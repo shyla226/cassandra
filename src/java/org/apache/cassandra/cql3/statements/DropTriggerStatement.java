@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Maybe;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,7 +50,7 @@ public class DropTriggerStatement extends SchemaAlteringStatement
         this.ifExists = ifExists;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException
+    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         state.ensureIsSuper("Only superusers are allowed to perfrom DROP TRIGGER queries");
     }
@@ -58,7 +60,7 @@ public class DropTriggerStatement extends SchemaAlteringStatement
         Schema.instance.validateTable(keyspace(), columnFamily());
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws ConfigurationException, InvalidRequestException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws ConfigurationException, InvalidRequestException
     {
         TableMetadata current = Schema.instance.getTableMetadata(keyspace(), columnFamily());
         Triggers triggers = current.triggers;
@@ -66,9 +68,9 @@ public class DropTriggerStatement extends SchemaAlteringStatement
         if (!triggers.get(triggerName).isPresent())
         {
             if (ifExists)
-                return null;
+                return Maybe.empty();
             else
-                throw new InvalidRequestException(String.format("Trigger %s was not found", triggerName));
+                return error(String.format("Trigger %s was not found", triggerName));
         }
 
         logger.info("Dropping trigger with name {}", triggerName);
@@ -78,8 +80,7 @@ public class DropTriggerStatement extends SchemaAlteringStatement
                    .triggers(triggers.without(triggerName))
                    .build();
 
-        MigrationManager.announceTableUpdate(updated, isLocalOnly);
-
-        return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily());
+        return MigrationManager.announceTableUpdate(updated, isLocalOnly)
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())));
     }
 }

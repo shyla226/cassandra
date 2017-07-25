@@ -25,6 +25,7 @@ import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator.Reader;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 
 // Used by indexed readers to store where they are of the index.
 public class IndexState implements AutoCloseable
@@ -36,22 +37,33 @@ public class IndexState implements AutoCloseable
     private final boolean reversed;
 
     private int currentIndexIdx;
+    private int lastIndexIdx;
 
     // Marks the beginning of the block corresponding to currentIndexIdx.
     private long startOfBlock;
     private Comparator<IndexInfo> indexComparator;
 
-    public IndexState(Reader reader, ClusteringComparator comparator, BigRowIndexEntry indexEntry, boolean reversed, FileHandle indexFile)
+    public IndexState(Reader reader, ClusteringComparator comparator, BigRowIndexEntry indexEntry, boolean reversed, FileHandle indexFile, Rebufferer.ReaderConstraint rc)
     {
         this.reader = reader;
         this.indexEntry = indexEntry;
-        this.indexInfoRetriever = indexEntry.openWithIndex(indexFile);
+        this.indexInfoRetriever = indexEntry.openWithIndex(indexFile, rc);
         this.reversed = reversed;
         this.currentIndexIdx = reversed ? indexEntry.rowIndexCount() : -1;
+        this.lastIndexIdx = currentIndexIdx;
 
         this.indexComparator = reversed
                 ? (o1, o2) -> comparator.compare(o1.firstName, o2.firstName)
                 : (o1, o2) -> comparator.compare(o1.lastName, o2.lastName);
+    }
+
+    /**
+     * Resets the state back to last known
+     * entry.
+     */
+    public void reset()
+    {
+        this.currentIndexIdx = lastIndexIdx;
     }
 
     public boolean isDone()
@@ -68,6 +80,7 @@ public class IndexState implements AutoCloseable
         currentIndexIdx = blockIdx;
         reader.openMarker = blockIdx > 0 ? index(blockIdx - 1).endOpenMarker : null;
         startOfBlock = reader.file.getFilePointer();
+        lastIndexIdx = currentIndexIdx;
     }
 
     private long columnOffset(int i) throws IOException
@@ -102,6 +115,9 @@ public class IndexState implements AutoCloseable
             ++currentIndexIdx;
 
             startOfBlock = columnOffset(currentIndexIdx);
+
+            //Finished, save state
+            lastIndexIdx = currentIndexIdx;
         }
     }
 

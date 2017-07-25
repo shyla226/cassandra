@@ -40,6 +40,7 @@ import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -66,7 +67,6 @@ import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.CompactionMetrics;
-import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.repair.Validator;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -588,10 +588,10 @@ public class CompactionManager implements CompactionManagerMBean
         {
             protected void runMayThrow() throws Exception
             {
-                try (TableMetrics.TableTimer.Context ctx = cfs.metric.anticompactionTime.time())
-                {
-                    performAnticompaction(cfs, ranges, sstables, txn, ActiveRepairService.UNREPAIRED_SSTABLE, sessionId, sessionId);
-                }
+            try (Timer.Context ctx = cfs.metric.anticompactionTime.timer())
+            {
+                performAnticompaction(cfs, ranges, sstables, txn, ActiveRepairService.UNREPAIRED_SSTABLE, sessionId, sessionId);
+            }
             }
         };
 
@@ -936,7 +936,7 @@ public class CompactionManager implements CompactionManagerMBean
         {
             public Object call() throws IOException
             {
-                try (TableMetrics.TableTimer.Context c = cfStore.metric.validationTime.time())
+                try (Timer.Context c = cfStore.metric.validationTime.timer())
                 {
                     doValidationCompaction(cfStore, validator);
                 }

@@ -25,6 +25,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -33,6 +34,9 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
+
+import io.reactivex.Completable;
+import io.reactivex.Single;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -48,6 +52,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
@@ -67,10 +72,12 @@ import org.apache.cassandra.service.paxos.CommitCallback;
 import org.apache.cassandra.service.paxos.PrepareCallback;
 import org.apache.cassandra.service.paxos.ProposeCallback;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.concurrent.AsyncLatch;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class StorageProxy implements StorageProxyMBean
 {
@@ -166,16 +173,20 @@ public class StorageProxy implements StorageProxyMBean
      * @return null if the operation succeeds in updating the row, or the current values corresponding to conditions.
      * (since, if the CAS doesn't succeed, it means the current value do not match the conditions).
      */
-    public static RowIterator cas(String keyspaceName,
-                                  String cfName,
-                                  DecoratedKey key,
-                                  CASRequest request,
-                                  ConsistencyLevel consistencyForPaxos,
-                                  ConsistencyLevel consistencyForCommit,
-                                  ClientState state,
-                                  long queryStartNanoTime)
+    // this is blocking
+    public static Optional<RowIterator> cas(String keyspaceName,
+                                            String cfName,
+                                            DecoratedKey key,
+                                            CASRequest request,
+                                            ConsistencyLevel consistencyForPaxos,
+                                            ConsistencyLevel consistencyForCommit,
+                                            ClientState state,
+                                            long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, RequestFailureException, RequestTimeoutException, InvalidRequestException
     {
+        if (logger.isTraceEnabled())
+            logger.trace("Execute cas on {}.{} for pk {}", keyspaceName, cfName, key);
+
         final long startTimeForMetrics = System.nanoTime();
         int contentions = 0;
         try
@@ -188,7 +199,7 @@ public class StorageProxy implements StorageProxyMBean
             long timeout = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getCasContentionTimeout());
             while (System.nanoTime() - queryStartNanoTime < timeout)
             {
-                // for simplicity, we'll do a single liveness check at the start of each attempt
+                // for simplicity, we'll do a single liveliness check at the start of each attempt
                 Pair<WriteEndpoints, Integer> p = getPaxosParticipants(metadata, key, consistencyForPaxos);
                 List<InetAddress> liveEndpoints = p.left.live();
                 int requiredParticipants = p.right;
@@ -202,17 +213,12 @@ public class StorageProxy implements StorageProxyMBean
                 SinglePartitionReadCommand readCommand = request.readCommand(FBUtilities.nowInSeconds());
                 ConsistencyLevel readConsistency = consistencyForPaxos == ConsistencyLevel.LOCAL_SERIAL ? ConsistencyLevel.LOCAL_QUORUM : ConsistencyLevel.QUORUM;
 
-                FilteredPartition current;
-                try (RowIterator rowIter = readOne(readCommand, readConsistency, queryStartNanoTime))
-                {
-                    current = FilteredPartition.create(rowIter);
-                }
-
+                FilteredPartition current = readOne(readCommand, readConsistency, queryStartNanoTime);
                 if (!request.appliesTo(current))
                 {
                     Tracing.trace("CAS precondition does not match current values {}", current);
                     casWriteMetrics.conditionNotMet.inc();
-                    return current.rowIterator();
+                    return Optional.of(current.rowIterator());
                 }
 
                 // finish the paxos round w/ the desired updates
@@ -239,7 +245,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     commitPaxos(proposal, consistencyForCommit, true, queryStartNanoTime);
                     Tracing.trace("CAS successful");
-                    return null;
+                    return Optional.empty();
                 }
 
                 Tracing.trace("Paxos proposal not accepted (pre-empted by a higher ballot)");
@@ -463,8 +469,6 @@ public class StorageProxy implements StorageProxyMBean
 
         if (shouldHint)
         {
-            // Hint dead nodes first as it's always non-blocking, while sending our message may block (due to the use
-            // of LocalAwareExecutorService.maybeExecuteImmediately for local delivery).
             Collection<InetAddress> endpointsToHint = Collections2.filter(endpoints.dead(), e -> shouldHint(e));
             if (!endpointsToHint.isEmpty())
                 submitHint(mutation, endpointsToHint, null);
@@ -483,16 +487,14 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     /**
-     * Use this method to have these Mutations applied
-     * across all replicas. This method will take care
-     * of the possibility of a replica being down and hint
-     * the data across to some other replica.
+     * Use this method to have these Mutations applied across all replicas. This method will take care
+     * of the possibility of a replica being down and hint the data across to some other replica.
      *
      * @param mutations          the mutations to be applied across the replicas
      * @param consistencyLevel   the consistency level for the operation
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
      */
-    public static void mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    public static Single<ResultMessage.Void> mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
     {
         Tracing.trace("Determining replicas for mutation");
@@ -515,57 +517,73 @@ public class StorageProxy implements StorageProxyMBean
                     responseHandlers.add(mutateStandard((Mutation)mutation, consistencyLevel, localDataCenter, wt, queryStartNanoTime));
                 }
             }
+        }
+        catch(UnavailableException | OverloadedException ex)
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("Unavailable or overloaded exception", ex);
 
-            // wait for writes.  throws TimeoutException if necessary
-            for (WriteHandler responseHandler : responseHandlers)
-                responseHandler.get();
-        }
-        catch (WriteTimeoutException | WriteFailureException ex)
-        {
-            if (consistencyLevel == ConsistencyLevel.ANY)
-            {
-                hintMutations(mutations);
-            }
-            else
-            {
-                if (ex instanceof WriteFailureException)
-                {
-                    writeMetrics.failures.mark();
-                    writeMetricsMap.get(consistencyLevel).failures.mark();
-                    WriteFailureException fe = (WriteFailureException) ex;
-                    Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
-                                  fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
-                }
-                else
-                {
-                    writeMetrics.timeouts.mark();
-                    writeMetricsMap.get(consistencyLevel).timeouts.mark();
-                    WriteTimeoutException te = (WriteTimeoutException) ex;
-                    Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
-                }
-                throw ex;
-            }
-        }
-        catch (UnavailableException e)
-        {
             writeMetrics.unavailables.mark();
             writeMetricsMap.get(consistencyLevel).unavailables.mark();
             Tracing.trace("Unavailable");
-            throw e;
+            return Single.error(ex);
         }
-        catch (OverloadedException e)
-        {
-            writeMetrics.unavailables.mark();
-            writeMetricsMap.get(consistencyLevel).unavailables.mark();
-            Tracing.trace("Overloaded");
-            throw e;
-        }
-        finally
-        {
-            long latency = System.nanoTime() - startTime;
-            writeMetrics.addNano(latency);
-            writeMetricsMap.get(consistencyLevel).addNano(latency);
-        }
+
+        Completable ret = Completable.merge(responseHandlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
+        return ret.onErrorResumeNext(ex -> {
+            try
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Failed to wait for handlers", ex);
+
+                if (ex instanceof WriteTimeoutException || ex instanceof WriteFailureException)
+                {
+                    if (consistencyLevel == ConsistencyLevel.ANY)
+                    {
+                        hintMutations(mutations);
+                        return Completable.complete(); // do not propagate the exception
+                    }
+                    else
+                    {
+                        if (ex instanceof WriteFailureException)
+                        {
+                            writeMetrics.failures.mark();
+                            writeMetricsMap.get(consistencyLevel).failures.mark();
+                            WriteFailureException fe = (WriteFailureException) ex;
+                            Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
+                                          fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
+                        }
+                        else
+                        {
+                            writeMetrics.timeouts.mark();
+                            writeMetricsMap.get(consistencyLevel).timeouts.mark();
+                            WriteTimeoutException te = (WriteTimeoutException) ex;
+                            Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
+                        }
+                    }
+                }
+                else if (ex instanceof UnavailableException)
+                {
+                    writeMetrics.unavailables.mark();
+                    writeMetricsMap.get(consistencyLevel).unavailables.mark();
+                    Tracing.trace("Unavailable");
+                }
+                else if (ex instanceof OverloadedException)
+                {
+                    writeMetrics.unavailables.mark();
+                    writeMetricsMap.get(consistencyLevel).unavailables.mark();
+                    Tracing.trace("Overloaded");
+                }
+
+                return Completable.error(ex);
+            }
+            finally
+            {
+                long latency = System.nanoTime() - startTime;
+                writeMetrics.addNano(latency);
+                writeMetricsMap.get(consistencyLevel).addNano(latency);
+            }
+        }).toSingleDefault(new ResultMessage.Void());
     }
 
     /**
@@ -622,113 +640,109 @@ public class StorageProxy implements StorageProxyMBean
      * @param baseComplete       time from epoch in ms that the local base mutation was(or will be) completed
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
      */
-    public static void mutateMV(ByteBuffer dataKey, Collection<Mutation> mutations, boolean writeCommitLog, AtomicLong baseComplete, long queryStartNanoTime)
+    public static Completable mutateMV(ByteBuffer dataKey, Collection<Mutation> mutations, boolean writeCommitLog, AtomicLong baseComplete, long queryStartNanoTime)
     throws UnavailableException, OverloadedException, WriteTimeoutException
     {
         Tracing.trace("Determining replicas for mutation");
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
         long startTime = System.nanoTime();
-        try
-        {
-            final UUID batchUUID = UUIDGen.getTimeUUID();
+        final UUID batchUUID = UUIDGen.getTimeUUID();
 
-            // if we haven't joined the ring, write everything to batchlog because paired replicas may be stale
-            if (StorageService.instance.isStarting() || StorageService.instance.isJoining() || StorageService.instance.isMoving())
+        // if we haven't joined the ring, write everything to batchlog because paired replicas may be stale
+        if (StorageService.instance.isStarting() || StorageService.instance.isJoining() || StorageService.instance.isMoving())
+        {
+            return BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(),
+                                                           mutations), writeCommitLog);
+        }
+
+        List<MutationAndEndpoints> mutationsAndEndpoints = new ArrayList<>(mutations.size());
+        Set<Mutation> nonLocalMutations = new HashSet<>(mutations);
+        Token baseToken = StorageService.instance.getTokenMetadata().partitioner.getToken(dataKey);
+
+        //Since the base -> view replication is 1:1 we only need to store the BL locally
+        final List<InetAddress> batchlogEndpoints = Collections.singletonList(FBUtilities.getBroadcastAddress());
+        AsyncLatch cleanupLatch = new AsyncLatch(mutations.size(), () -> asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID));
+
+        ArrayList<Completable> completables = new ArrayList<>(mutations.size() + 1);
+
+        // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
+        for (Mutation mutation : mutations)
+        {
+            WriteEndpoints endpoints = WriteEndpoints.computeForView(baseToken, mutation);
+
+            if (endpoints.naturalCount() == 0)
             {
-                BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(),
-                                                        mutations), writeCommitLog);
-                return;
+                if (endpoints.pendingCount() == 0)
+                    logger.warn("Received base materialized view mutation for key {} that does not belong " +
+                                "to this node. There is probably a range movement happening (move or decommission)," +
+                                "but this node hasn't updated its ring metadata yet. Adding mutation to " +
+                                "local batchlog to be replayed later.",
+                                mutation.key());
+                continue;
             }
 
-            List<MutationAndEndpoints> mutationsAndEndpoints = new ArrayList<>(mutations.size());
-            Set<Mutation> nonLocalMutations = new HashSet<>(mutations);
-            Token baseToken = StorageService.instance.getTokenMetadata().partitioner.getToken(dataKey);
-
-            //Since the base -> view replication is 1:1 we only need to store the BL locally
-            final List<InetAddress> batchlogEndpoints = Collections.singletonList(FBUtilities.getBroadcastAddress());
-            AsyncLatch cleanupLatch = new AsyncLatch(mutations.size(), () -> asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID));
-
-            // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
-            for (Mutation mutation : mutations)
+            InetAddress endpoint = endpoints.natural().get(0);
+            // When local node is the paired endpoint just apply the mutation locally.
+            if (endpoint.equals(FBUtilities.getBroadcastAddress()) && endpoints.pendingCount() == 0 && StorageService.instance.isJoined())
             {
-                WriteEndpoints endpoints = WriteEndpoints.computeForView(baseToken, mutation);
+                completables.add(mutation.applyAsync(writeCommitLog, true)
+                                         .doFinally(() -> cleanupLatch.countDown())
+                                         .doOnError(exc -> logger.error("Error applying local view update to keyspace {}: {}", mutation.getKeyspaceName(), mutation)));
 
-                if (endpoints.naturalCount() == 0)
-                {
-                    if (endpoints.pendingCount() == 0)
-                        logger.warn("Received base materialized view mutation for key {} that does not belong " +
-                                    "to this node. There is probably a range movement happening (move or decommission)," +
-                                    "but this node hasn't updated its ring metadata yet. Adding mutation to " +
-                                    "local batchlog to be replayed later.",
-                                    mutation.key());
-                    continue;
-                }
+                nonLocalMutations.remove(mutation);
 
-                InetAddress endpoint = endpoints.natural().get(0);
-                // When local node is the paired endpoint just apply the mutation locally.
-                if (endpoint.equals(FBUtilities.getBroadcastAddress()) && endpoints.pendingCount() == 0 && StorageService.instance.isJoined())
-                {
-                    try
-                    {
-                        mutation.apply(writeCommitLog);
-                        nonLocalMutations.remove(mutation);
-                        cleanupLatch.countDown();
-                    }
-                    catch (Exception exc)
-                    {
-                        logger.error("Error applying local view update to keyspace {}: {}", mutation.getKeyspaceName(), mutation);
-                        throw exc;
-                    }
-                }
-                else
-                {
-                    mutationsAndEndpoints.add(new MutationAndEndpoints(mutation, endpoints));
-                }
             }
-
-            // Apply to local batchlog memtable in this thread
-            if (!nonLocalMutations.isEmpty())
-                BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), nonLocalMutations), writeCommitLog);
-
-            if (mutationsAndEndpoints.isEmpty())
-                return;
-
-            // Creates write handlers: each mutation must be acknowledged to clean the batchlog.
-            // We also need to update view metrics.
-            Consumer<Response<EmptyPayload>> onReplicaResponse = r ->
+            else
             {
-                viewWriteMetrics.viewReplicasSuccess.inc();
-                long delay = Math.max(0, System.currentTimeMillis() - baseComplete.get());
-                viewWriteMetrics.viewWriteLatency.update(delay, TimeUnit.MILLISECONDS);
-            };
-
-            List<WriteHandler> handlers = Lists.transform(mutationsAndEndpoints, mae ->
-            {
-                viewWriteMetrics.viewReplicasAttempted.inc(mae.endpoints.liveCount());
-                WriteHandler handler = WriteHandler.builder(mae.endpoints, ConsistencyLevel.ONE, WriteType.BATCH, queryStartNanoTime)
-                                                   .onResponse(onReplicaResponse)
-                                                   .build();
-
-
-                handler.thenRun(cleanupLatch::countDown);
-                return handler;
-            });
-
-            // now actually perform the writes (but don't wait on them)
-            writeBatchedMutations(mutationsAndEndpoints, handlers, localDataCenter, Verbs.WRITES.VIEW_WRITE);
+                mutationsAndEndpoints.add(new MutationAndEndpoints(mutation, endpoints));
+            }
         }
-        finally
+
+        // Apply to local batchlog memtable in this thread
+        if (!nonLocalMutations.isEmpty())
+            completables.add(BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), nonLocalMutations), writeCommitLog));
+
+        if (mutationsAndEndpoints.isEmpty())
+            return Completable.merge(completables);
+
+        // Creates write handlers: each mutation must be acknowledged to clean the batchlog.
+        // We also need to update view metrics.
+        Consumer<Response<EmptyPayload>> onReplicaResponse = r ->
         {
-            viewWriteMetrics.addNano(System.nanoTime() - startTime);
-        }
+            viewWriteMetrics.viewReplicasSuccess.inc();
+            long delay = Math.max(0, System.currentTimeMillis() - baseComplete.get());
+            viewWriteMetrics.viewWriteLatency.update(delay, TimeUnit.MILLISECONDS);
+        };
+
+        // The copy into an immutable list is not just an optimization, it is essential for correctness
+        // since it would be very wrong if we subscribed to the observable of a different handler
+        List<WriteHandler> handlers = ImmutableList.copyOf(Lists.transform(mutationsAndEndpoints, mae ->
+        {
+            viewWriteMetrics.viewReplicasAttempted.inc(mae.endpoints.liveCount());
+            WriteHandler handler = WriteHandler.builder(mae.endpoints, ConsistencyLevel.ONE, WriteType.BATCH, queryStartNanoTime)
+                                               .onResponse(onReplicaResponse)
+                                               .build();
+
+
+            handler.thenRun(cleanupLatch::countDown);
+            return handler;
+        }));
+
+        completables.addAll(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
+
+        // now actually perform the writes
+        writeBatchedMutations(mutationsAndEndpoints, handlers, localDataCenter, Verbs.WRITES.VIEW_WRITE);
+
+        return Completable.merge(completables)
+                          .doFinally(() -> viewWriteMetrics.addNano(System.nanoTime() - startTime));
     }
 
     @SuppressWarnings("unchecked")
-    public static void mutateWithTriggers(Collection<? extends IMutation> mutations,
-                                          ConsistencyLevel consistencyLevel,
-                                          boolean mutateAtomically,
-                                          long queryStartNanoTime)
+    public static Single<ResultMessage.Void> mutateWithTriggers(Collection<? extends IMutation> mutations,
+                                                                ConsistencyLevel consistencyLevel,
+                                                                boolean mutateAtomically,
+                                                                long queryStartNanoTime)
     throws WriteTimeoutException, WriteFailureException, UnavailableException, OverloadedException, InvalidRequestException
     {
         Collection<Mutation> augmented = TriggerExecutor.instance.execute(mutations);
@@ -742,13 +756,15 @@ public class StorageProxy implements StorageProxyMBean
         writeMetricsMap.get(consistencyLevel).mutationSize.update(size);
 
         if (augmented != null)
-            mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime);
+            return mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime)
+                   .toSingleDefault(new ResultMessage.Void());
         else
         {
             if (mutateAtomically || updatesView)
-                mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView, queryStartNanoTime);
+                return mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView, queryStartNanoTime)
+                       .toSingleDefault(new ResultMessage.Void());
             else
-                mutate(mutations, consistencyLevel, queryStartNanoTime);
+                return mutate(mutations, consistencyLevel, queryStartNanoTime);
         }
     }
 
@@ -763,7 +779,7 @@ public class StorageProxy implements StorageProxyMBean
      * @param requireQuorumForRemove at least a quorum of nodes will see update before deleting batchlog
      * @param queryStartNanoTime     the value of System.nanoTime() when the query started to be processed
      */
-    private static void mutateAtomically(Collection<Mutation> mutations,
+    private static Completable mutateAtomically(Collection<Mutation> mutations,
                                          ConsistencyLevel consistencyLevel,
                                          boolean requireQuorumForRemove,
                                          long queryStartNanoTime)
@@ -774,75 +790,87 @@ public class StorageProxy implements StorageProxyMBean
 
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
+        // Computes the final endpoints right away to check availability before writing the batchlog
+        List<MutationAndEndpoints> mutationsAndEndpoints = new ArrayList<>(mutations.size());
+
         try
         {
-            // Computes the final endpoints right away to check availability before writing the batchlog
-            List<MutationAndEndpoints> mutationsAndEndpoints = new ArrayList<>(mutations.size());
             for (Mutation mutation : mutations)
             {
                 WriteEndpoints endpoints = WriteEndpoints.compute(mutation);
                 endpoints.checkAvailability(consistencyLevel);
                 mutationsAndEndpoints.add(new MutationAndEndpoints(mutation, endpoints));
             }
-
-            // If we are requiring quorum nodes for removal, we upgrade consistency level to QUORUM unless we already
-            // require ALL, or EACH_QUORUM. This is so that *at least* QUORUM nodes see the update.
-            ConsistencyLevel batchConsistencyLevel = requireQuorumForRemove && !consistencyLevel.isAtLeastQuorum()
-                                                     ? ConsistencyLevel.QUORUM
-                                                     : consistencyLevel;
-
-            WriteEndpoints batchlogEndpoints = getBatchlogEndpoints(localDataCenter, batchConsistencyLevel);
-            UUID batchUUID = UUIDGen.getTimeUUID();
-
-            // write to the batchlog
-            writeToBatchlog(mutations, batchlogEndpoints, batchUUID, queryStartNanoTime).get();
-
-            AsyncLatch cleanupLatch = new AsyncLatch(mutations.size(), () -> asyncRemoveFromBatchlog(batchlogEndpoints.live(), batchUUID));
-
-            // Creates write handlers: each mutation must be acknowledged to clean the batchlog, and each mutation is
-            // acknowledged once we head back from 'batchConsistencyLevel' nodes.
-            List<WriteHandler> handlers = ImmutableList.copyOf(Lists.transform(mutationsAndEndpoints, mae ->
-            {
-                Keyspace keyspace = mae.endpoints.keyspace();
-                AsyncLatch toCleanupLatch = new AsyncLatch(batchConsistencyLevel.blockFor(keyspace), cleanupLatch::countDown);
-                return WriteHandler.builder(mae.endpoints, consistencyLevel, WriteType.BATCH, queryStartNanoTime)
-                                   .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
-                                   .onResponse(r -> toCleanupLatch.countDown())
-                                   .build();
-            }));
-
-            // now actually perform the writes and wait for them to complete
-            writeBatchedMutations(mutationsAndEndpoints, handlers, localDataCenter, Verbs.WRITES.WRITE);
-            for (WriteHandler handler : handlers)
-                handler.get();
         }
         catch (UnavailableException e)
         {
             writeMetrics.unavailables.mark();
             writeMetricsMap.get(consistencyLevel).unavailables.mark();
             Tracing.trace("Unavailable");
-            throw e;
+            return Completable.error(e);
         }
-        catch (WriteTimeoutException e)
+
+        // If we are requiring quorum nodes for removal, we upgrade consistency level to QUORUM unless we already
+        // require ALL, or EACH_QUORUM. This is so that *at least* QUORUM nodes see the update.
+        ConsistencyLevel batchConsistencyLevel = requireQuorumForRemove && !consistencyLevel.isAtLeastQuorum()
+                                                 ? ConsistencyLevel.QUORUM
+                                                 : consistencyLevel;
+
+        WriteEndpoints batchlogEndpoints = getBatchlogEndpoints(localDataCenter, batchConsistencyLevel);
+        UUID batchUUID = UUIDGen.getTimeUUID();
+
+        // write to the batchlog
+        Completable batchlogCompletable = writeToBatchlog(mutations, batchlogEndpoints, batchUUID, queryStartNanoTime).toObservable();
+
+        AsyncLatch cleanupLatch = new AsyncLatch(mutations.size(), () -> asyncRemoveFromBatchlog(batchlogEndpoints.live(), batchUUID));
+
+        // Creates write handlers: each mutation must be acknowledged to clean the batchlog, and each mutation is
+        // acknowledged once we head back from 'batchConsistencyLevel' nodes.
+        // The copy into an immutable list is not just an optimization, it is essential for correctness
+        // since it would be very wrong if we subscribed to the observable of a different handler
+        List<WriteHandler> handlers = ImmutableList.copyOf(Lists.transform(mutationsAndEndpoints, mae ->
         {
-            writeMetrics.timeouts.mark();
-            writeMetricsMap.get(consistencyLevel).timeouts.mark();
-            Tracing.trace("Write timeout; received {} of {} required replies", e.received, e.blockFor);
-            throw e;
-        }
-        catch (WriteFailureException e)
-        {
-            writeMetrics.failures.mark();
-            writeMetricsMap.get(consistencyLevel).failures.mark();
-            Tracing.trace("Write failure; received {} of {} required replies", e.received, e.blockFor);
-            throw e;
-        }
-        finally
-        {
+            Keyspace keyspace = mae.endpoints.keyspace();
+            AsyncLatch toCleanupLatch = new AsyncLatch(batchConsistencyLevel.blockFor(keyspace), cleanupLatch::countDown);
+            return WriteHandler.builder(mae.endpoints, consistencyLevel, WriteType.BATCH, queryStartNanoTime)
+                               .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
+                               .onResponse(r -> toCleanupLatch.countDown())
+                               .build();
+        }));
+
+        // now actually perform the writes
+        Completable ret = batchlogCompletable.andThen(Completable.defer(() -> {
+            writeBatchedMutations(mutationsAndEndpoints, handlers, localDataCenter, Verbs.WRITES.WRITE);
+            return Completable.merge(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
+        }));
+
+        return ret.onErrorResumeNext(e -> {
+            if (e instanceof UnavailableException)
+            {
+                writeMetrics.unavailables.mark();
+                writeMetricsMap.get(consistencyLevel).unavailables.mark();
+                Tracing.trace("Unavailable");
+            }
+            else if (e instanceof WriteTimeoutException)
+            {
+                writeMetrics.timeouts.mark();
+                writeMetricsMap.get(consistencyLevel).timeouts.mark();
+                WriteTimeoutException wte = (WriteTimeoutException)e;
+                Tracing.trace("Write timeout; received {} of {} required replies", wte.received, wte.blockFor);
+            }
+            else if (e instanceof WriteFailureException)
+            {
+                writeMetrics.failures.mark();
+                writeMetricsMap.get(consistencyLevel).failures.mark();
+                WriteFailureException wfe = (WriteFailureException)e;
+                Tracing.trace("Write failure; received {} of {} required replies", wfe.received, wfe.blockFor);
+            }
+            return Completable.error(e);
+        }).doFinally(() -> {
             long latency = System.nanoTime() - startTime;
             writeMetrics.addNano(latency);
             writeMetricsMap.get(consistencyLevel).addNano(latency);
-        }
+        });
     }
 
     /**
@@ -1004,8 +1032,6 @@ public class StorageProxy implements StorageProxyMBean
         checkHintOverload(targets);
         MessagingService.instance().applyBackPressure(targets.live(), handler.currentTimeout());
 
-        // Hint dead nodes first as it's always non-blocking, while sending our message may block (due to the use
-        // of LocalAwareExecutorService.maybeExecuteImmediately for local delivery).
         Collection<InetAddress> endpointsToHint = Collections2.filter(targets.dead(), e -> shouldHint(e));
         if (!endpointsToHint.isEmpty())
             submitHint(mutation, endpointsToHint, handler);
@@ -1114,22 +1140,37 @@ public class StorageProxy implements StorageProxyMBean
     public static CompletableFuture<Void> applyCounterMutationOnLeader(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
     throws UnavailableException, OverloadedException
     {
-        return cm.applyFuture().thenCompose(result -> {
-           WriteEndpoints endpoints = WriteEndpoints.compute(result);
-           WriteHandler handler = WriteHandler.builder(endpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime)
-                                              .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
-                                              .hintOnTimeout(result)
-                                              .build();
+       CompletableFuture<Void> ret = new CompletableFuture<>();
 
-           // We already wrote locally
-           handler.onLocalResponse();
+        cm.applyCounterMutation().subscribe(
+            result -> {
 
-           WriteEndpoints remainingEndpoints = handler.endpoints().withoutLocalhost();
-           if (!remainingEndpoints.isEmpty())
-               sendToHintedEndpoints(result, remainingEndpoints, handler, localDataCenter, Verbs.WRITES.WRITE);
+                WriteEndpoints endpoints = WriteEndpoints.compute(cm.getKeyspaceName(), cm.key());
+                WriteHandler handler = WriteHandler.builder(endpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime)
+                                                   .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
+                                                   .hintOnTimeout(result)
+                                                   .build();
 
-           return handler;
-       });
+                // We already wrote locally
+                handler.onLocalResponse();
+
+                WriteEndpoints remainingEndpoints = handler.endpoints().withoutLocalhost();
+                if (!remainingEndpoints.isEmpty())
+                    sendToHintedEndpoints(result, remainingEndpoints, handler, localDataCenter, Verbs.WRITES.WRITE);
+
+                handler.whenComplete((r, t) -> {
+                    if (t != null)
+                        ret.completeExceptionally(t);
+                    else
+                        ret.complete(r);
+                });
+            },
+            ex -> {
+                ret.completeExceptionally(ex);
+            });
+
+
+        return ret;
     }
 
     private static boolean systemKeyspaceQuery(List<? extends ReadCommand> cmds)
@@ -1140,19 +1181,25 @@ public class StorageProxy implements StorageProxyMBean
         return true;
     }
 
-    private static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    // this is blocking
+    private static FilteredPartition readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
         return readOne(command, consistencyLevel, null, queryStartNanoTime);
     }
 
-    private static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
+    // this is blocking
+    private static FilteredPartition readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime, false), command);
+        return read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime, false)
+               .flatMap(partition -> FilteredPartition.create(partition))
+               .take(1)
+               .ifEmpty(FilteredPartition.empty(command))
+               .blockingSingle();
     }
 
-    public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    public static Flow<FlowablePartition> read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
         // When using serial CL, the ClientState should be provided
@@ -1176,11 +1223,11 @@ public class StorageProxy implements StorageProxyMBean
      * Performs the actual reading of a row out of the StorageService, fetching
      * a specific set of column names from a given column family.
      */
-    public static PartitionIterator read(SinglePartitionReadCommand.Group group,
-                                         ConsistencyLevel consistencyLevel,
-                                         ClientState state,
-                                         long queryStartNanoTime,
-                                         boolean forContinuousPaging)
+    public static Flow<FlowablePartition> read(SinglePartitionReadCommand.Group group,
+                                               ConsistencyLevel consistencyLevel,
+                                               ClientState state,
+                                               long queryStartNanoTime,
+                                               boolean forContinuousPaging)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
         checkNotBootstrappingOrSystemQuery(group.commands, readMetrics, readMetricsMap.get(consistencyLevel));
@@ -1199,7 +1246,7 @@ public class StorageProxy implements StorageProxyMBean
     /**
      * Read data locally, but for an external request. This implements an optimized local read path for data that
      * is available locally and that has been requested at a consistency level of ONE/LOCAL_ONE. We
-     * wrap the functionality of {@link ReadCommand#executeInternal(ReadExecutionController)}  with additional
+     * wrap the functionality of {@link ReadCommand#executeInternal()}  with additional
      * functionality that is required for client requests, such as metrics recording and local query monitoring,
      * to ensure {@link ReadExecutionController} is not kept for too long. If local queries are aborted, they
      * are not reported as failed, rather the caller will take care of restarting them.
@@ -1213,7 +1260,7 @@ public class StorageProxy implements StorageProxyMBean
      * @return - the filtered partition iterator
      */
     @SuppressWarnings("resource")
-    private static PartitionIterator readLocalContinuous(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel)
+    private static Flow<FlowablePartition> readLocalContinuous(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel)
     throws IsBootstrappingException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
         assert consistencyLevel.isSingleNode();
@@ -1223,165 +1270,121 @@ public class StorageProxy implements StorageProxyMBean
         // javadoc that the returned iterator must be closed, and we have a good track record of using
         // PartitionIterator in try-with-resource.
 
-        Monitor monitor = Monitor.createAndStartNoReporting(group,
-                                                            System.currentTimeMillis(),
-                                                            DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
-        ReadExecutionController controller = group.executionController(monitor);
-        try
-        {
-            // We could simply use a close Transformation here. However, we want to make extra sure close() is
-            // called when the returned iterator is closed and we don't want to risk a bug in the Transformation
-            // framework (which is non trivial code) making that not happen.
-            final PartitionIterator iter = group.executeInternal(controller);
-            return new PartitionIterator()
-            {
-                public boolean hasNext()
-                {
-                    return iter.hasNext();
-                }
+        final Monitor monitor = Monitor.createAndStartNoReporting(group,
+                                                                  System.currentTimeMillis(),
+                                                                  DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
 
-                public RowIterator next()
-                {
-                    return iter.next();
-                }
+        if (logger.isTraceEnabled())
+            logger.trace("Querying single partition commands {} for continuous paging", group);
 
-                public void close()
-                {
-                    // Make sure we close this as the first thing so it's always called.
-                    controller.close();
-                    monitor.complete();
-                }
-            };
-        }
-        catch (Throwable e)
-        {
-            controller.close();
-            readMetrics.failures.mark();
-            readMetricsMap.get(consistencyLevel).failures.mark();
-            throw e;
-        }
+        return group.executeInternal(monitor)
+                    .doOnClose(monitor::complete)
+                    .doOnError(error -> {
+                        readMetrics.failures.mark();
+                        readMetricsMap.get(consistencyLevel).failures.mark();
+                    });
     }
 
-    private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
+    private static Flow<FlowablePartition> readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws InvalidRequestException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
-        assert state != null;
-        if (group.commands.size() > 1)
-            throw new InvalidRequestException("SERIAL/LOCAL_SERIAL consistency may only be requested for one partition at a time");
+       assert state != null;
+       if (group.commands.size() > 1)
+           throw new InvalidRequestException("SERIAL/LOCAL_SERIAL consistency may only be requested for one partition at a time");
 
-        long start = System.nanoTime();
-        SinglePartitionReadCommand command = group.commands.get(0);
-        TableMetadata metadata = command.metadata();
-        DecoratedKey key = command.partitionKey();
+       long start = System.nanoTime();
+       SinglePartitionReadCommand command = group.commands.get(0);
+       TableMetadata metadata = command.metadata();
+       DecoratedKey key = command.partitionKey();
 
-        PartitionIterator result = null;
-        try
-        {
-            // make sure any in-progress paxos writes are done (i.e., committed to a majority of replicas), before performing a quorum read
-            Pair<WriteEndpoints, Integer> p = getPaxosParticipants(metadata, key, consistencyLevel);
-            List<InetAddress> liveEndpoints = p.left.live();
-            int requiredParticipants = p.right;
+       // make sure any in-progress paxos writes are done (i.e., committed to a majority of replicas), before performing a quorum read
+       Pair<WriteEndpoints, Integer> p = getPaxosParticipants(metadata, key, consistencyLevel);
+       List<InetAddress> liveEndpoints = p.left.live();
+       int requiredParticipants = p.right;
 
-            // does the work of applying in-progress writes; throws UAE or timeout if it can't
-            final ConsistencyLevel consistencyForCommitOrFetch = consistencyLevel == ConsistencyLevel.LOCAL_SERIAL
-                                                                                   ? ConsistencyLevel.LOCAL_QUORUM
-                                                                                   : ConsistencyLevel.QUORUM;
+       // does the work of applying in-progress writes; throws UAE or timeout if it can't
+       final ConsistencyLevel consistencyForCommitOrFetch = consistencyLevel == ConsistencyLevel.LOCAL_SERIAL
+                                                            ? ConsistencyLevel.LOCAL_QUORUM
+                                                            : ConsistencyLevel.QUORUM;
 
-            try
-            {
-                final Pair<UUID, Integer> pair = beginAndRepairPaxos(start, key, metadata, liveEndpoints, requiredParticipants, consistencyLevel, consistencyForCommitOrFetch, false, state);
-                if (pair.right > 0)
-                    casReadMetrics.contention.update(pair.right);
-            }
-            catch (WriteTimeoutException e)
-            {
-                throw new ReadTimeoutException(consistencyLevel, 0, consistencyLevel.blockFor(Keyspace.open(metadata.keyspace)), false);
-            }
-            catch (WriteFailureException e)
-            {
-                throw new ReadFailureException(consistencyLevel, e.received, e.blockFor, false, e.failureReasonByEndpoint);
-            }
+       try
+       {
+           final Pair<UUID, Integer> pair = beginAndRepairPaxos(start, key, metadata, liveEndpoints, requiredParticipants, consistencyLevel, consistencyForCommitOrFetch, false, state);
+           if (pair.right > 0)
+               casReadMetrics.contention.update(pair.right);
+       }
+       catch (WriteTimeoutException e)
+       {
+           return Flow.error(new ReadTimeoutException(consistencyLevel, 0, consistencyLevel.blockFor(Keyspace.open(metadata.keyspace)), false));
+       }
+       catch (WriteFailureException e)
+       {
+           return Flow.error(new ReadFailureException(consistencyLevel, e.received, e.blockFor, false, e.failureReasonByEndpoint));
+       }
 
-            result = fetchRows(group.commands, consistencyForCommitOrFetch, queryStartNanoTime);
-        }
-        catch (UnavailableException e)
-        {
-            readMetrics.unavailables.mark();
-            casReadMetrics.unavailables.mark();
-            readMetricsMap.get(consistencyLevel).unavailables.mark();
-            throw e;
-        }
-        catch (ReadTimeoutException e)
-        {
-            readMetrics.timeouts.mark();
-            casReadMetrics.timeouts.mark();
-            readMetricsMap.get(consistencyLevel).timeouts.mark();
-            throw e;
-        }
-        catch (ReadFailureException e)
-        {
-            readMetrics.failures.mark();
-            casReadMetrics.failures.mark();
-            readMetricsMap.get(consistencyLevel).failures.mark();
-            throw e;
-        }
-        finally
-        {
-            long latency =  recordLatency(group, consistencyLevel, start);
-            casReadMetrics.addNano(latency);
-        }
-
-        return result;
+        return fetchRows(group.commands, consistencyForCommitOrFetch, queryStartNanoTime)
+               .doOnError(e -> {
+                   if (e instanceof UnavailableException)
+                   {
+                       readMetrics.unavailables.mark();
+                       casReadMetrics.unavailables.mark();
+                       readMetricsMap.get(consistencyLevel).unavailables.mark();
+                   }
+                   else if (e instanceof ReadTimeoutException)
+                   {
+                       readMetrics.timeouts.mark();
+                       casReadMetrics.timeouts.mark();
+                       readMetricsMap.get(consistencyLevel).timeouts.mark();
+                   }
+                   else if (e instanceof ReadFailureException)
+                   {
+                       readMetrics.failures.mark();
+                       casReadMetrics.failures.mark();
+                       readMetricsMap.get(consistencyLevel).failures.mark();
+                   }
+               })
+               .doOnClose(() -> {
+                   long latency = recordLatency(group, consistencyLevel, start);
+                   casReadMetrics.addNano(latency);
+               });
     }
 
     @SuppressWarnings("resource")
-    private static PartitionIterator readRegular(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime, boolean forContinuousPaging)
+    private static Flow<FlowablePartition> readRegular(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime, boolean forContinuousPaging)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
-        long start = System.nanoTime();
-        try
-        {
-            PartitionIterator result = fetchRows(group.commands, consistencyLevel, queryStartNanoTime);
-            // If we have more than one command, then despite each read command honoring the limit, the total result
-            // might not honor it and so we should enforce it; For continuous paging however, we know we enforce this
-            // later (by always wrapping in a pager) so don't bother
-            if (!forContinuousPaging && group.commands.size() > 1)
-                result = group.limits().filter(result, group.nowInSec(), group.selectsFullPartition());
+        Flow<FlowablePartition> result = fetchRows(group.commands, consistencyLevel, queryStartNanoTime);
+
+        // For continuous paging, we know we enforce global limits when we have more than one command
+        // later (by always wrapping in a pager) and we also don't need to update the metrics or latency
+        // because it has its own dedicated metrics, so just return the result here.
+        if (forContinuousPaging)
             return result;
-        }
-        catch (UnavailableException e)
-        {
-            /** continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}. */
-            if (!forContinuousPaging)
-            {
-                readMetrics.unavailables.mark();
-                readMetricsMap.get(consistencyLevel).unavailables.mark();
-            }
-            throw e;
-        }
-        catch (ReadTimeoutException e)
-        {
-            if (!forContinuousPaging)
-            {
-                readMetrics.timeouts.mark();
-                readMetricsMap.get(consistencyLevel).timeouts.mark();
-            }
-            throw e;
-        }
-        catch (ReadFailureException e)
-        {
-            if (!forContinuousPaging)
-            {
-                readMetrics.failures.mark();
-                readMetricsMap.get(consistencyLevel).failures.mark();
-            }
-            throw e;
-        }
-        finally
-        {
-            if (!forContinuousPaging)
-                recordLatency(group, consistencyLevel, start);
-        }
+
+        // If we have more than one command, then despite each read command honoring the limit, the total result
+        // might not honor it and so we should enforce it;
+        if (group.commands.size() > 1)
+            result = result.map(r -> group.limits().truncateFiltered(r, group.nowInSec(), group.selectsFullPartition()));
+
+        return result.doOnError(e ->
+                                {
+                                    if (e instanceof UnavailableException)
+                                    {
+                                        readMetrics.unavailables.mark();
+                                        readMetricsMap.get(consistencyLevel).unavailables.mark();
+                                    }
+                                    else if (e instanceof ReadTimeoutException)
+                                    {
+                                        readMetrics.timeouts.mark();
+                                        readMetricsMap.get(consistencyLevel).timeouts.mark();
+                                    }
+                                    else if (e instanceof ReadFailureException)
+                                    {
+                                        readMetrics.failures.mark();
+                                        readMetricsMap.get(consistencyLevel).failures.mark();
+                                    }
+                                })
+                     .doOnClose(() -> recordLatency(group, consistencyLevel, queryStartNanoTime));
     }
 
     /**
@@ -1420,36 +1423,14 @@ public class StorageProxy implements StorageProxyMBean
      * 4. If the digests (if any) match the data return the data
      * 5. else carry out read repair by getting data from all the nodes.
      */
-    private static PartitionIterator fetchRows(List<SinglePartitionReadCommand> commands, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    private static Flow<FlowablePartition> fetchRows(List<SinglePartitionReadCommand> commands, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
-        int cmdCount = commands.size();
+        if (commands.size() == 1)
+            return new SinglePartitionReadLifecycle(commands.get(0), consistencyLevel, queryStartNanoTime).result();
 
-        SinglePartitionReadLifecycle[] reads = new SinglePartitionReadLifecycle[cmdCount];
-        for (int i = 0; i < cmdCount; i++)
-            reads[i] = new SinglePartitionReadLifecycle(commands.get(i), consistencyLevel, queryStartNanoTime);
-
-        for (int i = 0; i < cmdCount; i++)
-            reads[i].doInitialQueries();
-
-        for (int i = 0; i < cmdCount; i++)
-            reads[i].maybeTryAdditionalReplicas();
-
-        for (int i = 0; i < cmdCount; i++)
-            reads[i].awaitResultsAndRetryOnDigestMismatch();
-
-        for (int i = 0; i < cmdCount; i++)
-            if (!reads[i].isDone())
-                reads[i].maybeAwaitFullDataRead();
-
-        List<PartitionIterator> results = new ArrayList<>(cmdCount);
-        for (int i = 0; i < cmdCount; i++)
-        {
-            assert reads[i].isDone();
-            results.add(reads[i].getResult());
-        }
-
-        return PartitionIterators.concat(results);
+        return Flow.fromIterable(commands)
+                   .flatMap(command -> new SinglePartitionReadLifecycle(command, consistencyLevel, queryStartNanoTime).result());
     }
 
     private static class SinglePartitionReadLifecycle
@@ -1459,7 +1440,6 @@ public class StorageProxy implements StorageProxyMBean
         private final ConsistencyLevel consistency;
         private final long queryStartNanoTime;
 
-        private PartitionIterator result;
         private ReadCallback repairHandler;
 
         SinglePartitionReadLifecycle(SinglePartitionReadCommand command, ConsistencyLevel consistency, long queryStartNanoTime)
@@ -1470,82 +1450,81 @@ public class StorageProxy implements StorageProxyMBean
             this.queryStartNanoTime = queryStartNanoTime;
         }
 
-        boolean isDone()
+        Completable doInitialQueries()
         {
-            return result != null;
+            return executor.executeAsync();
         }
 
-        void doInitialQueries()
+        Completable maybeTryAdditionalReplicas()
         {
-            executor.executeAsync();
+            return executor.maybeTryAdditionalReplicas();
         }
 
-        void maybeTryAdditionalReplicas()
+        Flow<FlowablePartition> result()
         {
-            executor.maybeTryAdditionalReplicas();
+            return Flow.concat(Completable.concatArray(doInitialQueries(), maybeTryAdditionalReplicas()),
+                               executor.handler.result())
+                       .onErrorResumeNext(e -> {
+                                if (logger.isTraceEnabled())
+                                    logger.trace("Got error {}/{}", e.getClass().getName(), e.getMessage());
+
+                                if (e instanceof RuntimeException && e.getCause() != null)
+                                    e = e.getCause();
+
+                                if (e instanceof DigestMismatchException)
+                                    return retryOnDigestMismatch((DigestMismatchException)e);
+
+                                return Flow.error(e);
+                            });
         }
 
-        void awaitResultsAndRetryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException
+        Flow<FlowablePartition> retryOnDigestMismatch(DigestMismatchException ex) throws ReadFailureException, ReadTimeoutException
         {
-            try
-            {
-                result = executor.get();
-            }
-            catch (DigestMismatchException ex)
-            {
-                Tracing.trace("Digest mismatch: {}", ex);
+            Tracing.trace("Digest mismatch: {}", ex);
 
-                ReadRepairMetrics.repairedBlocking.mark();
+            ReadRepairMetrics.repairedBlocking.mark();
 
-                // Do a full data read to resolve the correct response (and repair node that need be)
-                Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
-                DataResolver resolver = new DataResolver(keyspace, command, ConsistencyLevel.ALL, executor.handler.endpoints.size(), queryStartNanoTime);
-                repairHandler = new ReadCallback(resolver,
-                                                 ConsistencyLevel.ALL,
-                                                 executor.getContactedReplicas().size(),
-                                                 command,
-                                                 keyspace,
-                                                 executor.handler.endpoints,
-                                                 queryStartNanoTime);
+            // Do a full data read to resolve the correct response (and repair node that need be)
+            Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
+            DataResolver resolver = new DataResolver(keyspace, command, ConsistencyLevel.ALL, executor.handler.endpoints.size(), queryStartNanoTime);
+            repairHandler = new ReadCallback(resolver,
+                                             ConsistencyLevel.ALL,
+                                             executor.getContactedReplicas().size(),
+                                             command,
+                                             keyspace,
+                                             executor.handler.endpoints,
+                                             queryStartNanoTime);
 
-                List<InetAddress> endpoints = executor.getContactedReplicas();
-                Tracing.trace("Enqueuing full data read to {}", endpoints);
-                MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command), repairHandler);
-            }
-        }
 
-        void maybeAwaitFullDataRead() throws ReadTimeoutException
-        {
-            // There wasn't a digest mismatch, we're good
-            if (repairHandler == null)
-                return;
+            List<InetAddress> endpoints = executor.getContactedReplicas();
+            Tracing.trace("Enqueuing full data read to {}", endpoints);
+            MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command), repairHandler);
 
-            // Otherwise, get the result from the full-data read and check that it's not a short read
-            try
-            {
-                result = repairHandler.get();
-            }
-            catch (DigestMismatchException e)
-            {
-                throw new AssertionError(e); // full data requested from each node here, no digests should be sent
-            }
-            catch (ReadTimeoutException e)
-            {
-                if (Tracing.isTracing())
-                    Tracing.trace("Timed out waiting on digest mismatch repair requests");
-                else
-                    logger.trace("Timed out waiting on digest mismatch repair requests");
-                // the caught exception here will have CL.ALL from the repair command,
-                // not whatever CL the initial command was at (CASSANDRA-7947)
-                int blockFor = consistency.blockFor(Keyspace.open(command.metadata().keyspace));
-                throw new ReadTimeoutException(consistency, blockFor-1, blockFor, true);
-            }
-        }
+            return repairHandler.result().mapError(e -> {
+                if (logger.isTraceEnabled())
+                    logger.trace("Got error {}/{}", e.getClass().getName(), e.getMessage());
 
-        PartitionIterator getResult()
-        {
-            assert result != null;
-            return result;
+                if (e instanceof RuntimeException && e.getCause() != null)
+                    e = e.getCause();
+
+                if (e instanceof DigestMismatchException)
+                    return new AssertionError(e); // full data requested from each node here, no digests should be sent
+
+                else if(e instanceof ReadTimeoutException)
+                {
+                    if (Tracing.isTracing())
+                        Tracing.trace("Timed out waiting on digest mismatch repair requests");
+                    else
+                        logger.trace("Timed out waiting on digest mismatch repair requests");
+
+                    // the caught exception here will have CL.ALL from the repair command,
+                    // not whatever CL the initial command was at (CASSANDRA-7947)
+                    int blockFor = consistency.blockFor(Keyspace.open(command.metadata().keyspace));
+                    return new ReadTimeoutException(consistency, blockFor-1, blockFor, true);
+                }
+
+                return e;
+            });
         }
     }
 
@@ -1597,6 +1576,12 @@ public class StorageProxy implements StorageProxyMBean
             this.range = range;
             this.liveEndpoints = liveEndpoints;
             this.filteredEndpoints = filteredEndpoints;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("[%s -> %s", range, filteredEndpoints);
         }
     }
 
@@ -1692,45 +1677,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static class SingleRangeResponse extends AbstractIterator<RowIterator> implements PartitionIterator
-    {
-        private final ReadCallback handler;
-        private PartitionIterator result;
-
-        private SingleRangeResponse(ReadCallback handler)
-        {
-            this.handler = handler;
-        }
-
-        private void waitForResponse() throws ReadTimeoutException
-        {
-            if (result != null)
-                return;
-
-            try
-            {
-                result = handler.get();
-            }
-            catch (DigestMismatchException e)
-            {
-                throw new AssertionError(e); // no digests in range slices yet
-            }
-        }
-
-        protected RowIterator computeNext()
-        {
-            waitForResponse();
-            return result.hasNext() ? result.next() : endOfData();
-        }
-
-        public void close()
-        {
-            if (result != null)
-                result.close();
-        }
-    }
-
-    private static class RangeCommandIterator extends AbstractIterator<RowIterator> implements PartitionIterator
+    private static class RangeCommandPartitions
     {
         private final Iterator<RangeForQuery> ranges;
         private final int totalRangeCount;
@@ -1742,7 +1689,6 @@ public class StorageProxy implements StorageProxyMBean
         private final long queryStartNanoTime;
         private final boolean forContinuousPaging;
         private DataLimits.Counter counter;
-        private PartitionIterator sentQueryIterator;
 
         private int concurrencyFactor;
         // The two following "metric" are maintained to improve the concurrencyFactor
@@ -1750,13 +1696,13 @@ public class StorageProxy implements StorageProxyMBean
         private int liveReturned;
         private int rangesQueried;
 
-        public RangeCommandIterator(RangeIterator ranges,
-                                    PartitionRangeReadCommand command,
-                                    int concurrencyFactor,
-                                    Keyspace keyspace,
-                                    ConsistencyLevel consistency,
-                                    long queryStartNanoTime,
-                                    boolean forContinuousPaging)
+        public RangeCommandPartitions(RangeIterator ranges,
+                                      PartitionRangeReadCommand command,
+                                      int concurrencyFactor,
+                                      Keyspace keyspace,
+                                      ConsistencyLevel consistency,
+                                      long queryStartNanoTime,
+                                      boolean forContinuousPaging)
         {
             this.command = command;
             this.concurrencyFactor = concurrencyFactor;
@@ -1769,50 +1715,60 @@ public class StorageProxy implements StorageProxyMBean
             this.forContinuousPaging = forContinuousPaging;
         }
 
-        public RowIterator computeNext()
+        Flow<FlowablePartition> partitions()
         {
-            try
-            {
-                while (sentQueryIterator == null || !sentQueryIterator.hasNext())
-                {
-                    // If we don't have more range to handle, we're done
-                    if (!ranges.hasNext())
-                        return endOfData();
+            Flow<FlowablePartition> partitions = nextBatch().concatWith(this::moreContents);
 
-                    // else, sends the next batch of concurrent queries (after having close the previous iterator)
-                    if (sentQueryIterator != null)
-                    {
-                        liveReturned += counter.counted();
-                        sentQueryIterator.close();
+            /** continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}. */
+            if (!forContinuousPaging)
+                partitions = partitions.doOnClose(this::close);
 
-                        // It's not the first batch of queries and we're not done, so we we can use what has been
-                        // returned so far to improve our rows-per-range estimate and update the concurrency accordingly
-                        updateConcurrencyFactor();
-                    }
-                    sentQueryIterator = sendNextRequests();
-                }
+            return partitions;
+        }
 
-                return sentQueryIterator.next();
-            }
-            catch (UnavailableException e)
+        private Flow<FlowablePartition> nextBatch()
+        {
+            Flow<FlowablePartition> batch = sendNextRequests();
+
+            /** continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}. */
+            if (!forContinuousPaging)
+                batch = batch.doOnError(this::handleError);
+
+            return batch.doOnComplete(this::handleBatchCompleted);
+        }
+
+        private Flow<FlowablePartition> moreContents()
+        {
+            // If we don't have more range to handle, we're done
+            if (!ranges.hasNext())
+                return null;
+
+            return nextBatch();
+        }
+
+        private void handleError(Throwable e)
+        {
+            if (e instanceof UnavailableException)
             {
-                /** continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}. */
-                if (!forContinuousPaging)
-                    rangeMetrics.unavailables.mark();
-                throw e;
+                rangeMetrics.unavailables.mark();
             }
-            catch (ReadTimeoutException e)
+            else if (e instanceof ReadTimeoutException)
             {
-                if (!forContinuousPaging)
-                    rangeMetrics.timeouts.mark();
-                throw e;
+                rangeMetrics.timeouts.mark();
             }
-            catch (ReadFailureException e)
+            else if (e instanceof ReadFailureException)
             {
-                if (!forContinuousPaging)
-                    rangeMetrics.failures.mark();
-                throw e;
+                rangeMetrics.failures.mark();
             }
+        }
+
+        private void handleBatchCompleted()
+        {
+            liveReturned += counter.counted();
+
+            // It's not the first batch of queries and we're not done, so we we can use what has been
+            // returned so far to improve our rows-per-range estimate and update the concurrency accordingly
+            updateConcurrencyFactor();
         }
 
         private void updateConcurrencyFactor()
@@ -1842,7 +1798,7 @@ public class StorageProxy implements StorageProxyMBean
          * {@code DataLimits}) may have "state" information and that state may only be valid for the first query (in
          * that it's the query that "continues" whatever we're previously queried).
          */
-        private SingleRangeResponse query(RangeForQuery toQuery, boolean isFirst)
+        private Flow<FlowablePartition> query(RangeForQuery toQuery, boolean isFirst)
         {
             PartitionRangeReadCommand rangeCommand = command.forSubRange(toQuery.range, isFirst);
 
@@ -1855,13 +1811,19 @@ public class StorageProxy implements StorageProxyMBean
 
             handler.assureSufficientLiveNodes();
 
+            if (logger.isTraceEnabled())
+                logger.trace("Sending {} for CL {}/{} - min {}", toQuery, consistency, blockFor, minimalEndpoints.size());
+
             MessagingService.instance().send(Verbs.READS.READ.newDispatcher(toQuery.filteredEndpoints, rangeCommand), handler);
-            return new SingleRangeResponse(handler);
+            return handler.result();
         }
 
-        private PartitionIterator sendNextRequests()
+        private Flow<FlowablePartition> sendNextRequests()
         {
-            List<PartitionIterator> concurrentQueries = new ArrayList<>(concurrencyFactor);
+            if (logger.isTraceEnabled())
+                logger.trace("Sending requests with concurrencyFactor {}", concurrencyFactor);
+
+            List<Flow<FlowablePartition>> concurrentQueries = new ArrayList<>(concurrencyFactor);
             for (int i = 0; i < concurrencyFactor && ranges.hasNext(); i++)
             {
                 concurrentQueries.add(query(ranges.next(), i == 0));
@@ -1872,22 +1834,12 @@ public class StorageProxy implements StorageProxyMBean
             // We want to count the results for the sake of updating the concurrency factor (see updateConcurrencyFactor) but we don't want to
             // enforce any particular limit at this point (this could break code than rely on postReconciliationProcessing), hence the DataLimits.NONE.
             counter = DataLimits.NONE.newCounter(command.nowInSec(), true, command.selectsFullPartition());
-            return counter.applyTo(PartitionIterators.concat(concurrentQueries));
+            return DataLimits.truncateFiltered(Flow.concat(concurrentQueries), counter);
         }
 
         public void close()
         {
-            try
-            {
-                if (sentQueryIterator != null)
-                    sentQueryIterator.close();
-            }
-            finally
-            {
-                /** continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}. */
-                if (!forContinuousPaging)
-                    recordLatency(command, startTime);
-            }
+            recordLatency(command, startTime);
         }
     }
 
@@ -1905,10 +1857,10 @@ public class StorageProxy implements StorageProxyMBean
         Keyspace.openAndGetStore(command.metadata()).metric.coordinatorScanLatency.update(latency, TimeUnit.NANOSECONDS);
     }
 
-    public static PartitionIterator getRangeSlice(PartitionRangeReadCommand command,
-                                                  ConsistencyLevel consistencyLevel,
-                                                  long queryStartNanoTime,
-                                                  boolean forContinuousPaging)
+    public static Flow<FlowablePartition> getRangeSlice(PartitionRangeReadCommand command,
+                                                        ConsistencyLevel consistencyLevel,
+                                                        long queryStartNanoTime,
+                                                        boolean forContinuousPaging)
     {
         return forContinuousPaging && consistencyLevel.isSingleNode() && command.queriesOnlyLocalData()
              ? getRangeSliceLocalContinuous(command, consistencyLevel, queryStartNanoTime)
@@ -1916,20 +1868,16 @@ public class StorageProxy implements StorageProxyMBean
     }
 
 
-    public static PartitionIterator getRangeSlice(PartitionRangeReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
-    {
-        return getRangeSliceRemote(command, consistencyLevel, queryStartNanoTime, false);
-    }
-
     @SuppressWarnings("resource")
-    private static PartitionIterator getRangeSliceRemote(PartitionRangeReadCommand command,
-                                                        ConsistencyLevel consistencyLevel,
-                                                        long queryStartNanoTime,
-                                                        boolean forContinuousPaging)
+    private static Flow<FlowablePartition> getRangeSliceRemote(PartitionRangeReadCommand command,
+                                                               ConsistencyLevel consistencyLevel,
+                                                               long queryStartNanoTime,
+                                                               boolean forContinuousPaging)
     {
         checkNotBootstrappingOrSystemQuery(Collections.singletonList(command), rangeMetrics);
 
         Tracing.trace("Computing ranges to query");
+
 
         Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
         RangeIterator ranges = new RangeIterator(command, keyspace, consistencyLevel);
@@ -1940,21 +1888,27 @@ public class StorageProxy implements StorageProxyMBean
         // fetch enough rows in the first round
         resultsPerRange -= resultsPerRange * CONCURRENT_SUBREQUESTS_MARGIN;
         int concurrencyFactor = resultsPerRange == 0.0
-                              ? 1
-                              : Math.max(1, Math.min(ranges.rangeCount(), (int) Math.ceil(command.limits().count() / resultsPerRange)));
+                                ? 1
+                                : Math.max(1, Math.min(ranges.rangeCount(), (int) Math.ceil(command.limits().count() / resultsPerRange)));
         logger.trace("Estimated result rows per range: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
                      resultsPerRange, command.limits().count(), ranges.rangeCount(), concurrencyFactor);
         Tracing.trace("Submitting range requests on {} ranges with a concurrency of {} ({} rows per range expected)", ranges.rangeCount(), concurrencyFactor, resultsPerRange);
 
         // Note that in general, a RangeCommandIterator will honor the command limit for each range, but will not enforce it globally.
 
-        return command.withLimitsAndPostReconciliation(new RangeCommandIterator(ranges, command, concurrencyFactor, keyspace, consistencyLevel, queryStartNanoTime, forContinuousPaging));
+        return command.withLimitsAndPostReconciliation(new RangeCommandPartitions(ranges,
+                                                                                  command,
+                                                                                  concurrencyFactor,
+                                                                                  keyspace,
+                                                                                  consistencyLevel,
+                                                                                  queryStartNanoTime,
+                                                                                  forContinuousPaging).partitions());
     }
 
     /**
      * Read a range slice locally, but for an external request. This implements an optimized local read path for data that
      * is available locally and that has been requested at a consistency level of ONE or LOCAL_ONE. We
-     * wrap the functionality of {@link ReadCommand#executeInternal(ReadExecutionController)}  with additional
+     * wrap the functionality of {@link ReadCommand#executeInternal()}  with additional
      * functionality that is required for client requests, such as metrics recording and local query monitoring,
      * to ensure {@link ReadExecutionController} is not kept for too long. If local queries are aborted, they
      * are not reported as failed, rather the caller will take care of restarting them.
@@ -1969,50 +1923,23 @@ public class StorageProxy implements StorageProxyMBean
      * @return - the filtered partition iterator
      */
     @SuppressWarnings("resource")
-    public static PartitionIterator getRangeSliceLocalContinuous(PartitionRangeReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    public static Flow<FlowablePartition> getRangeSliceLocalContinuous(PartitionRangeReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     {
         assert consistencyLevel.isSingleNode();
 
         checkNotBootstrappingOrSystemQuery(Collections.singletonList(command), rangeMetrics);
 
-        Tracing.trace("Querying local ranges");
+        if (logger.isTraceEnabled())
+            logger.trace("Querying local ranges {} for continuous paging", command);
 
-        Monitor monitor = Monitor.createAndStartNoReporting(command,
-                                                            System.currentTimeMillis(),
-                                                            DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
+        final Monitor monitor = Monitor.createAndStartNoReporting(command,
+                                                                  System.currentTimeMillis(),
+                                                                  DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
 
         // Same reasoning as in readLocalContinuous, see there for details.
-        ReadExecutionController controller = command.executionController(monitor);
-        try
-        {
-            // Same reasoning as in readLocalContinuous, see there for details.
-            final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal(controller));
-            return new PartitionIterator()
-            {
-                public boolean hasNext()
-                {
-                    return iter.hasNext();
-                }
-
-                public RowIterator next()
-                {
-                    return iter.next();
-                }
-
-                public void close()
-                {
-                    // Make sure we close this as the first thing so it's always called.
-                    controller.close();
-                    monitor.complete();
-                }
-            };
-        }
-        catch (Throwable e)
-        {
-            controller.close();
-            rangeMetrics.failures.mark();
-            throw e;
-        }
+        return command.withLimitsAndPostReconciliation(command.executeInternal(monitor))
+                      .doOnClose(monitor::complete)
+                      .doOnError(e -> rangeMetrics.failures.mark());
     }
 
 

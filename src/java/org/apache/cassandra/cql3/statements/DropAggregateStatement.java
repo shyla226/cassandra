@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import io.reactivex.Maybe;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.functions.*;
@@ -75,16 +76,16 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
     {
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
         Collection<Function> olds = Schema.instance.getFunctions(functionName);
 
         if (!argsPresent && olds != null && olds.size() > 1)
-            throw new InvalidRequestException(String.format("'DROP AGGREGATE %s' matches multiple function definitions; " +
-                                                            "specify the argument types by issuing a statement like " +
-                                                            "'DROP AGGREGATE %s (type, type, ...)'. Hint: use cqlsh " +
-                                                            "'DESCRIBE AGGREGATE %s' command to find all overloads",
-                                                            functionName, functionName, functionName));
+            return error(String.format("'DROP AGGREGATE %s' matches multiple function definitions; " +
+                                       "specify the argument types by issuing a statement like " +
+                                       "'DROP AGGREGATE %s (type, type, ...)'. Hint: use cqlsh " +
+                                       "'DESCRIBE AGGREGATE %s' command to find all overloads",
+                                       functionName, functionName, functionName));
 
         Function old = null;
         if (argsPresent)
@@ -100,7 +101,7 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
             if (old == null || !(old instanceof AggregateFunction))
             {
                 if (ifExists)
-                    return null;
+                    return Maybe.empty();
                 // just build a nicer error message
                 StringBuilder sb = new StringBuilder();
                 for (CQL3Type.Raw rawType : argRawTypes)
@@ -109,8 +110,7 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
                         sb.append(", ");
                     sb.append(rawType);
                 }
-                throw new InvalidRequestException(String.format("Cannot drop non existing aggregate '%s(%s)'",
-                                                                functionName, sb));
+                return error(String.format("Cannot drop non existing aggregate '%s(%s)'", functionName, sb));
             }
         }
         else
@@ -118,19 +118,20 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
             if (olds == null || olds.isEmpty() || !(olds.iterator().next() instanceof AggregateFunction))
             {
                 if (ifExists)
-                    return null;
-                throw new InvalidRequestException(String.format("Cannot drop non existing aggregate '%s'", functionName));
+                    return Maybe.empty();
+                return error(String.format("Cannot drop non existing aggregate '%s'", functionName));
             }
             old = olds.iterator().next();
         }
 
         if (old.isNative())
-            throw new InvalidRequestException(String.format("Cannot drop aggregate '%s' because it is a " +
-                                                            "native (built-in) function", functionName));
+            return error(String.format("Cannot drop aggregate '%s' because it is a " +
+                                       "native (built-in) function", functionName));
 
-        MigrationManager.announceAggregateDrop((UDAggregate)old, isLocalOnly);
-        return new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.AGGREGATE,
-                                      old.name().keyspace, old.name().name, AbstractType.asCQLTypeStringList(old.argTypes()));
+        final Function oldFinal = old;
+        return MigrationManager.announceAggregateDrop((UDAggregate)old, isLocalOnly)
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.AGGREGATE,
+                                      oldFinal.name().keyspace, oldFinal.name().name, AbstractType.asCQLTypeStringList(oldFinal.argTypes()))));
 
     }
 

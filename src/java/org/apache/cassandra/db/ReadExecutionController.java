@@ -17,13 +17,19 @@
  */
 package org.apache.cassandra.db;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class ReadExecutionController implements AutoCloseable
 {
+    private static final Logger logger = LoggerFactory.getLogger(ReadExecutionController.class);
+
     // For every reads
     private final OpOrder.Group baseOp;
     private final TableMetadata baseMetadata; // kept to sanity check that we have take the op order on the right table
@@ -31,14 +37,12 @@ public class ReadExecutionController implements AutoCloseable
     // For index reads
     private final ReadExecutionController indexController;
     private final OpOrder.Group writeOp;
-
-    private final Monitor monitor;
+    private boolean closed;
 
     private ReadExecutionController(OpOrder.Group baseOp,
                                     TableMetadata baseMetadata,
                                     ReadExecutionController indexController,
-                                    OpOrder.Group writeOp,
-                                    Monitor monitor)
+                                    OpOrder.Group writeOp)
     {
         // We can have baseOp == null, but only when empty() is called, in which case the controller will never really be used
         // (which validForReadOn should ensure). But if it's not null, we should have the proper metadata too.
@@ -47,7 +51,7 @@ public class ReadExecutionController implements AutoCloseable
         this.baseMetadata = baseMetadata;
         this.indexController = indexController;
         this.writeOp = writeOp;
-        this.monitor = monitor;
+        this.closed = false;
     }
 
     public ReadExecutionController indexReadController()
@@ -62,48 +66,29 @@ public class ReadExecutionController implements AutoCloseable
 
     public boolean validForReadOn(ColumnFamilyStore cfs)
     {
-        return baseOp != null && cfs.metadata.id.equals(baseMetadata.id);
+        return !closed && baseOp != null && cfs.metadata.id.equals(baseMetadata.id);
     }
 
     public static ReadExecutionController empty()
     {
-        return new ReadExecutionController(null, null, null, null, null);
+        return new ReadExecutionController(null, null, null, null);
     }
 
     /**
      * Creates an execution controller for the provided command.
-     * <p>
-     * Note: no code should use this method outside of {@link ReadCommand#executionController} (for
-     * consistency sake) and you should use that latter method if you need an execution controller.
      *
      * @param command the command for which to create a controller.
      * @return the created execution controller, which must always be closed.
      */
     @SuppressWarnings("resource") // ops closed during controller close
-    static ReadExecutionController forCommand(ReadCommand command)
-    {
-        return forCommand(command, null);
-    }
-
-    /**
-     * Creates an execution controller for the provided command.
-     * <p>
-     * Note: no code should use this method outside of {@link ReadCommand#executionController} (for
-     * consistency sake) and you should use that latter method if you need an execution controller.
-     *
-     * @param command the command for which to create a controller.
-     * @param monitor the {@link Monitor} to use to monitor the query. Can be {@code null} if no monitor is desired.
-     * @return the created execution controller, which must always be closed.
-     */
-    @SuppressWarnings("resource") // ops closed during controller close
-    static ReadExecutionController forCommand(ReadCommand command, Monitor monitor)
+    public static ReadExecutionController forCommand(ReadCommand command)
     {
         ColumnFamilyStore baseCfs = Keyspace.openAndGetStore(command.metadata());
         ColumnFamilyStore indexCfs = maybeGetIndexCfs(baseCfs, command);
 
         if (indexCfs == null)
         {
-            return new ReadExecutionController(baseCfs.readOrdering.start(), baseCfs.metadata(), null, null, monitor);
+            return new ReadExecutionController(baseCfs.readOrdering.start(), baseCfs.metadata(), null, null);
         }
         else
         {
@@ -113,11 +98,11 @@ public class ReadExecutionController implements AutoCloseable
             try
             {
                 baseOp = baseCfs.readOrdering.start();
-                indexController = new ReadExecutionController(indexCfs.readOrdering.start(), indexCfs.metadata(), null, null, monitor);
+                indexController = new ReadExecutionController(indexCfs.readOrdering.start(), indexCfs.metadata(), null, null);
                 // TODO: this should perhaps not open and maintain a writeOp for the full duration, but instead only *try* to delete stale entries, without blocking if there's no room
                 // as it stands, we open a writeOp and keep it open for the duration to ensure that should this CF get flushed to make room we don't block the reclamation of any room being made
                 writeOp = Keyspace.writeOrder.start();
-                return new ReadExecutionController(baseOp, baseCfs.metadata(), indexController, writeOp, monitor);
+                return new ReadExecutionController(baseOp, baseCfs.metadata(), indexController, writeOp);
             }
             catch (RuntimeException e)
             {
@@ -149,36 +134,21 @@ public class ReadExecutionController implements AutoCloseable
         return baseMetadata;
     }
 
-    /**
-     * The monitor used to monitor the read query execution, if any.
-     *
-     * @return the monitor used to monitor the read operation if it is monitored, {@code null} otherwise.
-     */
-    public Monitor monitor()
-    {
-        return monitor;
-    }
-
     public void close()
     {
-        try
+        if (closed)
+            return; // this should be idempotent
+
+        closed = true;
+
+        Throwable fail = null;
+        fail = Throwables.closeNonNull(fail, baseOp);
+        fail = Throwables.closeNonNull(fail, indexController);
+        fail = Throwables.closeNonNull(fail, writeOp);
+        if (fail != null)
         {
-            if (baseOp != null)
-                baseOp.close();
-        }
-        finally
-        {
-            if (indexController != null)
-            {
-                try
-                {
-                    indexController.close();
-                }
-                finally
-                {
-                    writeOp.close();
-                }
-            }
+            JVMStabilityInspector.inspectThrowable(fail);
+            logger.error("Failed to close ReadExecutionController: {}", fail);
         }
     }
 }

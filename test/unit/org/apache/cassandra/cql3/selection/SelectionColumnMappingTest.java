@@ -23,16 +23,14 @@ package org.apache.cassandra.cql3.selection;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.junit.BeforeClass;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.junit.Test;
 
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.service.ClientState;
@@ -50,14 +48,6 @@ public class SelectionColumnMappingTest extends CQLTester
     String typeName;
     UserType userType;
     String functionName;
-
-    @BeforeClass
-    public static void setUpClass()     // overrides CQLTester.setUpClass()
-    {
-        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
-
-        prepareServer();
-    }
 
     @Test
     public void testSelectionColumnMapping() throws Throwable
@@ -118,7 +108,7 @@ public class SelectionColumnMappingTest extends CQLTester
     {
         // demonstrate behaviour of token() with composite partition key
         tableName = createTable("CREATE TABLE %s (a int, b text, PRIMARY KEY ((a, b)))");
-        ColumnSpecification tokenSpec = columnSpecification("system.token(a, b)", BytesType.instance);
+        ColumnSpecification tokenSpec = columnSpecification("system.token(a, b)", LongType.instance);
         SelectionColumnMapping expected = SelectionColumnMapping.newMapping()
                                                                 .addMapping(tokenSpec, columnDefinitions("a", "b"));
         // we don't use verify like with the other tests because this query will produce no results
@@ -581,8 +571,8 @@ public class SelectionColumnMappingTest extends CQLTester
     private void checkExecution(SelectStatement statement, List<ColumnSpecification> expectedResultColumns)
     throws RequestExecutionException, RequestValidationException
     {
-        UntypedResultSet rs = UntypedResultSet.create(statement.executeInternal(QueryState.forInternalCalls(),
-                                                                                QueryOptions.DEFAULT).result);
+        ResultMessage.Rows result = statement.executeInternal(QueryState.forInternalCalls(), QueryOptions.DEFAULT).blockingGet();
+        UntypedResultSet rs = UntypedResultSet.create(result.result);
 
         assertEquals(expectedResultColumns, rs.one().getColumns());
     }

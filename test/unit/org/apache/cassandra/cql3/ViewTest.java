@@ -26,6 +26,8 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
+
+import io.reactivex.Single;
 import junit.framework.Assert;
 import org.junit.After;
 import org.junit.Before;
@@ -35,9 +37,7 @@ import org.junit.Test;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
-import org.apache.cassandra.concurrent.SEPExecutor;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -83,11 +83,6 @@ public class ViewTest extends CQLTester
     private void updateView(String query, Object... params) throws Throwable
     {
         executeNet(protocolVersion, query, params);
-        while (!(((SEPExecutor) StageManager.getStage(Stage.VIEW_MUTATION)).getPendingTasks() == 0
-                 && ((SEPExecutor) StageManager.getStage(Stage.VIEW_MUTATION)).getActiveCount() == 0))
-        {
-            Thread.sleep(1);
-        }
     }
 
     @Test
@@ -112,11 +107,13 @@ public class ViewTest extends CQLTester
 
         updateView("INSERT INTO %s (k1, c1, val) VALUES (1, 2, 200)");
         updateView("INSERT INTO %s (k1, c1, val) VALUES (1, 3, 300)");
+        BatchlogManager.instance.forceBatchlogReplay();
 
         Assert.assertEquals(2, execute("select * from %s").size());
         Assert.assertEquals(2, execute("select * from view1").size());
 
         updateView("DELETE FROM %s WHERE k1 = 1");
+        BatchlogManager.instance.forceBatchlogReplay();
 
         Assert.assertEquals(0, execute("select * from %s").size());
         Assert.assertEquals(0, execute("select * from view1").size());
@@ -148,10 +145,14 @@ public class ViewTest extends CQLTester
         updateView("INSERT INTO %s (k1, c1, val) VALUES (1, 2, 200)");
         updateView("INSERT INTO %s (k1, c1, val) VALUES (1, 3, 300)");
 
+        BatchlogManager.instance.forceBatchlogReplay();
+
         Assert.assertEquals(2, execute("select * from %s").size());
         Assert.assertEquals(2, execute("select * from view1").size());
 
         updateView("DELETE FROM %s WHERE k1 = 1 and c1 = 3");
+
+        BatchlogManager.instance.forceBatchlogReplay();
 
         Assert.assertEquals(1, execute("select * from %s").size());
         Assert.assertEquals(1, execute("select * from view1").size());
@@ -253,6 +254,7 @@ public class ViewTest extends CQLTester
 
         for (int i = 0; i < 100; i++)
             updateView("INSERT into %s (k,c,sval,val)VALUES(?,?,?,?)", 0, i % 2, "bar" + i, "baz");
+        BatchlogManager.instance.forceBatchlogReplay();
 
         Assert.assertEquals(2, execute("select * from %s").size());
 
@@ -281,6 +283,8 @@ public class ViewTest extends CQLTester
         for (int i = 0; i < 100; i++)
             updateView("INSERT into %s (k,c,val)VALUES(?,?,?)", 0, i % 2, "baz");
 
+        BatchlogManager.instance.forceBatchlogReplay();
+
         Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush();
 
         Assert.assertEquals(2, execute("select * from %s").size());
@@ -291,12 +295,16 @@ public class ViewTest extends CQLTester
 
         //Make sure an old TS does nothing
         updateView("UPDATE %s USING TIMESTAMP 100 SET val = ? where k = ? AND c = ?", "bar", 0, 0);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT val from %s where k = 0 and c = 0"), row("baz"));
         assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "baz"), row(0), row(1));
         assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "bar"));
 
         //Latest TS
         updateView("UPDATE %s SET val = ? where k = ? AND c = ?", "bar", 0, 0);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT val from %s where k = 0 and c = 0"), row("bar"));
         assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "bar"), row(0));
         assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "baz"), row(1));
@@ -320,6 +328,8 @@ public class ViewTest extends CQLTester
         updateView("UPDATE %s SET c = ?, val = ? WHERE k = ?", 0, 0, 0);
         updateView("UPDATE %s SET val = ? WHERE k = ?", 1, 0);
         updateView("UPDATE %s SET c = ? WHERE k = ?", 1, 0);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT c, k, val FROM mv_rctstest"), row(1, 0, 1));
 
         updateView("TRUNCATE %s");
@@ -329,6 +339,8 @@ public class ViewTest extends CQLTester
         updateView("UPDATE %s USING TIMESTAMP 2 SET val = ? WHERE k = ?", 1, 0);
         updateView("UPDATE %s USING TIMESTAMP 4 SET c = ? WHERE k = ?", 2, 0);
         updateView("UPDATE %s USING TIMESTAMP 3 SET val = ? WHERE k = ?", 2, 0);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT c, k, val FROM mv_rctstest"), row(2, 0, 2));
     }
 
@@ -401,14 +413,14 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
 
         //update c's timestamp TS=2
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
 
             //change c's value and TS=3, tombstones c=1 and adds c=0 record
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? and b = ? ", 0, 0, 0);
@@ -417,7 +429,7 @@ public class ViewTest extends CQLTester
         if(flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
         }
 
 
@@ -426,7 +438,7 @@ public class ViewTest extends CQLTester
         if (flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
         }
 
         assertRows(execute("SELECT d,e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, null));
@@ -437,7 +449,7 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d,e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, 1));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
 
 
         //Change d value @ TS=2
@@ -445,7 +457,7 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(2));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
 
 
         //Change d value @ TS=3
@@ -537,6 +549,8 @@ public class ViewTest extends CQLTester
         for (int i = 0; i < 100; i++)
             updateView("INSERT into %s (k,asciival,bigintval,textval1,textval2)VALUES(?,?,?,?,?)", 0, "foo", (long) i % 2, "bar" + i, "baz");
 
+        BatchlogManager.instance.forceBatchlogReplay();
+
         Assert.assertEquals(50, execute("select * from %s where k = 0 and asciival = 'foo' and bigintval = 0").size());
         Assert.assertEquals(50, execute("select * from %s where k = 0 and asciival = 'foo' and bigintval = 1").size());
 
@@ -560,6 +574,7 @@ public class ViewTest extends CQLTester
 
         //Write a RT and verify the data is removed from index
         updateView("DELETE FROM %s WHERE k = ? AND asciival = ? and bigintval = ?", 0, "foo", 0L);
+        BatchlogManager.instance.forceBatchlogReplay();
 
         Assert.assertEquals(50, execute("select asciival from mv_test3 where textval2 = ? and k = ?", "baz", 0).size());
     }
@@ -583,6 +598,7 @@ public class ViewTest extends CQLTester
 
         for (int i = 0; i < 100; i++)
             updateView("INSERT into %s (k,asciival,bigintval,textval1)VALUES(?,?,?,?)", 0, "foo", (long) i % 2, "bar" + i);
+        BatchlogManager.instance.forceBatchlogReplay();
 
         Assert.assertEquals(1, execute("select * from %s where k = 0 and asciival = 'foo' and bigintval = 0").size());
         Assert.assertEquals(1, execute("select * from %s where k = 0 and asciival = 'foo' and bigintval = 1").size());
@@ -593,6 +609,7 @@ public class ViewTest extends CQLTester
 
         //Write a RT and verify the data is removed from index
         updateView("DELETE FROM %s WHERE k = ? AND asciival = ? and bigintval = ?", 0, "foo", 0L);
+        BatchlogManager.instance.forceBatchlogReplay();
 
         Assert.assertEquals(1, execute("select * from %s").size());
         Assert.assertEquals(1, execute("select * from mv").size());
@@ -616,6 +633,7 @@ public class ViewTest extends CQLTester
 
         for (int i = 0; i < 100; i++)
             updateView("INSERT into %s (k,asciival,bigintval,textval1)VALUES(?,?,?,?)", 0, "foo", (long) i % 2, "bar" + i);
+        BatchlogManager.instance.forceBatchlogReplay();
 
         Assert.assertEquals(1, execute("select * from %s where k = 0 and asciival = 'foo' and bigintval = 0").size());
         Assert.assertEquals(1, execute("select * from %s where k = 0 and asciival = 'foo' and bigintval = 1").size());
@@ -626,6 +644,7 @@ public class ViewTest extends CQLTester
 
         //Write a RT and verify the data is removed from index
         updateView("DELETE FROM %s WHERE k = ? AND asciival = ? and bigintval >= ?", 0, "foo", 0L);
+        BatchlogManager.instance.forceBatchlogReplay();
 
         Assert.assertEquals(0, execute("select * from %s").size());
         Assert.assertEquals(0, execute("select * from mv").size());
@@ -722,6 +741,8 @@ public class ViewTest extends CQLTester
 
         updateView("INSERT INTO %s (k, asciival, bigintval) VALUES (?, ?, fromJson(?))", 0, "ascii text", "123123123123");
         updateView("INSERT INTO %s (k, asciival) VALUES (?, fromJson(?))", 0, "\"ascii text\"");
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT bigintval FROM %s WHERE k = ? and asciival = ?", 0, "ascii text"), row(123123123123L));
 
         //Check the MV
@@ -733,6 +754,8 @@ public class ViewTest extends CQLTester
 
         //UPDATE BASE
         updateView("INSERT INTO %s (k, asciival, bigintval) VALUES (?, ?, fromJson(?))", 0, "ascii text", "1");
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT bigintval FROM %s WHERE k = ? and asciival = ?", 0, "ascii text"), row(1L));
 
         //Check the MV
@@ -741,7 +764,6 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT k from mv1_bigintval WHERE bigintval = ?", 123123123123L));
         assertRows(execute("SELECT asciival from mv3_bigintval where bigintval = ? AND k = ?", 123123123123L, 0));
         assertRows(execute("SELECT asciival from mv3_bigintval where bigintval = ? AND k = ?", 1L, 0), row("ascii text"));
-
 
         //test truncate also truncates all MV
         updateView("TRUNCATE %s");
@@ -767,11 +789,15 @@ public class ViewTest extends CQLTester
         createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND intval IS NOT NULL PRIMARY KEY (intval, k)");
 
         updateView("INSERT INTO %s (k, intval, listval) VALUES (?, ?, fromJson(?))", 0, 0, "[1, 2, 3]");
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT k, listval FROM %s WHERE k = ?", 0), row(0, list(1, 2, 3)));
         assertRows(execute("SELECT k, listval from mv WHERE intval = ?", 0), row(0, list(1, 2, 3)));
 
         updateView("INSERT INTO %s (k, intval) VALUES (?, ?)", 1, 1);
         updateView("INSERT INTO %s (k, listval) VALUES (?, fromJson(?))", 1, "[1, 2, 3]");
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT k, listval FROM %s WHERE k = ?", 1), row(1, list(1, 2, 3)));
         assertRows(execute("SELECT k, listval from mv WHERE intval = ?", 1), row(1, list(1, 2, 3)));
     }
@@ -790,10 +816,14 @@ public class ViewTest extends CQLTester
         createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND intval IS NOT NULL PRIMARY KEY (intval, k)");
 
         updateView("INSERT INTO %s (k, intval) VALUES (?, ?)", 0, 0);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT k, intval FROM %s WHERE k = ?", 0), row(0, 0));
         assertRows(execute("SELECT k, intval from mv WHERE intval = ?", 0), row(0, 0));
 
         updateView("INSERT INTO %s (k, intval) VALUES (?, ?)", 0, 1);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT k, intval FROM %s WHERE k = ?", 0), row(0, 1));
         assertRows(execute("SELECT k, intval from mv WHERE intval = ?", 1), row(0, 1));
     }
@@ -816,9 +846,13 @@ public class ViewTest extends CQLTester
         createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT a, b, c FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL PRIMARY KEY (b, a)");
 
         updateView("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, 0);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT a, b, c from mv WHERE b = ?", 0), row(0, 0, 0));
 
         updateView("UPDATE %s SET d = ? WHERE a = ? AND b = ?", 0, 0, 0);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT a, b, c from mv WHERE b = ?", 0), row(0, 0, 0));
 
         // Note: errors here may result in the test hanging when the memtables are flushed as part of the table drop,
@@ -831,6 +865,8 @@ public class ViewTest extends CQLTester
                 "APPLY BATCH",
                 0, 0, 0, 0,
                 1, 0, 1);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRows(execute("SELECT a, b, c from mv WHERE b = ?", 0), row(0, 0, 0));
         assertEmpty(execute("SELECT a, b, c from mv WHERE b = ?", 1));
 
@@ -854,11 +890,13 @@ public class ViewTest extends CQLTester
         createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE c IS NOT NULL AND a IS NOT NULL AND b IS NOT NULL PRIMARY KEY (c, a, b)");
 
         updateView("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?) USING TTL 3", 1, 1, 1, 1);
+        BatchlogManager.instance.forceBatchlogReplay();
 
         Thread.sleep(TimeUnit.SECONDS.toMillis(1));
         updateView("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 1, 1, 2);
+        BatchlogManager.instance.forceBatchlogReplay();
 
-        Thread.sleep(TimeUnit.SECONDS.toMillis(5));
+        Uninterruptibles.sleepUninterruptibly(3, TimeUnit.SECONDS);
         List<Row> results = executeNet(protocolVersion, "SELECT d FROM mv WHERE c = 2 AND a = 1 AND b = 1").all();
         Assert.assertEquals(1, results.size());
         Assert.assertTrue("There should be a null result given back due to ttl expiry", results.get(0).isNull(0));
@@ -880,7 +918,9 @@ public class ViewTest extends CQLTester
 
         updateView("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?) USING TTL 3", 1, 1, 1, 1);
 
-        Thread.sleep(TimeUnit.SECONDS.toMillis(4));
+        BatchlogManager.instance.forceBatchlogReplay();
+
+        Uninterruptibles.sleepUninterruptibly(3, TimeUnit.SECONDS);
         Assert.assertEquals(0, executeNet(protocolVersion, "SELECT * FROM mv WHERE c = 1 AND a = 1 AND b = 1").all().size());
     }
 
@@ -901,6 +941,8 @@ public class ViewTest extends CQLTester
         String table = keyspace() + "." + currentTable();
         updateView("DELETE FROM " + table + " USING TIMESTAMP 6 WHERE a = 1 AND b = 1;");
         updateView("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?) USING TIMESTAMP 3", 1, 1, 1, 1);
+
+        BatchlogManager.instance.forceBatchlogReplay();
         Assert.assertEquals(0, executeNet(protocolVersion, "SELECT * FROM mv WHERE c = 1 AND a = 1 AND b = 1").all().size());
     }
 
@@ -921,6 +963,8 @@ public class ViewTest extends CQLTester
         {
             updateView("INSERT INTO %s (a, b, c) VALUES (?, ?, ?) USING TIMESTAMP 1", 1, 1, i);
         }
+
+        BatchlogManager.instance.forceBatchlogReplay();
 
         ResultSet mvRows = executeNet(protocolVersion, "SELECT c FROM mv");
         List<Row> rows = executeNet(protocolVersion, "SELECT c FROM %s").all();
@@ -949,6 +993,8 @@ public class ViewTest extends CQLTester
 
         updateView("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 1, 1);
         updateView("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 2, 2, 2);
+
+        BatchlogManager.instance.forceBatchlogReplay();
 
         ResultSet mvRows = executeNet(protocolVersion, "SELECT b FROM mv1");
         assertRowsNet(protocolVersion, mvRows,
@@ -987,6 +1033,8 @@ public class ViewTest extends CQLTester
         updateView("INSERT INTO %s (a, b) VALUES (?, ?)", 1, 2);
         updateView("INSERT INTO %s (a, b) VALUES (?, ?)", 1, 3);
 
+        BatchlogManager.instance.forceBatchlogReplay();
+
         ResultSet mvRows = executeNet(protocolVersion, "SELECT a, b FROM mv1");
         assertRowsNet(protocolVersion, mvRows,
                       row(1, 1),
@@ -997,6 +1045,7 @@ public class ViewTest extends CQLTester
                    "DELETE FROM %s WHERE a = 1 AND b > 1 AND b < 3;" +
                    "DELETE FROM %s WHERE a = 1;" +
                    "APPLY BATCH", currentTable(), currentTable()));
+        BatchlogManager.instance.forceBatchlogReplay();
 
         mvRows = executeNet(protocolVersion, "SELECT a, b FROM mv1");
         assertRowsNet(protocolVersion, mvRows);
@@ -1016,6 +1065,7 @@ public class ViewTest extends CQLTester
         createView("mv1", "CREATE MATERIALIZED VIEW %s AS SELECT a, b FROM %%s WHERE b IS NOT NULL PRIMARY KEY (b, a)");
 
         updateView("INSERT INTO %s (a, b) VALUES (?, ?)", 1, 1);
+        BatchlogManager.instance.forceBatchlogReplay();
 
         ResultSet mvRows = executeNet(protocolVersion, "SELECT a, b FROM mv1");
         assertRowsNet(protocolVersion, mvRows, row(1, 1));
@@ -1035,6 +1085,7 @@ public class ViewTest extends CQLTester
         createView("mv1", "CREATE MATERIALIZED VIEW %s AS SELECT a, b FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL PRIMARY KEY (b, a)");
 
         updateView("INSERT INTO %s (a, b) VALUES (?, ?)", 1, 1);
+        BatchlogManager.instance.forceBatchlogReplay();
 
         ResultSet mvRows = executeNet(protocolVersion, "SELECT a, b FROM mv1");
         assertRowsNet(protocolVersion, mvRows, row(1, 1));
@@ -1080,14 +1131,20 @@ public class ViewTest extends CQLTester
         createView("mv1", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND d IS NOT NULL PRIMARY KEY (d, a, b)");
 
         updateView("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         ResultSet mvRows = executeNet(protocolVersion, "SELECT a, d, b, c FROM mv1");
         assertRowsNet(protocolVersion, mvRows, row(0, 0, 0, 0));
 
         updateView("DELETE c FROM %s WHERE a = ? AND b = ?", 0, 0);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         mvRows = executeNet(protocolVersion, "SELECT a, d, b, c FROM mv1");
         assertRowsNet(protocolVersion, mvRows, row(0, 0, 0, null));
 
         updateView("DELETE d FROM %s WHERE a = ? AND b = ?", 0, 0);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         mvRows = executeNet(protocolVersion, "SELECT a, d, b FROM mv1");
         assertTrue(mvRows.isExhausted());
     }
@@ -1105,14 +1162,20 @@ public class ViewTest extends CQLTester
         createView("mvmap", "CREATE MATERIALIZED VIEW %s AS SELECT a, b FROM %%s WHERE b IS NOT NULL PRIMARY KEY (b, a)");
 
         updateView("INSERT INTO %s (a, b) VALUES (?, ?)", 0, 0);
+        BatchlogManager.instance.forceBatchlogReplay();
+
         ResultSet mvRows = executeNet(protocolVersion, "SELECT a, b FROM mvmap WHERE b = ?", 0);
         assertRowsNet(protocolVersion, mvRows, row(0, 0));
 
         updateView("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 1, 1, map(1, "1"));
+        BatchlogManager.instance.forceBatchlogReplay();
+
         mvRows = executeNet(protocolVersion, "SELECT a, b FROM mvmap WHERE b = ?", 1);
         assertRowsNet(protocolVersion, mvRows, row(1, 1));
 
         updateView("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, map(0, "0"));
+        BatchlogManager.instance.forceBatchlogReplay();
+
         mvRows = executeNet(protocolVersion, "SELECT a, b FROM mvmap WHERE b = ?", 0);
         assertRowsNet(protocolVersion, mvRows, row(0, 0));
     }
@@ -1283,7 +1346,6 @@ public class ViewTest extends CQLTester
 
         //Force a second MV on the same base table, which will restart the first MV builder...
         createView("mv_test2", "CREATE MATERIALIZED VIEW %s AS SELECT val, k, c FROM %%s WHERE val IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (val,k,c)");
-
 
         //Compact the base table
         FBUtilities.waitOnFutures(futures);

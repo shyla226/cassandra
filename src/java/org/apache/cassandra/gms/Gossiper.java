@@ -1060,6 +1060,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             logger.debug("Not marking {} alive due to dead state", ep);
             markDead(ep, epState);
         }
+        logger.info("WRITING LOCAL JOIN INFO to " + subscribers);
+
         for (IEndpointStateChangeSubscriber subscriber : subscribers)
             subscriber.onJoin(ep, epState);
         // check this at the end so nodes will learn about the endpoint
@@ -1520,6 +1522,12 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         }
         else
             logger.warn("No local state, state is in silent shutdown, or node hasn't joined, not announcing shutdown");
+
+        stopWithoutAnnouncing();
+    }
+
+    public void stopWithoutAnnouncing()
+    {
         if (scheduledGossipTask != null)
             scheduledGossipTask.cancel(false);
     }

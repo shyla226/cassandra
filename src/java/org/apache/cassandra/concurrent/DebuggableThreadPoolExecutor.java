@@ -41,7 +41,7 @@ import static org.apache.cassandra.tracing.Tracing.isTracing;
  *   threads and the queue is full, we want the enqueuer to block.  But to allow the number of threads to drop if a
  *   stage is less busy, core thread timeout is enabled.
  */
-public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements LocalAwareExecutorService
+public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements TracingAwareExecutorService
 {
     protected static final Logger logger = LoggerFactory.getLogger(DebuggableThreadPoolExecutor.class);
     public static final RejectedExecutionHandler blockingExecutionHandler = new RejectedExecutionHandler()
@@ -148,11 +148,6 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
         super.execute(locals == null || command instanceof LocalSessionWrapper
                       ? command
                       : new LocalSessionWrapper<Object>(command, locals));
-    }
-
-    public void maybeExecuteImmediately(Runnable command)
-    {
-        execute(command);
     }
 
     // execute does not call newTaskFor

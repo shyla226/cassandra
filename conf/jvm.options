@@ -109,9 +109,6 @@
 # transparent hugepage allocation more effective.
 -XX:+AlwaysPreTouch
 
-# Disable biased locking as it does not benefit Cassandra.
--XX:-UseBiasedLocking
-
 # Enable thread-local allocation blocks and allow the JVM to automatically
 # resize them at runtime.
 -XX:+UseTLAB
@@ -119,7 +116,7 @@
 -XX:+UseNUMA
 
 # http://www.evanjones.ca/jvm-mmap-pause.html
--XX:+PerfDisableSharedMem
+#-XX:+PerfDisableSharedMem
 
 # Prefer binding to IPv4 network intefaces (when net.ipv6.bindv6only=1). See
 # http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6342561 (short version:
@@ -132,12 +129,14 @@
 #-XX:+UnlockCommercialFeatures
 #-XX:+FlightRecorder
 
+
 # uncomment to have Cassandra JVM listen for remote debuggers/profilers on port 1414
 #-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=1414
 
 # uncomment to have Cassandra JVM log internal method compilation (developers only)
 #-XX:+UnlockDiagnosticVMOptions
 #-XX:+DebugNonSafepoints
+#-XX:+PreserveFramePointer
 #-XX:+LogCompilation
 
 #################

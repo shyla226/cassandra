@@ -21,31 +21,39 @@
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
-import com.google.common.util.concurrent.MoreExecutors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.github.benmanes.caffeine.cache.*;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.metrics.CacheMissMetrics;
 import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.utils.memory.BufferPool;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 
 public class ChunkCache
-        implements CacheLoader<ChunkCache.Key, ChunkCache.Buffer>, RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
+        implements AsyncCacheLoader<ChunkCache.Key, ChunkCache.Buffer>, RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
 {
+    private static final Logger logger = LoggerFactory.getLogger(ChunkCache.class);
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     public static final long cacheSize = 1024L * 1024L * Math.max(0, DatabaseDescriptor.getFileCacheSizeInMB() - RESERVED_POOL_SPACE_IN_MB);
 
-    public static boolean enabled = cacheSize > 0;
-    public static final ChunkCache instance = enabled ? new ChunkCache() : null;
+    public static final ChunkCache instance = cacheSize > 0 ? new ChunkCache() : null;
+    private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
 
-    private final LoadingCache<Key, Buffer> cache;
+    private final AsyncLoadingCache<Key, Buffer> cache;
     public final CacheMissMetrics metrics;
 
     public static int bufferToChunkSize(int bufferSize)
@@ -90,19 +98,28 @@ public class ChunkCache
                     && file.getClass() == other.file.getClass()
                     && path.equals(other.path);
         }
+
+        public String toString()
+        {
+            return path + "@" + position;
+        }
     }
 
-    static class Buffer implements Rebufferer.BufferHolder
+    public static class Buffer implements Rebufferer.BufferHolder
     {
+        private final Key key;
         private final ByteBuffer buffer;
         private final long offset;
         private final AtomicInteger references;
 
-        public Buffer(ByteBuffer buffer, long offset)
+        public Buffer(Key key, ByteBuffer buffer, long offset)
         {
-            this.buffer = buffer;
+            this.key = key;
             this.offset = offset;
-            references = new AtomicInteger(1);  // start referenced.
+
+            // Start referenced
+            this.references = new AtomicInteger(1);
+            this.buffer = buffer;
         }
 
         Buffer reference()
@@ -111,9 +128,12 @@ public class ChunkCache
             do
             {
                 refCount = references.get();
+
                 if (refCount == 0)
+                {
                     // Buffer was released before we managed to reference it.
                     return null;
+                }
             } while (!references.compareAndSet(refCount, refCount + 1));
 
             return this;
@@ -135,8 +155,15 @@ public class ChunkCache
         @Override
         public void release()
         {
+            //The read from disk read may be in flight
+            //We need to keep this buffer till the async callback has fired
             if (references.decrementAndGet() == 0)
                 BufferPool.put(buffer);
+        }
+
+        public String toString()
+        {
+            return "ChunkCacheBuffer " + key;
         }
     }
 
@@ -144,24 +171,35 @@ public class ChunkCache
     {
         cache = Caffeine.newBuilder()
                 .maximumWeight(cacheSize)
-                .executor(MoreExecutors.directExecutor())
+                .executor(TPC.getWrappedExecutor())
                 .weigher((key, buffer) -> ((Buffer) buffer).buffer.capacity())
                 .removalListener(this)
-                .build(this);
+                .buildAsync(this);
         metrics = new CacheMissMetrics("ChunkCache", this);
     }
 
     @Override
-    public Buffer load(Key key) throws Exception
+    @SuppressWarnings("resource")
+    public CompletableFuture<Buffer> asyncLoad(Key key, Executor executor)
     {
         ChunkReader rebufferer = key.file;
         metrics.misses.mark();
-        try (Timer.Context ctx = metrics.missLatency.timer())
+
+        Timer.Context ctx = metrics.missLatency.timer();
+        try
         {
             ByteBuffer buffer = BufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
             assert buffer != null;
-            rebufferer.readChunk(key.position, buffer);
-            return new Buffer(buffer, key.position);
+            assert !buffer.isDirect() || (MemoryUtil.getAddress(buffer) & (512 - 1)) == 0 : "Buffer from pool is not properly aligned!";
+
+            return rebufferer.readChunk(key.position, buffer)
+                             .thenApply(b -> new Buffer(key, b, key.position))
+                             .whenComplete((b, t) -> ctx.close());
+        }
+        catch (Throwable t)
+        {
+           ctx.close();
+           throw t;
         }
     }
 
@@ -173,7 +211,7 @@ public class ChunkCache
 
     public void close()
     {
-        cache.invalidateAll();
+        cache.synchronous().invalidateAll();
     }
 
     public RebuffererFactory wrap(ChunkReader file)
@@ -183,10 +221,7 @@ public class ChunkCache
 
     public RebuffererFactory maybeWrap(ChunkReader file)
     {
-        if (!enabled)
-            return file;
-
-        return wrap(file);
+        return wrapper.apply(file);
     }
 
     public void invalidatePosition(FileHandle dfile, long position)
@@ -199,15 +234,22 @@ public class ChunkCache
 
     public void invalidateFile(String fileName)
     {
-        cache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> x.path.equals(fileName)));
+        cache.synchronous().invalidateAll(Iterables.filter(cache.synchronous().asMap().keySet(), x -> x.path.equals(fileName)));
     }
 
     @VisibleForTesting
     public void enable(boolean enabled)
     {
-        ChunkCache.enabled = enabled;
-        cache.invalidateAll();
+        wrapper = enabled ? this::wrap : x -> x;
+        cache.synchronous().invalidateAll();
         metrics.reset();
+    }
+
+    @VisibleForTesting
+    public void intercept(Function<RebuffererFactory, RebuffererFactory> interceptor)
+    {
+        final Function<ChunkReader, RebuffererFactory> prevWrapper = wrapper;
+        wrapper = rdr -> interceptor.apply(prevWrapper.apply(rdr));
     }
 
     // TODO: Invalidate caches for obsoleted/MOVED_START tables?
@@ -225,7 +267,7 @@ public class ChunkCache
         {
             source = file;
             int chunkSize = file.chunkSize();
-            assert Integer.bitCount(chunkSize) == 1;    // Must be power of two
+            assert Integer.bitCount(chunkSize) == 1 : chunkSize; // Must be power of two
             alignmentMask = -chunkSize;
         }
 
@@ -236,10 +278,22 @@ public class ChunkCache
             {
                 metrics.requests.mark();
                 long pageAlignedPos = position & alignmentMask;
-                Buffer buf;
-                do
-                    buf = cache.get(new Key(source, pageAlignedPos)).reference();
-                while (buf == null);
+                Buffer buf = null;
+                Key pageKey = new Key(source, pageAlignedPos);
+
+                Buffer page = null;
+
+                int spin = 0;
+                //There is a small window when a released buffer/invalidated chunk
+                //is still in the cache. In this case it will return null
+                //so we spin loop while waiting for the cache to re-populate
+                while(page == null || ((buf = page.reference()) == null))
+                {
+                    page = cache.get(pageKey).join();
+
+                    if (page != null && buf == null && ++spin == 1024)
+                        logger.error("Spinning for {}", pageKey);
+                }
 
                 return buf;
             }
@@ -250,10 +304,41 @@ public class ChunkCache
             }
         }
 
+        @Override
+        public Buffer rebuffer(long position, ReaderConstraint rc)
+        {
+            if (rc != ReaderConstraint.IN_CACHE_ONLY)
+                return rebuffer(position);
+
+            metrics.requests.mark();
+            long pageAlignedPos = position & alignmentMask;
+            Key key = new Key(source, pageAlignedPos);
+
+            CompletableFuture<Buffer> asyncBuffer = cache.get(key);
+
+            if (asyncBuffer.isDone())
+            {
+                Buffer buf = asyncBuffer.join();
+
+                if (buf != null && (buf = buf.reference()) != null)
+                    return buf;
+
+                asyncBuffer = cache.get(key);
+            }
+
+            metrics.misses.mark();
+
+            /**
+             * Notify the caller this page isn't ready
+             * but give them the Buffer container so they can register a callback
+             */
+            throw new NotInCacheException(asyncBuffer);
+        }
+
         public void invalidate(long position)
         {
             long pageAlignedPos = position & alignmentMask;
-            cache.invalidate(new Key(source, pageAlignedPos));
+            cache.synchronous().invalidate(new Key(source, pageAlignedPos));
         }
 
         @Override
@@ -275,7 +360,7 @@ public class ChunkCache
         }
 
         @Override
-        public ChannelProxy channel()
+        public AsynchronousChannelProxy channel()
         {
             return source.channel();
         }
@@ -314,14 +399,14 @@ public class ChunkCache
     @Override
     public int size()
     {
-        return cache.asMap().size();
+        return cache.synchronous().asMap().size();
     }
 
     @Override
     public long weightedSize()
     {
-        return cache.policy().eviction()
-                .map(policy -> policy.weightedSize().orElseGet(cache::estimatedSize))
-                .orElseGet(cache::estimatedSize);
+        return cache.synchronous().policy().eviction()
+                .map(policy -> policy.weightedSize().orElseGet(cache.synchronous()::estimatedSize))
+                .orElseGet(cache.synchronous()::estimatedSize);
     }
 }

@@ -49,6 +49,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.compaction.CompactionManager;
@@ -187,14 +188,13 @@ public class LocalSessions
     /**
      * Loads sessions out of the repairs table and sets state to started
      */
-    public synchronized void start()
+    public void start()
     {
         Preconditions.checkArgument(!started, "LocalSessions.start can only be called once");
         Preconditions.checkArgument(sessions.isEmpty(), "No sessions should be added before start");
-        UntypedResultSet rows = QueryProcessor.executeInternalWithPaging(String.format("SELECT * FROM %s.%s", keyspace, table), 1000);
+        UntypedResultSet result = QueryProcessor.executeInternalWithPaging(String.format("SELECT * FROM %s.%s", keyspace, table), 1000);
         Map<UUID, LocalSession> loadedSessions = new HashMap<>();
-        for (UntypedResultSet.Row row : rows)
-        {
+        TPCUtils.blockingAwait(result.rows().processToRxCompletable(row -> {
             try
             {
                 LocalSession session = load(row);
@@ -204,9 +204,16 @@ public class LocalSessions
             {
                 logger.warn("Unable to load malformed repair session {}, ignoring", row.has("parent_id") ? row.getUUID("parent_id") : null);
             }
+        }));
+
+        synchronized (this)
+        {
+            if (sessions.isEmpty() && !started)
+            {
+                sessions = ImmutableMap.copyOf(loadedSessions);
+                started = true;
+            }
         }
-        sessions = ImmutableMap.copyOf(loadedSessions);
-        started = true;
     }
 
     public boolean isStarted()

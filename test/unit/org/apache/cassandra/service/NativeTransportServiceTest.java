@@ -19,7 +19,6 @@ package org.apache.cassandra.service;
 
 import java.util.Arrays;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -39,7 +38,7 @@ import static org.junit.Assert.assertTrue;
 public class NativeTransportServiceTest
 {
     @BeforeClass
-    public static void setupDD()
+    public static void setup()
     {
         DatabaseDescriptor.daemonInitialization();
     }
@@ -84,19 +83,16 @@ public class NativeTransportServiceTest
     public void testDestroy()
     {
         withService((NativeTransportService service) -> {
-            Supplier<Boolean> allTerminated = () ->
-                                              service.getWorkerGroup().isShutdown() && service.getWorkerGroup().isTerminated() &&
-                                              service.getEventExecutor().isShutdown() && service.getEventExecutor().isTerminated();
-            assertFalse(allTerminated.get());
+            assertFalse(service.getServers().isEmpty());
             service.destroy();
-            assertTrue(allTerminated.get());
+            assertTrue(service.getServers().isEmpty());
         });
     }
 
     @Test
     public void testConcurrentStarts()
     {
-        withService(NativeTransportService::start, false, 20);
+        withService(service -> service.start(), false, 20);
     }
 
     @Test

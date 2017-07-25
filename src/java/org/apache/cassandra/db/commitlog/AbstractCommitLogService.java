@@ -21,14 +21,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 
+import io.reactivex.*;
+import io.reactivex.subjects.BehaviorSubject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
-import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.utils.NoSpamLogger;
-import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 public abstract class AbstractCommitLogService
 {
@@ -42,8 +42,7 @@ public abstract class AbstractCommitLogService
     private final AtomicLong written = new AtomicLong(0);
     protected final AtomicLong pending = new AtomicLong(0);
 
-    // signal that writers can wait on to be notified of a completed sync
-    protected final WaitQueue syncComplete = new WaitQueue();
+    private BehaviorSubject<Long> syncTimePublisher = BehaviorSubject.createDefault(0L);
 
     final CommitLog commitLog;
     private final String name;
@@ -93,8 +92,8 @@ public abstract class AbstractCommitLogService
                         // This is a target for Byteman in CommitLogSegmentManagerTest
                         commitLog.sync();
                         lastSyncedAt = syncStarted;
-                        syncComplete.signalAll();
 
+                        syncTimePublisher.onNext(syncStarted);
 
                         // sleep any time we have left before the next one is due
                         long now = System.nanoTime();
@@ -139,7 +138,10 @@ public abstract class AbstractCommitLogService
                     catch (Throwable t)
                     {
                         if (!CommitLog.handleCommitError("Failed to persist commits to disk", t))
+                        {
+                            syncTimePublisher.onError(t);
                             break;
+                        }
 
                         // sleep for full poll-interval after an error, so we don't spam the log file
                         LockSupport.parkNanos(pollIntervalNanos);
@@ -150,19 +152,19 @@ public abstract class AbstractCommitLogService
 
         shutdown = false;
         thread = NamedThreadFactory.createThread(runnable, name);
+        thread.setDaemon(true);
         thread.start();
     }
 
     /**
      * Block for @param alloc to be sync'd as necessary, and handle bookkeeping
      */
-    public void finishWriteFor(Allocation alloc)
+    public Completable finishWriteFor(Allocation alloc)
     {
-        maybeWaitForSync(alloc);
-        written.incrementAndGet();
+        return maybeWaitForSync(alloc).doOnComplete(() -> written.incrementAndGet());
     }
 
-    protected abstract void maybeWaitForSync(Allocation alloc);
+    protected abstract Completable maybeWaitForSync(Allocation alloc);
 
     /**
      * Request an additional sync cycle without blocking.
@@ -188,20 +190,12 @@ public abstract class AbstractCommitLogService
     {
         long requestTime = System.nanoTime();
         requestExtraSync();
-        awaitSyncAt(requestTime, null);
+        awaitSyncAt(requestTime).blockingGet();
     }
 
-    void awaitSyncAt(long syncTime, Timer.Context context)
+    Single<Long> awaitSyncAt(long syncTime)
     {
-        do
-        {
-            WaitQueue.Signal signal = context != null ? syncComplete.register(context) : syncComplete.register();
-            if (lastSyncedAt < syncTime)
-                signal.awaitUninterruptibly();
-            else
-                signal.cancel();
-        }
-        while (lastSyncedAt < syncTime);
+        return syncTimePublisher.filter(v -> v >= syncTime).first(0L);
     }
 
     public void awaitTermination() throws InterruptedException

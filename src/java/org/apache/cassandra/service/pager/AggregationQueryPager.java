@@ -18,7 +18,6 @@
 package org.apache.cassandra.service.pager;
 
 import java.nio.ByteBuffer;
-import java.util.NoSuchElementException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,19 +25,19 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.GroupingState;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * {@code QueryPager} that takes care of fetching the pages for aggregation queries.
  * <p>
  * For aggregation/group by queries, the user page size is in number of groups. But each group could be composed of very
  * many rows so to avoid running into OOMs, this pager will page internal queries into sub-pages. So each call to
- * {@link QueryPager#fetchPage(int, ConsistencyLevel, ClientState, long)} may (transparently) yield multiple internal queries (sub-pages).
+ * {@link QueryPager#fetchPage(int, ConsistencyLevel, ClientState, long, boolean)}  may (transparently) yield multiple
+ * internal queries (sub-pages).
  */
 public final class AggregationQueryPager implements QueryPager
 {
@@ -56,31 +55,25 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     @Override
-    public PartitionIterator fetchPage(int pageSize,
-                                       ConsistencyLevel consistency,
-                                       ClientState clientState,
-                                       long queryStartNanoTime,
-                                       boolean forContinuousPaging)
+    public Flow<FlowablePartition> fetchPage(int pageSize,
+                                             ConsistencyLevel consistency,
+                                             ClientState clientState,
+                                             long queryStartNanoTime,
+                                             boolean forContinuousPaging)
     {
         if (limits.isGroupByLimit())
-            return new GroupByPartitionIterator(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging);
+            return new GroupByPartitions(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging).partitions();
 
-        return new AggregationPartitionIterator(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging);
+        return new AggregatedPartitions(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging).partitions();
     }
 
     @Override
-    public ReadExecutionController executionController()
-    {
-        return subPager.executionController();
-    }
-
-    @Override
-    public PartitionIterator fetchPageInternal(int pageSize, ReadExecutionController executionController)
+    public Flow<FlowablePartition> fetchPageInternal(int pageSize)
     {
         if (limits.isGroupByLimit())
-            return new GroupByPartitionIterator(pageSize, null, executionController, System.nanoTime());
+            return new GroupByPartitions(pageSize, null, System.nanoTime()).partitions();
 
-        return new AggregationPartitionIterator(pageSize, null, executionController, System.nanoTime());
+        return new AggregatedPartitions(pageSize, null, System.nanoTime()).partitions();
     }
 
     @Override
@@ -108,44 +101,27 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     /**
-     * <code>PartitionIterator</code> that automatically fetch a new sub-page of data if needed when the current iterator is
-     * exhausted.
+     * Group by partitions.
+     * <p>
+     * This class takes care of concatenating sub-pages until done. It also makes sure that partitions
+     * with the same key across sub-pages are grouped correctly. Before each sub-page is retrieved we need
+     * to update the sub-pager, for which we need to keep track of some state such as the last partition key
+     * and clustering.
      */
-    class GroupByPartitionIterator implements PartitionIterator
+    class GroupByPartitions
     {
         /**
          * The top-level page size in number of groups.
          */
         private final int pageSize;
 
-        // For distributed and local queries, null for internal queries
+        /**
+         * For distributed and local queries, null for internal queries
+         */
         private final ConsistencyLevel consistency;
 
-        // For distributed queries, null for local and distributed queries
+        /** For distributed queries, null for local and distributed queries */
         private final ClientState clientState;
-
-        // For internal or local queries, null for distributed queries
-        private final ReadExecutionController executionController;
-
-        /**
-         * The <code>PartitionIterator</code> over the last page retrieved.
-         */
-        private PartitionIterator partitionIterator;
-
-        /**
-         * The next <code>RowIterator</code> to be returned.
-         */
-        private RowIterator next;
-
-        /**
-         * Specify if all the data have been returned.
-         */
-        private boolean endOfData;
-
-        /**
-         * Keeps track if the partitionIterator has been closed or not.
-         */
-        private boolean closed;
 
         /**
          * The key of the last partition processed.
@@ -166,36 +142,70 @@ public final class AggregationQueryPager implements QueryPager
 
         private final long queryStartNanoTime;
 
-        GroupByPartitionIterator(int pageSize,
-                                 ConsistencyLevel consistency,
-                                 ClientState clientState,
-                                 long queryStartNanoTime,
-                                 boolean forContinuousPaging)
-        {
-            this(pageSize, consistency, clientState, null, queryStartNanoTime, forContinuousPaging);
-        }
-
-        GroupByPartitionIterator(int pageSize,
-                                 ConsistencyLevel consistency,
-                                 ReadExecutionController executionController,
-                                 long queryStartNanoTime)
+        GroupByPartitions(int pageSize,
+                          ConsistencyLevel consistency,
+                          long queryStartNanoTime)
        {
-           this(pageSize, consistency, null, executionController, queryStartNanoTime, false);
+           this(pageSize, consistency, null, queryStartNanoTime, false);
        }
 
-        private GroupByPartitionIterator(int pageSize,
-                                         ConsistencyLevel consistency,
-                                         ClientState clientState,
-                                         ReadExecutionController executionController,
-                                         long queryStartNanoTime,
-                                         boolean forContinuousPaging)
+        private GroupByPartitions(int pageSize,
+                                  ConsistencyLevel consistency,
+                                  ClientState clientState,
+                                  long queryStartNanoTime,
+                                  boolean forContinuousPaging)
         {
             this.pageSize = handlePagingOff(pageSize);
             this.consistency = consistency;
             this.clientState = clientState;
-            this.executionController = executionController;
             this.queryStartNanoTime = queryStartNanoTime;
             this.forContinuousPaging = forContinuousPaging;
+
+            if (logger.isTraceEnabled())
+                logger.trace("{} - created with page size {}, cl {}, client state {}, cp {}",
+                             hashCode(), this.pageSize, this.consistency, this.clientState, this.forContinuousPaging);
+        }
+
+        /**
+         * Return the partitions by concatenating sub-pages as long as we are not done, see {@link #moreContents()}.
+         * <p>
+         * Because the same partition key may span two partitions across two different sub-pages, it is necessary to group the
+         * partitions by partition key, but at the same time we should publish partitions immediately to allow the sub-pager
+         * to make progress since {@link #moreContents()} relies on the sub-pager counter to work out if it needs more pages.
+         * <p>
+         * In addition to concatenating and grouping same key partitions, we also need to track the last partition key
+         * and the last clustering, see {@link #applyToPartition(FlowablePartition)} and {@link #applyToRow(Row)}.
+         *
+         * @return the partitions for this query.
+         */
+        Flow<FlowablePartition> partitions()
+        {
+            initialMaxRemaining = subPager.maxRemaining();
+            Flow<FlowablePartition> ret = fetchSubPage(pageSize);
+
+            // the existing iterator based approach would merge partitions with the same key across two different pages
+            // however it looks like we don't need to do this, because we create a new pager with a grouping state
+            // that can handle splitting partitions across pages, and so a simple concat of pages is sufficient
+            return ret.concatWith(this::moreContents).map(this::applyToPartition);
+        }
+
+        private FlowablePartition applyToPartition(FlowablePartition partition)
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("{} applyToPartition {}", hashCode(), ByteBufferUtil.bytesToHex(partition.header.partitionKey.getKey()));
+
+            lastPartitionKey = partition.header.partitionKey.getKey();
+            lastClustering = null;
+            return partition.mapContent(this::applyToRow);
+        }
+
+        private Row applyToRow(Row row)
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - applyToRow {}", hashCode(), row.clustering() == null ? "null" : row.clustering().toBinaryString());
+
+            lastClustering = row.clustering();
+            return row;
         }
 
         private int handlePagingOff(int pageSize)
@@ -205,68 +215,29 @@ public final class AggregationQueryPager implements QueryPager
             return pageSize <= 0 ? DataLimits.NO_LIMIT : pageSize;
         }
 
-        public final void close()
+        private Flow<FlowablePartition> moreContents()
         {
-            if (!closed)
-            {
-                closed = true;
-                if (partitionIterator != null)
-                    partitionIterator.close();
-            }
-        }
+            int counted = initialMaxRemaining - subPager.maxRemaining();
 
-        public final boolean hasNext()
-        {
-            if (endOfData)
-                return false;
-
-            if (next != null)
-                return true;
-
-            fetchNextRowIterator();
-
-            return next != null;
-        }
-
-        /**
-         * Loads the next <code>RowIterator</code> to be returned.
-         */
-        private void fetchNextRowIterator()
-        {
             if (logger.isTraceEnabled())
-                logger.trace("fetchNextRowIterator(), p.it. {}, last: {}/{}",
-                             partitionIterator,
+                logger.trace("{} - moreContents() called with last: {}/{}, counted: {}",
+                             hashCode(),
                              lastPartitionKey == null ? "null" : ByteBufferUtil.bytesToHex(lastPartitionKey),
-                             lastClustering == null ? "null" : lastClustering.toBinaryString());
-            if (partitionIterator == null)
+                             lastClustering == null ? "null" : lastClustering.toBinaryString(),
+                             counted);
+
+
+            if (isDone(pageSize, counted) || subPager.isExhausted())
             {
-                initialMaxRemaining = subPager.maxRemaining();
-                partitionIterator = fetchSubPage(pageSize);
+                if (logger.isTraceEnabled())
+                    logger.trace("{} - moreContents() returns null: {}, {}, [{}] exhausted? {}",
+                                 hashCode(), counted, pageSize, subPager.hashCode(), subPager.isExhausted());
+
+                return null;
             }
 
-            while (!partitionIterator.hasNext())
-            {
-                partitionIterator.close();
-
-                int counted = initialMaxRemaining - subPager.maxRemaining();
-                if (isDone(pageSize, counted) || subPager.isExhausted())
-                {
-                    if (logger.isTraceEnabled())
-                        logger.trace("Returning because done: {}, {}, {}, {}, {}",
-                                     counted, pageSize, subPager.isExhausted(),
-                                     lastPartitionKey == null ? "null" : ByteBufferUtil.bytesToHex(lastPartitionKey),
-                                     lastClustering == null ? "null" : lastClustering.toBinaryString());
-
-                    endOfData = true;
-                    closed = true;
-                    return;
-                }
-
-                subPager = updatePagerLimit(subPager, limits, lastPartitionKey, lastClustering);
-                partitionIterator = fetchSubPage(computeSubPageSize(pageSize, counted));
-            }
-
-            next = partitionIterator.next();
+            subPager = updatePagerLimit(subPager, limits, lastPartitionKey, lastClustering);
+            return fetchSubPage(computeSubPageSize(pageSize, counted));
         }
 
         protected boolean isDone(int pageSize, int counted)
@@ -277,7 +248,7 @@ public final class AggregationQueryPager implements QueryPager
         /**
          * Updates the pager with the new limits if needed.
          *
-         * @param pager the pager previoulsy used
+         * @param pager the pager previously used
          * @param limits the DataLimits
          * @param lastPartitionKey the partition key of the last row returned
          * @param lastClustering the clustering of the last row returned
@@ -311,138 +282,39 @@ public final class AggregationQueryPager implements QueryPager
          * @param subPageSize the sub-page size in number of groups
          * @return the next sub-page
          */
-        private PartitionIterator fetchSubPage(int subPageSize)
+        private Flow<FlowablePartition> fetchSubPage(int subPageSize)
         {
             if (logger.isTraceEnabled())
-                logger.trace("Fetching sub-page with consitency {} and exec. controller {}", consistency, executionController);
+                logger.trace("Fetching sub-page with consistency {}", consistency);
 
             return consistency == null
-                 ? subPager.fetchPageInternal(subPageSize, executionController)
+                 ? subPager.fetchPageInternal(subPageSize)
                  : subPager.fetchPage(subPageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging);
-        }
-
-        public final RowIterator next()
-        {
-            if (!hasNext())
-                throw new NoSuchElementException();
-
-            RowIterator iterator = new GroupByRowIterator(next);
-            lastPartitionKey = iterator.partitionKey().getKey();
-            next = null;
-            return iterator;
-        }
-
-        private class GroupByRowIterator implements RowIterator
-        {
-            /**
-             * The decorated <code>RowIterator</code>.
-             */
-            private RowIterator rowIterator;
-
-            /**
-             * Keeps track if the decorated iterator has been closed or not.
-             */
-            private boolean closed;
-
-            GroupByRowIterator(RowIterator delegate)
-            {
-                this.rowIterator = delegate;
-            }
-
-            public TableMetadata metadata()
-            {
-                return rowIterator.metadata();
-            }
-
-            public boolean isReverseOrder()
-            {
-                return rowIterator.isReverseOrder();
-            }
-
-            public RegularAndStaticColumns columns()
-            {
-                return rowIterator.columns();
-            }
-
-            public DecoratedKey partitionKey()
-            {
-                return rowIterator.partitionKey();
-            }
-
-            public Row staticRow()
-            {
-                Row row = rowIterator.staticRow();
-                lastClustering = null;
-                return row;
-            }
-
-            public boolean isEmpty()
-            {
-                return this.rowIterator.isEmpty() && !hasNext();
-            }
-
-            public void close()
-            {
-                if (!closed)
-                    rowIterator.close();
-            }
-
-            public boolean hasNext()
-            {
-                if (rowIterator.hasNext())
-                    return true;
-
-                DecoratedKey partitionKey = rowIterator.partitionKey();
-
-                rowIterator.close();
-
-                // Fetch the next RowIterator
-                GroupByPartitionIterator.this.hasNext();
-
-                // if the previous page was ending within the partition the
-                // next RowIterator is the continuation of this one
-                if (next != null && partitionKey.equals(next.partitionKey()))
-                {
-                    rowIterator = next;
-                    next = null;
-                    return rowIterator.hasNext();
-                }
-
-                closed = true;
-                return false;
-            }
-
-            public Row next()
-            {
-                Row row = this.rowIterator.next();
-                lastClustering = row.clustering();
-                return row;
-            }
         }
     }
 
     /**
-     * <code>PartitionIterator</code> for queries without Group By but with aggregates.
+     * Partitions for queries without Group By but with aggregates.
+     *
      * <p>For maintaining backward compatibility we are forced to use the {@link org.apache.cassandra.db.filter.DataLimits.CQLLimits} instead of the
      * {@link org.apache.cassandra.db.filter.DataLimits.CQLGroupByLimits}. Due to that pages need to be fetched in a different way.</p>
      */
-    private final class AggregationPartitionIterator extends GroupByPartitionIterator
+    private final class AggregatedPartitions extends GroupByPartitions
     {
-        AggregationPartitionIterator(int pageSize,
-                                     ConsistencyLevel consistency,
-                                     ClientState clientState,
-                                     long queryStartNanoTime,
-                                     boolean forContinuousPaging)
+        AggregatedPartitions(int pageSize,
+                             ConsistencyLevel consistency,
+                             ClientState clientState,
+                             long queryStartNanoTime,
+                             boolean forContinuousPaging)
         {
             super(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging);
         }
 
-        AggregationPartitionIterator(int pageSize,
-                                     ConsistencyLevel consistency,
-                                     ReadExecutionController executionController,
-                                     long queryStartNanoTime)
+        AggregatedPartitions(int pageSize,
+                             ConsistencyLevel consistency,
+                             long queryStartNanoTime)
         {
-            super(pageSize, consistency, executionController, queryStartNanoTime);
+            super(pageSize, consistency, queryStartNanoTime);
         }
 
         @Override

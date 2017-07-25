@@ -23,6 +23,7 @@ import java.util.function.Consumer;
 
 import com.google.common.base.Predicate;
 
+import io.reactivex.Single;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -30,6 +31,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
@@ -666,7 +668,8 @@ public interface Row extends Unfiltered, Collection<ColumnData>
                 rowInfo = LivenessInfo.EMPTY;
 
             for (Row row : rows)
-                columnDataIterators.add(row == null ? Collections.emptyIterator() : row.iterator());
+                if (row != null)
+                    columnDataIterators.add(row.iterator());
 
             columnDataReducer.setActiveDeletion(activeDeletion);
             Iterator<ColumnData> merged = MergeIterator.get(columnDataIterators, ColumnData.comparator, columnDataReducer);
@@ -693,7 +696,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
             return rows;
         }
 
-        private static class ColumnDataReducer extends MergeIterator.Reducer<ColumnData, ColumnData>
+        private static class ColumnDataReducer extends Reducer<ColumnData, ColumnData>
         {
             private final int nowInSec;
 
@@ -726,7 +729,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
                 versions.add(data);
             }
 
-            protected ColumnData getReduced()
+            public ColumnData getReduced()
             {
                 if (column.isSimple())
                 {
@@ -773,13 +776,13 @@ public interface Row extends Unfiltered, Collection<ColumnData>
                 }
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 versions.clear();
             }
         }
 
-        private static class CellReducer extends MergeIterator.Reducer<Cell, Cell>
+        private static class CellReducer extends Reducer<Cell, Cell>
         {
             private final int nowInSec;
 
@@ -803,12 +806,12 @@ public interface Row extends Unfiltered, Collection<ColumnData>
                     merged = merged == null ? cell : Cells.reconcile(merged, cell, nowInSec);
             }
 
-            protected Cell getReduced()
+            public Cell getReduced()
             {
                 return merged;
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 merged = null;
             }

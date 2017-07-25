@@ -17,12 +17,18 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import org.apache.cassandra.auth.*;
+import io.reactivex.Single;
+import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.IRoleManager.Option;
 import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.auth.RoleOptions;
+import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -44,14 +50,15 @@ public class AlterRoleStatement extends AuthenticationStatement
         if (opts.isEmpty())
             throw new InvalidRequestException("ALTER [ROLE|USER] can't be empty");
 
-        // validate login here before checkAccess to avoid leaking user existence to anonymous users.
-        state.ensureNotAnonymous();
-        if (!DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            throw new InvalidRequestException(String.format("%s doesn't exist", role.getRoleName()));
     }
 
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
+        // validate login first to avoid leaking user existence to anonymous users.
+        state.ensureNotAnonymous();
+        if (!DatabaseDescriptor.getRoleManager().isExistingRole(role))
+            throw new InvalidRequestException(String.format("%s doesn't exist", role.getRoleName()));
+
         AuthenticatedUser user = state.getUser();
         boolean isSuper = user.isSuper();
 
@@ -82,10 +89,12 @@ public class AlterRoleStatement extends AuthenticationStatement
         }
     }
 
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        if (!opts.isEmpty())
-            DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
-        return null;
+        return Single.fromCallable(() -> {
+           if (!opts.isEmpty())
+               DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
+           return (ResultMessage)(new ResultMessage.Void());
+       });
     }
 }

@@ -100,7 +100,7 @@ public class Upgrader
         }
         catch (Exception e)
         {
-            Throwables.propagate(e);
+            throw Throwables.propagate(e);
         }
         finally
         {

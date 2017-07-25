@@ -281,6 +281,11 @@ public class TransformerTest
                 return null;
             }
 
+            public boolean closeNonAttachedContents()
+            {
+                return false;
+            }
+
             BaseRowIterator<?> applyTo(BaseRowIterator<?> iter)
             {
                 if (iter instanceof UnfilteredRowIterator)

@@ -33,6 +33,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -57,7 +58,7 @@ import org.apache.cassandra.utils.UUIDGen;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.junit.Assert.*;
 
-public class BatchlogManagerTest
+public class BatchlogManagerTest extends CQLTester
 {
     private static final String KEYSPACE1 = "BatchlogManagerTest1";
     private static final String CF_STANDARD1 = "Standard1";
@@ -151,7 +152,7 @@ public class BatchlogManagerTest
                            ? (System.currentTimeMillis() - BatchlogManager.getBatchlogTimeout())
                            : (System.currentTimeMillis() + BatchlogManager.getBatchlogTimeout());
 
-            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), timestamp * 1000, mutations));
+            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), timestamp * 1000, mutations)).blockingAwait();
         }
 
         // Flush the batchlog to disk (see CASSANDRA-6822).
@@ -162,7 +163,6 @@ public class BatchlogManagerTest
 
         // Force batchlog replay and wait for it to complete.
         BatchlogManager.instance.startBatchlogReplay().get();
-
         // Ensure that the first half, and only the first half, got replayed.
         assertEquals(50, BatchlogManager.instance.countAllBatches() - initialAllBatches);
         assertEquals(50, BatchlogManager.instance.getTotalBatchesReplayed() - initialReplayedBatches);
@@ -235,7 +235,7 @@ public class BatchlogManagerTest
             else
                 timestamp--;
 
-            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), FBUtilities.timestampMicros(), mutations));
+            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), FBUtilities.timestampMicros(), mutations)).blockingAwait();
         }
 
         // Flush the batchlog to disk (see CASSANDRA-6822).
@@ -290,8 +290,7 @@ public class BatchlogManagerTest
                           .build());
         }
 
-
-        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations));
+        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations)).blockingAwait();
         Assert.assertEquals(initialAllBatches + 1, BatchlogManager.instance.countAllBatches());
 
         String query = String.format("SELECT count(*) FROM %s.%s where id = %s",
@@ -323,11 +322,11 @@ public class BatchlogManagerTest
         }
 
         // Store the batch
-        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations));
+        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations)).blockingAwait();
         Assert.assertEquals(initialAllBatches + 1, BatchlogManager.instance.countAllBatches());
 
         // Remove the batch
-        BatchlogManager.remove(uuid);
+        BatchlogManager.remove(uuid).blockingAwait();
 
         assertEquals(initialAllBatches, BatchlogManager.instance.countAllBatches());
 
@@ -363,7 +362,7 @@ public class BatchlogManagerTest
                           .add("val", "val" + j)
                           .build());
         }
-        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations));
+        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations)).blockingAwait();
         assertEquals(1, BatchlogManager.instance.countAllBatches() - initialAllBatches);
 
         // Flush the batchlog to disk (see CASSANDRA-6822).

@@ -22,7 +22,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
@@ -33,28 +33,28 @@ import org.slf4j.LoggerFactory;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
-import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.Version;
-import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.transport.messages.EventMessage;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 public class Server implements CassandraDaemon.Server
 {
@@ -64,7 +64,6 @@ public class Server implements CassandraDaemon.Server
     }
 
     private static final Logger logger = LoggerFactory.getLogger(Server.class);
-    private static final boolean useEpoll = NativeTransportService.useEpoll();
 
     private final ConnectionTracker connectionTracker = new ConnectionTracker();
 
@@ -80,26 +79,11 @@ public class Server implements CassandraDaemon.Server
     public boolean useSSL = false;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
-    private EventLoopGroup workerGroup;
-    private EventExecutor eventExecutorGroup;
-
-    private Server (Builder builder)
+    private Server(Builder builder)
     {
         this.socket = builder.getSocket();
         this.useSSL = builder.useSSL;
-        if (builder.workerGroup != null)
-        {
-            workerGroup = builder.workerGroup;
-        }
-        else
-        {
-            if (useEpoll)
-                workerGroup = new EpollEventLoopGroup();
-            else
-                workerGroup = new NioEventLoopGroup();
-        }
-        if (builder.eventExecutorGroup != null)
-            eventExecutorGroup = builder.eventExecutorGroup;
+
         EventNotifier notifier = new EventNotifier(this);
         StorageService.instance.register(notifier);
         Schema.instance.registerListener(notifier);
@@ -123,15 +107,14 @@ public class Server implements CassandraDaemon.Server
 
         // Configure the server.
         ServerBootstrap bootstrap = new ServerBootstrap()
-                                    .channel(useEpoll ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
+                                    .group(TPC.eventLoopGroup())
+                                    .channel(TPC.USE_EPOLL ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
                                     .childOption(ChannelOption.TCP_NODELAY, true)
                                     .childOption(ChannelOption.SO_LINGER, 0)
                                     .childOption(ChannelOption.SO_KEEPALIVE, DatabaseDescriptor.getRpcKeepAlive())
                                     .childOption(ChannelOption.ALLOCATOR, CBUtil.allocator)
                                     .childOption(ChannelOption.WRITE_BUFFER_HIGH_WATER_MARK, 32 * 1024)
                                     .childOption(ChannelOption.WRITE_BUFFER_LOW_WATER_MARK, 8 * 1024);
-        if (workerGroup != null)
-            bootstrap = bootstrap.group(workerGroup);
 
         if (this.useSSL)
         {
@@ -155,6 +138,7 @@ public class Server implements CassandraDaemon.Server
 
         // Bind and start to accept incoming connections.
         logger.info("Using Netty Version: {}", Version.identify().entrySet());
+        logger.info("Netty Epoll = {}, AIO = {}, SSD detected = {}", TPC.USE_EPOLL, TPC.USE_AIO, FileUtils.isSSD());
         logger.info("Starting listening for CQL clients on {} ({})...", socket, this.useSSL ? "encrypted" : "unencrypted");
 
         ChannelFuture bindFuture = bootstrap.bind(socket);
@@ -180,8 +164,6 @@ public class Server implements CassandraDaemon.Server
 
     public static class Builder
     {
-        private EventLoopGroup workerGroup;
-        private EventExecutor eventExecutorGroup;
         private boolean useSSL = false;
         private InetAddress hostAddr;
         private int port = -1;
@@ -190,18 +172,6 @@ public class Server implements CassandraDaemon.Server
         public Builder withSSL(boolean useSSL)
         {
             this.useSSL = useSSL;
-            return this;
-        }
-
-        public Builder withEventLoopGroup(EventLoopGroup eventLoopGroup)
-        {
-            this.workerGroup = eventLoopGroup;
-            return this;
-        }
-
-        public Builder withEventExecutor(EventExecutor eventExecutor)
-        {
-            this.eventExecutorGroup = eventExecutor;
             return this;
         }
 
@@ -243,9 +213,12 @@ public class Server implements CassandraDaemon.Server
 
     public static class ConnectionTracker implements Connection.Tracker
     {
+        private final static int ON_CLOSE_WAIT_TIMEOUT_SECS = 5;
+
         // TODO: should we be using the GlobalEventExecutor or defining our own?
         public final ChannelGroup allChannels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
         private final EnumMap<Event.Type, ChannelGroup> groups = new EnumMap<>(Event.Type.class);
+        private final List<CompletableFuture<?>> inFlightRequestsFutures = new ArrayList<>();
 
         public ConnectionTracker()
         {
@@ -256,6 +229,18 @@ public class Server implements CassandraDaemon.Server
         public void addConnection(Channel ch, Connection connection)
         {
             allChannels.add(ch);
+        }
+
+        public void removeConnection(Channel ch, Connection connection)
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("Removing connection {} from connection tracker", ch);
+            allChannels.remove(ch);
+
+            assert connection instanceof ServerConnection : "Expected connection of type ServerConnection";
+            ServerConnection serverConnection = (ServerConnection)connection;
+
+            inFlightRequestsFutures.add(serverConnection.waitForInFlightRequests());
         }
 
         public void register(Event.Type type, Channel ch)
@@ -270,7 +255,21 @@ public class Server implements CassandraDaemon.Server
 
         public void closeAll()
         {
+            if (logger.isTraceEnabled())
+                logger.trace("Closing all channels");
             allChannels.close().awaitUninterruptibly();
+
+            try
+            {
+                CompletableFuture.allOf(inFlightRequestsFutures.toArray(new CompletableFuture<?>[inFlightRequestsFutures.size()]))
+                                 .get(ON_CLOSE_WAIT_TIMEOUT_SECS, TimeUnit.SECONDS);
+            }
+            catch (Throwable t)
+            {
+                JVMStabilityInspector.inspectThrowable(t);
+                logger.warn("Failed to wait for in-flight requests when closing all connections ({})", t.getMessage());
+            }
+
         }
 
         public int getConnectedClients()
@@ -325,10 +324,7 @@ public class Server implements CassandraDaemon.Server
             pipeline.addLast("messageDecoder", messageDecoder);
             pipeline.addLast("messageEncoder", messageEncoder);
 
-            if (server.eventExecutorGroup != null)
-                pipeline.addLast(server.eventExecutorGroup, "executor", dispatcher);
-            else
-                pipeline.addLast("executor", dispatcher);
+            pipeline.addLast("executor", dispatcher);
         }
     }
 

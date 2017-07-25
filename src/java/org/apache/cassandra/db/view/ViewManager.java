@@ -20,13 +20,13 @@ package org.apache.cassandra.db.view;
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.Lock;
+import java.util.concurrent.Semaphore;
 
 import com.google.common.util.concurrent.Striped;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.db.*;
@@ -53,7 +53,7 @@ public class ViewManager
 {
     private static final Logger logger = LoggerFactory.getLogger(ViewManager.class);
 
-    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentViewWriters() * 1024);
+    private static final Striped<Semaphore> SEMAPHORES = Striped.lazyWeakSemaphore(TPC.getNumCores() * 1024, 1);
 
     private static final boolean enableCoordinatorBatchlog = Boolean.getBoolean("cassandra.mv_enable_coordinator_batchlog");
 
@@ -173,13 +173,19 @@ public class ViewManager
         return views;
     }
 
-    public static Lock acquireLockFor(int keyAndCfidHash)
+    public static Semaphore acquireLockFor(int keyAndCfidHash)
     {
-        Lock lock = LOCKS.get(keyAndCfidHash);
+        Semaphore ret = SEMAPHORES.get(keyAndCfidHash);
 
-        if (lock.tryLock())
-            return lock;
+        if (ret.tryAcquire(1))
+            return ret;
 
         return null;
+    }
+
+    public static void release(Semaphore semaphore)
+    {
+        if (semaphore != null)
+            semaphore.release(1);
     }
 }

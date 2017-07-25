@@ -147,16 +147,16 @@ public class UFTest extends CQLTester
 
         ResultMessage.Prepared preparedSelect1 = QueryProcessor.prepare(
                                                                        String.format("SELECT key, %s(d) FROM %s.%s", fSin, KEYSPACE, currentTable()),
-                                                                       ClientState.forInternalCalls());
+                                                                       ClientState.forInternalCalls()).blockingGet();
         ResultMessage.Prepared preparedSelect2 = QueryProcessor.prepare(
                                                     String.format("SELECT key FROM %s.%s", KEYSPACE, currentTable()),
-                                                    ClientState.forInternalCalls());
+                                                    ClientState.forInternalCalls()).blockingGet();
         ResultMessage.Prepared preparedInsert1 = QueryProcessor.prepare(
                                                       String.format("INSERT INTO %s.%s (key, d) VALUES (?, %s(?))", KEYSPACE, currentTable(), fSin),
-                                                      ClientState.forInternalCalls());
+                                                      ClientState.forInternalCalls()).blockingGet();
         ResultMessage.Prepared preparedInsert2 = QueryProcessor.prepare(
                                                       String.format("INSERT INTO %s.%s (key, d) VALUES (?, ?)", KEYSPACE, currentTable()),
-                                                      ClientState.forInternalCalls());
+                                                      ClientState.forInternalCalls()).blockingGet();
 
         Assert.assertNotNull(QueryProcessor.instance.getPrepared(preparedSelect1.statementId));
         Assert.assertNotNull(QueryProcessor.instance.getPrepared(preparedSelect2.statementId));
@@ -181,10 +181,10 @@ public class UFTest extends CQLTester
 
         preparedSelect1= QueryProcessor.prepare(
                                          String.format("SELECT key, %s(d) FROM %s.%s", fSin, KEYSPACE, currentTable()),
-                                         ClientState.forInternalCalls());
+                                         ClientState.forInternalCalls()).blockingGet();
         preparedInsert1 = QueryProcessor.prepare(
                                          String.format("INSERT INTO %s.%s (key, d) VALUES (?, %s(?))", KEYSPACE, currentTable(), fSin),
-                                         ClientState.forInternalCalls());
+                                         ClientState.forInternalCalls()).blockingGet();
         Assert.assertNotNull(QueryProcessor.instance.getPrepared(preparedSelect1.statementId));
         Assert.assertNotNull(QueryProcessor.instance.getPrepared(preparedInsert1.statementId));
 
@@ -250,7 +250,7 @@ public class UFTest extends CQLTester
                                                                              KEYSPACE,
                                                                              currentTable(),
                                                                              literalArgs),
-                                                                ClientState.forInternalCalls());
+                                                                ClientState.forInternalCalls()).blockingGet();
         Assert.assertNotNull(QueryProcessor.instance.getPrepared(prepared.statementId));
         return prepared;
     }
@@ -266,7 +266,7 @@ public class UFTest extends CQLTester
                                                                              KEYSPACE,
                                                                              currentTable(),
                                                                              function),
-                                                                ClientState.forInternalCalls());
+                                                                ClientState.forInternalCalls()).blockingGet();
         Assert.assertNotNull(QueryProcessor.instance.getPrepared(prepared.statementId));
         return prepared;
     }
@@ -281,7 +281,7 @@ public class UFTest extends CQLTester
                                                                String.format("INSERT INTO %s.%s (key, val) VALUES (?, ?)",
                                                                             KEYSPACE,
                                                                             currentTable()),
-                                                               ClientState.forInternalCalls());
+                                                               ClientState.forInternalCalls()).blockingGet();
         Assert.assertNotNull(QueryProcessor.instance.getPrepared(control.statementId));
 
         // a function that we'll drop and verify that statements which use it to
@@ -729,7 +729,7 @@ public class UFTest extends CQLTester
         Assert.assertEquals(1, Schema.instance.getFunctions(fNameName).size());
 
         ResultMessage.Prepared prepared = QueryProcessor.prepare(String.format("SELECT key, %s(udt) FROM %s.%s", fName, KEYSPACE, currentTable()),
-                                                                 ClientState.forInternalCalls());
+                                                                 ClientState.forInternalCalls()).blockingGet();
         Assert.assertNotNull(QueryProcessor.instance.getPrepared(prepared.statementId));
 
         // UT still referenced by table

@@ -58,9 +58,11 @@
     <property name="benchmark.name" value=""/>
     <property name="test.methods" value=""/>
     <property name="test.unit.src" value="${test.dir}/unit"/>
+    <property name="test.smoke.src" value="${test.dir}/unit/org/apache/cassandra/cql3/validation/operations"/>
     <property name="test.long.src" value="${test.dir}/long"/>
     <property name="test.burn.src" value="${test.dir}/burn"/>
     <property name="test.microbench.src" value="${test.dir}/microbench"/>
+    <property name="test.microbench.classes" value="${build.test.dir}/classes/org/apache/cassandra/test/microbench"/>
     <property name="test.dse.src" value="${test.dir}/dse"/>
     <property name="dist.dir" value="${build.dir}/dist"/>
     <property name="tmp.dir" value="${java.io.tmpdir}"/>
@@ -442,15 +444,16 @@
           <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core-j8" version="0.4.4" />
           <dependency groupId="net.ju-n.compile-command-annotations" artifactId="compile-command-annotations" version="1.2.0" />
           <dependency groupId="org.fusesource" artifactId="sigar" version="1.6.4">
-          <exclusion groupId="log4j" artifactId="log4j"/>
+              <exclusion groupId="log4j" artifactId="log4j"/>
           </dependency>
           <dependency groupId="joda-time" artifactId="joda-time" version="2.4" />
           <dependency groupId="de.jflex" artifactId="jflex" version="1.6.0" />
           <dependency groupId="com.github.rholder" artifactId="snowball-stemmer" version="1.3.0.581.1" />
           <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees" version="2.4.0" />
           <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="2.3.5" />
-          <dependency groupId="org.jctools" artifactId="jctools-core" version="1.2.1"/>
-          <dependency groupId="com.carrotsearch" artifactId="hppc" version="0.5.4" />
+          <dependency groupId="org.jctools" artifactId="jctools-core" version="2.0"/>
+          <dependency groupId="io.reactivex.rxjava2" artifactId="rxjava" version="2.0.4"/>
+          <dependency groupId="com.carrotsearch" artifactId="hppc" version="0.7.2" />
           <dependency groupId="org.apache.ant" artifactId="ant-junit" version="1.9.4" />
           <!-- dependencies for the DSE test framework-->
           <dependency groupId="org.apache.velocity" artifactId="velocity" version="1.7" scope="test">
@@ -788,6 +791,7 @@
         <dependency groupId="org.apache.hadoop" artifactId="hadoop-minicluster" optional="true"/>
 
         <!-- don't need the Java Driver to run, but if you use the hadoop stuff or UDFs -->
+        <dependency groupId="com.google.code.findbugs" artifactId="jsr305"/>
         <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" classifier="shaded" optional="true">
           <exclusion groupId="io.netty" artifactId="netty-buffer"/>
           <exclusion groupId="io.netty" artifactId="netty-codec"/>
@@ -814,7 +818,8 @@
         <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees"/>
         <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" />
         <dependency groupId="org.jctools" artifactId="jctools-core"/>
-        <dependency groupId="com.carrotsearch" artifactId="hppc" version="0.5.4" />
+        <dependency groupId="io.reactivex.rxjava2" artifactId="rxjava"/>
+        <dependency groupId="com.carrotsearch" artifactId="hppc" version="0.7.2" />
         <dependency groupId="org.psjava" artifactId="psjava" version="0.1.19" />
 
         <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-cli"/>
@@ -1232,7 +1237,14 @@
       </rat:report>
     </target>
 
-  <target name="build-jmh" depends="build-test" description="Create JMH uber jar">
+    <target name="clean-benches">
+        <delete dir="${test.microbench.classes}" />
+    </target>
+
+    <!--Note, if we do not clean all the benchmark classes, when compiling only the modified
+     benchmarks, build/test/classes/META-INF/BenchmarkList will be overwritten with only the
+     modified benchmakrs and the other ones will not be available for running-->
+    <target name="build-jmh" depends="clean-benches, build-test" description="Create JMH uber jar">
       <jar jarfile="${build.test.dir}/deps.jar">
           <zipgroupfileset dir="${build.dir.lib}/jars">
               <include name="*jmh*.jar"/>
@@ -1249,7 +1261,7 @@
           <fileset dir="${build.classes.main}"/>
           <fileset dir="${test.classes}"/>
       </jar>
-  </target>
+    </target>
 
     <!-- use https://github.com/krummas/jstackjunit to get thread dumps when unit tests time out -->
   <taskdef name="junit" classname="org.krummas.junit.JStackJUnitTask" classpath="lib/jstackjunit-0.0.1.jar"/>
@@ -1315,7 +1327,10 @@
         <!-- Cassandra 3.0+ needs <jvmarg line="... ${additionalagent}" /> here! (not value=) -->
         <jvmarg line="-javaagent:${basedir}/lib/jamm-0.3.0.jar ${additionalagent}" />
         <jvmarg value="-ea"/>
-        <jvmarg value="-Dcassandra.debugrefcount=true"/>
+        <!--Disable ref count debugging as it is very slow (uses getStackTrace)-->
+        <!--jvmarg value="-Dcassandra.debugrefcount=true"/-->
+        <!--Temporarily disable debugflow until stack overflow fixed, also I want to test ApplyOpSubscription on Jenkins-->
+        <!--jvmarg value="-Dcassandra.debugflow=true"/-->
         <jvmarg value="-Xss256k"/>
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>
@@ -1386,6 +1401,12 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config.loader=org.apache.cassandra.OffsetAwareConfigurationLoader"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <!--<jvmarg value="-XX:+HeapDumpOnOutOfMemoryError"/>-->
+        <!--<jvmarg value="-XX:+UnlockCommercialFeatures"/>-->
+        <!--<jvmarg value="-XX:+FlightRecorder"/>-->
+        <!--<jvmarg value="-XX:+UnlockDiagnosticVMOptions"/>-->
+        <!--<jvmarg value="-XX:+DebugNonSafepoints"/>-->
+        <!--<jvmarg value="-XX:StartFlightRecording=name=auto_recording,filename=${test.name}.jfr,dumponexit=true,settings=/home/stefi/profiling-advanced.jfc"/>-->
       </testmacrohelper>
     </sequential>
   </macrodef>
@@ -1427,6 +1448,21 @@
         <jvmarg value="-Dcassandra.config=file:///${cdc_yaml}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
         <jvmarg value="-Dcassandra.config.loader=org.apache.cassandra.OffsetAwareConfigurationLoader"/>
+      </testmacrohelper>
+    </sequential>
+  </macrodef>
+
+  <macrodef name="testlist-nio">
+    <attribute name="test.file.list" />
+    <attribute name="testlist.offset" />
+    <sequential>
+      <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}" poffset="@{testlist.offset}"
+                       exclude="**/*.java" timeout="${test.timeout}" testtag="nio">
+        <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
+        <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
+        <jvmarg value="-Dmigration-sstable-root=${test.data}/migration-sstables"/>
+        <jvmarg value="-Dcassandra.native.epoll.enabled=false"/>
+	<jvmarg value="-Dcassandra.config.loader=org.apache.cassandra.OffsetAwareConfigurationLoader"/>
       </testmacrohelper>
     </sequential>
   </macrodef>
@@ -1482,6 +1518,14 @@
     </path>
     <property name="all-test-classes" refid="all-test-classes-path"/>
     <testparallel testdelegate="testlist-cdc" />
+  </target>
+
+  <target name="test-nio" depends="build-test" description="Execute unit tests without Epoll (with NIO)">
+    <path id="all-test-classes-path">
+      <fileset dir="${test.smoke.src}" includes="**/${test.name}.java" />
+    </path>
+    <property name="all-test-classes" refid="all-test-classes-path"/>
+    <testparallel testdelegate="testlist-nio" />
   </target>
 
   <target name="msg-ser-gen-test" depends="build-test" description="Generates message serializations">
@@ -1601,7 +1645,7 @@
   </target>
 
   <target name="test-all"
-          depends="eclipse-warnings,test,long-test,test-compression,stress-test,test-dse"
+          depends="eclipse-warnings,test,long-test,test-compression,stress-test,test-dse,test-nio"
           description="Run all tests except for those under test-burn" />
 
   <!-- Use JaCoCo ant extension without needing externally saved lib -->
@@ -1840,6 +1884,7 @@
   <target name="test" depends="build-test,get-cores,get-mem,stress-build" description="Parallel Test Runner">
     <path id="all-test-classes-path">
       <fileset dir="${test.unit.src}" includes="**/${test.name}.java" />
+      <!--fileset dir="${test.unit.src}" includes="org/apache/cassandra/cql3/*Test.java" /-->
     </path>
     <property name="all-test-classes" refid="all-test-classes-path"/>
     <testparallel testdelegate="testlist"/>
@@ -1876,6 +1921,8 @@
           <!--<arg value="hs_gc"/>-->
           <!--<arg value="-prof"/>-->
           <!--<arg value="hs_rt"/>-->
+          <!--<arg value="-prof"/>-->
+          <!--<arg value="perfasm"/>-->
           <arg value=".*microbench.*${benchmark.name}"/>
       </java>
   </target>

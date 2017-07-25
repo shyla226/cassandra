@@ -19,7 +19,9 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.CompletableFuture;
 
+import io.netty.util.Recycler;
 import org.apache.cassandra.io.compress.BufferType;
 
 /**
@@ -36,7 +38,7 @@ public interface ChunkReader extends RebuffererFactory
      * The source may have requirements for the positioning and/or size of the buffer (e.g. chunk-aligned and
      * chunk-sized). These must be satisfied by the caller. 
      */
-    void readChunk(long position, ByteBuffer buffer);
+    CompletableFuture<ByteBuffer> readChunk(long position, ByteBuffer buffer);
 
     /**
      * Buffer size required for this rebufferer. Must be power of 2 if alignment is required.
@@ -48,4 +50,43 @@ public interface ChunkReader extends RebuffererFactory
      * This is not guaranteed to be fulfilled.
      */
     BufferType preferredBufferType();
+
+
+    // Scratch buffers for performing unaligned reads of chunks, where buffers need to be larger than 64k and thus
+    // unsuitable for BufferPool.
+    // These buffers may grow until they reach the maximum size in use, and will not shrink.
+    // TODO: This should eventually be handled by the BufferPool
+    static final Recycler<BufferHandle> scratchBuffers = new Recycler<BufferHandle>()
+    {
+        protected BufferHandle newObject(Handle<BufferHandle> handle)
+        {
+            return new BufferHandle(handle);
+        }
+    };
+
+    static class BufferHandle
+    {
+        private final Recycler.Handle<BufferHandle> handle;
+        private ByteBuffer buffer;
+
+        BufferHandle(Recycler.Handle<BufferHandle> handle)
+        {
+            this.handle = handle;
+            this.buffer = null;
+        }
+
+        ByteBuffer get(int size)
+        {
+            if (buffer == null || size > buffer.capacity())
+            {
+                buffer = BufferType.OFF_HEAP_ALIGNED.allocate(size);
+            }
+            return buffer;
+        }
+
+        void recycle()
+        {
+            handle.recycle(this);
+        }
+    }
 }

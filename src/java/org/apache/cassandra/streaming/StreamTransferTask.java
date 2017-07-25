@@ -113,7 +113,7 @@ public class StreamTransferTask extends StreamTask
         }
         files.clear();
         if (fail != null)
-            Throwables.propagate(fail);
+            throw Throwables.propagate(fail);
     }
 
     public synchronized int getTotalNumberOfFiles()

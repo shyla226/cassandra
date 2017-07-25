@@ -1612,7 +1612,7 @@ public class SecondaryIndexTest extends CQLTester
     private ResultMessage.Prepared prepareStatement(String cql)
     {
         return QueryProcessor.prepare(String.format(cql, KEYSPACE, currentTable()),
-                                      ClientState.forInternalCalls());
+                                      ClientState.forInternalCalls()).blockingGet();
     }
 
     private void validateCell(Cell cell, ColumnMetadata def, ByteBuffer val, long timestamp)

@@ -42,6 +42,7 @@ import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Pair;
@@ -127,15 +128,15 @@ public class TrieIndexFormat implements SSTableFormat
         {
             IPartitioner partitioner = metadata.partitioner;
             boolean compressedData = new File(desc.filenameFor(Component.COMPRESSION_INFO)).exists();
-            try (FileHandle.Builder piBuilder = SSTableReader.indexFileHandleBuilder(desc, Component.PARTITION_INDEX);
-                 FileHandle.Builder riBuilder = SSTableReader.indexFileHandleBuilder(desc, Component.ROW_INDEX);
-                 FileHandle.Builder dBuilder = SSTableReader.dataFileHandleBuilder(desc, compressedData);
-                 PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false);
+            try (FileHandle.Builder piBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.PARTITION_INDEX);
+                 FileHandle.Builder riBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.ROW_INDEX);
+                 FileHandle.Builder dBuilder = SSTableReader.dataFileHandleBuilder(desc, metadata, compressedData);
+                 PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE);
                  FileHandle dFile = dBuilder.complete();
                  FileHandle riFile = riBuilder.complete())
             {
                 return new PartitionIterator(index, partitioner, riFile, dFile,
-                                             partitioner.getMinimumToken().minKeyBound(), 0, partitioner.getMaximumToken().maxKeyBound(), 0);
+                                             partitioner.getMinimumToken().minKeyBound(), 0, partitioner.getMaximumToken().maxKeyBound(), 0, Rebufferer.ReaderConstraint.NONE);
             }
             catch (IOException e)
             {
@@ -150,8 +151,8 @@ public class TrieIndexFormat implements SSTableFormat
             if (!indexFile.exists())
                 return null;
 
-            try (FileHandle.Builder fhBuilder = SSTableReader.indexFileHandleBuilder(descriptor, Component.PARTITION_INDEX);
-                 PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, false))
+            try (FileHandle.Builder fhBuilder = SSTableReader.indexFileHandleBuilder(descriptor, TableMetadata.minimal(descriptor.ksname, descriptor.cfname), Component.PARTITION_INDEX);
+                 PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE))
             {
                 return Pair.create(pIndex.firstKey(), pIndex.lastKey());
             }
@@ -172,6 +173,7 @@ public class TrieIndexFormat implements SSTableFormat
     {
         public static final String current_version = "aa";
         public static final String earliest_supported_version = "aa";
+        public static final EncodingVersion latestVersion = EncodingVersion.last();
 
         // aa (DSE 6.0): trie index format
         //
@@ -217,7 +219,7 @@ public class TrieIndexFormat implements SSTableFormat
         @Override
         public EncodingVersion encodingVersion()
         {
-            return EncodingVersion.last();
+            return latestVersion;
         }
 
         @Override

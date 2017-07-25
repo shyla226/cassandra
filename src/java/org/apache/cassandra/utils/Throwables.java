@@ -77,7 +77,12 @@ public final class Throwables
     @SafeVarargs
     public static <E extends Exception> void perform(DiscreteAction<? extends E> ... actions) throws E
     {
-        perform(Stream.of(actions));
+        Throwable accumulate = null;
+        for (DiscreteAction<? extends E> action : actions)
+            accumulate = perform(accumulate, action);
+
+        if (failIfCanCast(accumulate, null))
+            throw (E) accumulate;
     }
 
     public static <E extends Exception> void perform(Stream<? extends DiscreteAction<? extends E>> stream, DiscreteAction<? extends E> ... extra) throws E
@@ -106,16 +111,20 @@ public final class Throwables
     public static Throwable perform(Throwable accumulate, Iterator<? extends DiscreteAction<?>> actions)
     {
         while (actions.hasNext())
+            accumulate = perform(accumulate, actions.next());
+
+        return accumulate;
+    }
+
+    public static Throwable perform(Throwable accumulate, DiscreteAction<?> action)
+    {
+        try
         {
-            DiscreteAction<?> action = actions.next();
-            try
-            {
-                action.perform();
-            }
-            catch (Throwable t)
-            {
-                accumulate = merge(accumulate, t);
-            }
+            action.perform();
+        }
+        catch (Throwable t)
+        {
+            accumulate = merge(accumulate, t);
         }
         return accumulate;
     }
@@ -165,6 +174,29 @@ public final class Throwables
             {
                 accumulate = merge(accumulate, t);
             }
+        }
+        return accumulate;
+    }
+
+    public static Throwable closeNonNull(Throwable accumulate, AutoCloseable... closeables)
+    {
+        for (AutoCloseable closeable : closeables)
+            accumulate = closeNonNull(accumulate, closeable);
+        return accumulate;
+    }
+
+    public static Throwable closeNonNull(Throwable accumulate, AutoCloseable closeable)
+    {
+        if (closeable == null)
+            return accumulate;
+
+        try
+        {
+            closeable.close();
+        }
+        catch (Throwable t)
+        {
+            accumulate = merge(accumulate, t);
         }
         return accumulate;
     }

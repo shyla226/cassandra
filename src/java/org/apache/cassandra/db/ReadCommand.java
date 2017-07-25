@@ -19,20 +19,25 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.functions.Function;
+import org.apache.cassandra.utils.flow.Flow;
+import io.reactivex.Single;
+import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.config.*;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.selection.ResultBuilder;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.monitoring.Monitor;
-import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -40,7 +45,6 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingVersion;
-import org.apache.cassandra.net.ProtocolVersion;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -59,7 +63,7 @@ import org.apache.cassandra.utils.versioning.Versioned;
  * <p>
  * This contains all the information needed to do a local read.
  */
-public abstract class ReadCommand implements ReadQuery
+public abstract class ReadCommand implements ReadQuery, Scheduleable
 {
     protected static final Logger logger = LoggerFactory.getLogger(ReadCommand.class);
 
@@ -141,6 +145,11 @@ public abstract class ReadCommand implements ReadQuery
     public TableMetadata metadata()
     {
         return metadata;
+    }
+
+    public boolean isEmpty()
+    {
+        return false;
     }
 
     /**
@@ -243,15 +252,35 @@ public abstract class ReadCommand implements ReadQuery
      */
     public abstract ClusteringIndexFilter clusteringIndexFilter(DecoratedKey key);
 
-    protected abstract UnfilteredPartitionIterator queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
+    @VisibleForTesting
+    public abstract Flow<FlowableUnfilteredPartition> queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
 
     protected abstract int oldestUnrepairedTombstone();
 
-    public ReadResponse createResponse(UnfilteredPartitionIterator iterator)
+
+    /**
+     * Whether the underlying {@code ClusteringIndexFilter} is reversed or not.
+     *
+     * @return whether the underlying {@code ClusteringIndexFilter} is reversed or not.
+     */
+    public abstract boolean isReversed();
+
+    /**
+     * Create a read response and takes care of eventually closing the iterator.
+     *
+     * Digest responses calculate the digest in the constructor and close the iterator immediately,
+     * whilst data responses may keep it open until the iterator is closed by the final handler, e.g.
+     * {@link org.apache.cassandra.cql3.statements.SelectStatement#processPartition(FlowablePartition, QueryOptions, ResultBuilder, int)}
+     *
+     * @param partitions - the partitions to be processed in order to create the response
+     * @param forLocalDelivery - if the response is to be delivered locally (optimized path)
+     * @return An appropriate response, either of type digest or data.
+     */
+    public Single<ReadResponse> createResponse(Flow<FlowableUnfilteredPartition> partitions, boolean forLocalDelivery)
     {
         return isDigestQuery()
-             ? ReadResponse.createDigestResponse(iterator, this)
-             : ReadResponse.createDataResponse(iterator, this);
+               ? ReadResponse.createDigestResponse(partitions, this)
+               : ReadResponse.createDataResponse(partitions, this, forLocalDelivery);
     }
 
     public long indexSerializedSize()
@@ -306,63 +335,71 @@ public abstract class ReadCommand implements ReadQuery
     /**
      * Executes this command on the local host.
      *
-     * @param executionController the execution controller spanning this command
-     *
      * @return an iterator over the result of executing this command locally.
      */
-    @SuppressWarnings("resource") // The result iterator is closed upon exceptions (we know it's fine to potentially not close the intermediary
-                                  // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
-    public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)
+    // The result iterator is closed upon exceptions (we know it's fine to potentially not close the intermediary
+    // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
+    @SuppressWarnings("resource")
+    @Override
+    public Flow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
     {
         long startTimeNanos = System.nanoTime();
-
-        ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
+        ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
         Index index = getIndex(cfs);
 
-        Index.Searcher searcher = null;
+        Index.Searcher pickSearcher = null;
         if (index != null)
         {
             if (!cfs.indexManager.isIndexQueryable(index))
                 throw new IndexNotAvailableException(index);
 
-            searcher = index.searcherFor(this);
+            pickSearcher = index.searcherFor(this);
             Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
         }
 
-        UnfilteredPartitionIterator resultIterator = searcher == null
-                                         ? queryStorage(cfs, executionController)
-                                         : searcher.search(executionController);
+        Index.Searcher searcher = pickSearcher;
+        Flow<FlowableUnfilteredPartition> flow = applyController(
+            controller ->
+            {
+                Flow<FlowableUnfilteredPartition> r = searcher == null
+                                                        ? queryStorage(cfs, controller)
+                                                        : searcher.search(controller);
 
-        try
-        {
-            if (executionController.monitor() != null)
-                resultIterator = executionController.monitor().withMonitoring(resultIterator);
-            resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
+                if (monitor != null)
+                    r = monitor.withMonitoring(r);
 
-            // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
-            // no point in checking it again.
-            RowFilter updatedFilter = searcher == null
-                                    ? rowFilter()
-                                    : index.getPostIndexQueryFilter(rowFilter());
+                r = withoutPurgeableTombstones(r, cfs);
+                r = withMetricsRecording(r, cfs.metric, startTimeNanos);
 
-            // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
-            // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
-            // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
-            // processing we do on it).
-            return limits().filter(updatedFilter.filter(resultIterator, nowInSec()), nowInSec(), selectsFullPartition());
-        }
-        catch (RuntimeException | Error e)
-        {
-            resultIterator.close();
-            throw e;
-        }
+                // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
+                // no point in checking it again.
+                RowFilter updatedFilter = searcher == null
+                                          ? rowFilter()
+                                          : index.getPostIndexQueryFilter(rowFilter());
+
+                // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
+                // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
+                // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
+                // processing we do on it).
+                r = updatedFilter.filter(r, cfs.metadata(), nowInSec());
+                return limits().truncateUnfiltered(r, nowInSec(), selectsFullPartition());
+            });
+
+        return flow;
+    }
+
+    public Flow<FlowableUnfilteredPartition> applyController(Function<ReadExecutionController, Flow<FlowableUnfilteredPartition>> op)
+    {
+        return Flow.using(() -> ReadExecutionController.forCommand(this),
+                          op,
+                            controller -> controller.close());
     }
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
 
-    public PartitionIterator executeInternal(ReadExecutionController controller)
+    public Flow<FlowablePartition> executeInternal(Monitor monitor)
     {
-        return UnfilteredPartitionIterators.filter(executeLocally(controller), nowInSec());
+        return FlowablePartitions.filterAndSkipEmpty(executeLocally(monitor), nowInSec());
     }
 
     public ReadExecutionController executionController()
@@ -370,18 +407,15 @@ public abstract class ReadCommand implements ReadQuery
         return ReadExecutionController.forCommand(this);
     }
 
-    public ReadExecutionController executionController(Monitor monitor)
-    {
-        return ReadExecutionController.forCommand(this, monitor);
-    }
-
     /**
      * Wraps the provided iterator so that metrics on what is scanned by the command are recorded.
      * This also log warning/trow TombstoneOverwhelmingException if appropriate.
      */
-    private UnfilteredPartitionIterator withMetricsRecording(UnfilteredPartitionIterator iter, final TableMetrics metric, final long startTimeNanos)
+    private Flow<FlowableUnfilteredPartition> withMetricsRecording(Flow<FlowableUnfilteredPartition> partitions,
+                                                                   final TableMetrics metric,
+                                                                   final long startTimeNanos)
     {
-        class MetricRecording extends Transformation<UnfilteredRowIterator>
+        class MetricRecording
         {
             private final int failureThreshold = DatabaseDescriptor.getTombstoneFailureThreshold();
             private final int warningThreshold = DatabaseDescriptor.getTombstoneWarnThreshold();
@@ -393,38 +427,39 @@ public abstract class ReadCommand implements ReadQuery
 
             private DecoratedKey currentKey;
 
-            @Override
-            public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator iter)
+            public FlowableUnfilteredPartition countPartition(FlowableUnfilteredPartition iter)
             {
-                currentKey = iter.partitionKey();
-                return Transformation.apply(iter, this);
+                currentKey = iter.header.partitionKey;
+                countRow(iter.staticRow);
+
+                return new FlowableUnfilteredPartition(iter.header,
+                                                       iter.staticRow,
+                                                       iter.content.map(this::countUnfiltered));
             }
 
-            @Override
-            public Row applyToStatic(Row row)
+            public Unfiltered countUnfiltered(Unfiltered unfiltered)
             {
-                return applyToRow(row);
+                if (unfiltered.isRow())
+                    countRow((Row) unfiltered);
+                else
+                    countTombstone(unfiltered.clustering());
+
+                return unfiltered;
             }
 
-            @Override
-            public Row applyToRow(Row row)
+            public void countRow(Row row)
             {
-                if (row.hasLiveData(ReadCommand.this.nowInSec()))
-                    ++liveRows;
-
+                boolean hasLiveCells = false;
                 for (Cell cell : row.cells())
                 {
                     if (!cell.isLive(ReadCommand.this.nowInSec()))
                         countTombstone(row.clustering());
+                    else if (!hasLiveCells)
+                        hasLiveCells = true;
                 }
-                return row;
-            }
 
-            @Override
-            public RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
-            {
-                countTombstone(marker.clustering());
-                return marker;
+                if (hasLiveCells || row.primaryKeyLivenessInfo().isLive(nowInSec))
+                    ++ liveRows;
             }
 
             private void countTombstone(ClusteringPrefix clustering)
@@ -438,8 +473,7 @@ public abstract class ReadCommand implements ReadQuery
                 }
             }
 
-            @Override
-            public void onClose()
+            public void onComplete()
             {
                 recordLatency(metric, System.nanoTime() - startTimeNanos);
 
@@ -458,29 +492,63 @@ public abstract class ReadCommand implements ReadQuery
             }
         };
 
-        return Transformation.apply(iter, new MetricRecording());
+        final MetricRecording metricsRecording = new MetricRecording();
+        partitions = partitions.map(metricsRecording::countPartition);
+        partitions = partitions.doOnClose(metricsRecording::onComplete);
+        return partitions;
     }
 
     protected abstract void appendCQLWhereClause(StringBuilder sb);
 
-    // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
-    // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
-    // are to some extend an artefact of compaction lagging behind and hence counting them is somewhat unintuitive).
-    protected UnfilteredPartitionIterator withoutPurgeableTombstones(UnfilteredPartitionIterator iterator, ColumnFamilyStore cfs)
+    static class PurgeOp
     {
-        class WithoutPurgeableTombstones extends PurgeFunction
-        {
-            public WithoutPurgeableTombstones()
-            {
-                super(nowInSec(), cfs.gcBefore(nowInSec()), oldestUnrepairedTombstone(), cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones());
-            }
+        private final DeletionPurger purger;
+        private final int nowInSec;
 
-            protected Predicate<Long> getPurgeEvaluator()
-            {
-                return time -> true;
-            }
+        public PurgeOp(int nowInSec, int gcBefore, Supplier<Integer> oldestUnrepairedTombstone, boolean onlyPurgeRepairedTombstones)
+        {
+            this.nowInSec = nowInSec;
+            this.purger = (timestamp, localDeletionTime) ->
+                          !(onlyPurgeRepairedTombstones && localDeletionTime >= oldestUnrepairedTombstone.get())
+                          && localDeletionTime < gcBefore;
         }
-        return Transformation.apply(iterator, new WithoutPurgeableTombstones());
+
+        public FlowableUnfilteredPartition purgePartition(FlowableUnfilteredPartition partition)
+        {
+            PartitionHeader header = partition.header;
+
+            if (purger.shouldPurge(header.partitionLevelDeletion))
+                header = header.with(DeletionTime.LIVE);
+
+            FlowableUnfilteredPartition purged = new FlowableUnfilteredPartition(header,
+                                                                                 applyToStatic(partition.staticRow),
+                                                                                 partition.content.skippingMap(this::purgeUnfiltered));
+            return purged;
+        }
+
+        public Unfiltered purgeUnfiltered(Unfiltered next)
+        {
+            return next.purge(purger, nowInSec);
+        }
+
+        public Row applyToStatic(Row row)
+        {
+            Row purged = row.purge(purger, nowInSec);
+            return purged != null ? purged : Rows.EMPTY_STATIC_ROW;
+        }
+    }
+
+
+    // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
+    // can save us some bandwidth, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
+    // are to some extend an artifact of compaction lagging behind and hence counting them is somewhat unintuitive).
+    protected Flow<FlowableUnfilteredPartition> withoutPurgeableTombstones(Flow<FlowableUnfilteredPartition> iterator, ColumnFamilyStore cfs)
+    {
+        return iterator.map(new PurgeOp(nowInSec(),
+                                        cfs.gcBefore(nowInSec()),
+                                        this::oldestUnrepairedTombstone,
+                                        cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones())
+                            ::purgePartition);
     }
 
     /**

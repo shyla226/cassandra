@@ -23,6 +23,7 @@ import java.util.Collections;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.streaming.DefaultConnectionFactory;
 import org.apache.cassandra.streaming.PreviewKind;
@@ -39,6 +40,7 @@ public class StreamStateStoreTest
     @BeforeClass
     public static void initDD()
     {
+        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
         DatabaseDescriptor.daemonInitialization();
     }
 

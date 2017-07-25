@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.db.partitions;
 
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.RowIterator;
 
 /**
  * An iterator over a number of (filtered) partition.
@@ -33,4 +33,5 @@ import org.apache.cassandra.db.rows.*;
  */
 public interface PartitionIterator extends BasePartitionIterator<RowIterator>
 {
+    void close();
 }

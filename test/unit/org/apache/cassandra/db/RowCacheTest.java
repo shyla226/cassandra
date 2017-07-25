@@ -32,6 +32,7 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.RowCacheKey;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.rows.*;
@@ -42,9 +43,7 @@ import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.dht.ByteOrderedPartitioner.BytesToken;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.CacheService;
@@ -60,11 +59,17 @@ public class RowCacheTest
     private static final String CF_CACHEDINT = "CachedIntCF";
     private static final String CF_CACHEDNOCLUSTER = "CachedNoClustering";
 
+    private static int defaultMetricsHistogramUpdateInterval;
+
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
         System.setProperty("org.caffinitas.ohc.segmentCount", "16");
         SchemaLoader.prepareServer();
+
+        defaultMetricsHistogramUpdateInterval = DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis();
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0); // this guarantees metrics histograms are updated on read
+
         SchemaLoader.createKeyspace(KEYSPACE_CACHED,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE_CACHED, CF_CACHEDNOCLUSTER, 1, AsciiType.instance, AsciiType.instance, null)
@@ -77,6 +82,7 @@ public class RowCacheTest
     @AfterClass
     public static void cleanup()
     {
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateInterval);
         SchemaLoader.cleanupSavedCaches();
     }
 
@@ -297,11 +303,10 @@ public class RowCacheTest
         store.cleanupCache();
         assertEquals(CacheService.instance.rowCache.size(), 100);
         TokenMetadata tmd = StorageService.instance.getTokenMetadata();
-        byte[] tk1, tk2;
-        tk1 = "key1000".getBytes();
-        tk2 = "key1050".getBytes();
-        tmd.updateNormalToken(new BytesToken(tk1), InetAddress.getByName("127.0.0.1"));
-        tmd.updateNormalToken(new BytesToken(tk2), InetAddress.getByName("127.0.0.2"));
+        Token tk1 = DatabaseDescriptor.getPartitioner().getMinimumToken();
+        Token tk2 = DatabaseDescriptor.getPartitioner().midpoint(tk1, DatabaseDescriptor.getPartitioner().getMaximumToken());
+        tmd.updateNormalToken(tk1, InetAddress.getByName("127.0.0.1"));
+        tmd.updateNormalToken(tk2, InetAddress.getByName("127.0.0.2"));
         store.cleanupCache();
         assertEquals(50, CacheService.instance.rowCache.size());
         CacheService.instance.setRowCacheCapacityInMB(0);
@@ -492,22 +497,22 @@ public class RowCacheTest
         //force flush for confidence that SSTables exists
         cachedStore.forceBlockingFlush();
 
-        ((ClearableHistogram)cachedStore.metric.sstablesPerReadHistogram.cf).clear();
+        cachedStore.metric.sstablesPerReadHistogram.clear();
 
         for (int i = 0; i < 100; i++)
         {
             DecoratedKey key = Util.dk("key" + i);
 
-            Util.getAll(Util.cmd(cachedStore, key).build());
+            Util.getAll(Util.cmd(cachedStore, key).build()); // this will not hit the cache
 
-            long count_before = cachedStore.metric.sstablesPerReadHistogram.cf.getCount();
-            Util.getAll(Util.cmd(cachedStore, key).build());
+            long count_before = cachedStore.metric.sstablesPerReadHistogram.getCount();
+            Util.getAll(Util.cmd(cachedStore, key).build()); // this should hit the cache
 
             // check that SSTablePerReadHistogram has been updated by zero,
             // so count has been increased and in a 1/2 of requests there were zero read SSTables
-            long count_after = cachedStore.metric.sstablesPerReadHistogram.cf.getCount();
-            double belowMedian = cachedStore.metric.sstablesPerReadHistogram.cf.getSnapshot().getValue(0.49D);
-            double mean_after = cachedStore.metric.sstablesPerReadHistogram.cf.getSnapshot().getMean();
+            long count_after = cachedStore.metric.sstablesPerReadHistogram.getCount();
+            double belowMedian = cachedStore.metric.sstablesPerReadHistogram.getSnapshot().getValue(0.49D);
+            double mean_after = cachedStore.metric.sstablesPerReadHistogram.getSnapshot().getMean();
             assertEquals("SSTablePerReadHistogram should be updated even key found in row cache", count_before + 1, count_after);
             assertTrue("In half of requests we have not touched SSTables, " +
                        "so 49 percentile (" + belowMedian + ") must be strongly less than 0.9", belowMedian < 0.9D);
@@ -515,7 +520,7 @@ public class RowCacheTest
                        "so mean value (" + mean_after + ") must be strongly less than 1, but greater than 0", mean_after < 0.999D && mean_after > 0.001D);
         }
 
-        assertEquals("Min value of SSTablesPerRead should be zero", 0, cachedStore.metric.sstablesPerReadHistogram.cf.getSnapshot().getMin());
+        assertEquals("Min value of SSTablesPerRead should be zero", 0, cachedStore.metric.sstablesPerReadHistogram.getSnapshot().getMin());
 
         CacheService.instance.setRowCacheCapacityInMB(0);
     }

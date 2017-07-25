@@ -18,6 +18,8 @@
  */
 package org.apache.cassandra.exceptions;
 
+import org.apache.cassandra.utils.flow.Flow;
+
 /**
  * Indicates an "expected" exception during the execution of a request on a
  * replica.
@@ -29,7 +31,7 @@ package org.apache.cassandra.exceptions;
  * Such failures include an index query while the index is not built yet, or a
  * 'TombstoneOverwhelmingException' for instance.
  */
-public class InternalRequestExecutionException extends RuntimeException
+public class InternalRequestExecutionException extends RuntimeException implements Flow.NonWrappableException
 {
     public final RequestFailureReason reason;
 
@@ -50,4 +52,3 @@ public class InternalRequestExecutionException extends RuntimeException
         this(reason, message, null);
     }
 }
-

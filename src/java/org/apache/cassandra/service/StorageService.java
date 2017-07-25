@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import javax.annotation.Nullable;
@@ -40,6 +41,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
+
+import io.reactivex.Completable;
+import io.reactivex.Single;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -58,9 +62,11 @@ import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.mos.MemoryOnlyStatus;
@@ -91,6 +97,7 @@ import org.apache.cassandra.streaming.*;
 import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.progress.ProgressEvent;
 import org.apache.cassandra.utils.progress.ProgressEventType;
 import org.apache.cassandra.utils.progress.jmx.JMXProgressSupport;
@@ -133,7 +140,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public volatile VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(tokenMetadata.partitioner);
 
-    private Thread drainOnShutdown = null;
     private volatile boolean isShutdown = false;
     private final List<Runnable> preShutdownHooks = new ArrayList<>();
     private final List<Runnable> postShutdownHooks = new ArrayList<>();
@@ -422,7 +428,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         daemon.deactivate();
     }
 
-    private synchronized UUID prepareForReplacement() throws ConfigurationException
+    @VisibleForTesting
+    public CassandraDaemon getDaemon()
+    {
+        return daemon;
+    }
+
+    private synchronized UUID prepareForReplacement(UUID localHostId) throws ConfigurationException
     {
         if (SystemKeyspace.bootstrapComplete())
             throw new RuntimeException("Cannot replace address with a node that is already bootstrapped");
@@ -456,12 +468,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new RuntimeException(e);
         }
 
-        UUID localHostId = SystemKeyspace.getLocalHostId();
-
         if (isReplacingSameAddress())
         {
             localHostId = Gossiper.instance.getHostId(replaceAddress, epStates);
-            SystemKeyspace.setLocalHostId(localHostId); // use the replacee's host Id as our own so we receive hints, etc
+            SystemKeyspace.setLocalHostIdBlocking(localHostId); // use the replacee's host Id as our own so we receive hints, etc
         }
 
         return localHostId;
@@ -560,7 +570,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
 
         // daemon threads, like our executors', continue to run while shutdown hooks are invoked
-        drainOnShutdown = NamedThreadFactory.createThread(new WrappedRunnable()
+        Thread drainOnShutdown = NamedThreadFactory.createThread(new WrappedRunnable()
         {
             @Override
             public void runMayThrow() throws InterruptedException, ExecutionException, IOException
@@ -576,7 +586,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 logbackHook.run();
             }
         }, "StorageServiceShutdownHook");
-        Runtime.getRuntime().addShutdownHook(drainOnShutdown);
+        JVMStabilityInspector.registerShutdownHook(drainOnShutdown, this::onShutdownHookRemoved);
 
         replacing = isReplacing();
 
@@ -618,7 +628,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 states.add(Pair.create(ApplicationState.STATUS, valueFactory.hibernate(true)));
                 Gossiper.instance.addLocalApplicationStates(states);
             }
-            doAuthSetup();
+            TPCUtils.blockingAwait(doAuthSetup());
             logger.info("Not joining ring as requested. Use JMX (StorageService->joinRing()) to initiate ring joining");
         }
 
@@ -662,11 +672,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * In the event of forceful termination we need to remove the shutdown hook to prevent hanging (OOM for instance)
      */
-    public void removeShutdownHook()
+    public void onShutdownHookRemoved()
     {
-        if (drainOnShutdown != null)
-            Runtime.getRuntime().removeShutdownHook(drainOnShutdown);
-
         if (FBUtilities.isWindows)
             WindowsTimer.endTimerPeriod(DatabaseDescriptor.getWindowsTimerInterval());
     }
@@ -704,11 +711,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (!MessagingService.instance().isListening())
                 MessagingService.instance().listen();
 
-            UUID localHostId = SystemKeyspace.getLocalHostId();
+            UUID localHostId = SystemKeyspace.setLocalHostIdBlocking();
 
             if (replacing)
             {
-                localHostId = prepareForReplacement();
+                localHostId = prepareForReplacement(localHostId);
                 appStates.put(ApplicationState.TOKENS, valueFactory.tokens(bootstrapTokens));
 
                 if (!DatabaseDescriptor.isAutoBootstrap())
@@ -915,8 +922,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
 
         // if we don't have system_traces keyspace at this point, then create it manually
-        maybeAddOrUpdateKeyspace(TraceKeyspace.metadata());
-        maybeAddOrUpdateKeyspace(SystemDistributedKeyspace.metadata());
+        maybeAddOrUpdateKeyspace(TraceKeyspace.metadata()).andThen(maybeAddOrUpdateKeyspace(SystemDistributedKeyspace.metadata()))
+                                                          .blockingAwait();
 
         if (!isSurveyMode)
         {
@@ -999,21 +1006,22 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         setTokens(tokens);
 
         assert tokenMetadata.sortedTokens().size() > 0;
-        doAuthSetup();
+        TPCUtils.blockingAwait(doAuthSetup());
     }
 
-    private void doAuthSetup()
+    private Completable doAuthSetup()
     {
-        if (!doneAuthSetup.getAndSet(true))
-        {
-            maybeAddOrUpdateKeyspace(AuthKeyspace.metadata());
+        if (doneAuthSetup.getAndSet(true))
+            return Completable.complete();
 
-            DatabaseDescriptor.getRoleManager().setup();
-            DatabaseDescriptor.getAuthenticator().setup();
-            DatabaseDescriptor.getAuthorizer().setup();
-            Schema.instance.registerListener(new AuthSchemaChangeListener());
-            authSetupComplete = true;
-        }
+        return maybeAddOrUpdateKeyspace(AuthKeyspace.metadata())
+                .doOnComplete(() -> {
+                    DatabaseDescriptor.getRoleManager().setup();
+                    DatabaseDescriptor.getAuthenticator().setup();
+                    DatabaseDescriptor.getAuthorizer().setup();
+                    Schema.instance.registerListener(new AuthSchemaChangeListener());
+                    authSetupComplete = true;
+                });
     }
 
     public boolean isAuthSetupComplete()
@@ -1021,23 +1029,26 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return authSetupComplete;
     }
 
-    private void maybeAddKeyspace(KeyspaceMetadata ksm)
+    private Completable maybeAddKeyspace(KeyspaceMetadata ksm)
     {
-        try
-        {
-            MigrationManager.announceNewKeyspace(ksm, 0, false);
-        }
-        catch (AlreadyExistsException e)
-        {
-            logger.debug("Attempted to create new keyspace {}, but it already exists", ksm.name);
-        }
+        return MigrationManager.announceNewKeyspace(ksm, 0, false)
+                               .onErrorResumeNext(e -> {
+                                   if (e instanceof AlreadyExistsException)
+                                   {
+                                       logger.debug("Attempted to create new keyspace {}, but it already exists", ksm.name);
+                                       return Completable.complete();
+                                   }
+
+                                   return Completable.error(e);
+
+        });
     }
 
     /**
      * Ensure the schema of a pseudo-system keyspace (a distributed system keyspace: traces, auth and the so-called distributedKeyspace),
      * is up to date with what we expected (creating it if it doesn't exist and updating tables that may have been upgraded).
      */
-    private void maybeAddOrUpdateKeyspace(KeyspaceMetadata expected)
+    private Completable maybeAddOrUpdateKeyspace(KeyspaceMetadata expected)
     {
         // Note that want to deal with the keyspace and its table a bit differently: for the keyspace definition
         // itself, we want to create it if it doesn't exist yet, but if it does exist, we don't want to modify it,
@@ -1046,24 +1057,31 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // (#8162 being an example), so even if the table definition exists, we still need to force the "current"
         // version of the schema, the one the node will be expecting.
 
-        KeyspaceMetadata defined = Schema.instance.getKeyspaceMetadata(expected.name);
+        //KeyspaceMetadata defined = Schema.instance.getKeyspaceMetadata(expected.name);
         // If the keyspace doesn't exist, create it
-        if (defined == null)
-        {
-            maybeAddKeyspace(expected);
-            defined = Schema.instance.getKeyspaceMetadata(expected.name);
-        }
+        Completable migration;
+        if (Schema.instance.getKeyspaceMetadata(expected.name) == null)
+            migration = maybeAddKeyspace(expected);
+        else
+            migration = Completable.complete();
 
-        // While the keyspace exists, it might miss table or have outdated one
-        // There is also the potential for a race, as schema migrations add the bare
-        // keyspace into Schema.instance before adding its tables, so double check that
-        // all the expected tables are present
-        for (TableMetadata expectedTable : expected.tables)
-        {
-            TableMetadata definedTable = defined.tables.get(expectedTable.name).orElse(null);
-            if (definedTable == null || !definedTable.equals(expectedTable))
-                MigrationManager.forceAnnounceNewTable(expectedTable);
-        }
+        return migration.andThen(Completable.defer( () -> {
+            KeyspaceMetadata defined = Schema.instance.getKeyspaceMetadata(expected.name);
+
+            // While the keyspace exists, it might miss table or have outdated one
+            // There is also the potential for a race, as schema migrations add the bare
+            // keyspace into Schema.instance before adding its tables, so double check that
+            // all the expected tables are present
+            List<Completable> migrations = new ArrayList<>();
+            for (TableMetadata expectedTable : expected.tables)
+            {
+                TableMetadata definedTable = defined.tables.get(expectedTable.name).orElse(null);
+                if (definedTable == null || !definedTable.equals(expectedTable))
+                    migrations.add(MigrationManager.forceAnnounceNewTable(expectedTable));
+            }
+
+            return migrations.isEmpty() ? Completable.complete() : Completable.merge(migrations);
+        }));
     }
 
     public boolean isJoined()
@@ -2790,6 +2808,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public Collection<Token> getLocalTokens()
     {
         Collection<Token> tokens = SystemKeyspace.getSavedTokens();
+        logger.debug("Got tokens {}", tokens);
+
         assert tokens != null && !tokens.isEmpty(); // should not be called before initServer sets this
         return tokens;
     }
@@ -4327,6 +4347,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             if (daemon != null)
                 shutdownClientServers();
+
             ScheduledExecutors.optionalTasks.shutdown();
             Gossiper.instance.stop();
 
@@ -4336,17 +4357,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // In-progress writes originating here could generate hints to be written, so shut down MessagingService
             // before mutation stage, so we can get all the hints saved before shutting down
             MessagingService.instance().shutdown();
-
-            if (!isFinalShutdown)
-                setMode(Mode.DRAINING, "clearing mutation stage", false);
-            viewMutationStage.shutdown();
-            counterMutationStage.shutdown();
-            mutationStage.shutdown();
-            viewMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
-            counterMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
-            mutationStage.awaitTermination(3600, TimeUnit.SECONDS);
-
-            StorageProxy.instance.verifyNoHintsInProgress();
 
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "flushing column families", false);
@@ -4361,51 +4371,72 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             for (Keyspace keyspace : Keyspace.nonSystem())
                 totalCFs += keyspace.getColumnFamilyStores().size();
             remainingCFs = totalCFs;
-            // flush
-            List<Future<?>> flushes = new ArrayList<>();
-            for (Keyspace keyspace : Keyspace.nonSystem())
-            {
-                for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    flushes.add(cfs.forceFlush());
-            }
-            // wait for the flushes.
-            // TODO this is a godawful way to track progress, since they flush in parallel.  a long one could
-            // thus make several short ones "instant" if we wait for them later.
-            for (Future f : flushes)
-            {
-                try
-                {
-                    FBUtilities.waitOnFuture(f);
-                }
-                catch (Throwable t)
-                {
-                    JVMStabilityInspector.inspectThrowable(t);
-                    // don't let this stop us from shutting down the commitlog and other thread pools
-                    logger.warn("Caught exception while waiting for memtable flushes during shutdown hook", t);
-                }
 
-                remainingCFs--;
-            }
+            // flush non-system keyspaces first
+            List<Single<CommitLogPosition>> nonSystemFlushes =
+                StreamSupport.stream(Keyspace.nonSystem().spliterator(), false)
+                            .flatMap(keyspace -> keyspace.getColumnFamilyStores().stream())
+                            .map(cfs ->cfs.forceFlush().doOnSuccess((cl) -> remainingCFs--))
+                            .collect(toList());
+
+            // wait for the non-system flushes for up to 1 minute
+            Single.concat(nonSystemFlushes)
+                  .timeout(1, TimeUnit.MINUTES)
+                  .doOnError(t -> {
+                      JVMStabilityInspector.inspectThrowable(t);
+                      logger.error("Caught exception while waiting for memtable flushes during shutdown hook", t);
+            }).blockingLast(CommitLogPosition.NONE);
 
             // Interrupt ongoing compactions and shutdown CM to prevent further compactions.
             CompactionManager.instance.forceShutdown();
+
             // Flush the system tables after all other tables are flushed, just in case flushing modifies any system state
             // like CASSANDRA-5151. Don't bother with progress tracking since system data is tiny.
             // Flush system tables after stopping compactions since they modify
             // system tables (for example compactions can obsolete sstables and the tidiers in SSTableReader update
             // system tables, see SSTableReader.GlobalTidy)
-            flushes.clear();
-            for (Keyspace keyspace : Keyspace.system())
-            {
-                for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    flushes.add(cfs.forceFlush());
-            }
-            FBUtilities.waitOnFutures(flushes);
 
+            // flush system keyspaces
+            List<Single<CommitLogPosition>> systemFlushes =
+                StreamSupport.stream(Keyspace.system().spliterator(), false)
+                             .flatMap(keyspace -> keyspace.getColumnFamilyStores().stream())
+                             .map(cfs ->cfs.forceFlush())
+                             .collect(toList());
+
+            // wait for the system flushes for up to 1 minute
+            Single.merge(systemFlushes)
+                  .timeout(1, TimeUnit.MINUTES)
+                  .doOnError(t -> {
+                      JVMStabilityInspector.inspectThrowable(t);
+                      logger.error("Caught exception while waiting for memtable flushes during shutdown hook", t);
+            }).blockingLast(CommitLogPosition.NONE);
+
+            // Now that client requests, messaging service and compactions are shutdown, there shouldn't be any more
+            // mutations so let's wait for any pending mutations and then clear the stages. Note that the compaction
+            // manager can generated mutations, for example because of the view builder or the sstable_activity updates
+            // in the SSTableReader.GlobalTidy, so we do this step quite late, but before shutting down the CL
+            if (!isFinalShutdown)
+                setMode(Mode.DRAINING, "stopping mutations", false);
+
+            List<OpOrder.Barrier> barriers = StreamSupport.stream(Keyspace.all().spliterator(), false)
+                                                          .map(ks -> ks.stopMutations())
+                                                          .collect(Collectors.toList());
+            barriers.forEach(OpOrder.Barrier::await); // we could parallelize this...
+
+            if (!isFinalShutdown)
+                setMode(Mode.DRAINING, "clearing mutation stages", false);
+
+            viewMutationStage.shutdown();
+            counterMutationStage.shutdown();
+            mutationStage.shutdown();
+            viewMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+            counterMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+            mutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+
+            StorageProxy.instance.verifyNoHintsInProgress();
+
+            // shutdown hints
             HintsService.instance.shutdownBlocking();
-
-            // Interrupt ongoing compactions and shutdown CM to prevent further compactions.
-            CompactionManager.instance.forceShutdown();
 
             // whilst we've flushed all the CFs, which will have recycled all completed segments, we want to ensure
             // there are no segments to replay, so we force the recycling of any remaining (should be at most one)
@@ -4417,6 +4448,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             ScheduledExecutors.nonPeriodicTasks.shutdown();
             if (!ScheduledExecutors.nonPeriodicTasks.awaitTermination(1, TimeUnit.MINUTES))
                 logger.warn("Failed to wait for non periodic tasks to shutdown");
+
 
             ColumnFamilyStore.shutdownPostFlushExecutor();
             setMode(Mode.DRAINED, !isFinalShutdown);
@@ -5061,16 +5093,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return NativeLibrary.getProcessID();
     }
 
-    public static List<PartitionPosition> getDiskBoundaries(ColumnFamilyStore cfs, Directories.DataDirectory[] directories)
+    public static List<Range<Token>> getStartupTokenRanges(Keyspace keyspace)
     {
-        if (!cfs.getPartitioner().splitter().isPresent() || !SPLIT_SSTABLES_BY_TOKEN_RANGE)
+        if (!DatabaseDescriptor.getPartitioner().splitter().isPresent())
             return null;
 
         Collection<Range<Token>> lr;
 
         if (StorageService.instance.isBootstrapMode())
         {
-            lr = StorageService.instance.getTokenMetadata().getPendingRanges(cfs.keyspace.getName(), FBUtilities.getBroadcastAddress());
+            lr = StorageService.instance.getTokenMetadata().getPendingRanges(keyspace.getName(), FBUtilities.getBroadcastAddress());
         }
         else
         {
@@ -5078,12 +5110,23 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // from that node to the correct location on disk, if we didn't, we would put new files in the wrong places.
             // We do this to minimize the amount of data we need to move in rebalancedisks once everything settled
             TokenMetadata tmd = StorageService.instance.getTokenMetadata().cloneAfterAllSettled();
-            lr = cfs.keyspace.getReplicationStrategy().getAddressRanges(tmd).get(FBUtilities.getBroadcastAddress());
+            lr = keyspace.getReplicationStrategy().getAddressRanges(tmd).get(FBUtilities.getBroadcastAddress());
         }
 
         if (lr == null || lr.isEmpty())
             return null;
-        List<Range<Token>> localRanges = Range.sort(lr);
+
+        return Range.sort(lr);
+    }
+
+    public static List<PartitionPosition> getDiskBoundaries(ColumnFamilyStore cfs, Directories.DataDirectory[] directories)
+    {
+        if (!SPLIT_SSTABLES_BY_TOKEN_RANGE)
+            return null;
+
+        List<Range<Token>> localRanges = getStartupTokenRanges(cfs.keyspace);
+        if (localRanges == null)
+            return null;
 
         return getDiskBoundaries(localRanges, cfs.getPartitioner(), directories);
     }

@@ -68,7 +68,7 @@ public final class SessionInfo implements Serializable
 
     /**
      * copy previous transferred and received files
-     * 
+     *
      * @param previous sessionInfo to be replaced
      */
     public void copyProgress(SessionInfo previous)

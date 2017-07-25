@@ -1,11 +1,13 @@
 package org.apache.cassandra.index.internal;
 
+import io.reactivex.Completable;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
@@ -15,10 +17,10 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.flow.Flow;
 
 import java.util.Optional;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 
 /**
@@ -121,7 +123,7 @@ public class TableBackedCustomIndex implements Index
     {
         this.metadata = indexDef;
         this.indexCfm = buildIndexCFMetadata();
-        MigrationManager.announceNewTable(this.indexCfm, true);
+        MigrationManager.announceNewTable(this.indexCfm, true).observeOn(Schedulers.io()).blockingAwait();
         indexCfs = Keyspace.openAndGetStore(this.indexCfm);
     }
 
@@ -149,9 +151,9 @@ public class TableBackedCustomIndex implements Index
 
     public long getEstimatedResultRows() { throw new UnsupportedOperationException(); }
 
-    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command)
+    public BiFunction<Flow<FlowablePartition>, ReadCommand, Flow<FlowablePartition>> postProcessorFor(ReadCommand command)
     {
-        return (partitionIterator, rowFilter) -> partitionIterator;
+        return (partitions, rowFilter) -> partitions;
     }
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter) { return filter; }
@@ -173,27 +175,42 @@ public class TableBackedCustomIndex implements Index
                 maybeInitializeIndexCfs();
             }
 
-            public void finish() { }
-
-            public void insertRow(Row newBaseRow)
+            public Completable finish()
             {
-                PartitionUpdate update = PartitionUpdate.singleRowUpdate(indexCfs.metadata(), key, newBaseRow);
-                applyMutation(new Mutation(update));
+                return Completable.complete();
             }
 
-            public void partitionDelete(DeletionTime deletionTime) { }
-            public void rangeTombstone(RangeTombstone tombstone) { }
-            public void removeRow(Row row) { }
-            public void updateRow(Row oldRow, Row newRow) { }
+            public Completable insertRow(Row newBaseRow)
+            {
+                PartitionUpdate update = PartitionUpdate.singleRowUpdate(indexCfs.metadata(), key, newBaseRow);
+                return applyMutation(new Mutation(update));
+            }
 
-            private void applyMutation(Mutation mutation)
+            public Completable partitionDelete(DeletionTime deletionTime)
+            {
+                return Completable.complete();
+            }
+
+            public Completable rangeTombstone(RangeTombstone tombstone)
+            {
+                return Completable.complete();
+            }
+
+            public Completable removeRow(Row row)
+            {
+                return Completable.complete();
+            }
+
+            public Completable updateRow(Row oldRow, Row newRow)
+            {
+                return Completable.complete();
+            }
+
+            private Completable applyMutation(Mutation mutation)
             {
                 Keyspace ks = Keyspace.open(mutation.getKeyspaceName());
                 // set writeCommitlog to false
-                CompletableFuture<?> future = ks.applyFuture(mutation, false, true);
-
-                if (future.isDone())
-                    future.getNow(null);  // force exception to be thrown if this errored
+                return ks.apply(mutation, false);
             }
         };
     }

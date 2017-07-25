@@ -29,6 +29,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.btree.BTree;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.versioning.Version;
 
 public class CachedBTreePartition extends ImmutableBTreePartition implements CachedPartition
@@ -113,6 +114,64 @@ public class CachedBTreePartition extends ImmutableBTreePartition implements Cac
     }
 
     /**
+     * Creates a {@code CachedBTreePartition} asynchronously, holding all the data of the provided partition.
+     *
+     * @param partition the partition to gather in memory.
+     * @param nowInSec the time of the creation in seconds. This is the time at which {@link #cachedLiveRows} applies.
+     *
+     * @return the created partition.
+     */
+    public static Flow<CachedBTreePartition> create(FlowableUnfilteredPartition partition, int nowInSec)
+    {
+        return create(partition, 16, nowInSec);
+    }
+
+    /**
+     * Creates a {@code CachedBTreePartition} asynchronously, holding all the data of the provided iterator.
+     *
+     * @param partition the partition to gather in memory.
+     * @param initialRowCapacity sizing hint (in rows) to use for the created partition. It should ideally
+     * correspond or be a good estimation of the number or rows in {@code partition}.
+     * @param nowInSec the time of the creation in seconds. This is the time at which {@link #cachedLiveRows} applies.
+     *
+     * @return the created partition.
+     */
+    public static Flow<CachedBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity, int nowInSec)
+    {
+        return AbstractBTreePartition.build(partition, initialRowCapacity, true).map(holder -> {
+
+            int cachedLiveRows = 0;
+            int rowsWithNonExpiringCells = 0;
+
+            for (Row row : BTree.<Row>iterable(holder.tree))
+            {
+                if (row.hasLiveData(nowInSec))
+                    ++cachedLiveRows;
+
+                boolean hasNonExpiringLiveCell = false;
+                for (Cell cell : row.cells())
+                {
+                    if (!cell.isTombstone() && !cell.isExpiring())
+                    {
+                        hasNonExpiringLiveCell = true;
+                        break;
+                    }
+                }
+
+                if (hasNonExpiringLiveCell)
+                    ++rowsWithNonExpiringCells;
+            }
+
+            return new CachedBTreePartition(partition.metadata(),
+                                            partition.partitionKey(),
+                                            holder,
+                                            nowInSec,
+                                            cachedLiveRows,
+                                            rowsWithNonExpiringCells);
+        });
+    }
+
+    /**
      * The number of rows that were live at the time the partition was cached.
      *
      * See {@link ColumnFamilyStore#isFilterFullyCoveredBy} to see why we need this.
@@ -156,7 +215,7 @@ public class CachedBTreePartition extends ImmutableBTreePartition implements Cac
             partition.metadata().id.serialize(out);
             try (UnfilteredRowIterator iter = p.unfilteredIterator())
             {
-                UnfilteredRowIteratorSerializer.serializers.get(version).serialize(iter, null, out, p.rowCount());
+                UnfilteredPartitionSerializer.serializers.get(version).serialize(iter, null, out, p.rowCount());
             }
         }
 
@@ -175,11 +234,11 @@ public class CachedBTreePartition extends ImmutableBTreePartition implements Cac
 
 
             TableMetadata metadata = Schema.instance.getExistingTableMetadata(TableId.deserialize(in));
-            UnfilteredRowIteratorSerializer.Header header = UnfilteredRowIteratorSerializer.serializers.get(version).deserializeHeader(metadata, null, in, SerializationHelper.Flag.LOCAL);
+            UnfilteredPartitionSerializer.Header header = UnfilteredPartitionSerializer.serializers.get(version).deserializeHeader(metadata, null, in, SerializationHelper.Flag.LOCAL);
             assert !header.isReversed && header.rowEstimate >= 0;
 
             Holder holder;
-            try (UnfilteredRowIterator partition = UnfilteredRowIteratorSerializer.serializers.get(version).deserialize(in, metadata, SerializationHelper.Flag.LOCAL, header))
+            try (UnfilteredRowIterator partition = UnfilteredPartitionSerializer.serializers.get(version).deserializeToIt(in, metadata, SerializationHelper.Flag.LOCAL, header))
             {
                 holder = ImmutableBTreePartition.build(partition, header.rowEstimate);
             }
@@ -201,10 +260,10 @@ public class CachedBTreePartition extends ImmutableBTreePartition implements Cac
             try (UnfilteredRowIterator iter = p.unfilteredIterator())
             {
                 return TypeSizes.sizeof(p.createdAtInSec)
-                     + TypeSizes.sizeof(p.cachedLiveRows)
-                     + TypeSizes.sizeof(p.rowsWithNonExpiringCells)
-                     + partition.metadata().id.serializedSize()
-                     + UnfilteredRowIteratorSerializer.serializers.get(version).serializedSize(iter, null, p.rowCount());
+                       + TypeSizes.sizeof(p.cachedLiveRows)
+                       + TypeSizes.sizeof(p.rowsWithNonExpiringCells)
+                       + partition.metadata().id.serializedSize()
+                       + UnfilteredPartitionSerializer.serializers.get(version).serializedSize(iter, null, p.rowCount());
             }
         }
     }

@@ -17,11 +17,16 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Maybe;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.IndexName;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.KeyspaceNotDefinedException;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
@@ -64,28 +69,29 @@ public class DropIndexStatement extends SchemaAlteringStatement
     }
 
     @Override
-    public ResultMessage execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
+    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
     {
-        Event.SchemaChange ce = announceMigration(state, false);
-        return ce == null ? null : new ResultMessage.SchemaChange(ce);
+        return announceMigration(state, false).map(schemaChangeEvent -> new ResultMessage.SchemaChange(schemaChangeEvent))
+                                              .cast(ResultMessage.class)
+                                              .toSingle(new ResultMessage.Void());
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         TableMetadata current = lookupIndexedTable();
         if (current == null)
-            return null;
+            return Maybe.empty();
 
         TableMetadata updated =
             current.unbuild()
                    .indexes(current.indexes.without(indexName))
                    .build();
 
-        MigrationManager.announceTableUpdate(updated, isLocalOnly);
         // Dropping an index is akin to updating the CF
         // Note that we shouldn't call columnFamily() at this point because the index has been dropped and the call to lookupIndexedTable()
         // in that method would now throw.
-        return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, current.keyspace, current.name);
+        Event.SchemaChange event = new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, current.keyspace, current.name);
+        return MigrationManager.announceTableUpdate(updated, isLocalOnly).andThen(Maybe.just(event));
     }
 
     /**

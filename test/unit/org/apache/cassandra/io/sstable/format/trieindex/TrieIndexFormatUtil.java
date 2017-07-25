@@ -32,6 +32,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FilterFactory;
@@ -48,7 +49,7 @@ public class TrieIndexFormatUtil
                  PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder))
             {
                 builder.complete();
-                partitionIndex = PartitionIndex.load(fhBuilder, Util.testPartitioner(), false);
+                partitionIndex = PartitionIndex.load(fhBuilder, Util.testPartitioner(), false, Rebufferer.ReaderConstraint.NONE);
             }
         }
         catch (IOException e)

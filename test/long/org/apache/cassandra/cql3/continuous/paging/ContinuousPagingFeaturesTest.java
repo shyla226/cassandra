@@ -438,8 +438,7 @@ public class ContinuousPagingFeaturesTest extends CQLTester
     @Test
     public void testOneMoreSessionThanMaxConcurrentSessions() throws Throwable
     {
-        ContinuousPagingConfig config = DatabaseDescriptor.getContinuousPaging();
-        testTooManyConcurrentSessions(config.max_concurrent_sessions + 1, 1);
+        testTooManyConcurrentSessions(1, 1);
 
     }
 
@@ -449,16 +448,30 @@ public class ContinuousPagingFeaturesTest extends CQLTester
     @Test
     public void testTwoMoreSessionsThanMaxConcurrentSessions() throws Throwable
     {
-        ContinuousPagingConfig config = DatabaseDescriptor.getContinuousPaging();
-        testTooManyConcurrentSessions(config.max_concurrent_sessions + 2, 2);
+        testTooManyConcurrentSessions(2, 2);
     }
 
-    private void testTooManyConcurrentSessions(int numSessions, int numExpectedErrors) throws Throwable
+    private void testTooManyConcurrentSessions(int numExtraSessions, int numExpectedErrors) throws Throwable
     {
-        int [] maxPagesPerSecond = new int [numSessions];
-        // we need slow sessions to ensure they don't finish before a new one is started
-        Arrays.fill(maxPagesPerSecond, 2);
-        testConcurrentSessions(numSessions, maxPagesPerSecond, numExpectedErrors);
+        ContinuousPagingConfig config = DatabaseDescriptor.getContinuousPaging();
+        final int oldMaxConcurrentSessions = config.max_concurrent_sessions;
+        // if we have too many max concurrent sessions, by the time we get to the extra sessions
+        // the old ones may already have completed now that we have fewer Netty request threads
+        config.max_concurrent_sessions = 5;
+        try
+        {
+            final int numSessions = config.max_concurrent_sessions + numExtraSessions;
+            final int[] maxPagesPerSecond = new int[numSessions];
+
+            // we need slow sessions to ensure they don't finish before a new one is started
+            Arrays.fill(maxPagesPerSecond, 2);
+
+            testConcurrentSessions(numSessions, maxPagesPerSecond, numExpectedErrors);
+        }
+        finally
+        {
+            config.max_concurrent_sessions = oldMaxConcurrentSessions;
+        }
     }
 
     private void testConcurrentSessions(int numThreads, int[] maxPagesPerSecond, int numExpectedErrors) throws Throwable
@@ -479,7 +492,7 @@ public class ContinuousPagingFeaturesTest extends CQLTester
 
             executor.submit(() ->
                 {
-                    try (TestHelper helper = new ContinuousPagingTestUtils.TestBuilder(this, schema)
+                    try (TestHelper helper = new TestBuilder(this, schema)
                                              .maxPagesPerSecond(maxPagesPerSecondIt)
                                              .checkRows(true)
                                              .build())
@@ -502,7 +515,7 @@ public class ContinuousPagingFeaturesTest extends CQLTester
         if (numExpectedErrors != errors.size())
         {
             for (Throwable e : errors)
-                e.printStackTrace();
+                logger.error("Unexpected error", e);
 
             fail(String.format("Unexpected number of errors %d, was expecting %d", errors.size(), numExpectedErrors));
         }

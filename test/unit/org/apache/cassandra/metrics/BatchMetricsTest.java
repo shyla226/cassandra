@@ -20,6 +20,7 @@ package org.apache.cassandra.metrics;
 
 import java.io.IOException;
 
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -43,6 +44,7 @@ import static org.apache.cassandra.cql3.statements.BatchStatement.metrics;
 public class BatchMetricsTest extends SchemaLoader
 {
     private static EmbeddedCassandraService cassandra;
+    private static int defaultMetricsHistogramUpdateTimeMillis;
 
     private static Cluster cluster;
     private static Session session;
@@ -68,6 +70,15 @@ public class BatchMetricsTest extends SchemaLoader
         session.execute("CREATE TABLE IF NOT EXISTS " + TABLE + " (id int PRIMARY KEY, val text);");
 
         ps = session.prepare("INSERT INTO " + KEYSPACE + '.' + TABLE + " (id, val) VALUES (?, ?);");
+
+        defaultMetricsHistogramUpdateTimeMillis = DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis();
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0);
+    }
+
+    @AfterClass
+    public static void teardown()
+    {
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateTimeMillis);
     }
 
     private void executeBatch(boolean isLogged, int distinctPartitions, int statementsPerPartition)

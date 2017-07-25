@@ -24,6 +24,8 @@ import java.util.List;
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
+import io.reactivex.Single;
+
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
@@ -145,7 +147,7 @@ public class BatchMessage extends Message.Request
         this.options = options;
     }
 
-    public Message.Response execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
     {
         try
         {
@@ -194,20 +196,20 @@ public class BatchMessage extends Message.Request
             // Note: It's ok at this point to pass a bogus value for the number of bound terms in the BatchState ctor
             // (and no value would be really correct, so we prefer passing a clearly wrong one).
             BatchStatement batch = new BatchStatement(-1, batchType, statements, Attributes.none());
-            Message.Response response = handler.processBatch(batch, state, batchOptions, getCustomPayload(), queryStartNanoTime);
 
-            response.setTracingId(state.getPreparedTracingSession());
+            return handler.processBatch(batch, state, batchOptions, getCustomPayload(), queryStartNanoTime)
+                          .map(response -> {
+                              response.setTracingId(state.getPreparedTracingSession());
 
-            return response;
+                              return response;
+                          })
+                          .flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
         }
         catch (Exception e)
         {
             JVMStabilityInspector.inspectThrowable(e);
-            return ErrorMessage.fromException(e);
-        }
-        finally
-        {
-            Tracing.instance.stopSession();
+            return Tracing.instance.stopSessionAsync()
+                                   .toSingleDefault(ErrorMessage.fromException(e));
         }
     }
 

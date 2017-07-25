@@ -27,8 +27,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -49,15 +51,36 @@ public class MonitoringTaskTest
     private static final int REPORT_INTERVAL_MS = 600000; // long enough so that it won't check unless told to do so
     private static final int MAX_TIMEDOUT_OPERATIONS = -1; // unlimited
 
+    private static volatile boolean finished = false;
+
     @BeforeClass
-    public static void setup()
+    public static void setupClass()
     {
         DatabaseDescriptor.clientInitialization(false);
         MonitoringTask.instance = MonitoringTask.make(REPORT_INTERVAL_MS, MAX_TIMEDOUT_OPERATIONS);
+
+        // The approximate time needs to be ticked forward manually, this is normally done by
+        // the monitoring thread of EpollTPCEventLoopGroup, which also parks for 1 nanosecond
+        Thread advanceApproximateTime = new Thread(() ->
+                                                   {
+                                                       while(!finished)
+                                                       {
+                                                           LockSupport.parkNanos(1);
+                                                           ApproximateTime.tick();
+                                                       }
+                                                   });
+        advanceApproximateTime.setDaemon(true);
+        advanceApproximateTime.start();
+    }
+
+    @AfterClass
+    public static void cleanupClass()
+    {
+        finished = true;
     }
 
     @After
-    public void cleanUp()
+    public void cleanup()
     {
         // these clear the queues of the monitorint task
         MonitoringTask.instance.getSlowOperations();

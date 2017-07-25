@@ -32,6 +32,17 @@ public abstract class AbstractUnfilteredRowIterator extends AbstractIterator<Unf
     protected final boolean isReverseOrder;
     protected final EncodingStats stats;
 
+    protected AbstractUnfilteredRowIterator(PartitionTrait partition)
+    {
+        this(partition.metadata(),
+             partition.partitionKey(),
+             partition.partitionLevelDeletion(),
+             partition.columns(),
+             partition.staticRow(),
+             partition.isReverseOrder(),
+             partition.stats());
+    }
+
     protected AbstractUnfilteredRowIterator(TableMetadata metadata,
                                             DecoratedKey partitionKey,
                                             DeletionTime partitionLevelDeletion,

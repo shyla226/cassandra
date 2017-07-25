@@ -33,6 +33,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -541,7 +542,7 @@ public class CassandraIndexTest extends CQLTester
                                                                                ColumnFilter.all(indexCfs.metadata()),
                                                                                filter);
         try (ReadExecutionController executionController = command.executionController();
-             UnfilteredRowIterator iter = command.queryMemtableAndDisk(indexCfs, executionController))
+             UnfilteredRowIterator iter = FlowablePartitions.toIterator(command.deferredQuery(indexCfs, executionController).blockingSingle()))
         {
             while( iter.hasNext())
             {

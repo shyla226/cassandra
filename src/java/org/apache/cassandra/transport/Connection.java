@@ -18,6 +18,7 @@
 package org.apache.cassandra.transport;
 
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.util.AttributeKey;
 
 public class Connection
@@ -37,6 +38,7 @@ public class Connection
         this.tracker = tracker;
 
         tracker.addConnection(channel, this);
+        channel.closeFuture().addListener((fut) -> tracker.removeConnection(channel, this));
     }
 
     public void setCompressor(FrameCompressor compressor)
@@ -72,5 +74,6 @@ public class Connection
     public interface Tracker
     {
         void addConnection(Channel ch, Connection connection);
+        void removeConnection(Channel ch, Connection connection);
     }
 }

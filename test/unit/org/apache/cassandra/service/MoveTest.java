@@ -25,11 +25,11 @@ import java.util.*;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
-import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -38,7 +38,6 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -62,8 +61,7 @@ import static org.junit.Assert.assertNotNull;
 
 public class MoveTest
 {
-    private static final IPartitioner partitioner = RandomPartitioner.instance;
-    private static IPartitioner oldPartitioner;
+    private static final IPartitioner partitioner = Murmur3Partitioner.instance;
     //Simple Strategy Keyspaces
     private static final String Simple_RF1_KeyspaceName = "MoveTestKeyspace1";
     private static final String Simple_RF2_KeyspaceName = "MoveTestKeyspace5";
@@ -85,19 +83,19 @@ public class MoveTest
     @BeforeClass
     public static void setup() throws Exception
     {
+        DatabaseDescriptor.setPartitionerUnsafe(partitioner);
         DatabaseDescriptor.daemonInitialization();
-        oldPartitioner = StorageService.instance.setPartitionerUnsafe(partitioner);
+
         SchemaLoader.loadSchema();
         SchemaLoader.schemaDefinition("MoveTest");
+
         addNetworkTopologyKeyspace(Network_11_KeyspaceName, 1, 1);
         addNetworkTopologyKeyspace(Network_22_KeyspaceName, 2, 2);
         addNetworkTopologyKeyspace(Network_33_KeyspaceName, 3, 3);
-    }
 
-    @AfterClass
-    public static void tearDown()
-    {
-        StorageService.instance.setPartitionerUnsafe(oldPartitioner);
+        // the Gossip status checks may unexpectedly remove nodes from the
+        // endpoint map, causing NPEs
+        Gossiper.instance.stopWithoutAnnouncing();
     }
 
     @Before
@@ -153,7 +151,7 @@ public class MoveTest
                                                                                     .addPartitionKeyColumn("key", BytesType.instance)
                                                                                     .build()));
 
-        MigrationManager.announceNewKeyspace(keyspace);
+        MigrationManager.announceNewKeyspace(keyspace).blockingAwait();
     }
 
     private static Object[] configOptions(Integer[] replicas)
@@ -186,8 +184,8 @@ public class MoveTest
 
         for(int i=0; i < RING_SIZE/2; i++)
         {
-            endpointTokens.add(new BigIntegerToken(String.valueOf(10 * i)));
-            endpointTokens.add(new BigIntegerToken(String.valueOf((10 * i) + 1)));
+            endpointTokens.add(new Murmur3Partitioner.LongToken(10 * i));
+            endpointTokens.add(new Murmur3Partitioner.LongToken((10 * i) + 1));
         }
         Util.createInitialRing(ss, partitioner, endpointTokens, keyTokens, hosts, hostIds, RING_SIZE);
         PendingRangeCalculatorService.instance.blockUntilFinished();
@@ -226,8 +224,8 @@ public class MoveTest
 
         for(int i=0; i < RING_SIZE/2; i++)
         {
-            endpointTokens.add(new BigIntegerToken(String.valueOf(10 * i)));
-            endpointTokens.add(new BigIntegerToken(String.valueOf((10 * i) + 1)));
+            endpointTokens.add(new Murmur3Partitioner.LongToken((10 * i)));
+            endpointTokens.add(new Murmur3Partitioner.LongToken(((10 * i) + 1)));
         }
 
         Util.createInitialRing(ss, partitioner, endpointTokens, keyTokens, hosts, hostIds, RING_SIZE);
@@ -362,7 +360,6 @@ public class MoveTest
                 generatePendingMapEntry(10, 20, "127.0.0.1"), generatePendingMapEntry(70, 80, "127.0.0.2")), Simple_RF3_KeyspaceName);
 
         finishMove(hosts.get(MOVING_NODE), 35, tmd);
-
     }
 
     @Test
@@ -489,7 +486,7 @@ public class MoveTest
     {
         tmd.removeFromMoving(host);
         assertTrue(!tmd.isMoving(host));
-        tmd.updateNormalToken(new BigIntegerToken(String.valueOf(token)), host);
+        tmd.updateNormalToken(new Murmur3Partitioner.LongToken(token), host);
     }
 
     private Map.Entry<Range<Token>, Collection<InetAddress>> generatePendingMapEntry(int start, int end, String... endpoints) throws UnknownHostException
@@ -623,7 +620,6 @@ public class MoveTest
         StorageService ss = StorageService.instance;
         final int RING_SIZE = 10;
         TokenMetadata tmd = ss.getTokenMetadata();
-        IPartitioner partitioner = RandomPartitioner.instance;
         VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
 
         ArrayList<Token> endpointTokens = new ArrayList<Token>();
@@ -825,49 +821,49 @@ public class MoveTest
         // pre-calculate the results.
         Map<String, Multimap<Token, InetAddress>> expectedEndpoints = new HashMap<String, Multimap<Token, InetAddress>>();
         expectedEndpoints.put(Simple_RF1_KeyspaceName, HashMultimap.<Token, InetAddress>create());
-        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new BigIntegerToken("5"), makeAddrs("127.0.0.2"));
-        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new BigIntegerToken("15"), makeAddrs("127.0.0.3"));
-        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new BigIntegerToken("25"), makeAddrs("127.0.0.4"));
-        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new BigIntegerToken("35"), makeAddrs("127.0.0.5"));
-        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new BigIntegerToken("45"), makeAddrs("127.0.0.6"));
-        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new BigIntegerToken("55"), makeAddrs("127.0.0.7", "127.0.1.1"));
-        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new BigIntegerToken("65"), makeAddrs("127.0.0.7"));
-        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new BigIntegerToken("75"), makeAddrs("127.0.0.9", "127.0.1.2"));
-        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new BigIntegerToken("85"), makeAddrs("127.0.0.9"));
-        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new BigIntegerToken("95"), makeAddrs("127.0.0.10"));
+        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(5), makeAddrs("127.0.0.2"));
+        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(15), makeAddrs("127.0.0.3"));
+        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(25), makeAddrs("127.0.0.4"));
+        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(35), makeAddrs("127.0.0.5"));
+        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(45), makeAddrs("127.0.0.6"));
+        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(55), makeAddrs("127.0.0.7", "127.0.1.1"));
+        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(65), makeAddrs("127.0.0.7"));
+        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(75), makeAddrs("127.0.0.9", "127.0.1.2"));
+        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(85), makeAddrs("127.0.0.9"));
+        expectedEndpoints.get(Simple_RF1_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(95), makeAddrs("127.0.0.10"));
         expectedEndpoints.put(KEYSPACE2, HashMultimap.<Token, InetAddress>create());
-        expectedEndpoints.get(KEYSPACE2).putAll(new BigIntegerToken("5"), makeAddrs("127.0.0.2"));
-        expectedEndpoints.get(KEYSPACE2).putAll(new BigIntegerToken("15"), makeAddrs("127.0.0.3"));
-        expectedEndpoints.get(KEYSPACE2).putAll(new BigIntegerToken("25"), makeAddrs("127.0.0.4"));
-        expectedEndpoints.get(KEYSPACE2).putAll(new BigIntegerToken("35"), makeAddrs("127.0.0.5"));
-        expectedEndpoints.get(KEYSPACE2).putAll(new BigIntegerToken("45"), makeAddrs("127.0.0.6"));
-        expectedEndpoints.get(KEYSPACE2).putAll(new BigIntegerToken("55"), makeAddrs("127.0.0.7", "127.0.1.1"));
-        expectedEndpoints.get(KEYSPACE2).putAll(new BigIntegerToken("65"), makeAddrs("127.0.0.7"));
-        expectedEndpoints.get(KEYSPACE2).putAll(new BigIntegerToken("75"), makeAddrs("127.0.0.9", "127.0.1.2"));
-        expectedEndpoints.get(KEYSPACE2).putAll(new BigIntegerToken("85"), makeAddrs("127.0.0.9"));
-        expectedEndpoints.get(KEYSPACE2).putAll(new BigIntegerToken("95"), makeAddrs("127.0.0.10"));
+        expectedEndpoints.get(KEYSPACE2).putAll(new Murmur3Partitioner.LongToken(5), makeAddrs("127.0.0.2"));
+        expectedEndpoints.get(KEYSPACE2).putAll(new Murmur3Partitioner.LongToken(15), makeAddrs("127.0.0.3"));
+        expectedEndpoints.get(KEYSPACE2).putAll(new Murmur3Partitioner.LongToken(25), makeAddrs("127.0.0.4"));
+        expectedEndpoints.get(KEYSPACE2).putAll(new Murmur3Partitioner.LongToken(35), makeAddrs("127.0.0.5"));
+        expectedEndpoints.get(KEYSPACE2).putAll(new Murmur3Partitioner.LongToken(45), makeAddrs("127.0.0.6"));
+        expectedEndpoints.get(KEYSPACE2).putAll(new Murmur3Partitioner.LongToken(55), makeAddrs("127.0.0.7", "127.0.1.1"));
+        expectedEndpoints.get(KEYSPACE2).putAll(new Murmur3Partitioner.LongToken(65), makeAddrs("127.0.0.7"));
+        expectedEndpoints.get(KEYSPACE2).putAll(new Murmur3Partitioner.LongToken(75), makeAddrs("127.0.0.9", "127.0.1.2"));
+        expectedEndpoints.get(KEYSPACE2).putAll(new Murmur3Partitioner.LongToken(85), makeAddrs("127.0.0.9"));
+        expectedEndpoints.get(KEYSPACE2).putAll(new Murmur3Partitioner.LongToken(95), makeAddrs("127.0.0.10"));
         expectedEndpoints.put(KEYSPACE3, HashMultimap.<Token, InetAddress>create());
-        expectedEndpoints.get(KEYSPACE3).putAll(new BigIntegerToken("5"), makeAddrs("127.0.0.2", "127.0.0.3", "127.0.0.4", "127.0.0.5", "127.0.0.6"));
-        expectedEndpoints.get(KEYSPACE3).putAll(new BigIntegerToken("15"), makeAddrs("127.0.0.3", "127.0.0.4", "127.0.0.5", "127.0.0.6", "127.0.0.7", "127.0.1.1"));
-        expectedEndpoints.get(KEYSPACE3).putAll(new BigIntegerToken("25"), makeAddrs("127.0.0.4", "127.0.0.5", "127.0.0.6", "127.0.0.7", "127.0.0.8", "127.0.1.1"));
-        expectedEndpoints.get(KEYSPACE3).putAll(new BigIntegerToken("35"), makeAddrs("127.0.0.5", "127.0.0.6", "127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.1.1", "127.0.1.2"));
-        expectedEndpoints.get(KEYSPACE3).putAll(new BigIntegerToken("45"), makeAddrs("127.0.0.6", "127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.0.10", "127.0.1.1", "127.0.1.2"));
-        expectedEndpoints.get(KEYSPACE3).putAll(new BigIntegerToken("55"), makeAddrs("127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.0.10", "127.0.0.1", "127.0.1.1", "127.0.1.2"));
-        expectedEndpoints.get(KEYSPACE3).putAll(new BigIntegerToken("65"), makeAddrs("127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.0.10", "127.0.0.1", "127.0.1.2"));
-        expectedEndpoints.get(KEYSPACE3).putAll(new BigIntegerToken("75"), makeAddrs("127.0.0.9", "127.0.0.10", "127.0.0.1", "127.0.0.2", "127.0.0.3", "127.0.1.2"));
-        expectedEndpoints.get(KEYSPACE3).putAll(new BigIntegerToken("85"), makeAddrs("127.0.0.9", "127.0.0.10", "127.0.0.1", "127.0.0.2", "127.0.0.3"));
-        expectedEndpoints.get(KEYSPACE3).putAll(new BigIntegerToken("95"), makeAddrs("127.0.0.10", "127.0.0.1", "127.0.0.2", "127.0.0.3", "127.0.0.4"));
+        expectedEndpoints.get(KEYSPACE3).putAll(new Murmur3Partitioner.LongToken(5), makeAddrs("127.0.0.2", "127.0.0.3", "127.0.0.4", "127.0.0.5", "127.0.0.6"));
+        expectedEndpoints.get(KEYSPACE3).putAll(new Murmur3Partitioner.LongToken(15), makeAddrs("127.0.0.3", "127.0.0.4", "127.0.0.5", "127.0.0.6", "127.0.0.7", "127.0.1.1"));
+        expectedEndpoints.get(KEYSPACE3).putAll(new Murmur3Partitioner.LongToken(25), makeAddrs("127.0.0.4", "127.0.0.5", "127.0.0.6", "127.0.0.7", "127.0.0.8", "127.0.1.1"));
+        expectedEndpoints.get(KEYSPACE3).putAll(new Murmur3Partitioner.LongToken(35), makeAddrs("127.0.0.5", "127.0.0.6", "127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.1.1", "127.0.1.2"));
+        expectedEndpoints.get(KEYSPACE3).putAll(new Murmur3Partitioner.LongToken(45), makeAddrs("127.0.0.6", "127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.0.10", "127.0.1.1", "127.0.1.2"));
+        expectedEndpoints.get(KEYSPACE3).putAll(new Murmur3Partitioner.LongToken(55), makeAddrs("127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.0.10", "127.0.0.1", "127.0.1.1", "127.0.1.2"));
+        expectedEndpoints.get(KEYSPACE3).putAll(new Murmur3Partitioner.LongToken(65), makeAddrs("127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.0.10", "127.0.0.1", "127.0.1.2"));
+        expectedEndpoints.get(KEYSPACE3).putAll(new Murmur3Partitioner.LongToken(75), makeAddrs("127.0.0.9", "127.0.0.10", "127.0.0.1", "127.0.0.2", "127.0.0.3", "127.0.1.2"));
+        expectedEndpoints.get(KEYSPACE3).putAll(new Murmur3Partitioner.LongToken(85), makeAddrs("127.0.0.9", "127.0.0.10", "127.0.0.1", "127.0.0.2", "127.0.0.3"));
+        expectedEndpoints.get(KEYSPACE3).putAll(new Murmur3Partitioner.LongToken(95), makeAddrs("127.0.0.10", "127.0.0.1", "127.0.0.2", "127.0.0.3", "127.0.0.4"));
         expectedEndpoints.put(Simple_RF3_KeyspaceName, HashMultimap.<Token, InetAddress>create());
-        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new BigIntegerToken("5"), makeAddrs("127.0.0.2", "127.0.0.3", "127.0.0.4"));
-        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new BigIntegerToken("15"), makeAddrs("127.0.0.3", "127.0.0.4", "127.0.0.5"));
-        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new BigIntegerToken("25"), makeAddrs("127.0.0.4", "127.0.0.5", "127.0.0.6"));
-        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new BigIntegerToken("35"), makeAddrs("127.0.0.5", "127.0.0.6", "127.0.0.7", "127.0.1.1"));
-        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new BigIntegerToken("45"), makeAddrs("127.0.0.6", "127.0.0.7", "127.0.0.8", "127.0.1.1"));
-        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new BigIntegerToken("55"), makeAddrs("127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.1.1", "127.0.1.2"));
-        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new BigIntegerToken("65"), makeAddrs("127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.1.2"));
-        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new BigIntegerToken("75"), makeAddrs("127.0.0.9", "127.0.0.10", "127.0.0.1", "127.0.1.2"));
-        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new BigIntegerToken("85"), makeAddrs("127.0.0.9", "127.0.0.10", "127.0.0.1"));
-        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new BigIntegerToken("95"), makeAddrs("127.0.0.10", "127.0.0.1", "127.0.0.2"));
+        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(5), makeAddrs("127.0.0.2", "127.0.0.3", "127.0.0.4"));
+        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(15), makeAddrs("127.0.0.3", "127.0.0.4", "127.0.0.5"));
+        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(25), makeAddrs("127.0.0.4", "127.0.0.5", "127.0.0.6"));
+        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(35), makeAddrs("127.0.0.5", "127.0.0.6", "127.0.0.7", "127.0.1.1"));
+        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(45), makeAddrs("127.0.0.6", "127.0.0.7", "127.0.0.8", "127.0.1.1"));
+        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(55), makeAddrs("127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.1.1", "127.0.1.2"));
+        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(65), makeAddrs("127.0.0.7", "127.0.0.8", "127.0.0.9", "127.0.1.2"));
+        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(75), makeAddrs("127.0.0.9", "127.0.0.10", "127.0.0.1", "127.0.1.2"));
+        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(85), makeAddrs("127.0.0.9", "127.0.0.10", "127.0.0.1"));
+        expectedEndpoints.get(Simple_RF3_KeyspaceName).putAll(new Murmur3Partitioner.LongToken(95), makeAddrs("127.0.0.10", "127.0.0.1", "127.0.0.2"));
 
         for (Map.Entry<String, AbstractReplicationStrategy> keyspaceStrategy : keyspaceStrategyMap.entrySet())
         {
@@ -965,7 +961,6 @@ public class MoveTest
     {
         StorageService ss = StorageService.instance;
         TokenMetadata tmd = ss.getTokenMetadata();
-        IPartitioner partitioner = RandomPartitioner.instance;
         VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
 
         ArrayList<Token> endpointTokens = new ArrayList<Token>();
@@ -1022,7 +1017,7 @@ public class MoveTest
 
     private Token positionToken(int position)
     {
-        return new BigIntegerToken(String.valueOf(10 * position + 7));
+        return new Murmur3Partitioner.LongToken((10 * position + 7));
     }
 
     private int collectionSize(Collection<?> collection)
@@ -1059,6 +1054,6 @@ public class MoveTest
 
     private Range<Token> generateRange(int left, int right)
     {
-        return new Range<Token>(new BigIntegerToken(String.valueOf(left)), new BigIntegerToken(String.valueOf(right)));
+        return new Range<Token>(new Murmur3Partitioner.LongToken(left), new Murmur3Partitioner.LongToken(right));
     }
 }

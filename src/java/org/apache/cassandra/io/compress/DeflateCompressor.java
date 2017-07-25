@@ -223,7 +223,6 @@ public class DeflateCompressor implements ICompressor
 
     public BufferType preferredBufferType()
     {
-        // Prefer array-backed buffers.
         return BufferType.ON_HEAP;
     }
 }

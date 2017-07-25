@@ -17,13 +17,16 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Scheduler;
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.messages.ResultMessage;
 
 public class UseStatement extends ParsedStatement implements CQLStatement
 {
@@ -53,16 +56,21 @@ public class UseStatement extends ParsedStatement implements CQLStatement
     {
     }
 
-    public ResultMessage execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException
+    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException
     {
         state.getClientState().setKeyspace(keyspace);
-        return new ResultMessage.SetKeyspace(keyspace);
+        return Single.just(new ResultMessage.SetKeyspace(keyspace));
     }
 
-    public ResultMessage executeInternal(QueryState state, QueryOptions options) throws InvalidRequestException
+    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options) throws InvalidRequestException
     {
         // In production, internal queries are exclusively on the system keyspace and 'use' is thus useless
         // but for some unit tests we need to set the keyspace (e.g. for tests with DROP INDEX)
         return execute(state, options, System.nanoTime());
+    }
+
+    public Scheduler getScheduler()
+    {
+        return Schedulers.io();
     }
 }

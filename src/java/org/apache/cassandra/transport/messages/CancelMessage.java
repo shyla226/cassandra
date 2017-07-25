@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.List;
 
 import io.netty.buffer.ByteBuf;
+import io.reactivex.Single;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.ResultSet;
@@ -108,7 +109,7 @@ public class CancelMessage extends Message.Request
         this.id = id;
     }
 
-    public Response execute(QueryState queryState, long queryStartNanoTime)
+    public Single<Response> execute(QueryState queryState, long queryStartNanoTime)
     {
         if (operationType != OperationType.CONTINOUS_PAGING)
             throw new InvalidRequestException(String.format("Unknown operation type: %s", operationType));
@@ -117,12 +118,12 @@ public class CancelMessage extends Message.Request
         {
             boolean res = ContinuousPagingService.cancel(queryState, id);
             List<List<ByteBuffer>> rows = Collections.singletonList(Collections.singletonList(BooleanType.instance.decompose(res)));
-            return new ResultMessage.Rows(new ResultSet(RESULT_METADATA, rows));
+            return Single.just(new ResultMessage.Rows(new ResultSet(RESULT_METADATA, rows)));
         }
         catch (Throwable t)
         {
             JVMStabilityInspector.inspectThrowable(t);
-            return ErrorMessage.fromException(t);
+            return Single.just(ErrorMessage.fromException(t));
         }
     }
 }

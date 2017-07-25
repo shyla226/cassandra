@@ -26,6 +26,8 @@ import java.util.function.BooleanSupplier;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.*;
+import io.reactivex.*;
+import io.reactivex.Observable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -149,6 +151,7 @@ public abstract class AbstractCommitLogSegmentManager
 
         shutdown = false;
         managerThread = NamedThreadFactory.createThread(runnable, "COMMIT-LOG-ALLOCATOR");
+        managerThread.setDaemon(true);
         managerThread.start();
 
         // for simplicity, ensure the first segment is allocated before continuing
@@ -184,7 +187,7 @@ public abstract class AbstractCommitLogSegmentManager
     /**
      * Allocate a segment within this CLSM. Should either succeed or throw.
      */
-    public abstract Allocation allocate(Mutation mutation, int size);
+    public abstract Single<Allocation> allocate(Mutation mutation, int size);
 
     /**
      * The recovery and replay process replays mutations into memtables and flushes them to disk. Individual CLSM
@@ -259,7 +262,7 @@ public abstract class AbstractCommitLogSegmentManager
     {
         do
         {
-            WaitQueue.Signal prepared = segmentPrepared.register(commitLog.metrics.waitingOnSegmentAllocation.timer());
+            WaitQueue.Signal prepared = segmentPrepared.register(Thread.currentThread(), commitLog.metrics.waitingOnSegmentAllocation.timer());
             if (availableSegment == null && allocatingFrom == currentAllocatingFrom)
                 prepared.awaitUninterruptibly();
             else
@@ -287,10 +290,10 @@ public abstract class AbstractCommitLogSegmentManager
         Keyspace.writeOrder.awaitNewBarrier();
 
         // flush and wait for all CFs that are dirty in segments up-to and including 'last'
-        Future<?> future = flushDataFrom(segmentsToRecycle, true);
+        Observable<CommitLogPosition> observable = flushDataFrom(segmentsToRecycle, true);
         try
         {
-            future.get();
+            observable.blockingLast(CommitLogPosition.NONE);
 
             for (CommitLogSegment segment : activeSegments)
                 for (TableId tableId : droppedTables)
@@ -361,14 +364,15 @@ public abstract class AbstractCommitLogSegmentManager
      *
      * @return a Future that will finish when all the flushes are complete.
      */
-    private Future<?> flushDataFrom(List<CommitLogSegment> segments, boolean force)
+    private Observable<CommitLogPosition> flushDataFrom(List<CommitLogSegment> segments, boolean force)
     {
         if (segments.isEmpty())
-            return Futures.immediateFuture(null);
+            return Observable.just(CommitLogPosition.NONE);
+
         final CommitLogPosition maxCommitLogPosition = segments.get(segments.size() - 1).getCurrentCommitLogPosition();
 
         // a map of CfId -> forceFlush() to ensure we only queue one flush per cf
-        final Map<TableId, ListenableFuture<?>> flushes = new LinkedHashMap<>();
+        final Map<TableId, Observable<CommitLogPosition>> flushes = new LinkedHashMap<>();
 
         for (CommitLogSegment segment : segments)
         {
@@ -387,12 +391,12 @@ public abstract class AbstractCommitLogSegmentManager
                     final ColumnFamilyStore cfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(dirtyTableId);
                     // can safely call forceFlush here as we will only ever block (briefly) for other attempts to flush,
                     // no deadlock possibility since switchLock removal
-                    flushes.put(dirtyTableId, force ? cfs.forceFlush() : cfs.forceFlush(maxCommitLogPosition));
+                    flushes.put(dirtyTableId, force ? cfs.forceFlush().toObservable() : cfs.forceFlush(maxCommitLogPosition).toObservable());
                 }
             }
         }
 
-        return Futures.allAsList(flushes.values());
+        return Observable.concat(flushes.values());
     }
 
     /**

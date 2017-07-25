@@ -27,6 +27,7 @@ import java.util.stream.StreamSupport;
 
 import org.apache.commons.cli.*;
 
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -66,6 +67,7 @@ public class SSTableExport
     static
     {
         DatabaseDescriptor.toolInitialization();
+        TPC.ensureInitialized();
 
         Option optKey = new Option(KEY_OPTION, true, "Partition key");
         // Number of times -k <key> can be passed on the command line.
@@ -253,7 +255,7 @@ public class SSTableExport
                         partition.forEachRemaining(row ->
                         {
                             System.out.println(
-                            "[" + metadata.partitionKeyType.getString(partition.partitionKey().getKey()) + "]@"
+                                    "[" + metadata.partitionKeyType.getString(partition.partitionKey().getKey()) + "]@"
                             + position.get() + " " + row.toString(metadata, false, true));
                             position.set(currentScanner.getCurrentPosition());
                         });

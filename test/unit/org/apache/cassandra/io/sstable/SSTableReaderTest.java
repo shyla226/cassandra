@@ -32,13 +32,14 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.LocalPartitioner.LocalToken;
 import org.apache.cassandra.dht.Range;
@@ -46,6 +47,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -148,7 +150,7 @@ public class SSTableReaderTest
         for (int j = 0; j < 100; j += 2)
         {
             DecoratedKey dk = Util.dk(String.valueOf(j));
-            FileDataInput file = sstable.getFileDataInput(sstable.getPosition(dk, SSTableReader.Operator.EQ).position);
+            FileDataInput file = sstable.getFileDataInput(sstable.getPosition(dk, SSTableReader.Operator.EQ).position, Rebufferer.ReaderConstraint.NONE);
             DecoratedKey keyInDisk = sstable.decorateKey(ByteBufferUtil.readWithShortLength(file));
             assert keyInDisk.equals(dk) : String.format("%s != %s in %s", keyInDisk, dk, file.getPath());
         }
@@ -241,19 +243,37 @@ public class SSTableReaderTest
         store.forceBlockingFlush();
         CompactionManager.instance.performMaximal(store, false);
 
+        Token left = t(2);
+        Token right = t(6);
+        if (left.compareTo(right) > 0)
+        {
+            Token t = left;
+            left = right;
+            right = t;
+        }
+
+        PartitionPosition kl = partitioner.getMaximumToken().maxKeyBound();
+        PartitionPosition kr = kl;
+        for (int i = 0; i < 10; ++i)
+        {
+            DecoratedKey kk = k(i);
+            if (kk.compareTo(left.maxKeyBound()) > 0 && kk.compareTo(kl) < 0)
+                kl = kk;
+            if (kk.compareTo(right.maxKeyBound()) > 0 && kk.compareTo(kr) < 0)
+                kr = kk;
+        }
+
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
-        long p2 = sstable.getPosition(k(2), SSTableReader.Operator.EQ).position;
-        long p3 = sstable.getPosition(k(3), SSTableReader.Operator.EQ).position;
-        long p6 = sstable.getPosition(k(6), SSTableReader.Operator.EQ).position;
-        long p7 = sstable.getPosition(k(7), SSTableReader.Operator.EQ).position;
+        long pl = sstable.getPosition(kl, SSTableReader.Operator.EQ).position;
+        long pr = sstable.getPosition(kr, SSTableReader.Operator.EQ).position;
 
-        Pair<Long, Long> p = sstable.getPositionsForRanges(makeRanges(t(2), t(6))).get(0);
+        Pair<Long, Long> p = sstable.getPositionsForRanges(makeRanges(left, right)).get(0);
 
-        // range are start exclusive so we should start at 3
-        assert p.left == p3;
+        // range are start exclusive so we should start at 3 (for ByteOrderedPartitioner)
+        assertEquals(pl, p.left.longValue());
 
-        // to capture 6 we have to stop at the start of 7
-        assert p.right == p7;
+        // to capture 6 we have to stop at the start of 7 (for ByteOrderedPartitioner)
+        assertEquals(pr, p.right.longValue());
     }
 
     @Test
@@ -322,13 +342,10 @@ public class SSTableReaderTest
         for (int i = 0; i < store.metadata().params.minIndexInterval; i++)
         {
             DecoratedKey key = Util.dk(String.valueOf(i));
-            if (firstKey == null)
+            if (firstKey == null || key.compareTo(firstKey) < 0)
                 firstKey = key;
-            if (lastKey == null)
+            if (lastKey == null || lastKey.compareTo(key) < 0)
                 lastKey = key;
-            if (store.metadata().partitionKeyType.compare(lastKey.getKey(), key.getKey()) < 0)
-                lastKey = key;
-
 
             new RowUpdateBuilder(store.metadata(), timestamp, key.getKey())
                 .clustering("col")
@@ -344,9 +361,9 @@ public class SSTableReaderTest
 
         // test to see if sstable can be opened as expected
         SSTableReader target = SSTableReader.open(desc);
-        Assert.assertEquals(firstKey, target.keyAt(0));
-        assert target.first.equals(firstKey);
-        assert target.last.equals(lastKey);
+        Assert.assertEquals(firstKey, target.keyAt(0, Rebufferer.ReaderConstraint.NONE));
+        assertEquals(firstKey, target.first);
+        assertEquals(lastKey, target.last);
         target.selfRef().release();
     }
 
@@ -462,7 +479,9 @@ public class SSTableReaderTest
         assertNotNull(searcher);
         try (ReadExecutionController executionController = rc.executionController())
         {
-            assertEquals(1, Util.size(UnfilteredPartitionIterators.filter(searcher.search(executionController), rc.nowInSec())));
+            Flow<FlowableUnfilteredPartition> partitions = searcher.search(executionController);
+            assertEquals(1,
+                         Util.size(partitions, rc.nowInSec()));
         }
     }
 

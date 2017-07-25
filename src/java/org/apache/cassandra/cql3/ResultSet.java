@@ -38,6 +38,7 @@ import org.apache.cassandra.transport.*;
 
 public class ResultSet
 {
+    private static final int INITIAL_ROWS_CAPACITY = 16;
     public static final Codec codec = new Codec();
 
     public final ResultMetadata metadata;
@@ -45,7 +46,7 @@ public class ResultSet
 
     public ResultSet(List<ColumnSpecification> metadata)
     {
-        this(new ResultMetadata(metadata), new ArrayList<>());
+        this(new ResultMetadata(metadata), new ArrayList<>(INITIAL_ROWS_CAPACITY));
     }
 
     public ResultSet(ResultMetadata metadata, List<List<ByteBuffer>> rows)
@@ -784,7 +785,7 @@ public class ResultSet
         public Builder(ResultSet.ResultMetadata resultMetadata, Selection.Selectors selectors, GroupMaker groupMaker)
         {
             super(selectors, groupMaker);
-            this.resultSet = new ResultSet(resultMetadata, new ArrayList<>());
+            this.resultSet = new ResultSet(resultMetadata, new ArrayList<>(INITIAL_ROWS_CAPACITY));
         }
 
         public boolean onRowCompleted(List<ByteBuffer> row, boolean nextRowPending)

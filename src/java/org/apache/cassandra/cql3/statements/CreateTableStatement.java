@@ -22,6 +22,8 @@ import java.util.*;
 import java.util.regex.Pattern;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
+
+import io.reactivex.Maybe;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.auth.*;
@@ -81,22 +83,20 @@ public class CreateTableStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
-        try
-        {
-            if (params.compaction.klass().equals(DateTieredCompactionStrategy.class))
-                DateTieredCompactionStrategy.deprecatedWarning(keyspace(), columnFamily());
+        if (params.compaction.klass().equals(DateTieredCompactionStrategy.class))
+            DateTieredCompactionStrategy.deprecatedWarning(keyspace(), columnFamily());
 
-            MigrationManager.announceNewTable(toTableMetadata(), isLocalOnly);
-            return new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily());
-        }
-        catch (AlreadyExistsException e)
-        {
-            if (ifNotExists)
-                return null;
-            throw e;
-        }
+        return MigrationManager.announceNewTable(toTableMetadata(), isLocalOnly)
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
+                               .onErrorResumeNext(e ->
+                                                  {
+                                                      if (e instanceof AlreadyExistsException && ifNotExists)
+                                                          return Maybe.empty();
+
+                                                      return Maybe.error(e);
+                                                  });
     }
 
     protected void grantPermissionsToCreator(QueryState state)

@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -127,7 +128,7 @@ public class SinglePartitionSliceCommandTest
                                                             sliceFilter);
 
         // check raw iterator for static cell
-        try (ReadExecutionController executionController = cmd.executionController(); UnfilteredPartitionIterator pi = cmd.executeLocally(executionController))
+        try (UnfilteredPartitionIterator pi = cmd.executeForTests())
         {
             checkForS(pi);
         }
@@ -138,10 +139,8 @@ public class SinglePartitionSliceCommandTest
         ReadResponse dst;
 
         // check (de)serialized iterator for memtable static cell
-        try (ReadExecutionController executionController = cmd.executionController(); UnfilteredPartitionIterator pi = cmd.executeLocally(executionController))
-        {
-            response = ReadResponse.createDataResponse(pi, cmd);
-        }
+        cmd = cmd.withUpdatedLimit(cmd.limits());   // duplicate command as they are not reusable
+        response = ReadResponse.createDataResponse(cmd.executeLocally(), cmd, false).blockingGet();
 
         ReadVersion version = Version.last(ReadVersion.class);
 
@@ -149,22 +148,21 @@ public class SinglePartitionSliceCommandTest
         ReadResponse.serializers.get(version).serialize(response, out);
         in = new DataInputBuffer(out.buffer(), true);
         dst = ReadResponse.serializers.get(version).deserialize(in);
-        try (UnfilteredPartitionIterator pi = dst.makeIterator(cmd))
+        try (UnfilteredPartitionIterator pi = FlowablePartitions.toPartitions(dst.data(cmd), cmd.metadata()))
         {
             checkForS(pi);
         }
 
         // check (de)serialized iterator for sstable static cell
         Schema.instance.getColumnFamilyStoreInstance(metadata.id).forceBlockingFlush();
-        try (ReadExecutionController executionController = cmd.executionController(); UnfilteredPartitionIterator pi = cmd.executeLocally(executionController))
-        {
-            response = ReadResponse.createDataResponse(pi, cmd);
-        }
+        cmd = cmd.withUpdatedLimit(cmd.limits());   // duplicate command as they are not reusable
+        response = ReadResponse.createDataResponse(cmd.executeLocally(), cmd, false).blockingGet();
+
         out = new DataOutputBuffer(Math.toIntExact(ReadResponse.serializers.get(version).serializedSize(response)));
         ReadResponse.serializers.get(version).serialize(response, out);
         in = new DataInputBuffer(out.buffer(), true);
         dst = ReadResponse.serializers.get(version).deserialize(in);
-        try (UnfilteredPartitionIterator pi = dst.makeIterator(cmd))
+        try (UnfilteredPartitionIterator pi = FlowablePartitions.toPartitions(dst.data(cmd), cmd.metadata()))
         {
             checkForS(pi);
         }

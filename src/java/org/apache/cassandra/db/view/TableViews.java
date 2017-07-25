@@ -26,6 +26,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.*;
@@ -120,26 +121,24 @@ public class TableViews extends AbstractCollection<View>
      * @param writeCommitLog whether we should write the commit log for the view updates.
      * @param baseComplete time from epoch in ms that the local base mutation was (or will be) completed
      */
-    public void pushViewReplicaUpdates(PartitionUpdate update, boolean writeCommitLog, AtomicLong baseComplete)
+    public Completable pushViewReplicaUpdates(PartitionUpdate update, boolean writeCommitLog, AtomicLong baseComplete)
     {
         assert update.metadata().id.equals(baseTableMetadata.id);
 
         Collection<View> views = updatedViews(update);
         if (views.isEmpty())
-            return;
+            return Completable.complete();
 
         // Read modified rows
         int nowInSec = FBUtilities.nowInSeconds();
         long queryStartNanoTime = System.nanoTime();
         SinglePartitionReadCommand command = readExistingRowsCommand(update, views, nowInSec);
         if (command == null)
-            return;
+            return Completable.complete();
 
-        ColumnFamilyStore cfs = Keyspace.openAndGetStore(update.metadata());
         long start = System.nanoTime();
         Collection<Mutation> mutations;
-        try (ReadExecutionController orderGroup = command.executionController();
-             UnfilteredRowIterator existings = UnfilteredPartitionIterators.getOnlyElement(command.executeLocally(orderGroup), command);
+        try (UnfilteredRowIterator existings = UnfilteredPartitionIterators.getOnlyElement(command.executeForTests(), command);
              UnfilteredRowIterator updates = update.unfilteredIterator())
         {
             mutations = Iterators.getOnlyElement(generateViewUpdates(views, updates, existings, nowInSec, false));
@@ -147,7 +146,9 @@ public class TableViews extends AbstractCollection<View>
         Keyspace.openAndGetStore(update.metadata()).metric.viewReadTime.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
 
         if (!mutations.isEmpty())
-            StorageProxy.mutateMV(update.partitionKey().getKey(), mutations, writeCommitLog, baseComplete, queryStartNanoTime);
+            return StorageProxy.mutateMV(update.partitionKey().getKey(), mutations, writeCommitLog, baseComplete, queryStartNanoTime);
+        else
+            return Completable.complete();
     }
 
 

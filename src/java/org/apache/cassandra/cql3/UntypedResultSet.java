@@ -22,21 +22,27 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscription;
 
 /** a utility for doing internal cql-based queries */
 public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 {
+    public static final UntypedResultSet EMPTY = create(Collections.emptyList());
+
     public static UntypedResultSet create(ResultSet rs)
     {
         return new FromResultSet(rs);
@@ -59,6 +65,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
     public abstract int size();
     public abstract Row one();
+    public abstract Flow<Row> rows();
 
     // No implemented by all subclasses, but we use it when we know it's there (for tests)
     public abstract List<ColumnSpecification> metadata();
@@ -82,6 +89,12 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             if (cqlRows.size() != 1)
                 throw new IllegalStateException("One row required, " + cqlRows.size() + " found");
             return new Row(cqlRows.metadata.requestNames(), cqlRows.rows.get(0));
+        }
+
+        public Flow<Row> rows()
+        {
+            final List<ColumnSpecification> columns = cqlRows.metadata.requestNames();
+            return Flow.fromIterable(cqlRows.rows).map(r -> new Row(columns, r));
         }
 
         public Iterator<Row> iterator()
@@ -124,6 +137,11 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             if (cqlRows.size() != 1)
                 throw new IllegalStateException("One row required, " + cqlRows.size() + " found");
             return new Row(cqlRows.get(0));
+        }
+
+        public Flow<Row> rows()
+        {
+            return Flow.fromIterable(cqlRows).map(r -> new Row(r));
         }
 
         public Iterator<Row> iterator()
@@ -172,8 +190,77 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             throw new UnsupportedOperationException();
         }
 
+        public Flow<Row> rows()
+        {
+            class Subscription extends Flow.RequestLoop implements FlowSubscription
+            {
+                private Iterator<List<ByteBuffer>> currentPage;
+                private final int nowInSec = FBUtilities.nowInSeconds();
+                private final FlowSubscriber<Row> subscriber;
+
+                Subscription(FlowSubscriber<Row> subscriber)
+                {
+                    this.subscriber = subscriber;
+                }
+
+                public void request()
+                {
+                    if (currentPage == null || !currentPage.hasNext())
+                        nextPage();
+                    else
+                        subscriber.onNext(new Row(metadata, currentPage.next()));
+                }
+
+                private void nextPage()
+                {
+                    if (pager.isExhausted())
+                        subscriber.onComplete();
+                    else
+                        select.process(pager.fetchPageInternal(pageSize), nowInSec)
+                              .map(resultSet -> resultSet.rows)
+                              .subscribe(this::onRows, this::onError);
+                }
+
+                private void onRows(List<List<ByteBuffer>> rows)
+                {
+                    currentPage = rows.iterator();
+
+                    if (!currentPage.hasNext())
+                        requestInLoop(this);
+                    else
+                        subscriber.onNext(new Row(metadata, currentPage.next()));
+                }
+
+                private void onError(Throwable error)
+                {
+                    subscriber.onError(error);
+                }
+
+                public void close() throws Exception
+                {
+                    // nothing to release
+                }
+
+                public Throwable addSubscriberChainFromSource(Throwable throwable)
+                {
+                    return Flow.wrapException(throwable, this);
+                }
+            }
+
+            return new Flow<Row>()
+            {
+                public FlowSubscription subscribe(FlowSubscriber<Row> subscriber) throws Exception
+                {
+                   return new Subscription(subscriber);
+                }
+            };
+        }
+
         public Iterator<Row> iterator()
         {
+            if (TPC.isTPCThread())
+                throw new TPCUtils.WouldBlockException("Iterating would block a TPC thread");
+
             return new AbstractIterator<Row>()
             {
                 private Iterator<List<ByteBuffer>> currentPage;
@@ -186,11 +273,9 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
                         if (pager.isExhausted())
                             return endOfData();
 
-                        try (ReadExecutionController executionController = pager.executionController();
-                             PartitionIterator iter = pager.fetchPageInternal(pageSize, executionController))
-                        {
-                            currentPage = select.process(iter, nowInSec).rows.iterator();
-                        }
+                        Flow<FlowablePartition> iter = pager.fetchPageInternal(pageSize);
+                        currentPage = select.process(iter, nowInSec).blockingGet().rows.iterator(); // iter will be closed by select.process()
+
                     }
                     return new Row(metadata, currentPage.next());
                 }

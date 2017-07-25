@@ -17,11 +17,19 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Single;
+
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.auth.AuthenticatedUser;
+import org.apache.cassandra.auth.RoleOptions;
+import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -40,6 +48,12 @@ public class CreateRoleStatement extends AuthenticationStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
+        // validate login first to avoid leaking role existence to anonymous users.
+        state.ensureNotAnonymous();
+
+        if (!ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
+            throw new InvalidRequestException(String.format("%s already exists", role.getRoleName()));
+
         super.checkPermission(state, CorePermission.CREATE, RoleResource.root());
         if (opts.getSuperuser().isPresent())
         {
@@ -55,22 +69,19 @@ public class CreateRoleStatement extends AuthenticationStatement
         if (role.getRoleName().isEmpty())
             throw new InvalidRequestException("Role name can't be an empty string");
 
-        // validate login here before checkAccess to avoid leaking role existence to anonymous users.
-        state.ensureNotAnonymous();
-
-        if (!ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            throw new InvalidRequestException(String.format("%s already exists", role.getRoleName()));
     }
 
-    public ResultMessage execute(ClientState state) throws RequestExecutionException, RequestValidationException
+    public Single<ResultMessage> execute(ClientState state) throws RequestExecutionException, RequestValidationException
     {
-        // not rejected in validate()
-        if (ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            return null;
+        return Single.fromCallable(() -> {
+            // not rejected in validate()
+            if (ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
+                return new ResultMessage.Void();
 
-        DatabaseDescriptor.getRoleManager().createRole(state.getUser(), role, opts);
-        grantPermissionsToCreator(state);
-        return null;
+            DatabaseDescriptor.getRoleManager().createRole(state.getUser(), role, opts);
+            grantPermissionsToCreator(state);
+            return (ResultMessage)(new ResultMessage.Void());
+        });
     }
 
     /**

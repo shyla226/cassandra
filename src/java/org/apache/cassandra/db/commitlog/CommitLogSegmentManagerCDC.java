@@ -31,13 +31,13 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLogSegment.CDCState;
-import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.DirectorySizeCalculator;
-import org.apache.cassandra.utils.NoSpamLogger;
 
 public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
 {
@@ -92,25 +92,46 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
      * @throws CDCSegmentFullException If segment disallows CDC mutations because it is full
      */
     @Override
-    public CommitLogSegment.Allocation allocate(Mutation mutation, int size) throws CDCSegmentFullException
+    public Single<CommitLogSegment.Allocation> allocate(Mutation mutation, int size) throws CDCSegmentFullException
     {
-        CommitLogSegment segment = allocatingFrom();
-        CommitLogSegment.Allocation alloc;
-
-        throwIfForbidden(mutation, segment);
-        while ( null == (alloc = segment.allocate(mutation, size)) )
-        {
-            // Failed to allocate, so move to a new segment with enough room if possible.
-            advanceAllocatingFrom(segment);
-            segment = allocatingFrom();
-
+        return Single.defer(() -> {
+            CommitLogSegment segment = allocatingFrom();
             throwIfForbidden(mutation, segment);
-        }
 
-        if (mutation.trackedByCDC())
-            segment.setCDCState(CDCState.CONTAINS);
+            if (logger.isTraceEnabled())
+                logger.trace("Allocating mutation of size {} on segment {} with space {}", size, segment.id, segment.availableSize());
 
-        return alloc;
+            CommitLogSegment.Allocation alloc = segment.allocate(mutation, size);
+            if (alloc != null)
+            {
+                if (mutation.trackedByCDC())
+                    segment.setCDCState(CDCState.CONTAINS);
+                return Single.just(alloc);
+            }
+
+            // failed to allocate, so move to a new segment with enough room
+            return Single.fromCallable(() -> {
+                if (logger.isTraceEnabled())
+                    logger.trace("Waiting for segment allocation...");
+                CommitLogSegment.Allocation nalloc;
+                CommitLogSegment nsegment = segment;
+                do
+                {
+                    advanceAllocatingFrom(nsegment);
+                    nsegment = allocatingFrom();
+                    throwIfForbidden(mutation, nsegment);
+                }
+                while ((nalloc = nsegment.allocate(mutation, size)) == null);
+
+                if (logger.isTraceEnabled())
+                    logger.trace("Returning segment allocated {}", nalloc);
+
+                if (mutation.trackedByCDC())
+                    nsegment.setCDCState(CDCState.CONTAINS);
+                return nalloc;
+            }).subscribeOn(Schedulers.io()) // Do blocking on IO Sched, continue on TPC thread
+              .observeOn(mutation.getScheduler());
+        });
     }
 
     private void throwIfForbidden(Mutation mutation, CommitLogSegment segment) throws CDCSegmentFullException

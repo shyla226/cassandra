@@ -66,7 +66,8 @@ public class StartupChecksTest
     @After
     public void tearDown() throws IOException
     {
-        FileUtils.deleteRecursive(sstableDir.toFile());
+        if (sstableDir != null)
+            FileUtils.deleteRecursive(sstableDir.toFile());
     }
 
     @Test

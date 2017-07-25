@@ -22,6 +22,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -60,12 +61,16 @@ class ReadRepairFuture extends CompletableFuture<Void>
     @Override
     public Void get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException
     {
+        throw new UnsupportedOperationException();
+    }
+
+    public CompletableFuture<Void> whenComplete(BiConsumer<? super Void, ? super Throwable> action) {
         // It's possible we sent no repair at all, so if we're at 0 when we call this, force the future to complete.
         // Note that if we did send repairs and they simply alread all returned, this is a no-op which is fine.
         if (outstandingRepairs.get() == 0)
             complete(null);
 
-        return super.get(timeout, unit);
+        return super.whenComplete(action);
     }
 
     MessageCallback<EmptyPayload> newRepairMessageCallback()
@@ -75,8 +80,7 @@ class ReadRepairFuture extends CompletableFuture<Void>
         {
             public void onResponse(Response<EmptyPayload> response)
             {
-                if (outstandingRepairs.decrementAndGet() == 0)
-                    complete(null);
+                ReadRepairFuture.this.onResponse();
             }
 
             public void onFailure(FailureResponse<EmptyPayload> response)
@@ -93,9 +97,9 @@ class ReadRepairFuture extends CompletableFuture<Void>
     }
 
     @VisibleForTesting
-    void releaseUnsafe()
+    void onResponse()
     {
-        outstandingRepairs.set(0);
-        complete(null);
+        if (outstandingRepairs.decrementAndGet() == 0)
+            complete(null);
     }
 }

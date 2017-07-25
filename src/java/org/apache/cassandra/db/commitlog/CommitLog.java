@@ -26,6 +26,7 @@ import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 import com.google.common.annotations.VisibleForTesting;
+import io.reactivex.Single;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -240,11 +241,11 @@ public class CommitLog implements CommitLogMBean
      * @param mutation the Mutation to add to the log
      * @throws WriteTimeoutException
      */
-    public CommitLogPosition add(Mutation mutation) throws WriteTimeoutException
+    public Single<CommitLogPosition> add(Mutation mutation) throws WriteTimeoutException
     {
         assert mutation != null;
 
-        try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
+        try (DataOutputBuffer dob = DataOutputBuffer.RECYCLER.get())
         {
             Mutation.rawSerializers.get(CommitLogDescriptor.current_version.encodingVersion).serialize(mutation, dob);
             int size = dob.getLength();
@@ -252,42 +253,44 @@ public class CommitLog implements CommitLogMBean
             int totalSize = size + ENTRY_OVERHEAD_SIZE;
             if (totalSize > MAX_MUTATION_SIZE)
             {
-                throw new IllegalArgumentException(String.format("Mutation of %s is too large for the maximum size of %s",
-                                                                 FBUtilities.prettyPrintMemory(totalSize),
-                                                                 FBUtilities.prettyPrintMemory(MAX_MUTATION_SIZE)));
+                return Single.error(
+                new IllegalArgumentException(String.format("Mutation of %s is too large for the maximum size of %s",
+                                                           FBUtilities.prettyPrintMemory(totalSize),
+                                                           FBUtilities.prettyPrintMemory(MAX_MUTATION_SIZE))));
             }
 
-            Allocation alloc = segmentManager.allocate(mutation, totalSize);
+            return segmentManager.allocate(mutation, totalSize)
+                                 .flatMap(alloc ->
+                                          {
+                                              CRC32 checksum = new CRC32();
+                                              final ByteBuffer buffer = alloc.getBuffer();
+                                              try (BufferedDataOutputStreamPlus dos = new DataOutputBufferFixed(buffer))
+                                              {
+                                                  // checksummed length
+                                                  dos.writeInt(size);
+                                                  updateChecksumInt(checksum, size);
+                                                  buffer.putInt((int) checksum.getValue());
 
-            CRC32 checksum = new CRC32();
-            final ByteBuffer buffer = alloc.getBuffer();
-            try (BufferedDataOutputStreamPlus dos = new DataOutputBufferFixed(buffer))
-            {
-                // checksummed length
-                dos.writeInt(size);
-                updateChecksumInt(checksum, size);
-                buffer.putInt((int) checksum.getValue());
+                                                  // checksummed mutation
+                                                  dos.write(dob.getData(), 0, size);
+                                                  updateChecksum(checksum, buffer, buffer.position() - size, size);
+                                                  buffer.putInt((int) checksum.getValue());
+                                              }
+                                              catch (Exception e)
+                                              {
+                                                  return Single.error(new FSWriteError(e, alloc.getSegment().getPath()));
+                                              }
+                                              finally
+                                              {
+                                                  alloc.markWritten();
+                                              }
 
-                // checksummed mutation
-                dos.write(dob.getData(), 0, size);
-                updateChecksum(checksum, buffer, buffer.position() - size, size);
-                buffer.putInt((int) checksum.getValue());
-            }
-            catch (IOException e)
-            {
-                throw new FSWriteError(e, alloc.getSegment().getPath());
-            }
-            finally
-            {
-                alloc.markWritten();
-            }
-
-            executor.finishWriteFor(alloc);
-            return alloc.getCommitLogPosition();
+                                              return executor.finishWriteFor(alloc).toSingle(alloc::getCommitLogPosition);
+                                          }).doFinally(dob::recycle);
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, segmentManager.allocatingFrom().getPath());
+            return Single.error(new FSWriteError(e, segmentManager.allocatingFrom().getPath()));
         }
     }
 
@@ -461,7 +464,7 @@ public class CommitLog implements CommitLogMBean
     @VisibleForTesting
     public static boolean handleCommitError(String message, Throwable t)
     {
-        JVMStabilityInspector.inspectCommitLogThrowable(t);
+        JVMStabilityInspector.inspectCommitLogThrowable(t, StorageService.instance.isDaemonSetupCompleted());
         switch (DatabaseDescriptor.getCommitFailurePolicy())
         {
             // Needed here for unit tests to not fail on default assertion

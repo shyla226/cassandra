@@ -28,6 +28,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -50,6 +52,7 @@ public class LongStreamingTest
     @BeforeClass
     public static void setup() throws Exception
     {
+        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
         DatabaseDescriptor.daemonInitialization();
 
         SchemaLoader.cleanupAndLeaveDirs();

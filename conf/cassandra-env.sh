@@ -295,6 +295,9 @@ JVM_OPTS="$JVM_OPTS -Djava.library.path=$CASSANDRA_HOME/lib/sigar-bin"
 # See max_memory_to_lock_fraction setting in cassandra.yaml for details.
 JVM_OPTS="$JVM_OPTS -Dsystem_memory_in_mb=$system_memory_in_mb"
 
+# Disable Agrona bounds check for extra performance
+JVM_OPTS="$JVM_OPTS -Dagrona.disable.bounds.checks=TRUE"
+
 JVM_OPTS="$JVM_OPTS $MX4J_ADDRESS"
 JVM_OPTS="$JVM_OPTS $MX4J_PORT"
 JVM_OPTS="$JVM_OPTS $JVM_EXTRA_OPTS"

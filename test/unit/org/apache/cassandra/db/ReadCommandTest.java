@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.google.common.collect.Lists;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -40,24 +41,22 @@ import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionIterators;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionsSerializer;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowablePartitions;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.SerializationHelper;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.util.DataInputBuffer;
-import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.versioning.Version;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.Assert.*;
 
 public class ReadCommandTest
 {
@@ -119,8 +118,7 @@ public class ReadCommandTest
 
         Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
 
-        try (ReadExecutionController executionController = readCommand.executionController(monitor);
-             PartitionIterator iterator = readCommand.executeInternal(executionController))
+        try (PartitionIterator iterator = FlowablePartitions.toPartitionsFiltered(readCommand.executeInternal(monitor)))
         {
             PartitionIterators.consume(iterator);
             fail("The command should have been aborted");
@@ -160,8 +158,8 @@ public class ReadCommandTest
 
         Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
 
-        try (ReadExecutionController executionController = readCommand.executionController(monitor);
-             PartitionIterator iterator = readCommand.executeInternal(executionController))
+        readCommand = readCommand.withUpdatedLimit(readCommand.limits());   // duplicate command as they are not reusable
+        try (PartitionIterator iterator = FlowablePartitions.toPartitionsFiltered(readCommand.executeInternal(monitor)))
         {
             PartitionIterators.consume(iterator);
             fail("The command should have been aborted");
@@ -201,8 +199,8 @@ public class ReadCommandTest
 
         Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
 
-        try (ReadExecutionController executionController = readCommand.executionController(monitor);
-             PartitionIterator iterator = readCommand.executeInternal(executionController))
+        readCommand = readCommand.withUpdatedLimit(readCommand.limits());   // duplicate command as they are not reusable
+        try (PartitionIterator iterator = FlowablePartitions.toPartitionsFiltered(readCommand.executeInternal(monitor)))
         {
             PartitionIterators.consume(iterator);
             fail("The command should have been aborted");
@@ -218,31 +216,31 @@ public class ReadCommandTest
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(CF3);
 
-        String[][][] groups = new String[][][] {
-            new String[][] {
-                new String[] { "1", "key1", "aa", "a" }, // "1" indicates to create the data, "-1" to delete the row
-                new String[] { "1", "key2", "bb", "b" },
-                new String[] { "1", "key3", "cc", "c" }
-            },
-            new String[][] {
-                new String[] { "1", "key3", "dd", "d" },
-                new String[] { "1", "key2", "ee", "e" },
-                new String[] { "1", "key1", "ff", "f" }
-            },
-            new String[][] {
-                new String[] { "1", "key6", "aa", "a" },
-                new String[] { "1", "key5", "bb", "b" },
-                new String[] { "1", "key4", "cc", "c" }
-            },
-            new String[][] {
-                new String[] { "-1", "key6", "aa", "a" },
-                new String[] { "-1", "key2", "bb", "b" }
-            }
+        String[][][] groups = new String[][][]{
+        new String[][]{
+        new String[]{ "1", "key1", "aa", "a" }, // "1" indicates to create the data, "-1" to delete the row
+        new String[]{ "1", "key2", "bb", "b" },
+        new String[]{ "1", "key3", "cc", "c" }
+        },
+        new String[][]{
+        new String[]{ "1", "key3", "dd", "d" },
+        new String[]{ "1", "key2", "ee", "e" },
+        new String[]{ "1", "key1", "ff", "f" }
+        },
+        new String[][]{
+        new String[]{ "1", "key6", "aa", "a" },
+        new String[]{ "1", "key5", "bb", "b" },
+        new String[]{ "1", "key4", "cc", "c" }
+        },
+        new String[][]{
+        new String[]{ "-1", "key6", "aa", "a" },
+        new String[]{ "-1", "key2", "bb", "b" }
+        }
         };
 
         // Given the data above, when the keys are sorted and the deletions removed, we should
         // get these clustering rows in this order
-        String[] expectedRows = new String[] { "aa", "ff", "ee", "cc", "dd", "cc", "bb"};
+        List<String> expectedRows = Lists.newArrayList("col=aa", "col=ff", "col=ee", "col=cc", "col=dd", "col=cc", "col=bb");
 
         List<ByteBuffer> buffers = new ArrayList<>(groups.length);
         int nowInSeconds = FBUtilities.nowInSeconds();
@@ -279,68 +277,50 @@ public class ReadCommandTest
 
             ReadQuery query = new SinglePartitionReadCommand.Group(commands, DataLimits.NONE);
 
-            try (ReadExecutionController executionController = query.executionController();
-                 UnfilteredPartitionIterator iter = query.executeLocally(executionController);
-                 DataOutputBuffer buffer = new DataOutputBuffer())
-            {
-                UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(iter, columnFilter, buffer);
-                buffers.add(buffer.buffer());
-            }
+            Flow<FlowableUnfilteredPartition> partitions = FlowablePartitions.skipEmptyPartitions(query.executeLocally());
+            UnfilteredPartitionsSerializer.Serializer serializer = UnfilteredPartitionsSerializer.serializerForIntraNode(version);
+            buffers.addAll(serializer.serialize(partitions, columnFilter).toList().blockingSingle());
         }
 
         // deserialize, merge and check the results are all there
-        List<UnfilteredPartitionIterator> iterators = new ArrayList<>();
+        List<Flow<FlowableUnfilteredPartition>> partitions = new ArrayList<>();
 
+        UnfilteredPartitionsSerializer.Serializer serializer = UnfilteredPartitionsSerializer.serializerForIntraNode(version);
         for (ByteBuffer buffer : buffers)
         {
-            try (DataInputBuffer in = new DataInputBuffer(buffer, true))
-            {
-                iterators.add(UnfilteredPartitionIterators.serializerForIntraNode(version).deserialize(in,
-                                                                                                       cfs.metadata(),
-                                                                                                       columnFilter,
-                                                                                                       SerializationHelper.Flag.LOCAL));
-            }
+            partitions.add(serializer.deserialize(buffer,
+                                                  cfs.metadata(),
+                                                  columnFilter,
+                                                  SerializationHelper.Flag.LOCAL));
         }
 
-        try(PartitionIterator partitionIterator = UnfilteredPartitionIterators.mergeAndFilter(iterators,
-                                                                                          nowInSeconds,
-                                                                                          new UnfilteredPartitionIterators.MergeListener()
+        Flow<FlowablePartition> merged = FlowablePartitions.mergeAndFilter(partitions,
+                                                                           nowInSeconds,
+                                                                           FlowablePartitions.MergeListener.NONE);
+
+
+        int i = 0;
+        int numPartitions = 0;
+
+        try(PartitionIterator partitionIterator = FlowablePartitions.toPartitionsFiltered(merged))
         {
-            public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
-            {
-                return null;
-            }
-
-            public void close()
-            {
-
-            }
-
-            public boolean callOnTrivialMerge()
-            {
-                return false;
-            }
-        }))
-        {
-
-            int i = 0;
-            int numPartitions = 0;
             while (partitionIterator.hasNext())
             {
                 numPartitions++;
-                try(RowIterator rowIterator = partitionIterator.next())
+                try (RowIterator rowIterator = partitionIterator.next())
                 {
                     while (rowIterator.hasNext())
                     {
+                        i++;
                         Row row = rowIterator.next();
-                        assertEquals("col=" + expectedRows[i++], row.clustering().toString(cfs.metadata()));
+                        assertTrue(expectedRows.contains(row.clustering().toString(cfs.metadata())));
                         //System.out.print(row.toString(cfs.metadata, true));
                     }
                 }
             }
 
             assertEquals(5, numPartitions);
-            assertEquals(expectedRows.length, i);
+            assertEquals(expectedRows.size(), i);
         }
     }
 }

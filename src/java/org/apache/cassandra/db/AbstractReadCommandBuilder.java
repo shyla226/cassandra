@@ -319,6 +319,13 @@ public abstract class AbstractReadCommandBuilder
                 endInclusive = true;
             }
 
+            if (start.compareTo(end) > 0)
+            {
+                PartitionPosition tmp = start;
+                start = end;
+                end = tmp;
+            }
+
             AbstractBounds<PartitionPosition> bounds;
             if (startInclusive && endInclusive)
                 bounds = new Bounds<>(start, end);

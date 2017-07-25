@@ -22,47 +22,60 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Scheduler;
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.monitoring.AbortedOperationException;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.continuous.paging.ContinuousPagingService;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.cql3.selection.*;
-import org.apache.cassandra.cql3.selection.Selectable.WithFunction;
 import org.apache.cassandra.cql3.selection.RawSelector;
+import org.apache.cassandra.cql3.selection.ResultBuilder;
 import org.apache.cassandra.cql3.selection.Selectable;
+import org.apache.cassandra.cql3.selection.Selectable.WithFunction;
 import org.apache.cassandra.cql3.selection.Selection;
 import org.apache.cassandra.cql3.selection.Selection.Selectors;
+import org.apache.cassandra.cql3.selection.Selector;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
-import org.apache.cassandra.db.filter.*;
+import org.apache.cassandra.db.filter.ClusteringIndexFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.db.monitoring.AbortedOperationException;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.ComplexColumnData;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.ClientWriteException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sasi.SASIIndex;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
@@ -75,14 +88,18 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.flow.Flow;
 
-import static org.apache.cassandra.cql3.statements.RequestValidations.*;
+import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
+import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
+import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
+import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 import static org.apache.cassandra.db.aggregation.AggregationSpecification.aggregatePkPrefixFactory;
 import static org.apache.cassandra.db.aggregation.AggregationSpecification.aggregatePkPrefixFactoryWithSelector;
-
 import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
 
-/**
+/*
  * Encapsulates a completely parsed SELECT query, including the target
  * column family, expression, result count, and ordering clause.
  *
@@ -277,7 +294,7 @@ public class SelectStatement implements CQLStatement
         // Nothing to do, all validation has been done by RawStatement.prepare()
     }
 
-    public ResultMessage.Rows execute(QueryState state, QueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage.Rows> execute(QueryState state, QueryOptions options, long queryStartNanoTime)
     {
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
@@ -291,6 +308,11 @@ public class SelectStatement implements CQLStatement
         }
 
         return execute(state, options, FBUtilities.nowInSeconds(), cl, queryStartNanoTime);
+    }
+
+    public Scheduler getScheduler()
+    {
+        return null;
     }
 
     /**
@@ -350,18 +372,16 @@ public class SelectStatement implements CQLStatement
         return getSliceCommands(options, columnFilter, limit, nowInSec);
     }
 
-    private ResultMessage.Rows execute(ReadQuery query,
-                                       QueryOptions options,
-                                       QueryState state,
-                                       Selectors selectors,
-                                       int nowInSec,
-                                       int userLimit,
-                                       long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    private Single<ResultMessage.Rows> execute(ReadQuery query,
+                                               QueryOptions options,
+                                               QueryState state,
+                                               Selectors selectors,
+                                               int nowInSec,
+                                               int userLimit,
+                                               long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        try (PartitionIterator data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime, false))
-        {
-            return processResults(data, options, selectors, nowInSec, userLimit, null);
-        }
+        Flow<FlowablePartition> data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime, false);
+        return processResults(data, options, selectors, nowInSec, userLimit, null);
     }
 
     /**
@@ -378,9 +398,9 @@ public class SelectStatement implements CQLStatement
             this.pager = pager;
         }
 
-        public static Pager forInternalQuery(QueryPager pager, ReadExecutionController executionController)
+        public static Pager forInternalQuery(QueryPager pager)
         {
-            return new InternalPager(pager, executionController);
+            return new InternalPager(pager);
         }
 
         public static Pager forNormalQuery(QueryPager pager, ConsistencyLevel consistency, ClientState clientState, boolean forContinuousPaging)
@@ -403,7 +423,7 @@ public class SelectStatement implements CQLStatement
             return pager.maxRemaining();
         }
 
-        public abstract PartitionIterator fetchPage(int pageSize, long queryStartNanoTime);
+        public abstract Flow<FlowablePartition> fetchPage(int pageSize, long queryStartNanoTime);
 
         /**
          * The pager for ordinary queries.
@@ -422,7 +442,7 @@ public class SelectStatement implements CQLStatement
                 this.forContinuousPaging = forContinuousPaging;
             }
 
-            public PartitionIterator fetchPage(int pageSize, long queryStartNanoTime)
+            public Flow<FlowablePartition> fetchPage(int pageSize, long queryStartNanoTime)
             {
                 return pager.fetchPage(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging);
             }
@@ -433,29 +453,26 @@ public class SelectStatement implements CQLStatement
          */
         public static class InternalPager extends Pager
         {
-            private final ReadExecutionController executionController;
-
-            private InternalPager(QueryPager pager, ReadExecutionController executionController)
+            private InternalPager(QueryPager pager)
             {
                 super(pager);
-                this.executionController = executionController;
             }
 
-            public PartitionIterator fetchPage(int pageSize, long queryStartNanoTime)
+            public Flow<FlowablePartition> fetchPage(int pageSize, long queryStartNanoTime)
             {
-                return pager.fetchPageInternal(pageSize, executionController);
+                return pager.fetchPageInternal(pageSize);
             }
         }
     }
 
-    private ResultMessage.Rows execute(Pager pager,
-                                       QueryOptions options,
-                                       Selectors selectors,
-                                       int pageSize,
-                                       int nowInSec,
-                                       int userLimit,
-                                       AggregationSpecification aggregationSpec,
-                                       long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    private Single<ResultMessage.Rows> execute(Pager pager,
+                                               QueryOptions options,
+                                               Selectors selectors,
+                                               int pageSize,
+                                               int nowInSec,
+                                               int userLimit,
+                                               AggregationSpecification aggregationSpec,
+                                               long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         if (aggregationSpecFactory != null)
         {
@@ -475,16 +492,17 @@ public class SelectStatement implements CQLStatement
                    "Cannot page queries with both ORDER BY and a IN restriction on the partition key;"
                    + " you must either remove the ORDER BY or the IN and sort client side, or disable paging for this query");
 
-        ResultMessage.Rows msg;
-        try (PartitionIterator page = pager.fetchPage(pageSize, queryStartNanoTime))
-        {
-            msg = processResults(page, options, selectors, nowInSec, userLimit, aggregationSpec);
-        }
+        final Single<ResultMessage.Rows> msg;
+        final Flow<FlowablePartition> page = pager.fetchPage(pageSize, queryStartNanoTime);
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
-        if (!pager.isExhausted())
-            msg.result.metadata.setPagingResult(new PagingResult(pager.state(false)));
+        msg = processResults(page, options, selectors, nowInSec, userLimit, aggregationSpec).map(r -> {
+            if (!pager.isExhausted())
+                r.result.metadata.setPagingResult(new PagingResult(pager.state(false)));
+
+            return r;
+        });
 
         return msg;
     }
@@ -495,23 +513,22 @@ public class SelectStatement implements CQLStatement
         ClientWarn.instance.warn(msg);
     }
 
-    private ResultMessage.Rows processResults(PartitionIterator partitions,
-                                              QueryOptions options,
-                                              Selectors selectors,
-                                              int nowInSec,
-                                              int userLimit,
-                                              AggregationSpecification aggregationSpec) throws RequestValidationException
+    private Single<ResultMessage.Rows> processResults(Flow<FlowablePartition> partitions,
+                                                      QueryOptions options,
+                                                      Selectors selectors,
+                                                      int nowInSec,
+                                                      int userLimit,
+                                                      AggregationSpecification aggregationSpec) throws RequestValidationException
     {
-        ResultSet rset = process(partitions, options, selectors, nowInSec, userLimit, aggregationSpec);
-        return new ResultMessage.Rows(rset);
+        return process(partitions, options, selectors, nowInSec, userLimit, aggregationSpec).map(ResultMessage.Rows::new);
     }
 
-    public ResultMessage.Rows executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
+    public Single<ResultMessage.Rows> executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
     {
         return executeInternal(state, options, FBUtilities.nowInSeconds(), System.nanoTime());
     }
 
-    public ResultMessage.Rows executeInternal(QueryState state, QueryOptions options, int nowInSec, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    public Single<ResultMessage.Rows> executeInternal(QueryState state, QueryOptions options, int nowInSec, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
     {
         Selectors selectors = selection.newSelectors(options);
         AggregationSpecification aggregationSpec = getAggregationSpec(options);
@@ -523,27 +540,18 @@ public class SelectStatement implements CQLStatement
 
         ReadQuery query = getQuery(state, options, selectors.getColumnFilter(), nowInSec, limit);
 
-        try (ReadExecutionController executionController = query.executionController())
-        {
-            if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
-            {
-                try (PartitionIterator data = query.executeInternal(executionController))
-                {
-                    return processResults(data, options, selectors, nowInSec, userLimit, null);
-                }
-            }
+        if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
+            return processResults(query.executeInternal(), options, selectors, nowInSec, userLimit, null);
 
-            QueryPager pager = getPager(query, options);
-
-            return execute(Pager.forInternalQuery(pager, executionController),
-                           options,
-                           selectors,
-                           pageSize,
-                           nowInSec,
-                           userLimit,
-                           aggregationSpec,
-                           queryStartNanoTime);
-        }
+        QueryPager pager = getPager(query, options);
+        return execute(Pager.forInternalQuery(pager),
+                       options,
+                       selectors,
+                       pageSize,
+                       nowInSec,
+                       userLimit,
+                       aggregationSpec,
+                       queryStartNanoTime);
     }
 
     /**
@@ -555,7 +563,7 @@ public class SelectStatement implements CQLStatement
      * @throws RequestExecutionException
      * @throws RequestValidationException
      */
-    private ResultMessage.Rows execute(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
+    private Single<ResultMessage.Rows> execute(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         Selectors selectors = selection.newSelectors(options);
@@ -593,7 +601,7 @@ public class SelectStatement implements CQLStatement
      * @throws RequestExecutionException
      * @throws RequestValidationException
      */
-    private ResultMessage.Rows executeContinuous(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
+    private Single<ResultMessage.Rows> executeContinuous(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
     throws RequestValidationException, RequestExecutionException
     {
         ContinuousPagingService.metrics.requests.mark();
@@ -615,7 +623,7 @@ public class SelectStatement implements CQLStatement
         ResultBuilder builder = ContinuousPagingService.makeBuilder(this, executor, state, options, DatabaseDescriptor.getContinuousPaging());
 
         executor.schedule(options.getPagingOptions().state(), builder);
-        return new ResultMessage.Rows(new ResultSet(getResultMetadata(), Collections.emptyList()), false);
+        return Single.just(new ResultMessage.Rows(new ResultSet(getResultMetadata(), Collections.emptyList()), false));
     }
 
     /**
@@ -673,70 +681,66 @@ public class SelectStatement implements CQLStatement
             assert pager == null;
             assert !builder.isCompleted();
 
-            try
+            pager = Pager.forNormalQuery(statement.getPager(query, pagingState, options.getProtocolVersion()),
+                                         consistencyLevel,
+                                         state.getClientState(),
+                                         true);
+
+
+            // non-local queries span only one page at a time in SP, and each page is monitored starting from
+            // queryStartNanoTime and will fail once RPC read timeout has elapsed, so we must use System.nanoTime()
+            // instead of queryStartNanoTime for distributed queries
+            // local queries, on the other hand, are not monitored against the RPC timeout and we want to record
+            // the entire query duration in the metrics, so we should not reset queryStartNanoTime, further we
+            // should query all available data, not just page size rows
+            int pageSize = isLocalQuery ? pager.maxRemaining() : this.pageSize;
+            long queryStart = isLocalQuery ? queryStartNanoTime : System.nanoTime();
+
+            Flow<FlowablePartition> page = pager.fetchPage(pageSize, queryStart);
+
+            page.takeUntil(builder::isCompleted)
+                .flatMap(partition -> statement.processPartition(partition, options, builder, query.nowInSec()))
+                .reduceToFuture(builder, (b, v) -> b)
+                .whenComplete((bldr, error) ->
+                        {
+                            if (error == null)
+                                maybeReschedule(bldr);
+                            else
+                                handleError(error, builder); // bldr is null!
+                        });
+        }
+
+        private void handleError(Throwable error, ResultBuilder builder)
+        {
+            if (error instanceof AbortedOperationException)
             {
-                pager = Pager.forNormalQuery(statement.getPager(query, pagingState, options.getProtocolVersion()),
-                                             consistencyLevel,
-                                             state.getClientState(),
-                                             true);
+                if (logger.isTraceEnabled())
+                    logger.trace("Continuous paging aborted, rescheduling? {}", !builder.isCompleted());
 
-
-                // non-local queries span only one page at a time in SP, and each page is monitored starting from
-                // queryStartNanoTime and will fail once RPC read timeout has elapsed, so we must use System.nanoTime()
-                // instead of queryStartNanoTime for distirbuted queries
-                // local queries, on the other hand, are not monitored against the RPC timeout and we want to record
-                // the entire query duration in the metrics, so we should not reset queryStartNanoTime, further we
-                // should query all available data, not just page size rows
-                int pageSize = isLocalQuery ? pager.maxRemaining() : this.pageSize;
-                long queryStart = isLocalQuery ? queryStartNanoTime : System.nanoTime();
-
-                try (PartitionIterator page = pager.fetchPage(pageSize, queryStart))
-                {
-                    process(page, builder);
-                }
-
-                maybeReschedule(builder);
-            }
-            catch (AbortedOperationException e)
-            {
                 // An aborted exception will only reach here in the case of local queries (otherwise it stays inside
                 // MessagingService) and it means we should re-schedule the query (we use the monitor to ensure we
                 // don't hold OpOrder for too long).
                 if (!builder.isCompleted())
-                    schedule(pager.state(false), builder);
-            }
-            catch (ClientWriteException e)
-            {
-                logger.debug("Continuous paging client did not keep up: {}", e.getMessage());
-                builder.complete(e);
-            }
-            catch (Throwable t)
-            {
-                JVMStabilityInspector.inspectThrowable(t);
-                logger.error("Continuous paging failed with unexpected error: {}", t.getMessage(), t);
-
-                builder.complete(t);
-            }
-        }
-
-        /**
-         * Iterate the results and pass them to the builder by calling statement.processPartition().
-         *
-         * @param partitions - the partitions to iterate.
-         * @throws InvalidRequestException
-         */
-        void process(PartitionIterator partitions, ResultBuilder builder) throws InvalidRequestException
-        {
-            while (partitions.hasNext())
-            {
-                try (RowIterator partition = partitions.next())
                 {
-                    statement.processPartition(partition, options, builder, query.nowInSec());
+                    schedule(pager.state(false), builder);
+                    return;
                 }
 
-                if (builder.isCompleted())
-                    break;
             }
+            else if (error instanceof ClientWriteException)
+            {
+                logger.debug("Continuous paging client did not keep up: {}", error.getMessage());
+                builder.complete(error);
+            }
+            else
+            {
+                JVMStabilityInspector.inspectThrowable(error);
+                logger.error("Continuous paging failed with unexpected error: {}", error.getMessage(), error);
+
+                builder.complete(error);
+            }
+
+            ContinuousPagingService.metrics.addTotalDuration(isLocalQuery, System.nanoTime() - queryStartNanoTime);
         }
 
         /**
@@ -764,6 +768,8 @@ public class SelectStatement implements CQLStatement
             {
                 if (!builder.isCompleted())
                     schedule(pager.state(false), builder);
+                else
+                    ContinuousPagingService.metrics.addTotalDuration(isLocalQuery, System.nanoTime() - queryStartNanoTime);
             }
         }
 
@@ -794,13 +800,35 @@ public class SelectStatement implements CQLStatement
     {
         QueryPager pager = query.getPager(pagingState, protocolVersion);
 
-        if (aggregationSpecFactory == null || query == ReadQuery.EMPTY)
+        if (aggregationSpecFactory == null || query.isEmpty())
             return pager;
 
         return new AggregationQueryPager(pager, query.limits());
     }
 
+    /**
+     * Convert the iterator into a {@link ResultSet}. The iterator will be closed by this method.
+     *
+     * @param partitions - the partitions iterator
+     * @param nowInSec - the current time in seconds
+     *
+     * @return - a result set with the iterator results
+     */
     public ResultSet process(PartitionIterator partitions, int nowInSec)
+    {
+        return process(FlowablePartitions.fromPartitions(partitions, Schedulers.io()),
+                       nowInSec).blockingGet();
+    }
+
+    /**
+     * Convert the partitions into a {@link ResultSet}.
+     *
+     * @param partitions - the partitions flow
+     * @param nowInSec - the current time in seconds
+     *
+     * @return - a single of a result set with the results
+     */
+    public Single<ResultSet> process(Flow<FlowablePartition> partitions, int nowInSec)
     {
         return process(partitions,
                        QueryOptions.DEFAULT,
@@ -840,11 +868,11 @@ public class SelectStatement implements CQLStatement
     {
         Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options);
         if (keys.isEmpty())
-            return ReadQuery.EMPTY;
+            return new ReadQuery.EmptyQuery(table);
 
         ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter);
         if (filter == null)
-            return ReadQuery.EMPTY;
+            return new ReadQuery.EmptyQuery(table);
 
         RowFilter rowFilter = getRowFilter(options);
 
@@ -912,7 +940,7 @@ public class SelectStatement implements CQLStatement
     {
         ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options, columnFilter);
         if (clusteringIndexFilter == null)
-            return ReadQuery.EMPTY;
+            return new ReadQuery.EmptyQuery(table);
 
         RowFilter rowFilter = getRowFilter(options);
 
@@ -920,7 +948,7 @@ public class SelectStatement implements CQLStatement
         // We want to have getRangeSlice to count the number of columns, not the number of keys.
         AbstractBounds<PartitionPosition> keyBounds = restrictions.getPartitionKeyBounds(options);
         if (keyBounds == null)
-            return ReadQuery.EMPTY;
+            return new ReadQuery.EmptyQuery(table);
 
         PartitionRangeReadCommand command = new PartitionRangeReadCommand(table,
                                                                           nowInSec,
@@ -1124,24 +1152,16 @@ public class SelectStatement implements CQLStatement
         return filter;
     }
 
-    private ResultSet process(PartitionIterator partitions,
-                              QueryOptions options,
-                              Selectors selectors,
-                              int nowInSec,
-                              int userLimit,
-                              AggregationSpecification aggregationSpec)
+    private Single<ResultSet> process(Flow<FlowablePartition> partitions,
+                                      QueryOptions options,
+                                      Selectors selectors,
+                                      int nowInSec,
+                                      int userLimit,
+                                      AggregationSpecification aggregationSpec)
     {
         ResultSet.Builder result = ResultSet.makeBuilder(getResultMetadata(), selectors, aggregationSpec);
-
-        while (partitions.hasNext())
-        {
-            try (RowIterator partition = partitions.next())
-            {
-                processPartition(partition, options, result, nowInSec);
-            }
-        }
-
-        return postQueryProcessing(result, userLimit);
+        return partitions.flatProcess(partition -> processPartition(partition, options, result, nowInSec))
+                         .mapToRxSingle(VOID -> postQueryProcessing(result, userLimit));
     }
 
     private ResultSet postQueryProcessing(ResultSet.Builder result, int userLimit)
@@ -1172,72 +1192,64 @@ public class SelectStatement implements CQLStatement
         // regular columns restrictions), we ignore partitions that are empty outside of static content, but if it's a full partition
         // query, then we include that content.
         // We make an exception for "static compact" table are from a CQL standpoint we always want to show their static
-        // content for backward compatiblity.
+        // content for backward compatibility.
         return queriesFullPartitions() || table.isStaticCompactTable();
     }
 
     // Used by ModificationStatement for CAS operations
-    void processPartition(RowIterator partition, QueryOptions options, ResultBuilder result, int nowInSec)
+    <T extends ResultBuilder> Flow<T> processPartition(FlowablePartition partition, QueryOptions options, T result, int nowInSec)
     throws InvalidRequestException
     {
-        ProtocolVersion protocolVersion = options.getProtocolVersion();
+        final ProtocolVersion protocolVersion = options.getProtocolVersion();
+        final ByteBuffer[] keyComponents = getComponents(table, partition.header.partitionKey);
 
-        ByteBuffer[] keyComponents = getComponents(table, partition.partitionKey());
-
-        Row staticRow = partition.staticRow();
-        // If there is no rows, we include the static content if we should and we're done.
-        if (!partition.hasNext())
-        {
-            if (!staticRow.isEmpty() && returnStaticContentOnPartitionWithNoRows())
-            {
-                result.newRow(partition.partitionKey(), staticRow.clustering());
-                for (ColumnMetadata def : selection.getColumns())
-                {
-                    switch (def.kind)
+        return partition.content
+               .takeUntil(result::isCompleted)
+               .reduce(false, (hasContent, row) -> {
+                    result.newRow(partition.header.partitionKey, row.clustering());
+                    // Respect selection order
+                    for (ColumnMetadata def : selection.getColumns())
                     {
-                        case PARTITION_KEY:
-                            result.add(keyComponents[def.position()]);
-                            break;
-                        case STATIC:
-                            addValue(result, def, staticRow, nowInSec, protocolVersion);
-                            break;
-                        default:
-                            result.add(null);
+                        switch (def.kind)
+                        {
+                            case PARTITION_KEY:
+                                result.add(keyComponents[def.position()]);
+                                break;
+                            case CLUSTERING:
+                                result.add(row.clustering().get(def.position()));
+                                break;
+                            case REGULAR:
+                                addValue(result, def, row, nowInSec, protocolVersion);
+                                break;
+                            case STATIC:
+                                addValue(result, def, partition.staticRow, nowInSec, protocolVersion);
+                                break;
+                        }
                     }
-                }
-            }
-            return;
-        }
-        if (result.isCompleted())
-            return;
+                    return true; // return true if any rows were included
+               })
+               .map((hasContent) -> {
+                    if (!hasContent && !result.isCompleted() && !partition.staticRow.isEmpty() && returnStaticContentOnPartitionWithNoRows())
+                    { //if there were no rows but there is a static row then process it
+                        result.newRow(partition.header.partitionKey, partition.staticRow.clustering());
+                        for (ColumnMetadata def : selection.getColumns())
+                        {
+                            switch (def.kind)
+                            {
+                                case PARTITION_KEY:
+                                    result.add(keyComponents[def.position()]);
+                                    break;
+                                case STATIC:
+                                    addValue(result, def, partition.staticRow, nowInSec, protocolVersion);
+                                    break;
+                                default:
+                                    result.add(null);
+                            }
+                        }
+                    }
 
-        while (partition.hasNext())
-        {
-            Row row = partition.next();
-            result.newRow(partition.partitionKey(), row.clustering());
-            // Respect selection order
-            for (ColumnMetadata def : selection.getColumns())
-            {
-                switch (def.kind)
-                {
-                    case PARTITION_KEY:
-                        result.add(keyComponents[def.position()]);
-                        break;
-                    case CLUSTERING:
-                        result.add(row.clustering().get(def.position()));
-                        break;
-                    case REGULAR:
-                        addValue(result, def, row, nowInSec, protocolVersion);
-                        break;
-                    case STATIC:
-                        addValue(result, def, staticRow, nowInSec, protocolVersion);
-                        break;
-                }
-            }
-
-            if (result.isCompleted())
-                break;
-        }
+                    return result;
+        });
     }
 
     /**
@@ -1489,7 +1501,7 @@ public class SelectStatement implements CQLStatement
          * @param metadata the table metadata
          * @param selection the selection
          * @param restrictions the restrictions
-         * @param isDistinct <code>true</code> if the query is a DISTINCT one. 
+         * @param isDistinct <code>true</code> if the query is a DISTINCT one.
          * @return the {@code AggregationSpecification.Factory} used to make the aggregates
          */
         private AggregationSpecification.Factory getAggregationSpecFactory(TableMetadata metadata,

@@ -20,12 +20,13 @@ package org.apache.cassandra.db.partitions;
 import java.util.*;
 
 import org.apache.cassandra.db.EmptyIterators;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.db.rows.RowIterators;
 import org.apache.cassandra.db.transform.MorePartitions;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.utils.AbstractIterator;
 
-import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.rows.*;
 
 public abstract class PartitionIterators
 {
@@ -116,7 +117,7 @@ public abstract class PartitionIterators
     private static class SingletonPartitionIterator extends AbstractIterator<RowIterator> implements PartitionIterator
     {
         private final RowIterator iterator;
-        private boolean returned;
+        private boolean returned = false;
 
         private SingletonPartitionIterator(RowIterator iterator)
         {
@@ -134,7 +135,8 @@ public abstract class PartitionIterators
 
         public void close()
         {
-            iterator.close();
+            if (!returned)
+                iterator.close();
         }
     }
 }

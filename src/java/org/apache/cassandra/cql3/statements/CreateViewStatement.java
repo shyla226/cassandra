@@ -23,6 +23,8 @@ import java.util.*;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
+import io.reactivex.*;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -74,7 +76,6 @@ public class CreateViewStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
     }
 
-
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         if (!baseName.hasKeyspace())
@@ -113,7 +114,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         }
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
         // We need to make sure that:
         //  - primary key includes all columns in base table's primary key
@@ -127,28 +128,28 @@ public class CreateViewStatement extends SchemaAlteringStatement
         properties.validate();
 
         if (properties.useCompactStorage)
-            throw new InvalidRequestException("Cannot use 'COMPACT STORAGE' when defining a materialized view");
+            return error("Cannot use 'COMPACT STORAGE' when defining a materialized view");
 
         // We enforce the keyspace because if the RF is different, the logic to wait for a
         // specific replica would break
         if (!baseName.getKeyspace().equals(keyspace()))
-            throw new InvalidRequestException("Cannot create a materialized view on a table in a separate keyspace");
+            return error("Cannot create a materialized view on a table in a separate keyspace");
 
         TableMetadata metadata = Schema.instance.validateTable(baseName.getKeyspace(), baseName.getColumnFamily());
 
         if (metadata.isCounter())
-            throw new InvalidRequestException("Materialized views are not supported on counter tables");
+            return error("Materialized views are not supported on counter tables");
         if (metadata.isView())
-            throw new InvalidRequestException("Materialized views cannot be created against other materialized views");
+            return error("Materialized views cannot be created against other materialized views");
 
         if (metadata.params.gcGraceSeconds == 0)
         {
-            throw new InvalidRequestException(String.format("Cannot create materialized view '%s' for base table " +
-                                                            "'%s' with gc_grace_seconds of 0, since this value is " +
-                                                            "used to TTL undelivered updates. Setting gc_grace_seconds" +
-                                                            " too low might cause undelivered updates to expire " +
-                                                            "before being replayed.", cfName.getColumnFamily(),
-                                                            baseName.getColumnFamily()));
+            return error(String.format("Cannot create materialized view '%s' for base table " +
+                                       "'%s' with gc_grace_seconds of 0, since this value is " +
+                                       "used to TTL undelivered updates. Setting gc_grace_seconds" +
+                                       " too low might cause undelivered updates to expire " +
+                                       "before being replayed.", cfName.getColumnFamily(),
+                                       baseName.getColumnFamily()));
         }
 
         Set<ColumnIdentifier> included = Sets.newHashSetWithExpectedSize(selectClause.size());
@@ -156,21 +157,21 @@ public class CreateViewStatement extends SchemaAlteringStatement
         {
             Selectable.Raw selectable = selector.selectable;
             if (selectable instanceof Selectable.WithFieldSelection.Raw)
-                throw new InvalidRequestException("Cannot select out a part of type when defining a materialized view");
+                return error("Cannot select out a part of type when defining a materialized view");
             if (selectable instanceof Selectable.WithFunction.Raw)
-                throw new InvalidRequestException("Cannot use function when defining a materialized view");
+                return error("Cannot use function when defining a materialized view");
             if (selectable instanceof Selectable.WritetimeOrTTL.Raw)
-                throw new InvalidRequestException("Cannot use function when defining a materialized view");
+                return error("Cannot use function when defining a materialized view");
             if (selectable instanceof Selectable.WithElementSelection.Raw)
-                throw new InvalidRequestException("Cannot use collection element selection when defining a materialized view");
+                return error("Cannot use collection element selection when defining a materialized view");
             if (selectable instanceof Selectable.WithSliceSelection.Raw)
-                throw new InvalidRequestException("Cannot use collection slice selection when defining a materialized view");
+                return error("Cannot use collection slice selection when defining a materialized view");
             if (selector.alias != null)
-                throw new InvalidRequestException("Cannot use alias when defining a materialized view");
+                return error("Cannot use alias when defining a materialized view");
 
             Selectable s = selectable.prepare(metadata);
             if (s instanceof Term.Raw)
-                throw new InvalidRequestException("Cannot use terms in selection when defining a materialized view");
+                return error("Cannot use terms in selection when defining a materialized view");
 
             ColumnMetadata cdef = (ColumnMetadata)s;
             included.add(cdef.name);
@@ -180,18 +181,18 @@ public class CreateViewStatement extends SchemaAlteringStatement
         for (ColumnMetadata.Raw identifier : Iterables.concat(partitionKeys, clusteringKeys))
         {
             if (!targetPrimaryKeys.add(identifier))
-                throw new InvalidRequestException("Duplicate entry found in PRIMARY KEY: "+identifier);
+                return error("Duplicate entry found in PRIMARY KEY: " + identifier);
 
             ColumnMetadata cdef = identifier.prepare(metadata);
 
             if (cdef.type.isMultiCell())
-                throw new InvalidRequestException(String.format("Cannot use MultiCell column '%s' in PRIMARY KEY of materialized view", identifier));
+                return error(String.format("Cannot use MultiCell column '%s' in PRIMARY KEY of materialized view", identifier));
 
             if (cdef.isStatic())
-                throw new InvalidRequestException(String.format("Cannot use Static column '%s' in PRIMARY KEY of materialized view", identifier));
+                return error(String.format("Cannot use Static column '%s' in PRIMARY KEY of materialized view", identifier));
 
             if (cdef.type instanceof DurationType)
-                throw new InvalidRequestException(String.format("Cannot use Duration column '%s' in PRIMARY KEY of materialized view", identifier));
+                return error(String.format("Cannot use Duration column '%s' in PRIMARY KEY of materialized view", identifier));
         }
 
         // build the select statement
@@ -214,7 +215,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         StatementRestrictions restrictions = select.getRestrictions();
 
         if (!prepared.boundNames.isEmpty())
-            throw new InvalidRequestException("Cannot use query parameters in CREATE MATERIALIZED VIEW statements");
+            return error("Cannot use query parameters in CREATE MATERIALIZED VIEW statements");
 
         String whereClauseText = View.relationsToWhereClause(whereClause.relations);
 
@@ -247,18 +248,16 @@ public class CreateViewStatement extends SchemaAlteringStatement
             boolean includeDef = included.isEmpty() || included.contains(identifier);
 
             if (includeDef && def.isStatic())
-            {
-                throw new InvalidRequestException(String.format("Unable to include static column '%s' which would be included by Materialized View SELECT * statement", identifier));
-            }
+                return error(String.format("Unable to include static column '%s' which would be included by Materialized View SELECT * statement", identifier));
 
             boolean defInTargetPrimaryKey = targetClusteringColumns.contains(identifier)
                                             || targetPartitionKeys.contains(identifier);
 
             if (includeDef && !defInTargetPrimaryKey)
-            {
                 includedColumns.add(identifier);
-            }
-            if (!def.isPrimaryKeyColumn()) continue;
+
+            if (!def.isPrimaryKeyColumn())
+                continue;
 
             if (!defInTargetPrimaryKey)
             {
@@ -270,14 +269,14 @@ public class CreateViewStatement extends SchemaAlteringStatement
             }
         }
         if (missingClusteringColumns)
-            throw new InvalidRequestException(String.format("Cannot create Materialized View %s without primary key columns from base %s (%s)",
-                                                            columnFamily(), baseName.getColumnFamily(), columnNames.toString()));
+            return error(String.format("Cannot create Materialized View %s without primary key columns from base %s (%s)",
+                                       columnFamily(), baseName.getColumnFamily(), columnNames.toString()));
 
         if (targetPartitionKeys.isEmpty())
-            throw new InvalidRequestException("Must select at least a column for a Materialized View");
+            return error("Must select at least a column for a Materialized View");
 
         if (targetClusteringColumns.isEmpty())
-            throw new InvalidRequestException("No columns are defined for Materialized View other than primary key");
+            return error("No columns are defined for Materialized View other than primary key");
 
         TableParams params = properties.properties.asNewTableParams();
         if (params.compaction.klass().equals(DateTieredCompactionStrategy.class))
@@ -308,17 +307,15 @@ public class CreateViewStatement extends SchemaAlteringStatement
                                                    whereClauseText,
                                                    builder.build());
 
-        try
-        {
-            MigrationManager.announceNewView(definition, isLocalOnly);
-            return new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily());
-        }
-        catch (AlreadyExistsException e)
-        {
-            if (ifNotExists)
-                return null;
-            throw e;
-        }
+        return MigrationManager.announceNewView(definition, isLocalOnly)
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
+                               .onErrorResumeNext(e ->
+                                                  {
+                                                      if (e instanceof AlreadyExistsException && ifNotExists)
+                                                          return Maybe.empty();
+
+                                                      return Maybe.error(e);
+                                                  });
     }
 
     private static boolean getColumnIdentifier(TableMetadata cfm,

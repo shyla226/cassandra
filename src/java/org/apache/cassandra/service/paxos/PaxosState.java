@@ -131,6 +131,7 @@ public class PaxosState
         }
     }
 
+    // TODO make async
     public static void commit(Commit proposal)
     {
         long start = System.nanoTime();
@@ -147,7 +148,7 @@ public class PaxosState
             {
                 Tracing.trace("Committing proposal {}", proposal);
                 Mutation mutation = proposal.makeMutation();
-                Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true);
+                Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true).blockingAwait();
             }
             else
             {

@@ -32,27 +32,50 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.google.common.base.Throwables;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.Uninterruptibles;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.Test;
+import org.junit.Assert;
+
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.CQLSSTableWriter;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.statements.IndexTarget;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DataRange;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
@@ -65,23 +88,19 @@ import org.apache.cassandra.index.sasi.memory.IndexMemtable;
 import org.apache.cassandra.index.sasi.plan.QueryController;
 import org.apache.cassandra.index.sasi.plan.QueryPlan;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.flow.Flow;
 
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.Uninterruptibles;
-
-import junit.framework.Assert;
-
-import org.junit.*;
+import static org.junit.Assert.*;
 
 public class SASIIndexTest
 {
@@ -1335,12 +1354,8 @@ public class SASIIndexTest
         }
 
         // to make sure that query doesn't fail in normal conditions
-
-        try (ReadExecutionController controller = command.executionController())
-        {
-            Set<String> rows = getKeys(new QueryPlan(store, command, DatabaseDescriptor.getRangeRpcTimeout()).execute(controller));
-            Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1", "key2", "key3", "key4" }, rows.toArray(new String[rows.size()])));
-        }
+        Set<String> rows = getKeys(command.applyController(controller -> new QueryPlan(store, command, DatabaseDescriptor.getRangeRpcTimeout()).execute(controller)));
+        Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1", "key2", "key3", "key4" }, rows.toArray(new String[rows.size()])));
     }
 
     @Test
@@ -1557,7 +1572,7 @@ public class SASIIndexTest
         Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1" }, rows.toArray(new String[rows.size()])));
 
         rows = getIndexed(store, 10, buildExpression(name, Operator.EQ, UTF8Type.instance.decompose("Pave")));
-        Assert.assertTrue(rows.isEmpty());
+        Assert.assertTrue(rows.toString(), rows.isEmpty());
 
         rows = getIndexed(store, 10, buildExpression(name, Operator.EQ, UTF8Type.instance.decompose("Pavel")));
         Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1" }, rows.toArray(new String[rows.size()])));
@@ -1787,6 +1802,8 @@ public class SASIIndexTest
 
     public void testStaticIndex(boolean shouldFlush) throws Exception
     {
+        double delta = 0.0000001;
+
         ColumnFamilyStore store = Keyspace.open(KS_NAME).getColumnFamilyStore(STATIC_CF_NAME);
 
         executeCQL(STATIC_CF_NAME, "INSERT INTO %s.%s (sensor_id,sensor_type) VALUES(?, ?)", 1, "TEMPERATURE");
@@ -1816,18 +1833,18 @@ public class SASIIndexTest
 
         UntypedResultSet.Row row1 = iterator.next();
         Assert.assertEquals(20160401L, row1.getLong("date"));
-        Assert.assertEquals(24.46, row1.getDouble("value"));
+        Assert.assertEquals(24.46, row1.getDouble("value"), delta);
         Assert.assertEquals(2, row1.getInt("variance"));
 
 
         UntypedResultSet.Row row2 = iterator.next();
         Assert.assertEquals(20160402L, row2.getLong("date"));
-        Assert.assertEquals(25.62, row2.getDouble("value"));
+        Assert.assertEquals(25.62, row2.getDouble("value"), delta);
         Assert.assertEquals(5, row2.getInt("variance"));
 
         UntypedResultSet.Row row3 = iterator.next();
         Assert.assertEquals(20160403L, row3.getLong("date"));
-        Assert.assertEquals(24.96, row3.getDouble("value"));
+        Assert.assertEquals(24.96, row3.getDouble("value"), delta);
         Assert.assertEquals(4, row3.getInt("variance"));
 
 
@@ -1839,7 +1856,7 @@ public class SASIIndexTest
 
         row1 = results.one();
         Assert.assertEquals(20160402L, row1.getLong("date"));
-        Assert.assertEquals(1.04, row1.getDouble("value"));
+        Assert.assertEquals(1.04, row1.getDouble("value"), delta);
         Assert.assertEquals(7, row1.getInt("variance"));
 
         // Only non statc columns filtering
@@ -1852,26 +1869,26 @@ public class SASIIndexTest
         row1 = iterator.next();
         Assert.assertEquals("TEMPERATURE", row1.getString("sensor_type"));
         Assert.assertEquals(20160401L, row1.getLong("date"));
-        Assert.assertEquals(24.46, row1.getDouble("value"));
+        Assert.assertEquals(24.46, row1.getDouble("value"), delta);
         Assert.assertEquals(2, row1.getInt("variance"));
 
 
         row2 = iterator.next();
         Assert.assertEquals("TEMPERATURE", row2.getString("sensor_type"));
         Assert.assertEquals(20160402L, row2.getLong("date"));
-        Assert.assertEquals(25.62, row2.getDouble("value"));
+        Assert.assertEquals(25.62, row2.getDouble("value"), delta);
         Assert.assertEquals(5, row2.getInt("variance"));
 
         row3 = iterator.next();
         Assert.assertEquals("TEMPERATURE", row3.getString("sensor_type"));
         Assert.assertEquals(20160403L, row3.getLong("date"));
-        Assert.assertEquals(24.96, row3.getDouble("value"));
+        Assert.assertEquals(24.96, row3.getDouble("value"), delta);
         Assert.assertEquals(4, row3.getInt("variance"));
 
         UntypedResultSet.Row row4 = iterator.next();
         Assert.assertEquals("PRESSURE", row4.getString("sensor_type"));
         Assert.assertEquals(20160402L, row4.getLong("date"));
-        Assert.assertEquals(1.04, row4.getDouble("value"));
+        Assert.assertEquals(1.04, row4.getDouble("value"), delta);
         Assert.assertEquals(7, row4.getInt("variance"));
     }
 
@@ -2007,26 +2024,26 @@ public class SASIIndexTest
         String analyzedPrefixTable = "sasi_like_analyzed_prefix_test";
         String tokenizedContainsTable = "sasi_like_analyzed_contains_test";
 
-        QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (k int primary key, v text);", KS_NAME, containsTable));
-        QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (k int primary key, v text);", KS_NAME, prefixTable));
-        QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (k int primary key, v text);", KS_NAME, analyzedPrefixTable));
-        QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (k int primary key, v text);", KS_NAME, tokenizedContainsTable));
+        QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (k int primary key, v text);", KS_NAME, containsTable)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (k int primary key, v text);", KS_NAME, prefixTable)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (k int primary key, v text);", KS_NAME, analyzedPrefixTable)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (k int primary key, v text);", KS_NAME, tokenizedContainsTable)).blockingGet();
 
         QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) " +
                 "USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = { 'mode' : 'CONTAINS', " +
                                                          "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.NonTokenizingAnalyzer', " +
                                                          "'case_sensitive': 'false' };",
-                                                         KS_NAME, containsTable));
+                                                         KS_NAME, containsTable)).blockingGet();
         QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) " +
-                "USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = { 'mode' : 'PREFIX' };", KS_NAME, prefixTable));
+                "USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = { 'mode' : 'PREFIX' };", KS_NAME, prefixTable)).blockingGet();
         QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) " +
-                "USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = { 'mode' : 'PREFIX', 'analyzed': 'true' };", KS_NAME, analyzedPrefixTable));
+                "USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = { 'mode' : 'PREFIX', 'analyzed': 'true' };", KS_NAME, analyzedPrefixTable)).blockingGet();
         QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) " +
                                                          "USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = " +
                                                          "{ 'mode' : 'CONTAINS', 'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer'," +
                                                          "'analyzed': 'true', 'tokenization_enable_stemming': 'true', 'tokenization_normalize_lowercase': 'true', " +
                                                          "'tokenization_locale': 'en' };",
-                                                         KS_NAME, tokenizedContainsTable));
+                                                         KS_NAME, tokenizedContainsTable)).blockingGet();
 
         testLIKEAndEQSemanticsWithDifferenceKindsOfIndexes(containsTable, prefixTable, analyzedPrefixTable, tokenizedContainsTable, false);
         testLIKEAndEQSemanticsWithDifferenceKindsOfIndexes(containsTable, prefixTable, analyzedPrefixTable, tokenizedContainsTable, true);
@@ -2038,10 +2055,10 @@ public class SASIIndexTest
                                                                     String tokenizedContainsTable,
                                                                     boolean forceFlush)
     {
-        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?);", KS_NAME, containsTable), 0, "Pavel");
-        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?);", KS_NAME, prefixTable), 0, "Jean-Claude");
-        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?);", KS_NAME, analyzedPrefixTable), 0, "Jean-Claude");
-        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?);", KS_NAME, tokenizedContainsTable), 0, "Pavel");
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?);", KS_NAME, containsTable), 0, "Pavel").blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?);", KS_NAME, prefixTable), 0, "Jean-Claude").blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?);", KS_NAME, analyzedPrefixTable), 0, "Jean-Claude").blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?);", KS_NAME, tokenizedContainsTable), 0, "Pavel").blockingGet();
 
         if (forceFlush)
         {
@@ -2054,29 +2071,29 @@ public class SASIIndexTest
 
         // CONTAINS
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pav';", KS_NAME, containsTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pav';", KS_NAME, containsTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(0, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pav%%';", KS_NAME, containsTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pav%%';", KS_NAME, containsTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pavel';", KS_NAME, containsTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pavel';", KS_NAME, containsTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Pav';", KS_NAME, containsTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Pav';", KS_NAME, containsTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(0, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Pavel';", KS_NAME, containsTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Pavel';", KS_NAME, containsTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
         try
         {
-            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Pav';", KS_NAME, tokenizedContainsTable));
+            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Pav';", KS_NAME, tokenizedContainsTable)).blockingGet();
             Assert.fail();
         }
         catch (InvalidRequestException e)
@@ -2086,7 +2103,7 @@ public class SASIIndexTest
 
         try
         {
-            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pav%%';", KS_NAME, tokenizedContainsTable));
+            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pav%%';", KS_NAME, tokenizedContainsTable)).blockingGet();
             Assert.fail();
         }
         catch (InvalidRequestException e)
@@ -2094,39 +2111,39 @@ public class SASIIndexTest
             // expected since CONTAINS + analyzed only support LIKE
         }
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pav%%';", KS_NAME, containsTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pav%%';", KS_NAME, containsTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Pav';", KS_NAME, containsTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Pav';", KS_NAME, containsTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(0, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Pav%%';", KS_NAME, containsTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Pav%%';", KS_NAME, containsTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
         // PREFIX
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Jean';", KS_NAME, prefixTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Jean';", KS_NAME, prefixTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(0, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Jean-Claude';", KS_NAME, prefixTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Jean-Claude';", KS_NAME, prefixTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Jea';", KS_NAME, prefixTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Jea';", KS_NAME, prefixTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(0, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Jea%%';", KS_NAME, prefixTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Jea%%';", KS_NAME, prefixTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
         try
         {
-            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Jea';", KS_NAME, prefixTable));
+            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Jea';", KS_NAME, prefixTable)).blockingGet();
             Assert.fail();
         }
         catch (InvalidRequestException e)
@@ -2136,7 +2153,7 @@ public class SASIIndexTest
 
         try
         {
-            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Jea%%';", KS_NAME, prefixTable));
+            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Jea%%';", KS_NAME, prefixTable)).blockingGet();
             Assert.fail();
         }
         catch (InvalidRequestException e)
@@ -2148,7 +2165,7 @@ public class SASIIndexTest
 
         try
         {
-            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Jean';", KS_NAME, analyzedPrefixTable));
+            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Jean';", KS_NAME, analyzedPrefixTable)).blockingGet();
             Assert.fail();
         }
         catch (InvalidRequestException e)
@@ -2156,29 +2173,29 @@ public class SASIIndexTest
             // expected since PREFIX indexes only support EQ without tokenization
         }
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Jean';", KS_NAME, analyzedPrefixTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Jean';", KS_NAME, analyzedPrefixTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Claude';", KS_NAME, analyzedPrefixTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Claude';", KS_NAME, analyzedPrefixTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Jean-Claude';", KS_NAME, analyzedPrefixTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Jean-Claude';", KS_NAME, analyzedPrefixTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Jean%%';", KS_NAME, analyzedPrefixTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Jean%%';", KS_NAME, analyzedPrefixTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Claude%%';", KS_NAME, analyzedPrefixTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Claude%%';", KS_NAME, analyzedPrefixTable)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
         try
         {
-            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Jean';", KS_NAME, analyzedPrefixTable));
+            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Jean';", KS_NAME, analyzedPrefixTable)).blockingGet();
             Assert.fail();
         }
         catch (InvalidRequestException e)
@@ -2188,7 +2205,7 @@ public class SASIIndexTest
 
         try
         {
-            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Claude%%';", KS_NAME, analyzedPrefixTable));
+            QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%Claude%%';", KS_NAME, analyzedPrefixTable)).blockingGet();
             Assert.fail();
         }
         catch (InvalidRequestException e)
@@ -2197,7 +2214,7 @@ public class SASIIndexTest
         }
 
         for (String table : Arrays.asList(containsTable, prefixTable, analyzedPrefixTable))
-            QueryProcessor.executeOnceInternal(String.format("TRUNCATE TABLE %s.%s", KS_NAME, table));
+            QueryProcessor.executeOnceInternal(String.format("TRUNCATE TABLE %s.%s", KS_NAME, table)).blockingGet();
     }
 
     @Test
@@ -2206,18 +2223,18 @@ public class SASIIndexTest
         final String TABLE_NAME = "reversed_clustering";
 
         QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (pk text, ck int, v int, PRIMARY KEY (pk, ck)) " +
-                                                         "WITH CLUSTERING ORDER BY (ck DESC);", KS_NAME, TABLE_NAME));
-        QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX ON %s.%s (ck) USING 'org.apache.cassandra.index.sasi.SASIIndex'", KS_NAME, TABLE_NAME));
-        QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX ON %s.%s (v) USING 'org.apache.cassandra.index.sasi.SASIIndex'", KS_NAME, TABLE_NAME));
+                                                         "WITH CLUSTERING ORDER BY (ck DESC);", KS_NAME, TABLE_NAME)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX ON %s.%s (ck) USING 'org.apache.cassandra.index.sasi.SASIIndex'", KS_NAME, TABLE_NAME)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX ON %s.%s (v) USING 'org.apache.cassandra.index.sasi.SASIIndex'", KS_NAME, TABLE_NAME)).blockingGet();
 
-        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Alex', 1, 1);", KS_NAME, TABLE_NAME));
-        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Alex', 2, 2);", KS_NAME, TABLE_NAME));
-        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Alex', 3, 3);", KS_NAME, TABLE_NAME));
-        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Tom', 1, 1);", KS_NAME, TABLE_NAME));
-        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Tom', 2, 2);", KS_NAME, TABLE_NAME));
-        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Tom', 3, 3);", KS_NAME, TABLE_NAME));
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Alex', 1, 1);", KS_NAME, TABLE_NAME)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Alex', 2, 2);", KS_NAME, TABLE_NAME)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Alex', 3, 3);", KS_NAME, TABLE_NAME)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Tom', 1, 1);", KS_NAME, TABLE_NAME)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Tom', 2, 2);", KS_NAME, TABLE_NAME)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (pk, ck, v) VALUES ('Tom', 3, 3);", KS_NAME, TABLE_NAME)).blockingGet();
 
-        UntypedResultSet resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck <= 2;", KS_NAME, TABLE_NAME));
+        UntypedResultSet resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck <= 2;", KS_NAME, TABLE_NAME)).blockingGet();
 
         CQLTester.assertRowsIgnoringOrder(resultSet,
                                           CQLTester.row("Alex", 1, 1),
@@ -2225,30 +2242,30 @@ public class SASIIndexTest
                                           CQLTester.row("Tom", 1, 1),
                                           CQLTester.row("Tom", 2, 2));
 
-        resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck <= 2 AND v > 1 ALLOW FILTERING;", KS_NAME, TABLE_NAME));
+        resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck <= 2 AND v > 1 ALLOW FILTERING;", KS_NAME, TABLE_NAME)).blockingGet();
 
         CQLTester.assertRowsIgnoringOrder(resultSet,
                                           CQLTester.row("Alex", 2, 2),
                                           CQLTester.row("Tom", 2, 2));
 
-        resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck < 2;", KS_NAME, TABLE_NAME));
+        resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck < 2;", KS_NAME, TABLE_NAME)).blockingGet();
         CQLTester.assertRowsIgnoringOrder(resultSet,
                                           CQLTester.row("Alex", 1, 1),
                                           CQLTester.row("Tom", 1, 1));
 
-        resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck >= 2;", KS_NAME, TABLE_NAME));
+        resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck >= 2;", KS_NAME, TABLE_NAME)).blockingGet();
         CQLTester.assertRowsIgnoringOrder(resultSet,
                                           CQLTester.row("Alex", 2, 2),
                                           CQLTester.row("Alex", 3, 3),
                                           CQLTester.row("Tom", 2, 2),
                                           CQLTester.row("Tom", 3, 3));
 
-        resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck >= 2 AND v < 3 ALLOW FILTERING;", KS_NAME, TABLE_NAME));
+        resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck >= 2 AND v < 3 ALLOW FILTERING;", KS_NAME, TABLE_NAME)).blockingGet();
         CQLTester.assertRowsIgnoringOrder(resultSet,
                                           CQLTester.row("Alex", 2, 2),
                                           CQLTester.row("Tom", 2, 2));
 
-        resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck > 2;", KS_NAME, TABLE_NAME));
+        resultSet = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE ck > 2;", KS_NAME, TABLE_NAME)).blockingGet();
         CQLTester.assertRowsIgnoringOrder(resultSet,
                                           CQLTester.row("Alex", 3, 3),
                                           CQLTester.row("Tom", 3, 3));
@@ -2336,7 +2353,7 @@ public class SASIIndexTest
 
         File tempDir = com.google.common.io.Files.createTempDir();
         File dataDir = new File(tempDir.getAbsolutePath() + File.separator + KS_NAME + File.separator + tableName);
-        assert dataDir.mkdirs();
+        assertTrue(dataDir.mkdirs());
 
         String schema = "CREATE TABLE IF NOT EXISTS %s.%s (k int primary key, v text);";
         String insertQuery = "INSERT INTO %s.%s (k, v) VALUES (?, ?);";
@@ -2354,14 +2371,14 @@ public class SASIIndexTest
             writer.addRow(4, "Vier");
         }
 
-        QueryProcessor.executeOnceInternal(String.format(schema, KS_NAME, tableName));
+        QueryProcessor.executeOnceInternal(String.format(schema, KS_NAME, tableName)).blockingGet();
         QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) USING 'org.apache.cassandra.index.sasi.SASIIndex' " +
                                                          "WITH OPTIONS = { 'mode' : 'CONTAINS', " +
                                                          "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.NonTokenizingAnalyzer', " +
                                                          "'case_sensitive': 'false' };",
-                                                         KS_NAME, tableName));
+                                                         KS_NAME, tableName)).blockingGet();
         QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) USING 'org.apache.cassandra.index.sasi.SASIIndex'",
-                                                         KS_NAME, tableName));
+                                                         KS_NAME, tableName)).blockingGet();
 
         ColumnFamilyStore cfs = Keyspace.open(KS_NAME).getColumnFamilyStore(tableName);
         for (File file : dataDir.listFiles())
@@ -2370,15 +2387,15 @@ public class SASIIndexTest
         cfs.loadNewSSTables();
 
         UntypedResultSet results;
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s;", KS_NAME, tableName));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s;", KS_NAME, tableName)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(5, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%ei%%';", KS_NAME, tableName));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%ei%%';", KS_NAME, tableName)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(3, results.size());
 
-        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Zwei';", KS_NAME, tableName));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Zwei';", KS_NAME, tableName)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
     }
@@ -2420,37 +2437,41 @@ public class SASIIndexTest
 
     private static Set<DecoratedKey> getPaged(ColumnFamilyStore store, int pageSize, Expression... expressions)
     {
-        UnfilteredPartitionIterator currentPage;
+        Flow<FlowableUnfilteredPartition> currentPage;
         Set<DecoratedKey> uniqueKeys = new TreeSet<>();
 
         DecoratedKey lastKey = null;
 
-        int count;
+        AtomicInteger count = new AtomicInteger();
         do
         {
-            count = 0;
+            count.set(0);
             currentPage = getIndexed(store, ColumnFilter.all(store.metadata()), lastKey, pageSize, expressions);
             if (currentPage == null)
                 break;
 
-            while (currentPage.hasNext())
+            try
             {
-                try (UnfilteredRowIterator row = currentPage.next())
-                {
-                    uniqueKeys.add(row.partitionKey());
-                    lastKey = row.partitionKey();
-                    count++;
-                }
+                lastKey = currentPage.flatMap(Util::nonEmptyKeys)
+                                     .map(key ->
+                                          {
+                                              uniqueKeys.add(key);
+                                              count.incrementAndGet();
+                                              return key;
+                                          })
+                                     .blockingLast(null);
             }
-
-            currentPage.close();
+            catch (Exception e)
+            {
+                throw Throwables.propagate(e);
+            }
         }
-        while (count == pageSize);
+        while (count.get() == pageSize);
 
         return uniqueKeys;
     }
 
-    private static UnfilteredPartitionIterator getIndexed(ColumnFamilyStore store, ColumnFilter columnFilter, DecoratedKey startKey, int maxResults, Expression... expressions)
+    private static Flow<FlowableUnfilteredPartition> getIndexed(ColumnFamilyStore store, ColumnFilter columnFilter, DecoratedKey startKey, int maxResults, Expression... expressions)
     {
         DataRange range = (startKey == null)
                             ? DataRange.allData(PARTITIONER)
@@ -2468,7 +2489,7 @@ public class SASIIndexTest
                                                             range,
                                                             Optional.empty());
 
-        return command.executeLocally(command.executionController());
+        return command.executeLocally();
     }
 
     private static Mutation newMutation(String key, String firstName, String lastName, int age, long timestamp)
@@ -2487,25 +2508,22 @@ public class SASIIndexTest
         return rm;
     }
 
-    private static Set<String> getKeys(final UnfilteredPartitionIterator rows)
+    private static Set<String> getKeys(final Flow<FlowableUnfilteredPartition> rows)
     {
+        Flow<DecoratedKey> fs = rows.flatMap(Util::nonEmptyKeys);
+
         try
         {
-            return new TreeSet<String>()
-            {{
-                while (rows.hasNext())
-                {
-                    try (UnfilteredRowIterator row = rows.next())
-                    {
-                        if (!row.isEmpty())
-                            add(AsciiType.instance.compose(row.partitionKey().getKey()));
-                    }
-                }
-            }};
+            return fs.reduceBlocking(new TreeSet<String>(),
+                                     (set, pk) ->
+                                     {
+                                         set.add(AsciiType.instance.compose(pk.getKey()));
+                                         return set;
+                                     });
         }
-        finally
+        catch (Exception e)
         {
-            rows.close();
+            throw Throwables.propagate(e);
         }
     }
 
@@ -2520,13 +2538,13 @@ public class SASIIndexTest
 
     private UntypedResultSet executeCQL(String cfName, String query, Object... values)
     {
-        return QueryProcessor.executeOnceInternal(String.format(query, KS_NAME, cfName), values);
+        return QueryProcessor.executeOnceInternal(String.format(query, KS_NAME, cfName), values).blockingGet();
     }
 
     private Set<String> executeCQLWithKeys(String rawStatement) throws Exception
     {
         Set<String> results = new TreeSet<>();
-        for (UntypedResultSet.Row row : QueryProcessor.executeOnceInternal(rawStatement))
+        for (UntypedResultSet.Row row : QueryProcessor.executeOnceInternal(rawStatement).blockingGet())
         {
             if (row.has("id"))
                 results.add(row.getString("id"));
@@ -2568,7 +2586,7 @@ public class SASIIndexTest
     private static Cell buildCell(TableMetadata cfm, ByteBuffer name, ByteBuffer value, long timestamp)
     {
         ColumnMetadata column = cfm.getColumn(name);
-        assert column != null;
+        assertNotNull(column);
         return BufferCell.live(column, timestamp, value);
     }
 

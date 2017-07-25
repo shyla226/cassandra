@@ -19,24 +19,26 @@ package org.apache.cassandra.index.internal.keys;
 
 import java.nio.ByteBuffer;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.internal.CassandraIndexSearcher;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class KeysSearcher extends CassandraIndexSearcher
 {
-    private static final Logger logger = LoggerFactory.getLogger(KeysSearcher.class);
-
     public KeysSearcher(ReadCommand command,
                         RowFilter.Expression expression,
                         CassandraIndex indexer)
@@ -44,87 +46,36 @@ public class KeysSearcher extends CassandraIndexSearcher
         super(command, expression, indexer);
     }
 
-    protected UnfilteredPartitionIterator queryDataFromIndex(final DecoratedKey indexKey,
-                                                             final RowIterator indexHits,
-                                                             final ReadCommand command,
-                                                             final ReadExecutionController executionController)
+    protected Flow<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
+                                                                   final FlowablePartition indexHits,
+                                                                   final ReadCommand command,
+                                                                   final ReadExecutionController executionController)
     {
-        assert indexHits.staticRow() == Rows.EMPTY_STATIC_ROW;
+        assert indexHits.staticRow == Rows.EMPTY_STATIC_ROW;
+        return indexHits.content
+               .flatMap(hit ->
+               {
+                   DecoratedKey key = index.baseCfs.decorateKey(hit.clustering().get(0));
+                   if (!command.selectsKey(key))
+                       return Flow.<FlowableUnfilteredPartition>empty();
 
-        return new UnfilteredPartitionIterator()
-        {
-            private UnfilteredRowIterator next;
+                   ColumnFilter extendedFilter = getExtendedFilter(command.columnFilter());
+                   SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.create(
+                       index.baseCfs.metadata(),
+                       command.nowInSec(),
+                       extendedFilter,
+                       command.rowFilter(),
+                       DataLimits.NONE,
+                       key,
+                       command.clusteringIndexFilter(key));
 
-            public TableMetadata metadata()
-            {
-                return command.metadata();
-            }
-
-            public boolean hasNext()
-            {
-                return prepareNext();
-            }
-
-            public UnfilteredRowIterator next()
-            {
-                if (next == null)
-                    prepareNext();
-
-                UnfilteredRowIterator toReturn = next;
-                next = null;
-                return toReturn;
-            }
-
-            private boolean prepareNext()
-            {
-                while (next == null && indexHits.hasNext())
-                {
-                    Row hit = indexHits.next();
-                    DecoratedKey key = index.baseCfs.decorateKey(hit.clustering().get(0));
-                    if (!command.selectsKey(key))
-                        continue;
-
-                    ColumnFilter extendedFilter = getExtendedFilter(command.columnFilter());
-                    SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.create(index.baseCfs.metadata(),
-                                                                                           command.nowInSec(),
-                                                                                           extendedFilter,
-                                                                                           command.rowFilter(),
-                                                                                           DataLimits.NONE,
-                                                                                           key,
-                                                                                           command.clusteringIndexFilter(key));
-
-                    @SuppressWarnings("resource") // filterIfStale closes it's iterator if either it materialize it or if it returns null.
-                                                  // Otherwise, we close right away if empty, and if it's assigned to next it will be called either
-                                                  // by the next caller of next, or through closing this iterator is this come before.
-                    UnfilteredRowIterator dataIter = filterIfStale(dataCmd.queryMemtableAndDisk(index.baseCfs, executionController),
+                   Flow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
+                   return partition.skippingMap(p -> filterIfStale(p,
                                                                    hit,
                                                                    indexKey.getKey(),
                                                                    executionController.writeOpOrderGroup(),
-                                                                   command.nowInSec());
-
-                    if (dataIter != null)
-                    {
-                        if (dataIter.isEmpty())
-                            dataIter.close();
-                        else
-                            next = dataIter;
-                    }
-                }
-                return next != null;
-            }
-
-            public void remove()
-            {
-                throw new UnsupportedOperationException();
-            }
-
-            public void close()
-            {
-                indexHits.close();
-                if (next != null)
-                    next.close();
-            }
-        };
+                                                                   command.nowInSec()));
+               });
     }
 
     private ColumnFilter getExtendedFilter(ColumnFilter initialFilter)
@@ -138,27 +89,25 @@ public class KeysSearcher extends CassandraIndexSearcher
         return builder.build();
     }
 
-    private UnfilteredRowIterator filterIfStale(UnfilteredRowIterator iterator,
-                                                Row indexHit,
-                                                ByteBuffer indexedValue,
-                                                OpOrder.Group writeOp,
-                                                int nowInSec)
+    private FlowableUnfilteredPartition filterIfStale(FlowableUnfilteredPartition partition,
+                                                      Row indexHit,
+                                                      ByteBuffer indexedValue,
+                                                      OpOrder.Group writeOp,
+                                                      int nowInSec)
     {
-        assert iterator.metadata().isCompactTable();
-        Row data = iterator.staticRow();
-        if (index.isStale(data, indexedValue, nowInSec))
-        {
-            // Index is stale, remove the index entry and ignore
-            index.deleteStaleEntry(index.getIndexCfs().decorateKey(indexedValue),
-                    makeIndexClustering(iterator.partitionKey().getKey(), Clustering.EMPTY),
-                    new DeletionTime(indexHit.primaryKeyLivenessInfo().timestamp(), nowInSec),
-                    writeOp);
-            iterator.close();
-            return null;
-        }
-        else
-        {
-            return iterator;
-        }
+        assert partition.header.metadata.isCompactTable();
+        Row data = partition.staticRow;
+        if (!index.isStale(data, indexedValue, nowInSec))
+            return partition;
+
+        // Index is stale, remove the index entry and ignore
+        index.deleteStaleEntry(index.getIndexCfs().decorateKey(indexedValue),
+                               makeIndexClustering(partition.header.partitionKey.getKey(), Clustering.EMPTY),
+                               new DeletionTime(indexHit.primaryKeyLivenessInfo().timestamp(), nowInSec),
+                               writeOp)
+             .subscribe();    // We don't need to wait for the deletion to complete, and we don't care too much if it fails.
+
+        partition.unused();
+        return null;
     }
 }

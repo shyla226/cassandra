@@ -17,19 +17,23 @@
  */
 package org.apache.cassandra.service;
 
-import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.collect.Iterables;
+
+import io.reactivex.Completable;
+import io.reactivex.Single;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.net.Response;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class DigestResolver extends ResponseResolver
 {
     private volatile ReadResponse dataResponse;
 
-    public DigestResolver(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistency, int maxResponseCount)
+    DigestResolver(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistency, int maxResponseCount)
     {
         super(keyspace, command, consistency, maxResponseCount);
     }
@@ -45,10 +49,10 @@ public class DigestResolver extends ResponseResolver
     /**
      * Special case of resolve() so that CL.ONE reads never throw DigestMismatchException in the foreground
      */
-    public PartitionIterator getData()
+    public Flow<FlowablePartition> getData()
     {
         assert isDataPresent();
-        return UnfilteredPartitionIterators.filter(dataResponse.makeIterator(command), command.nowInSec());
+        return FlowablePartitions.filterAndSkipEmpty(dataResponse.data(command), command.nowInSec());
     }
 
     /*
@@ -61,7 +65,7 @@ public class DigestResolver extends ResponseResolver
      * b) we're checking additional digests that arrived after the minimum to handle
      *    the requested ConsistencyLevel, i.e. asynchronous read repair check
      */
-    public PartitionIterator resolve() throws DigestMismatchException
+    public Flow<FlowablePartition> resolve() throws DigestMismatchException
     {
         if (responses.size() == 1)
             return getData();
@@ -69,31 +73,35 @@ public class DigestResolver extends ResponseResolver
         if (logger.isTraceEnabled())
             logger.trace("resolving {} responses", responses.size());
 
-        compareResponses();
-
-        return UnfilteredPartitionIterators.filter(dataResponse.makeIterator(command), command.nowInSec());
+        return Flow.concat(compareResponses(),
+                           FlowablePartitions.filterAndSkipEmpty(dataResponse.data(command), command.nowInSec()));
     }
 
-    public void compareResponses() throws DigestMismatchException
+    public Completable completeOnReadRepairAnswersReceived()
     {
-        long start = System.nanoTime();
+        return Completable.complete();
+    }
 
-        // validate digests against each other; throw immediately on mismatch.
-        ByteBuffer digest = null;
-        for (Response<ReadResponse> message : responses)
-        {
-            ReadResponse response = message.payload();
+    public Completable compareResponses() throws DigestMismatchException
+    {
+        final long start = System.nanoTime();
 
-            ByteBuffer newDigest = response.digest(command);
-            if (digest == null)
-                digest = newDigest;
-            else if (!digest.equals(newDigest))
-                // rely on the fact that only single partition queries use digests
-                throw new DigestMismatchException(((SinglePartitionReadCommand)command).partitionKey(), digest, newDigest);
-        }
+        Completable pipeline =
+                Single.concat(Iterables.transform(responses, response -> response.payload().digest(command)))
+                      .reduce((prev, digest) ->
+                      {
+                          if (prev.equals(digest))
+                              return digest;
+
+                          // rely on the fact that only single partition queries use digests
+                          throw new DigestMismatchException(((SinglePartitionReadCommand) command).partitionKey(), prev, digest);
+                      })
+                      .ignoreElement();
 
         if (logger.isTraceEnabled())
-            logger.trace("resolve: {} ms.", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+            pipeline = pipeline.doFinally(() -> logger.trace("resolve: {} ms.", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)));
+
+        return pipeline;
     }
 
     public boolean isDataPresent()

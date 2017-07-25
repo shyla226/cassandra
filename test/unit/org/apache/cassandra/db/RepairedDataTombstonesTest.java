@@ -28,6 +28,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractRow;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -176,8 +177,7 @@ public class RepairedDataTombstonesTest extends CQLTester
         Thread.sleep(1000);
         ReadCommand cmd = Util.cmd(getCurrentColumnFamilyStore()).build();
         int partitionsFound = 0;
-        try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController))
+        try (UnfilteredPartitionIterator iterator = cmd.executeForTests())
         {
             while (iterator.hasNext())
             {
@@ -241,8 +241,8 @@ public class RepairedDataTombstonesTest extends CQLTester
         int foundRows = 0;
         try (ReadExecutionController executionController = cmd.executionController();
              UnfilteredPartitionIterator iterator =
-             includePurgeable ? cmd.queryStorage(getCurrentColumnFamilyStore(), executionController) :
-                                cmd.executeLocally(executionController))
+             includePurgeable ? FlowablePartitions.toPartitions(cmd.queryStorage(getCurrentColumnFamilyStore(), executionController), cmd.metadata()) :
+                                cmd.executeForTests())
         {
             while (iterator.hasNext())
             {
@@ -283,8 +283,8 @@ public class RepairedDataTombstonesTest extends CQLTester
         int foundRows = 0;
         try (ReadExecutionController executionController = cmd.executionController();
              UnfilteredPartitionIterator iterator =
-             includePurgeable ? cmd.queryStorage(getCurrentColumnFamilyStore(), executionController) :
-                                cmd.executeLocally(executionController))
+             includePurgeable ? FlowablePartitions.toPartitions(cmd.queryStorage(getCurrentColumnFamilyStore(), executionController), cmd.metadata()) :
+                                cmd.executeForTests())
         {
             while (iterator.hasNext())
             {

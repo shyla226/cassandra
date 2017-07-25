@@ -23,7 +23,6 @@ import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 public abstract class MemtableAllocator
 {
@@ -140,27 +139,10 @@ public abstract class MemtableAllocator
         {
             assert size >= 0;
 
-            while (true)
-            {
-                if (parent.tryAllocate(size))
-                {
-                    acquired(size);
-                    return;
-                }
-                WaitQueue.Signal signal = opGroup.isBlockingSignal(parent.hasRoom().register(parent.blockedTimerContext()));
-                boolean allocated = parent.tryAllocate(size);
-                if (allocated || opGroup.isBlocking())
-                {
-                    signal.cancel();
-                    if (allocated) // if we allocated, take ownership
-                        acquired(size);
-                    else // otherwise we're blocking so we're permitted to overshoot our constraints, to just allocate without blocking
-                        allocated(size);
-                    return;
-                }
-                else
-                    signal.awaitUninterruptibly();
-            }
+            if (parent.tryAllocate(size))
+                acquired(size);
+            else
+                allocated(size);
         }
 
         // retroactively mark an amount allocated and acquired in the tracker, and owned by us

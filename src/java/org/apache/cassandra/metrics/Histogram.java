@@ -18,12 +18,11 @@
 
 package org.apache.cassandra.metrics;
 
-import com.codahale.metrics.Counting;
-import com.codahale.metrics.Metric;
-import com.codahale.metrics.MetricRegistry;
-import com.codahale.metrics.Sampling;
-import com.codahale.metrics.ScheduledReporter;
-import com.codahale.metrics.Snapshot;
+import com.google.common.annotations.VisibleForTesting;
+
+import com.codahale.metrics.*;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.EstimatedHistogram;
 
 /**
  * A metric which calculates the distribution of a value.
@@ -35,20 +34,25 @@ import com.codahale.metrics.Snapshot;
  * class and retrieves {@link this#getCount()} from {@link Reservoir}.
  *
  * This class needs to extend {@link com.codahale.metrics.Histogram} to allow this metric
- * to be retrieved by {@link MetricRegistry#getHistograms()} (used by {@link ScheduledReporter}).
+ * to be retrieved by {@link MetricRegistry#getHistograms()} (used by {@link ScheduledReporter})
+ * but we can't easily do that since we need access to the reservoir, which can be shared. We also
+ * don't want to use a LongAdder by default. Was it not for this fact, it would have been an interface.
  */
-public class Histogram extends com.codahale.metrics.Histogram implements Metric, Sampling, Counting
+public abstract class Histogram extends com.codahale.metrics.Histogram implements Composable<Histogram>
 {
-    private final Reservoir reservoir;
-
     /**
-     * Creates a new {@link com.codahale.metrics.Histogram} with the given reservoir.
-     *
-     * @param reservoir the reservoir to create a histogram from
+     * Whether zeros are considered by default.
      */
-    public Histogram(Reservoir reservoir) {
-        super(reservoir);
-        this.reservoir = reservoir;
+    public static boolean DEFAULT_ZERO_CONSIDERATION = false;
+
+    /** The maximum trackable value, 18 TB. This comes from the legacy implementation based on
+     * {@link EstimatedHistogram#newOffsets(int, boolean)} with size set to 164 and  considerZeros
+     * set to true.*/
+    public static long DEFAULT_MAX_TRACKABLE_VALUE = 18 * (1L << 43);
+
+    protected Histogram()
+    {
+        super(null); // use a fake null reservoir for the base since our implementors use a different one and override all methods
     }
 
     /**
@@ -56,31 +60,67 @@ public class Histogram extends com.codahale.metrics.Histogram implements Metric,
      *
      * @param value the length of the value
      */
-    public void update(int value) {
-        update((long) value);
-    }
+    public abstract void update(final long value);
 
     /**
-     * Adds a recorded value.
-     *
-     * @param value the length of the value
-     */
-    public void update(long value) {
-        reservoir.update(value);
-    }
-
-    /**
-     * Returns the number of values recorded.
-     *
      * @return the number of values recorded
      */
     @Override
-    public long getCount() {
-        return reservoir.getCount();
+    public abstract long getCount();  //from Counting
+
+    /**
+     *
+     * @return a snapshot of the histogram.
+     */
+    @Override
+    public abstract Snapshot getSnapshot(); //from Sampling
+
+    @VisibleForTesting
+    public abstract void clear();
+
+    @VisibleForTesting
+    public abstract void aggregate();
+
+    public abstract boolean considerZeroes();
+
+    public abstract long maxTrackableValue();
+
+    public abstract long[] getOffsets();
+
+    public static Histogram make(boolean isComposite)
+    {
+        return make(DEFAULT_ZERO_CONSIDERATION, isComposite);
     }
 
-    @Override
-    public Snapshot getSnapshot() {
-        return reservoir.getSnapshot();
+    public static Histogram make(boolean considerZeroes, boolean isComposite)
+    {
+        return make(considerZeroes, DEFAULT_MAX_TRACKABLE_VALUE, isComposite);
+    }
+
+    public static Histogram make(boolean considerZeroes, long maxTrackableValue, boolean isComposite)
+    {
+        return make(considerZeroes, maxTrackableValue, DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis(), isComposite);
+    }
+
+    public static Histogram make(boolean considerZeroes, long maxTrackableValue, int updateIntervalMillis, boolean isComposite)
+    {
+        return isComposite
+               ? new CompositeHistogram(DecayingEstimatedHistogram.makeCompositeReservoir(considerZeroes, maxTrackableValue, updateIntervalMillis, ApproximateClock.defaultClock()))
+               : new DecayingEstimatedHistogram(considerZeroes, maxTrackableValue, updateIntervalMillis, ApproximateClock.defaultClock());
+    }
+
+    interface Reservoir
+    {
+        boolean considerZeroes();
+
+        long maxTrackableValue();
+
+        long getCount();
+
+        Snapshot getSnapshot();
+
+        void add(Histogram histogram);
+
+        long[] getOffsets();
     }
 }

@@ -24,7 +24,5 @@ public abstract class AbstractUnfilteredPartitionIterator implements UnfilteredP
         throw new UnsupportedOperationException();
     }
 
-    public void close()
-    {
-    }
+
 }

@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.*;
 import com.google.common.collect.Maps;
+import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,7 +51,7 @@ import static java.lang.String.format;
 
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
-import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
+import static org.apache.cassandra.cql3.QueryProcessor.executeInternalAsync;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
 
 /**
@@ -282,8 +283,9 @@ public final class SchemaKeyspace
         for (String schemaTable : ALL)
         {
             String query = String.format("DELETE FROM %s.%s USING TIMESTAMP ? WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, schemaTable);
+            // TODO make async?
             for (String systemKeyspace : SchemaConstants.SYSTEM_KEYSPACE_NAMES)
-                executeOnceInternal(query, timestamp, systemKeyspace);
+                executeOnceInternal(query, timestamp, systemKeyspace).blockingGet();
         }
 
         // (+1 to timestamp to make sure we don't get shadowed by the tombstones we just added)
@@ -296,10 +298,18 @@ public final class SchemaKeyspace
         ALL.reverse().forEach(table -> getSchemaCFS(table).truncateBlocking());
     }
 
-    static void flush()
+    static Completable flush()
     {
         if (!DatabaseDescriptor.isUnsafeSystem())
-            ALL.forEach(table -> FBUtilities.waitOnFuture(getSchemaCFS(table).forceFlush()));
+        {
+            List<Completable> flushes = new ArrayList<>(ALL.size());
+            for (String table : ALL)
+                flushes.add(getSchemaCFS(table).forceFlush().flatMapCompletable(position -> Completable.complete()));
+
+            return Completable.concat(flushes);
+        }
+
+        return Completable.complete();
     }
 
     /**
@@ -326,13 +336,15 @@ public final class SchemaKeyspace
                 continue;
 
             ReadCommand cmd = getReadCommandForTableSchema(table);
-            try (ReadExecutionController executionController = cmd.executionController();
-                 PartitionIterator schema = cmd.executeInternal(executionController))
+            try (PartitionIterator schema = FlowablePartitions.toPartitionsFiltered(cmd.executeInternal()))
             {
                 while (schema.hasNext())
                 {
                     try (RowIterator partition = schema.next())
                     {
+                        if (partition == null)
+                            continue;
+
                         if (!isSystemKeyspaceSchemaPartition(partition.partitionKey()))
                             RowIterators.digest(partition, digest);
                     }
@@ -374,8 +386,7 @@ public final class SchemaKeyspace
     private static void convertSchemaToMutations(Map<DecoratedKey, Mutation> mutationMap, String schemaTableName)
     {
         ReadCommand cmd = getReadCommandForTableSchema(schemaTableName);
-        try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iter = cmd.executeLocally(executionController))
+        try (UnfilteredPartitionIterator iter = FlowablePartitions.toPartitions(cmd.executeLocally(), cmd.metadata()))
         {
             while (iter.hasNext())
             {
@@ -509,8 +520,6 @@ public final class SchemaKeyspace
                                               .add("id", table.id.asUUID())
                                               .add("flags", TableMetadata.Flag.toStringSet(table.flags));
 
-        addTableParamsToRowBuilder(table.params, rowBuilder);
-
         if (withColumnsAndTriggers)
         {
             for (ColumnMetadata column : table.columns())
@@ -525,6 +534,10 @@ public final class SchemaKeyspace
             for (IndexMetadata index : table.indexes)
                 addIndexToSchemaMutation(table, index, builder);
         }
+
+        //We want table insert last to avoid trying to read
+        //column info before these mutations are fully applied.
+        addTableParamsToRowBuilder(table.params, rowBuilder);
     }
 
     private static void addTableParamsToRowBuilder(TableParams params, Row.SimpleBuilder builder)
@@ -886,7 +899,8 @@ public final class SchemaKeyspace
         String query = format("SELECT keyspace_name FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, KEYSPACES);
 
         Keyspaces.Builder keyspaces = org.apache.cassandra.schema.Keyspaces.builder();
-        for (UntypedResultSet.Row row : query(query))
+        // TODO make async?
+        for (UntypedResultSet.Row row : query(query).blockingGet())
         {
             String keyspaceName = row.getString("keyspace_name");
             if (!excludedKeyspaceNames.contains(keyspaceName))
@@ -909,7 +923,8 @@ public final class SchemaKeyspace
     {
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, KEYSPACES);
 
-        UntypedResultSet.Row row = query(query, keyspaceName).one();
+        // TODO make async?
+        UntypedResultSet.Row row = query(query, keyspaceName).blockingGet().one();
         boolean durableWrites = row.getBoolean(KeyspaceParams.Option.DURABLE_WRITES.toString());
         Map<String, String> replication = row.getFrozenTextMap(KeyspaceParams.Option.REPLICATION.toString());
         return KeyspaceParams.create(durableWrites, replication);
@@ -920,7 +935,8 @@ public final class SchemaKeyspace
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, TYPES);
 
         Types.RawBuilder types = org.apache.cassandra.schema.Types.rawBuilder(keyspaceName);
-        for (UntypedResultSet.Row row : query(query, keyspaceName))
+        // TODO make async?
+        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingGet())
         {
             String name = row.getString("type_name");
             List<String> fieldNames = row.getFrozenList("field_names", UTF8Type.instance);
@@ -935,7 +951,8 @@ public final class SchemaKeyspace
         String query = format("SELECT table_name FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, TABLES);
 
         Tables.Builder tables = org.apache.cassandra.schema.Tables.builder();
-        for (UntypedResultSet.Row row : query(query, keyspaceName))
+        // TODO make async?
+        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingGet())
         {
             String tableName = row.getString("table_name");
             try
@@ -966,7 +983,8 @@ public final class SchemaKeyspace
     private static TableMetadata fetchTable(String keyspaceName, String tableName, Types types)
     {
         String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, TABLES);
-        UntypedResultSet rows = query(query, keyspaceName, tableName);
+        // TODO make async?
+        UntypedResultSet rows = query(query, keyspaceName, tableName).blockingGet();
         if (rows.isEmpty())
             throw new RuntimeException(String.format("%s:%s not found in the schema definitions keyspace.", keyspaceName, tableName));
         UntypedResultSet.Row row = rows.one();
@@ -1006,7 +1024,8 @@ public final class SchemaKeyspace
     private static List<ColumnMetadata> fetchColumns(String keyspace, String table, Types types)
     {
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS);
-        UntypedResultSet columnRows = query(query, keyspace, table);
+        // TODO make async?
+        UntypedResultSet columnRows = query(query, keyspace, table).blockingGet();
         if (columnRows.isEmpty())
             throw new MissingColumns("Columns not found in schema table for " + keyspace + "." + table);
 
@@ -1040,7 +1059,8 @@ public final class SchemaKeyspace
     {
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, DROPPED_COLUMNS);
         Map<ByteBuffer, DroppedColumn> columns = new HashMap<>();
-        for (UntypedResultSet.Row row : query(query, keyspace, table))
+        // TODO make async?
+        for (UntypedResultSet.Row row : query(query, keyspace, table).blockingGet())
         {
             DroppedColumn column = createDroppedColumnFromRow(row);
             columns.put(column.column.name.bytes, column);
@@ -1074,7 +1094,8 @@ public final class SchemaKeyspace
     {
         String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, INDEXES);
         Indexes.Builder indexes = org.apache.cassandra.schema.Indexes.builder();
-        query(query, keyspace, table).forEach(row -> indexes.add(createIndexMetadataFromRow(row)));
+        // TODO make async
+        query(query, keyspace, table).blockingGet().forEach(row -> indexes.add(createIndexMetadataFromRow(row)));
         return indexes.build();
     }
 
@@ -1090,7 +1111,8 @@ public final class SchemaKeyspace
     {
         String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, TRIGGERS);
         Triggers.Builder triggers = org.apache.cassandra.schema.Triggers.builder();
-        query(query, keyspace, table).forEach(row -> triggers.add(createTriggerFromRow(row)));
+        // TODO make async?
+        query(query, keyspace, table).blockingGet().forEach(row -> triggers.add(createTriggerFromRow(row)));
         return triggers.build();
     }
 
@@ -1106,7 +1128,8 @@ public final class SchemaKeyspace
         String query = format("SELECT view_name FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, VIEWS);
 
         Views.Builder views = org.apache.cassandra.schema.Views.builder();
-        for (UntypedResultSet.Row row : query(query, keyspaceName))
+        // TODO make async?
+        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingGet())
             views.add(fetchView(keyspaceName, row.getString("view_name"), types));
         return views.build();
     }
@@ -1114,7 +1137,8 @@ public final class SchemaKeyspace
     private static ViewMetadata fetchView(String keyspaceName, String viewName, Types types)
     {
         String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND view_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, VIEWS);
-        UntypedResultSet rows = query(query, keyspaceName, viewName);
+        // TODO make async?
+        UntypedResultSet rows = query(query, keyspaceName, viewName).blockingGet();
         if (rows.isEmpty())
             throw new RuntimeException(String.format("%s:%s not found in the schema definitions keyspace.", keyspaceName, viewName));
         UntypedResultSet.Row row = rows.one();
@@ -1156,7 +1180,8 @@ public final class SchemaKeyspace
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, FUNCTIONS);
 
         Functions.Builder functions = org.apache.cassandra.schema.Functions.builder();
-        for (UntypedResultSet.Row row : query(query, keyspaceName))
+        // TODO make async?
+        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingGet())
             functions.add(createUDFFromRow(row, types));
         return functions.build();
     }
@@ -1222,7 +1247,8 @@ public final class SchemaKeyspace
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, AGGREGATES);
 
         Functions.Builder aggregates = org.apache.cassandra.schema.Functions.builder();
-        for (UntypedResultSet.Row row : query(query, keyspaceName))
+        // TODO make async?
+        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingGet())
             aggregates.add(createUDAFromRow(row, udfs, types));
         return aggregates.build();
     }
@@ -1256,9 +1282,9 @@ public final class SchemaKeyspace
         }
     }
 
-    private static UntypedResultSet query(String query, Object... variables)
+    private static Single<UntypedResultSet> query(String query, Object... variables)
     {
-        return executeInternal(query, variables);
+        return executeInternalAsync(query, variables);
     }
 
     /*
@@ -1276,11 +1302,13 @@ public final class SchemaKeyspace
                         .collect(toSet());
     }
 
-    static void applyChanges(Collection<Mutation> mutations)
+    static synchronized void applyChanges(Collection<Mutation> mutations)
     {
-        mutations.forEach(Mutation::apply);
+        // TODO - schould we merge rather than concat? (merge would process mutations in parallel)
+        Completable.concat(mutations.stream().map(Mutation::applyAsync).collect(toList())).blockingAwait();
+
         if (SchemaKeyspace.FLUSH_SCHEMA_TABLES)
-            SchemaKeyspace.flush();
+            SchemaKeyspace.flush().blockingAwait();
     }
 
     static Keyspaces fetchKeyspaces(Set<String> toFetch)
@@ -1292,7 +1320,7 @@ public final class SchemaKeyspace
         String query = format("SELECT keyspace_name FROM %s.%s WHERE keyspace_name IN ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, KEYSPACES);
 
         Keyspaces.Builder keyspaces = org.apache.cassandra.schema.Keyspaces.builder();
-        for (UntypedResultSet.Row row : query(query, new ArrayList<>(toFetch)))
+        for (UntypedResultSet.Row row : query(query, new ArrayList<>(toFetch)).blockingGet())
             keyspaces.add(fetchKeyspace(row.getString("keyspace_name")));
         return keyspaces.build();
     }

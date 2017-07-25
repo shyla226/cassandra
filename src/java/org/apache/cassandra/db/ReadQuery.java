@@ -17,15 +17,24 @@
  */
 package org.apache.cassandra.db;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.monitoring.Monitorable;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowablePartitions;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.service.pager.QueryPager;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Generic abstraction for read queries.
@@ -36,31 +45,36 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public interface ReadQuery extends Monitorable
 {
-    ReadQuery EMPTY = new EmptyQuery();
-
     final static class EmptyQuery implements ReadQuery
     {
+        private final TableMetadata metadata;
+
+        public EmptyQuery(TableMetadata metadata)
+        {
+            this.metadata = metadata;
+        }
+
         public ReadExecutionController executionController()
         {
             return ReadExecutionController.empty();
         }
 
-        public PartitionIterator execute(ConsistencyLevel consistency,
-                                         ClientState clientState,
-                                         long queryStartNanoTime,
-                                         boolean forContinuousPaging) throws RequestExecutionException
+        public Flow<FlowablePartition> execute(ConsistencyLevel consistency,
+                                               ClientState clientState,
+                                               long queryStartNanoTime,
+                                               boolean forContinuousPaging) throws RequestExecutionException
         {
-            return EmptyIterators.partition();
+            return Flow.empty();
         }
 
-        public PartitionIterator executeInternal(ReadExecutionController controller)
+        public Flow<FlowablePartition> executeInternal(Monitor monitor)
         {
-            return EmptyIterators.partition();
+            return Flow.empty();
         }
 
-        public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)
+        public Flow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
         {
-            return EmptyIterators.unfilteredPartition(executionController.metadata());
+            return Flow.empty();
         }
 
         public DataLimits limits()
@@ -101,17 +115,27 @@ public interface ReadQuery extends Monitorable
             return "<EMPTY>";
         }
 
-        @Override
+        public TableMetadata metadata()
+        {
+            return metadata;
+        }
+
+        public boolean isEmpty()
+        {
+            return true;
+        }
+
+         @Override
         public boolean selectsFullPartition()
         {
             return false;
         }
-    };
+    }
 
     /**
      * Starts a new read operation.
      * <p>
-     * This must be called before {@link this#executeInternal(ReadExecutionController)} and passed to it to protect the read.
+     * This must be called before {@link this#executeInternal()} and passed to it to protect the read.
      * The returned object <b>must</b> be closed on all path and it is thus strongly advised to
      * use it in a try-with-ressource construction.
      *
@@ -134,34 +158,43 @@ public interface ReadQuery extends Monitorable
      * the dynamic snitch, read repair and speculative retries. This flag is also used to record
      * different metrics than for non-continuous queries.
      *
-     * @return the result of the query.
+     * @return the result of the query as as asynchronous flow of {@link FlowablePartition}
      */
-    public PartitionIterator execute(ConsistencyLevel consistency,
-                                     ClientState clientState,
-                                     long queryStartNanoTime,
-                                     boolean forContinuousPaging) throws RequestExecutionException;
+    public Flow<FlowablePartition> execute(ConsistencyLevel consistency,
+                                           ClientState clientState,
+                                           long queryStartNanoTime,
+                                           boolean forContinuousPaging) throws RequestExecutionException;
 
     /**
      * Execute the query for internal queries.
      *
      * This return an iterator that directly query the local underlying storage.
      *
-     * @param controller the {@code ReadExecutionController} protecting the read.
      * @return the result of the query.
      */
-    public PartitionIterator executeInternal(ReadExecutionController controller);
+    public Flow<FlowablePartition> executeInternal(@Nullable Monitor monitor);
+
+    public default Flow<FlowablePartition> executeInternal()
+    {
+        return executeInternal(null);
+    }
 
     /**
      * Execute the query locally. This is where the reading actually happens, typically this method
-     * would be invoked by the read verb handlers and {@link ReadQuery#executeInternal(ReadExecutionController)}, or
-     * whenever we need to read local data and we need an unfiltered partition iterator, rather than a filtered one.
-     * The main difference with {@link ReadQuery#executeInternal(ReadExecutionController)} is the filtering, only
-     * unfiltered iterators can be merged later on.
+     * would be invoked by the read verb handlers, {@link ReadVerbs}
+     * and {@link ReadQuery#executeInternal()}, or whenever we need to read local data
+     * and we need an unfiltered partition iterator, rather than a filtered one. The main difference with
+     * {@link ReadQuery#executeInternal()} is the filtering, only unfiltered iterators can
+     * be merged later on.
      *
-     * @param controller the {@code ReadExecutionController} protecting the read.
      * @return the result of the read query.
      */
-    public UnfilteredPartitionIterator executeLocally(ReadExecutionController controller);
+    public Flow<FlowableUnfilteredPartition> executeLocally(@Nullable Monitor monitor);
+
+    default public Flow<FlowableUnfilteredPartition> executeLocally()
+    {
+        return executeLocally(null);
+    }
 
     /**
      * Returns a pager for the query.
@@ -226,8 +259,38 @@ public interface ReadQuery extends Monitorable
     }
 
     /**
+     * Return the table metadata of this query.
+     *
+     * @return - the table metadata
+     */
+    public TableMetadata metadata();
+
+    /**
+     * Return true if the query is empty.
+     *
+     * @return - true if the query is empty, false otherwise.
+     */
+    public boolean isEmpty();
+
+    /**
      * Checks if this {@code ReadQuery} selects full partitions, that is it has no filtering on clustering or regular columns.
      * @return {@code true} if this {@code ReadQuery} selects full partitions, {@code false} otherwise.
      */
     public boolean selectsFullPartition();
+
+    /**
+     * Test-only helper method.
+     */
+    default public UnfilteredPartitionIterator executeForTests()
+    {
+        return FlowablePartitions.toPartitions(FlowablePartitions.skipEmptyPartitions(executeLocally()), metadata());
+    }
+
+    /**
+     * Test-only helper method.
+     */
+    default public PartitionIterator executeInternalForTests()
+    {
+        return FlowablePartitions.toPartitionsFiltered(executeInternal());
+    }
 }

@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 
+import io.reactivex.Maybe;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -139,34 +140,34 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
             throw new InvalidRequestException(String.format("Cannot add function '%s' to non existing keyspace '%s'.", functionName.name, functionName.keyspace));
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
         Function old = Schema.instance.findFunction(functionName, argTypes).orElse(null);
         boolean replaced = old != null;
         if (replaced)
         {
             if (ifNotExists)
-                return null;
+                return Maybe.empty();
             if (!orReplace)
-                throw new InvalidRequestException(String.format("Function %s already exists", old));
+                return error(String.format("Function %s already exists", old));
             if (!(old instanceof ScalarFunction))
-                throw new InvalidRequestException(String.format("Function %s can only replace a function", old));
+                return error(String.format("Function %s can only replace a function", old));
             if (calledOnNullInput != ((ScalarFunction) old).isCalledOnNullInput())
-                throw new InvalidRequestException(String.format("Function %s can only be replaced with %s", old,
-                                                                calledOnNullInput ? "CALLED ON NULL INPUT" : "RETURNS NULL ON NULL INPUT"));
+                return error(String.format("Function %s can only be replaced with %s", old,
+                                           calledOnNullInput ? "CALLED ON NULL INPUT" : "RETURNS NULL ON NULL INPUT"));
 
             if (!Functions.typesMatch(old.returnType(), returnType))
-                throw new InvalidRequestException(String.format("Cannot replace function %s, the new return type %s is not compatible with the return type %s of existing function",
-                                                                functionName, returnType.asCQL3Type(), old.returnType().asCQL3Type()));
+                return error(String.format("Cannot replace function %s, the new return type %s is not compatible with the return type %s of existing function",
+                                    functionName, returnType.asCQL3Type(), old.returnType().asCQL3Type()));
         }
 
         UDFunction udFunction = UDFunction.create(functionName, argNames, argTypes, returnType, calledOnNullInput, language, body);
 
-        MigrationManager.announceNewFunction(udFunction, isLocalOnly);
-
-        return new Event.SchemaChange(replaced ? Event.SchemaChange.Change.UPDATED : Event.SchemaChange.Change.CREATED,
-                                      Event.SchemaChange.Target.FUNCTION,
-                                      udFunction.name().keyspace, udFunction.name().name, AbstractType.asCQLTypeStringList(udFunction.argTypes()));
+        return MigrationManager.announceNewFunction(udFunction, isLocalOnly)
+                .andThen(Maybe.just(new Event.SchemaChange(
+                        replaced ? Event.SchemaChange.Change.UPDATED : Event.SchemaChange.Change.CREATED,
+                        Event.SchemaChange.Target.FUNCTION,
+                        udFunction.name().keyspace, udFunction.name().name, AbstractType.asCQLTypeStringList(udFunction.argTypes()))));
     }
 
     private AbstractType<?> prepareType(String typeName, CQL3Type.Raw rawType)

@@ -22,8 +22,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.util.Arrays;
-import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -40,7 +38,9 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.compaction.MemoryOnlyStrategy;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
@@ -48,6 +48,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
@@ -55,7 +56,9 @@ import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.AsynchronousChannelProxy;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.CachingParams;
@@ -102,7 +105,7 @@ public class BigTableReader extends SSTableReader
         }
 
         try(FileHandle.Builder ibuilder = new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX))
-                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
+                .mmapped(DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard && metadata().params.compaction.klass().equals(MemoryOnlyStrategy.class))
                 .withChunkCache(ChunkCache.instance))
         {
             loadSummary();
@@ -266,17 +269,23 @@ public class BigTableReader extends SSTableReader
                                           boolean reversed,
                                           SSTableReadsListener listener)
     {
-        BigRowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ, listener);
-        return iterator(null, key, rie, slices, selectedColumns, reversed);
+        BigRowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ, listener, Rebufferer.ReaderConstraint.NONE);
+        return iterator(null, key, rie, slices, selectedColumns, reversed, Rebufferer.ReaderConstraint.NONE);
     }
 
-    public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public UnfilteredRowIterator iterator(FileDataInput file,
+                                          DecoratedKey key,
+                                          RowIndexEntry indexEntry,
+                                          Slices slices,
+                                          ColumnFilter selectedColumns,
+                                          boolean reversed,
+                                          Rebufferer.ReaderConstraint readerConstraint)
     {
         if (indexEntry == null)
             return UnfilteredRowIterators.noRowsIterator(metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, reversed);
         return reversed
-             ? new SSTableReversedIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns)
-             : new SSTableIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns);
+             ? new SSTableReversedIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns, readerConstraint)
+             : new SSTableIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns, readerConstraint);
     }
 
     /**
@@ -316,10 +325,10 @@ public class BigTableReader extends SSTableReader
         }
     }
 
-    public DecoratedKey keyAt(long indexPosition) throws IOException
+    public DecoratedKey keyAt(long indexPosition, Rebufferer.ReaderConstraint rc) throws IOException
     {
         DecoratedKey key;
-        try (FileDataInput in = ifile.createReader(indexPosition))
+        try (FileDataInput in = ifile.createReader(indexPosition, rc))
         {
             if (in.isEOF())
                 return null;
@@ -407,16 +416,19 @@ public class BigTableReader extends SSTableReader
         return keyCacheRequest.get();
     }
 
-    @Override
-    public BigRowIndexEntry getPosition(PartitionPosition key, Operator op)
+    /**
+     * Get position updating key cache and stats.
+     * @see #getPosition(PartitionPosition, SSTableReader.Operator, Rebufferer.ReaderConstraint)
+     */
+    public BigRowIndexEntry getPosition(PartitionPosition key, Operator op, Rebufferer.ReaderConstraint rc)
     {
-        return getPosition(key, op, true, false, SSTableReadsListener.NOOP_LISTENER);
+        return getPosition(key, op, true, false, SSTableReadsListener.NOOP_LISTENER, rc);
     }
 
     @Override
-    public BigRowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener)
+    public BigRowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener, Rebufferer.ReaderConstraint rc)
     {
-        return getPosition(key, op, true, false, listener);
+        return getPosition(key, op, true, false, listener, rc);
     }
 
     /**
@@ -430,7 +442,8 @@ public class BigTableReader extends SSTableReader
                                            Operator op,
                                            boolean updateCacheAndStats,
                                            boolean permitMatchPastLast,
-                                           SSTableReadsListener listener)
+                                           SSTableReadsListener listener,
+                                           Rebufferer.ReaderConstraint rc)
     {
         if (op == Operator.EQ)
         {
@@ -502,7 +515,7 @@ public class BigTableReader extends SSTableReader
         // of the next interval).
         int i = 0;
         String path = null;
-        try (FileDataInput in = ifile.createReader(sampledPosition))
+        try (FileDataInput in = ifile.createReader(sampledPosition, rc))
         {
             path = in.getPath();
             while (!in.isEOF())
@@ -546,7 +559,7 @@ public class BigTableReader extends SSTableReader
                         if (logger.isTraceEnabled())
                         {
                             // expensive sanity check!  see CASSANDRA-4687
-                            try (FileDataInput fdi = dataFile.createReader(indexEntry.position))
+                            try (FileDataInput fdi = dataFile.createReader(indexEntry.position, rc))
                             {
                                 DecoratedKey keyInDisk = decorateKey(ByteBufferUtil.readWithShortLength(fdi));
                                 if (!keyInDisk.equals(key))
@@ -587,15 +600,15 @@ public class BigTableReader extends SSTableReader
     }
 
     @Override
-    public RowIndexEntry getExactPosition(DecoratedKey key)
+    public RowIndexEntry getExactPosition(DecoratedKey key, Rebufferer.ReaderConstraint rc)
     {
-        return getPosition(key, Operator.EQ);
+        return getPosition(key, Operator.EQ, rc);
     }
 
     @Override
-    public boolean contains(DecoratedKey key)
+    public boolean contains(DecoratedKey key, Rebufferer.ReaderConstraint rc)
     {
-        return getExactPosition(key) != null;
+        return getExactPosition(key, rc) != null;
     }
 
     @Override

@@ -20,8 +20,8 @@ package org.apache.cassandra.cql3.validation.operations;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
-import org.junit.Test;
 import org.junit.Assert;
+import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Duration;
@@ -29,10 +29,10 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BYTE_BUFFER;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 
 /**
@@ -1490,6 +1490,7 @@ public class SelectTest extends CQLTester
                                     row(4, 2, 4, 2, 6),
                                     row(3, 2, 3, 2, 5));
         });
+        // tpc TODO see below
     }
 
     @Test
@@ -1510,6 +1511,9 @@ public class SelectTest extends CQLTester
                        row(1, 2, 1, 2, 3),
                        row(4, 2, 4, 2, 6));
         });
+        // tpc TODO: This does not currently work, because RowFilter does not filter out empty partition with static
+        // row but DataLimits counts that static row.
+        // Need blerer's opinion on how to sort this out properly (see comment in RowFilter.CQLFilter.filter and CASSANDRA-6377).
     }
 
     @Test
@@ -1532,7 +1536,9 @@ public class SelectTest extends CQLTester
         execute("DELETE FROM %s WHERE a = 2 AND b = 2");
 
         beforeAndAfterFlush(() -> {
-            
+
+            assertRows(execute("SELECT COUNT(*) FROM %s"), row(5L));
+
             // Checks filtering
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE c = 4 AND d = 8");

@@ -44,6 +44,7 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     protected RebufferingInputStream(ByteBuffer buffer)
     {
         Preconditions.checkArgument(buffer == null || buffer.order() == ByteOrder.BIG_ENDIAN, "Buffer must have BIG ENDIAN byte ordering");
+        assert buffer != null;
         this.buffer = buffer;
     }
 
@@ -139,6 +140,7 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     @Override
     public byte readByte() throws IOException
     {
+        assert buffer != null : "Got null buffer for " + this + " (" + this.getClass().getName() + ")";
         if (!buffer.hasRemaining())
         {
             reBuffer();

@@ -321,9 +321,9 @@ class ContinuousPageWriter
          */
         private void processPendingPages()
         {
-            long pauseMicros = 0;
+            long pauseMicros = 1;
             boolean aborted = aborted();
-            while(aborted || channel.isWritable())
+            while (aborted || channel.isWritable())
             {
                 if (!aborted && !limiter.tryAcquire())
                 {

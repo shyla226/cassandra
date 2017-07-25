@@ -17,11 +17,16 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+
 import java.util.*;
 
-import org.apache.cassandra.auth.*;
+import io.reactivex.Single;
+
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.auth.permission.Permissions;
+import org.apache.cassandra.auth.IResource;
+import org.apache.cassandra.auth.PermissionDetails;
+import org.apache.cassandra.auth.Resources;
+import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.*;
@@ -64,6 +69,11 @@ public class ListPermissionsStatement extends AuthorizationStatement
 
     public void validate(ClientState state) throws RequestValidationException
     {
+
+    }
+
+    public void checkAccess(ClientState state)
+    {
         // a check to ensure the existence of the user isn't being leaked by user existence check.
         state.ensureNotAnonymous();
 
@@ -76,30 +86,27 @@ public class ListPermissionsStatement extends AuthorizationStatement
 
         if ((grantee != null) && !DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
             throw new InvalidRequestException(String.format("%s doesn't exist", grantee));
-   }
-
-    public void checkAccess(ClientState state)
-    {
-        // checked in validate
     }
 
     // TODO: Create a new ResultMessage type (?). Rows will do for now.
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        List<PermissionDetails> details = new ArrayList<PermissionDetails>();
+        return Single.fromCallable(() -> {
+            List<PermissionDetails> details = new ArrayList<PermissionDetails>();
 
-        if (resource != null && recursive)
-        {
-            for (IResource r : Resources.chain(resource))
-                details.addAll(list(state, r));
-        }
-        else
-        {
-            details.addAll(list(state, resource));
-        }
+            if (resource != null && recursive)
+            {
+                for (IResource r : Resources.chain(resource))
+                    details.addAll(list(state, r));
+            }
+            else
+            {
+                details.addAll(list(state, resource));
+            }
 
-        Collections.sort(details);
-        return resultMessage(details);
+            Collections.sort(details);
+            return resultMessage(details);
+        });
     }
 
     private Set<PermissionDetails> list(ClientState state, IResource resource)

@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -31,9 +33,11 @@ public class RevokeRoleStatement extends RoleManagementStatement
         super(name, grantee);
     }
 
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        DatabaseDescriptor.getRoleManager().revokeRole(state.getUser(), role, grantee);
-        return null;
+        return Single.fromCallable(() -> {
+            DatabaseDescriptor.getRoleManager().revokeRole(state.getUser(), role, grantee);
+            return new ResultMessage.Void();
+        });
     }
 }

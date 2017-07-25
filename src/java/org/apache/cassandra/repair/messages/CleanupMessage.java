@@ -54,7 +54,7 @@ public class CleanupMessage extends RepairMessage<CleanupMessage>
             return UUIDSerializer.serializer.serializedSize(message.parentRepairSession);
         }
     });
-    
+
     public final UUID parentRepairSession;
 
     public CleanupMessage(UUID parentRepairSession)

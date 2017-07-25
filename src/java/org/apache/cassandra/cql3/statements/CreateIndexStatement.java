@@ -23,6 +23,7 @@ import com.google.common.base.Optional;
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -195,7 +196,7 @@ public class CreateIndexStatement extends SchemaAlteringStatement
                 throw new InvalidRequestException("Duplicate column " + target.column + " in index target list");
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
         TableMetadata current = Schema.instance.getTableMetadata(keyspace(), columnFamily());
         List<IndexTarget> targets = new ArrayList<>(rawTargets.size());
@@ -213,9 +214,9 @@ public class CreateIndexStatement extends SchemaAlteringStatement
         if (Schema.instance.getKeyspaceMetadata(keyspace()).existingIndexNames(null).contains(acceptedName))
         {
             if (ifNotExists)
-                return null;
+                return Maybe.empty();
             else
-                throw new InvalidRequestException(String.format("Index %s already exists", acceptedName));
+                return error(String.format("Index %s already exists", acceptedName));
         }
 
         IndexMetadata.Kind kind;
@@ -245,11 +246,10 @@ public class CreateIndexStatement extends SchemaAlteringStatement
         if (existingIndex.isPresent())
         {
             if (ifNotExists)
-                return null;
+                return Maybe.empty();
             else
-                throw new InvalidRequestException(String.format("Index %s is a duplicate of existing index %s",
-                                                                index.name,
-                                                                existingIndex.get().name));
+                return error(String.format("Index %s is a duplicate of existing index %s",
+                                           index.name, existingIndex.get().name));
         }
 
         TableMetadata updated =
@@ -259,9 +259,8 @@ public class CreateIndexStatement extends SchemaAlteringStatement
 
         logger.trace("Updating index definition for {}", indexName);
 
-        MigrationManager.announceTableUpdate(updated, isLocalOnly);
-
         // Creating an index is akin to updating the CF
-        return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily());
+        return MigrationManager.announceTableUpdate(updated, isLocalOnly)
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())));
     }
 }

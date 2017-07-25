@@ -110,6 +110,7 @@ public class LeveledCompactionStrategyTest
      */
     @Test
     public void testGrouperLevels() throws Exception{
+        cfs.disableAutoCompaction();
         ByteBuffer value = ByteBuffer.wrap(new byte[100 * 1024]); // 100 KB value, make it easy to have multiple files
 
         //Need entropy to prevent compression so size is predictable with compression enabled/disabled
@@ -129,7 +130,7 @@ public class LeveledCompactionStrategyTest
             cfs.forceBlockingFlush();
         }
 
-        waitForLeveling(cfs);
+        cfs.forceMajorCompaction();
         CompactionStrategyManager strategyManager = cfs.getCompactionStrategyManager();
         // Checking we're not completely bad at math
 
@@ -167,6 +168,7 @@ public class LeveledCompactionStrategyTest
     @Test
     public void testValidationMultipleSSTablePerLevel() throws Exception
     {
+        cfs.disableAutoCompaction();
         byte [] b = new byte[100 * 1024];
         new Random().nextBytes(b);
         ByteBuffer value = ByteBuffer.wrap(b); // 100 KB value, make it easy to have multiple files
@@ -185,7 +187,7 @@ public class LeveledCompactionStrategyTest
             cfs.forceBlockingFlush();
         }
 
-        waitForLeveling(cfs);
+        cfs.forceMajorCompaction();
         CompactionStrategyManager strategyManager = cfs.getCompactionStrategyManager();
         // Checking we're not completely bad at math
         assertTrue(strategyManager.getSSTableCountPerLevel()[1] > 0);

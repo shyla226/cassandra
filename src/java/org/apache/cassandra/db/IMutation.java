@@ -19,12 +19,14 @@ package org.apache.cassandra.db;
 
 import java.util.Collection;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.TableId;
 
 public interface IMutation
 {
     public void apply();
+    public Completable applyAsync();
     public String getKeyspaceName();
     public Collection<TableId> getTableIds();
     public DecoratedKey key();

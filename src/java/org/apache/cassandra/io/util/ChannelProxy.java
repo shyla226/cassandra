@@ -27,8 +27,6 @@ import java.nio.file.StandardOpenOption;
 
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.utils.NativeLibrary;
-import org.apache.cassandra.utils.concurrent.RefCounted;
-import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
 
 /**
  * A proxy of a FileChannel that:
@@ -39,11 +37,8 @@ import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
  *
  * Tested by RandomAccessReaderTest.
  */
-public final class ChannelProxy extends SharedCloseableImpl
+public final class ChannelProxy extends AbstractChannelProxy<FileChannel>
 {
-    private final String filePath;
-    private final FileChannel channel;
-
     public static FileChannel openChannel(File file)
     {
         try
@@ -68,57 +63,17 @@ public final class ChannelProxy extends SharedCloseableImpl
 
     public ChannelProxy(String filePath, FileChannel channel)
     {
-        super(new Cleanup(filePath, channel));
-
-        this.filePath = filePath;
-        this.channel = channel;
+        super(filePath, channel);
     }
 
     public ChannelProxy(ChannelProxy copy)
     {
         super(copy);
-
-        this.filePath = copy.filePath;
-        this.channel = copy.channel;
-    }
-
-    private final static class Cleanup implements RefCounted.Tidy
-    {
-        final String filePath;
-        final FileChannel channel;
-
-        Cleanup(String filePath, FileChannel channel)
-        {
-            this.filePath = filePath;
-            this.channel = channel;
-        }
-
-        public String name()
-        {
-            return filePath;
-        }
-
-        public void tidy()
-        {
-            try
-            {
-                channel.close();
-            }
-            catch (IOException e)
-            {
-                throw new FSReadError(e, filePath);
-            }
-        }
     }
 
     public ChannelProxy sharedCopy()
     {
         return new ChannelProxy(this);
-    }
-
-    public String filePath()
-    {
-        return filePath;
     }
 
     public int read(ByteBuffer buffer, long position)
@@ -158,7 +113,7 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
     }
 
-    public long size()
+    public long size() throws FSReadError
     {
         try
         {
@@ -173,11 +128,5 @@ public final class ChannelProxy extends SharedCloseableImpl
     public int getFileDescriptor()
     {
         return NativeLibrary.getfd(channel);
-    }
-
-    @Override
-    public String toString()
-    {
-        return filePath();
     }
 }

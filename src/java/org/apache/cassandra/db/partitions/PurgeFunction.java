@@ -19,6 +19,7 @@ package org.apache.cassandra.db.partitions;
 
 import java.util.function.Predicate;
 
+import io.reactivex.functions.Function;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
@@ -27,7 +28,6 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
 {
     private final DeletionPurger purger;
     private final int nowInSec;
-    private boolean isReverseOrder;
 
     public PurgeFunction(int nowInSec, int gcBefore, int oldestUnrepairedTombstone, boolean onlyPurgeRepairedTombstones)
     {
@@ -60,7 +60,6 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
     {
         onNewPartition(partition.partitionKey());
 
-        isReverseOrder = partition.isReverseOrder();
         UnfilteredRowIterator purged = Transformation.apply(partition, this);
         if (purged.isEmpty())
         {
@@ -79,7 +78,7 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
     }
 
     @Override
-    protected Row applyToStatic(Row row)
+    public Row applyToStatic(Row row)
     {
         updateProgress();
         return row.purge(purger, nowInSec);
@@ -96,30 +95,6 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
     protected RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
     {
         updateProgress();
-        boolean reversed = isReverseOrder;
-        if (marker.isBoundary())
-        {
-            // We can only skip the whole marker if both deletion time are purgeable.
-            // If only one of them is, filterTombstoneMarker will deal with it.
-            RangeTombstoneBoundaryMarker boundary = (RangeTombstoneBoundaryMarker)marker;
-            boolean shouldPurgeClose = purger.shouldPurge(boundary.closeDeletionTime(reversed));
-            boolean shouldPurgeOpen = purger.shouldPurge(boundary.openDeletionTime(reversed));
-
-            if (shouldPurgeClose)
-            {
-                if (shouldPurgeOpen)
-                    return null;
-
-                return boundary.createCorrespondingOpenMarker(reversed);
-            }
-
-            return shouldPurgeOpen
-                   ? boundary.createCorrespondingCloseMarker(reversed)
-                   : marker;
-        }
-        else
-        {
-            return purger.shouldPurge(((RangeTombstoneBoundMarker)marker).deletionTime()) ? null : marker;
-        }
+        return marker.purge(purger, nowInSec);
     }
 }

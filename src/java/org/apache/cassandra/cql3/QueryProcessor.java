@@ -18,12 +18,18 @@
 package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import io.reactivex.Scheduler;
+import io.reactivex.Single;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.annotations.VisibleForTesting;
@@ -35,8 +41,10 @@ import com.google.common.util.concurrent.MoreExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.schedulers.Schedulers;
 import org.antlr.runtime.*;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
@@ -197,34 +205,54 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    public ResultMessage processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<? extends ResultMessage> processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        logger.trace("Process {} @CL.{}", statement, options.getConsistency());
-        ClientState clientState = queryState.getClientState();
-        statement.checkAccess(clientState);
-        statement.validate(clientState);
+        if (logger.isTraceEnabled())
+            logger.trace("Process {} @CL.{}", statement, options.getConsistency());
 
-        ResultMessage result = statement.execute(queryState, options, queryStartNanoTime);
-        return result == null ? new ResultMessage.Void() : result;
+        final ClientState clientState = queryState.getClientState();
+        final Scheduler scheduler = statement.getScheduler();
+
+        Single<? extends ResultMessage> ret = Single.defer(() -> {
+            try
+            {
+                statement.checkAccess(clientState);
+                statement.validate(clientState);
+                return statement.execute(queryState, options, queryStartNanoTime);
+            }
+            catch (TPCUtils.WouldBlockException ex)
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Failed to execute blocking operation, retrying on io schedulers");
+
+                return Single.defer(() -> {
+                    statement.checkAccess(clientState);
+                    statement.validate(clientState);
+                    return statement.execute(queryState, options, queryStartNanoTime);
+                }).subscribeOn(Schedulers.io());
+            }
+        });
+
+        return scheduler == null ? ret : ret.subscribeOn(scheduler);
     }
 
-    public static ResultMessage process(String queryString, ConsistencyLevel cl, QueryState queryState, long queryStartNanoTime)
+    public static Single<? extends ResultMessage> process(String queryString, ConsistencyLevel cl, QueryState queryState, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        return instance.process(queryString, queryState, QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()), queryStartNanoTime);
+        return instance.process(queryString, queryState, QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()),  queryStartNanoTime);
     }
 
-    public ResultMessage process(String query,
-                                 QueryState state,
-                                 QueryOptions options,
-                                 Map<String, ByteBuffer> customPayload,
-                                 long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> process(String query,
+                                                   QueryState state,
+                                                   QueryOptions options,
+                                                   Map<String, ByteBuffer> customPayload,
+                                                   long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
     {
         return process(query, state, options, queryStartNanoTime);
     }
 
-    public ResultMessage process(String queryString, QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<? extends ResultMessage> process(String queryString, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         ParsedStatement.Prepared p = getStatement(queryString, queryState.getClientState());
@@ -244,18 +272,26 @@ public class QueryProcessor implements QueryHandler
         return getStatement(queryStr, queryState.getClientState());
     }
 
-    public static UntypedResultSet process(String query, ConsistencyLevel cl) throws RequestExecutionException
+    public static UntypedResultSet processBlocking(String query, ConsistencyLevel cl) throws RequestExecutionException
+    {
+        return TPCUtils.blockingGet(process(query, cl));
+    }
+
+    private static Single<UntypedResultSet> process(String query, ConsistencyLevel cl) throws RequestExecutionException
     {
         return process(query, cl, Collections.<ByteBuffer>emptyList());
     }
 
-    public static UntypedResultSet process(String query, ConsistencyLevel cl, List<ByteBuffer> values) throws RequestExecutionException
+    public static Single<UntypedResultSet> process(String query, ConsistencyLevel cl, List<ByteBuffer> values) throws RequestExecutionException
     {
-        ResultMessage result = instance.process(query, QueryState.forInternalCalls(), QueryOptions.forInternalCalls(cl, values), System.nanoTime());
-        if (result instanceof ResultMessage.Rows)
-            return UntypedResultSet.create(((ResultMessage.Rows)result).result);
-        else
-            return null;
+        Single<? extends ResultMessage> obs = instance.process(query, QueryState.forInternalCalls(), QueryOptions.forInternalCalls(cl, values), System.nanoTime());
+
+        return obs.map(result -> {
+            if (result instanceof ResultMessage.Rows)
+                return UntypedResultSet.create(((ResultMessage.Rows) result).result);
+            else
+                return UntypedResultSet.EMPTY;
+        });
     }
 
     private static QueryOptions makeInternalOptions(ParsedStatement.Prepared prepared, Object[] values)
@@ -278,27 +314,43 @@ public class QueryProcessor implements QueryHandler
         return QueryOptions.forInternalCalls(cl, boundValues);
     }
 
-    public static ParsedStatement.Prepared prepareInternal(String query) throws RequestValidationException
+    private static ParsedStatement.Prepared prepareInternal(String query) throws RequestValidationException
     {
-        ParsedStatement.Prepared prepared = internalStatements.get(query);
-        if (prepared != null)
-            return prepared;
+        ParsedStatement.Prepared existing = internalStatements.get(query);
+        if (existing != null)
+            return existing;
 
-        // Note: if 2 threads prepare the same query, we'll live so don't bother synchronizing
-        prepared = parseStatement(query, internalQueryState());
+        ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
         prepared.statement.validate(internalQueryState().getClientState());
         internalStatements.putIfAbsent(query, prepared);
         return prepared;
     }
 
-    public static UntypedResultSet executeInternal(String query, Object... values)
+    public static Single<UntypedResultSet> executeInternalAsync(String query, Object... values)
     {
         ParsedStatement.Prepared prepared = prepareInternal(query);
-        ResultMessage result = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
-        if (result instanceof ResultMessage.Rows)
-            return UntypedResultSet.create(((ResultMessage.Rows)result).result);
-        else
-            return null;
+
+        return prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values))
+                                 .map(result -> {
+                                     if (result instanceof ResultMessage.Rows)
+                                         return UntypedResultSet.create(((ResultMessage.Rows) result).result);
+                                     else
+                                         return UntypedResultSet.EMPTY;
+                                 });
+    }
+
+    /**
+     * Executes the query internally.
+     *
+     * @param query - the query to execute
+     * @param values - the query values
+     *
+     * @return the query result
+     * @throws org.apache.cassandra.concurrent.TPCUtils.WouldBlockException when called from a core thread
+     */
+    public static UntypedResultSet executeInternal(String query, Object... values)
+    {
+        return TPCUtils.blockingGet(executeInternalAsync(query, values));
     }
 
     public static UntypedResultSet execute(String query, ConsistencyLevel cl, Object... values)
@@ -307,17 +359,30 @@ public class QueryProcessor implements QueryHandler
         return execute(query, cl, internalQueryState(), values);
     }
 
+    /**
+     * Executes the query.
+     *
+     * @param query - the query to execute
+     * @param cl - the consistency level
+     * @param state - the query state
+     * @param values - the query values
+     *
+     * @return the query result
+     *
+     * @throws RequestExecutionException
+     * @throws org.apache.cassandra.concurrent.TPCUtils.WouldBlockException when called from a core thread
+     */
     public static UntypedResultSet execute(String query, ConsistencyLevel cl, QueryState state, Object... values)
     throws RequestExecutionException
     {
         try
         {
             ParsedStatement.Prepared prepared = prepareInternal(query);
-            ResultMessage result = prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime());
+            ResultMessage result = TPCUtils.blockingGet(prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime()));
             if (result instanceof ResultMessage.Rows)
                 return UntypedResultSet.create(((ResultMessage.Rows)result).result);
             else
-                return null;
+                return UntypedResultSet.EMPTY;
         }
         catch (RequestValidationException e)
         {
@@ -340,15 +405,25 @@ public class QueryProcessor implements QueryHandler
      * Same than executeInternal, but to use for queries we know are only executed once so that the
      * created statement object is not cached.
      */
-    public static UntypedResultSet executeOnceInternal(String query, Object... values)
+    public static Single<UntypedResultSet> executeOnceInternal(String query, Object... values)
     {
-        ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
-        prepared.statement.validate(internalQueryState().getClientState());
-        ResultMessage result = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
-        if (result instanceof ResultMessage.Rows)
-            return UntypedResultSet.create(((ResultMessage.Rows)result).result);
-        else
-            return null;
+        final ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
+        final Scheduler scheduler = prepared.statement.getScheduler();
+
+        Single<? extends ResultMessage> observable = Single.defer(() -> {
+            prepared.statement.validate(internalQueryState().getClientState());
+            return prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
+        });
+
+        if (scheduler != null)
+            observable = observable.subscribeOn(scheduler);
+
+        return observable.map(result -> {
+            if (result instanceof ResultMessage.Rows)
+                return UntypedResultSet.create(((ResultMessage.Rows) result).result);
+            else
+                return UntypedResultSet.EMPTY;
+        });
     }
 
     /**
@@ -356,14 +431,14 @@ public class QueryProcessor implements QueryHandler
      * Note that this only make sense for Selects so this only accept SELECT statements and is only useful in rare
      * cases.
      */
-    public static UntypedResultSet executeInternalWithNow(int nowInSec, long queryStartNanoTime, String query, Object... values)
+    public static Single<UntypedResultSet> executeInternalWithNow(int nowInSec, long queryStartNanoTime, String query, Object... values)
     {
         ParsedStatement.Prepared prepared = prepareInternal(query);
         assert prepared.statement instanceof SelectStatement;
         SelectStatement select = (SelectStatement)prepared.statement;
-        ResultMessage result = select.executeInternal(internalQueryState(), makeInternalOptions(prepared, values), nowInSec, queryStartNanoTime);
-        assert result instanceof ResultMessage.Rows;
-        return UntypedResultSet.create(((ResultMessage.Rows)result).result);
+
+        return select.executeInternal(internalQueryState(), makeInternalOptions(prepared, values), nowInSec, queryStartNanoTime)
+                     .map(result -> UntypedResultSet.create(result.result));
     }
 
     public static UntypedResultSet resultify(String query, RowIterator partition)
@@ -373,32 +448,29 @@ public class QueryProcessor implements QueryHandler
 
     public static UntypedResultSet resultify(String query, PartitionIterator partitions)
     {
-        try (PartitionIterator iter = partitions)
-        {
-            SelectStatement ss = (SelectStatement) getStatement(query, null).statement;
-            ResultSet cqlRows = ss.process(iter, FBUtilities.nowInSeconds());
-            return UntypedResultSet.create(cqlRows);
-        }
+        SelectStatement ss = (SelectStatement) getStatement(query, null).statement;
+        ResultSet cqlRows = ss.process(partitions, FBUtilities.nowInSeconds()); // iterator will be closed by ss.process
+        return UntypedResultSet.create(cqlRows);
     }
 
-    public ResultMessage.Prepared prepare(String query,
-                                          QueryState state,
-                                          Map<String, ByteBuffer> customPayload) throws RequestValidationException
+    public Single<ResultMessage.Prepared> prepare(String query,
+                                                  QueryState state,
+                                                  Map<String, ByteBuffer> customPayload) throws RequestValidationException
     {
         return prepare(query, state);
     }
 
-    public ResultMessage.Prepared prepare(String queryString, QueryState queryState)
+    public Single<ResultMessage.Prepared> prepare(String queryString, QueryState queryState)
     {
         ClientState cState = queryState.getClientState();
         return prepare(queryString, cState);
     }
 
-    public static ResultMessage.Prepared prepare(String queryString, ClientState clientState)
+    public static Single<ResultMessage.Prepared> prepare(String queryString, ClientState clientState)
     {
         ResultMessage.Prepared existing = getStoredPreparedStatement(queryString, clientState.getRawKeyspace());
         if (existing != null)
-            return existing;
+            return Single.just(existing);
 
         ParsedStatement.Prepared prepared = getStatement(queryString, clientState);
         prepared.rawCQLStatement = queryString;
@@ -429,7 +501,7 @@ public class QueryProcessor implements QueryHandler
         return new ResultMessage.Prepared(statementId, existing);
     }
 
-    private static ResultMessage.Prepared storePreparedStatement(String queryString, String keyspace, ParsedStatement.Prepared prepared)
+    private static Single<ResultMessage.Prepared> storePreparedStatement(String queryString, String keyspace, ParsedStatement.Prepared prepared)
     throws InvalidRequestException
     {
         // Concatenate the current keyspace so we don't mix prepared statements between keyspace (#5352).
@@ -443,21 +515,21 @@ public class QueryProcessor implements QueryHandler
                                                             queryString.substring(0, 200)));
         MD5Digest statementId = computeId(queryString, keyspace);
         preparedStatements.put(statementId, prepared);
-        SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
-        return new ResultMessage.Prepared(statementId, prepared);
+        Single<UntypedResultSet> observable = SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
+        return observable.map(resultSet -> new ResultMessage.Prepared(statementId, prepared));
     }
 
-    public ResultMessage processPrepared(CQLStatement statement,
-                                         QueryState state,
-                                         QueryOptions options,
-                                         Map<String, ByteBuffer> customPayload,
-                                         long queryStartNanoTime)
-                                                 throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> processPrepared(CQLStatement statement,
+                                                           QueryState state,
+                                                           QueryOptions options,
+                                                           Map<String, ByteBuffer> customPayload,
+                                                           long queryStartNanoTime)
+    throws RequestExecutionException, RequestValidationException
     {
         return processPrepared(statement, state, options, queryStartNanoTime);
     }
 
-    public ResultMessage processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<? extends ResultMessage> processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         List<ByteBuffer> variables = options.getValues();
@@ -480,24 +552,36 @@ public class QueryProcessor implements QueryHandler
         return processStatement(statement, queryState, options, queryStartNanoTime);
     }
 
-    public ResultMessage processBatch(BatchStatement statement,
-                                      QueryState state,
-                                      BatchQueryOptions options,
-                                      Map<String, ByteBuffer> customPayload,
-                                      long queryStartNanoTime)
-                                              throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> processBatch(BatchStatement statement,
+                                                        QueryState state,
+                                                        BatchQueryOptions options,
+                                                        Map<String, ByteBuffer> customPayload,
+                                                        long queryStartNanoTime)
     {
         return processBatch(statement, state, options, queryStartNanoTime);
     }
 
-    public ResultMessage processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
-    throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
     {
-        ClientState clientState = queryState.getClientState();
-        batch.checkAccess(clientState);
-        batch.validate();
-        batch.validate(clientState);
-        return batch.execute(queryState, options, queryStartNanoTime);
+        final ClientState clientState = queryState.getClientState();
+        return Single.defer(() -> {
+            try
+            {
+                batch.checkAccess(clientState);
+                batch.validate();
+                batch.validate(clientState);
+                return batch.execute(queryState, options, queryStartNanoTime);
+            }
+            catch (TPCUtils.WouldBlockException ex)
+            {
+                return Single.defer(() -> {
+                    batch.checkAccess(clientState);
+                    batch.validate();
+                    batch.validate(clientState);
+                    return batch.execute(queryState, options, queryStartNanoTime);
+                }).subscribeOn(Schedulers.io());
+            }
+        });
     }
 
     public static ParsedStatement.Prepared getStatement(String queryStr, ClientState clientState)

@@ -26,13 +26,13 @@ import java.util.NavigableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.*;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.utils.btree.BTreeSet;
@@ -56,29 +56,23 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
 
     @SuppressWarnings("resource") // Both the OpOrder and 'indexIter' are closed on exception, or through the closing of the result
     // of this method.
-    public UnfilteredPartitionIterator search(ReadExecutionController executionController)
+    public Flow<FlowableUnfilteredPartition> search(ReadExecutionController executionController)
     {
         // the value of the index expression is the partition key in the index table
         DecoratedKey indexKey = index.getBackingTable().get().decorateKey(expression.getIndexValue());
-        UnfilteredRowIterator indexIter = queryIndex(indexKey, command, executionController);
-        try
-        {
-            return queryDataFromIndex(indexKey, UnfilteredRowIterators.filter(indexIter, command.nowInSec()), command, executionController);
-        }
-        catch (RuntimeException | Error e)
-        {
-            indexIter.close();
-            throw e;
-        }
+        Flow<FlowableUnfilteredPartition> indexIter = queryIndex(indexKey, command, executionController);
+
+        return indexIter.flatMap(
+            i -> queryDataFromIndex(indexKey, FlowablePartitions.filter(i, command.nowInSec()), command, executionController));
     }
 
-    private UnfilteredRowIterator queryIndex(DecoratedKey indexKey, ReadCommand command, ReadExecutionController executionController)
+    private Flow<FlowableUnfilteredPartition> queryIndex(DecoratedKey indexKey, ReadCommand command, ReadExecutionController executionController)
     {
         ClusteringIndexFilter filter = makeIndexFilter(command);
         ColumnFamilyStore indexCfs = index.getBackingTable().get();
         TableMetadata indexMetadata = indexCfs.metadata();
         return SinglePartitionReadCommand.create(indexMetadata, command.nowInSec(), indexKey, ColumnFilter.all(indexMetadata), filter)
-                                         .queryMemtableAndDisk(indexCfs, executionController.indexReadController());
+                                         .queryStorage(indexCfs, executionController.indexReadController());
     }
 
     private ClusteringIndexFilter makeIndexFilter(ReadCommand command)
@@ -185,8 +179,8 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
         return index.buildIndexClusteringPrefix(rowKey, clustering, null).build();
     }
 
-    protected abstract UnfilteredPartitionIterator queryDataFromIndex(DecoratedKey indexKey,
-                                                                      RowIterator indexHits,
-                                                                      ReadCommand command,
-                                                                      ReadExecutionController executionController);
+    protected abstract Flow<FlowableUnfilteredPartition> queryDataFromIndex(DecoratedKey indexKey,
+                                                                            FlowablePartition indexHits,
+                                                                            ReadCommand command,
+                                                                            ReadExecutionController executionController);
 }

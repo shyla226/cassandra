@@ -42,14 +42,19 @@ public class CassandraMetricsRegistry extends MetricRegistry
         super();
     }
 
-    public Counter counter(MetricName name)
+    public Counter counter(MetricName name, boolean isComposite)
     {
-        return register(name, new Counter());
+        return register(name, Counter.make(isComposite));
     }
 
-    public Counter counter(MetricName name, MetricName alias)
+    public Counter counter(MetricName name)
     {
-        Counter counter = counter(name);
+        return counter(name, false);
+    }
+
+    public Counter counter(MetricName name, MetricName alias, boolean isComposite)
+    {
+        Counter counter = counter(name, isComposite);
         registerAlias(name, alias);
         return counter;
     }
@@ -68,24 +73,34 @@ public class CassandraMetricsRegistry extends MetricRegistry
 
     public Histogram histogram(MetricName name, boolean considerZeroes)
     {
-        return register(name, new ClearableHistogram(new DecayingEstimatedHistogramReservoir(considerZeroes)));
+        return histogram(name, considerZeroes, false);
     }
 
-    public Histogram histogram(MetricName name, MetricName alias, boolean considerZeroes)
+    public Histogram histogram(MetricName name, boolean considerZeroes, boolean isComposite)
     {
-        Histogram histogram = histogram(name, considerZeroes);
+        return register(name, Histogram.make(considerZeroes, isComposite));
+    }
+
+    public Histogram histogram(MetricName name, MetricName alias, boolean considerZeroes, boolean isComposite)
+    {
+        Histogram histogram = histogram(name, considerZeroes, isComposite);
         registerAlias(name, alias);
         return histogram;
     }
 
-    public Timer timer(MetricName name)
+    public Timer timer(MetricName name, boolean isComposite)
     {
-        return register(name, new Timer(new DecayingEstimatedHistogramReservoir()));
+        return register(name, new Timer(isComposite));
     }
 
-    public Timer timer(MetricName name, MetricName alias)
+    public Timer timer(MetricName name)
     {
-        Timer timer = timer(name);
+        return timer(name, false);
+    }
+
+    public Timer timer(MetricName name, MetricName alias, boolean isComposite)
+    {
+        Timer timer = timer(name, isComposite);
         registerAlias(name, alias);
         return timer;
     }

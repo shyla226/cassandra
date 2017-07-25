@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -33,9 +34,11 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
@@ -43,8 +46,24 @@ import static org.junit.Assert.*;
 
 public class KeyspaceTest extends CQLTester
 {
-    // Test needs synchronous table drop to avoid flushes causing flaky failures of testLimitSSTables
+    private static int defaultMetricsHistogramUpdateInterval;
 
+    @BeforeClass
+    public static void beforeClass()
+    {
+        DatabaseDescriptor.daemonInitialization();
+
+        defaultMetricsHistogramUpdateInterval = DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis();
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0); // this guarantees metrics histograms are updated on read
+    }
+
+    @AfterClass
+    public static void afterClass()
+    {
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateInterval);
+    }
+
+    // Test needs synchronous table drop to avoid flushes causing flaky failures of testLimitSSTables
     @Override
     public String createTable(String query)
     {
@@ -157,8 +176,7 @@ public class KeyspaceTest extends CQLTester
         ClusteringIndexSliceFilter filter = new ClusteringIndexSliceFilter(slices, reversed);
         SinglePartitionReadCommand command = singlePartitionSlice(cfs, key, filter, limit);
 
-        try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController))
+        try (PartitionIterator iterator = command.executeInternalForTests())
         {
             try (RowIterator rowIterator = iterator.next())
             {
@@ -230,8 +248,7 @@ public class KeyspaceTest extends CQLTester
             RegularAndStaticColumns columns = RegularAndStaticColumns.of(cfs.metadata().getColumn(new ColumnIdentifier("c", false)));
             ClusteringIndexSliceFilter filter = new ClusteringIndexSliceFilter(Slices.ALL, false);
             SinglePartitionReadCommand command = singlePartitionSlice(cfs, "0", filter, null);
-            try (ReadExecutionController executionController = command.executionController();
-                 PartitionIterator iterator = command.executeInternal(executionController))
+            try (PartitionIterator iterator = command.executeInternalForTests())
             {
                 try (RowIterator rowIterator = iterator.next())
                 {
@@ -245,8 +262,7 @@ public class KeyspaceTest extends CQLTester
 
     private static void assertRowsInResult(ColumnFamilyStore cfs, SinglePartitionReadCommand command, int ... columnValues)
     {
-        try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController))
+        try (PartitionIterator iterator = command.executeInternalForTests())
         {
             if (columnValues.length == 0)
             {
@@ -427,7 +443,7 @@ public class KeyspaceTest extends CQLTester
             cfs.forceBlockingFlush();
         }
 
-        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear();
+        cfs.metric.sstablesPerReadHistogram.clear();
 
         SinglePartitionReadCommand command = singlePartitionSlice(cfs, "0", slices(cfs, null, 1499, false), 1000);
         int[] expectedValues = new int[500];
@@ -435,16 +451,16 @@ public class KeyspaceTest extends CQLTester
             expectedValues[i] = i + 1000;
         assertRowsInResult(cfs, command, expectedValues);
 
-        assertEquals(5, cfs.metric.sstablesPerReadHistogram.cf.getSnapshot().getMax(), 0.1);
-        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear();
+        assertEquals(5, cfs.metric.sstablesPerReadHistogram.getSnapshot().getMax(), 0.1);
+        cfs.metric.sstablesPerReadHistogram.clear();
 
         command = singlePartitionSlice(cfs, "0", slices(cfs, 1500, 2000, false), 1000);
         for (int i = 0; i < 500; i++)
             expectedValues[i] = i + 1500;
         assertRowsInResult(cfs, command, expectedValues);
 
-        assertEquals(5, cfs.metric.sstablesPerReadHistogram.cf.getSnapshot().getMax(), 0.1);
-        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear();
+        assertEquals(5, cfs.metric.sstablesPerReadHistogram.getSnapshot().getMax(), 0.1);
+        cfs.metric.sstablesPerReadHistogram.clear();
 
         // reverse
         command = singlePartitionSlice(cfs, "0", slices(cfs, 1500, 2000, true), 1000);
@@ -480,11 +496,11 @@ public class KeyspaceTest extends CQLTester
             cfs.forceBlockingFlush();
         }
 
-        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear();
+        cfs.metric.sstablesPerReadHistogram.clear();
         assertRows(execute("SELECT * FROM %s WHERE a = ? AND (b, c) >= (?, ?) AND (b) <= (?) LIMIT 1000", "0", "a5", 85, "a5"),
                 row("0", "a5", 85, 0),
                 row("0", "a5", 95, 0));
-        assertEquals(2, cfs.metric.sstablesPerReadHistogram.cf.getSnapshot().getMax(), 0.1);
+        assertEquals(2, cfs.metric.sstablesPerReadHistogram.getSnapshot().getMax(), 0.1);
     }
 
     private void validateSliceLarge(ColumnFamilyStore cfs)

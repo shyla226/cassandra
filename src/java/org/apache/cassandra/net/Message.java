@@ -25,7 +25,7 @@ import javax.annotation.Nullable;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
-import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -180,6 +180,11 @@ public abstract class Message<P>
         {
             return 0;
         }
+
+        TracingAwareExecutor executor()
+        {
+            throw new UnsupportedOperationException();
+        }
     };
 
     private final InetAddress from;
@@ -306,7 +311,7 @@ public abstract class Message<P>
     {
         return messageData.timeoutMillis;
     }
-    
+
     /**
      * Whether the message is timed out and can be dropped.
      *
@@ -334,12 +339,7 @@ public abstract class Message<P>
         return System.currentTimeMillis() - operationStartMillis();
     }
 
-    Stage stage()
-    {
-        return isRequest()
-               ? verb().requestStage()
-               : (group().isInternal() ? Stage.INTERNAL_RESPONSE : Stage.REQUEST_RESPONSE);
-    }
+    abstract TracingAwareExecutor executor();
 
     /**
      * Whether the message is a locally delivered one, meaning if {@code to() == from()}.

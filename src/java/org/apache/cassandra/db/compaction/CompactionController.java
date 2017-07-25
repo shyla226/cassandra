@@ -32,6 +32,7 @@ import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 
 import org.slf4j.Logger;
@@ -244,11 +245,18 @@ public class CompactionController implements AutoCloseable
 
         for (Memtable memtable : memtables)
         {
-            Partition partition = memtable.getPartition(key);
-            if (partition != null)
+            try
             {
-                minTimestampSeen = Math.min(minTimestampSeen, partition.stats().minTimestamp);
-                hasTimestamp = true;
+                Partition partition = memtable.getPartition(key).blockingLast(null);
+                if (partition != null)
+                {
+                    minTimestampSeen = Math.min(minTimestampSeen, partition.stats().minTimestamp);
+                    hasTimestamp = true;
+                }
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
             }
         }
 
@@ -298,7 +306,7 @@ public class CompactionController implements AutoCloseable
             reader.getMaxTimestamp() <= minTimestamp ||
             tombstoneOnly && !reader.mayHaveTombstones())
             return null;
-        RowIndexEntry position = reader.getExactPosition(key);
+        RowIndexEntry position = reader.getExactPosition(key, Rebufferer.ReaderConstraint.NONE);
         if (position == null)
             return null;
         FileDataInput dfile = openDataFiles.computeIfAbsent(reader, this::openDataFile);

@@ -21,6 +21,7 @@ import java.net.InetAddress;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -30,6 +31,7 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.db.monitoring.AbortedOperationException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.utils.FBUtilities;
@@ -157,7 +159,9 @@ public class Request<P, Q> extends Message<P>
 
     Data<Q> responseData(Q payload)
     {
-        long serializedSize = MessagingService.current_version.serializer(verb()).responseSerializer.serializedSize(payload);
+        long serializedSize = from().equals(local)
+                              ? -1 // payload size not used for local responses, which may not be serializable, e.g. ReadResponse.LocalResponse
+                              : MessagingService.current_version.serializer(verb()).responseSerializer.serializedSize(payload);
         return messageData.withPayload(payload, serializedSize);
     }
 
@@ -182,6 +186,11 @@ public class Request<P, Q> extends Message<P>
                                      messageData.withPayload(null, -1));
     }
 
+    TracingAwareExecutor executor()
+    {
+        return verb().requestExecutor().get(payload());
+    }
+
     /**
      * Execute the request using the handler of the verb this is a request of, and feed the response to the provided
      * consumer.
@@ -202,6 +211,11 @@ public class Request<P, Q> extends Message<P>
                 future.thenAccept(responseHandler)
                       .exceptionally(e ->
                                      {
+                                         // Calling completeExceptionally() wraps the original exception into a CompletionException even
+                                         // though the documentation says otherwise
+                                         if (e instanceof CompletionException && e.getCause() != null)
+                                             e = e.getCause();
+
                                          if (e instanceof AbortedOperationException)
                                              onAborted.run();
                                          else if (e instanceof DroppingResponseException)

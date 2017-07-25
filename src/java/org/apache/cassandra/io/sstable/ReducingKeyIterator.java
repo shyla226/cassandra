@@ -29,6 +29,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 
 /**
  * Caller must acquire and release references to the sstables used here.
@@ -45,7 +46,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         for (SSTableReader sstable : sstables)
             iters.add(new Iter(sstable));
 
-        mi = MergeIterator.get(iters, DecoratedKey.comparator, new MergeIterator.Reducer<DecoratedKey,DecoratedKey>()
+        mi = MergeIterator.get(iters, DecoratedKey.comparator, new Reducer<DecoratedKey,DecoratedKey>()
         {
             DecoratedKey reduced = null;
 
@@ -60,14 +61,13 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
                 reduced = current;
             }
 
-            protected DecoratedKey getReduced()
-            {
-                return reduced;
-            }
-        });
-    }
-
-    class Iter implements CloseableIterator<DecoratedKey>
+                public DecoratedKey getReduced()
+                {
+                    return reduced;
+                }
+            });
+        }
+class Iter implements CloseableIterator<DecoratedKey>
     {
         PartitionIndexIterator source;
         SSTableReader sstable;
@@ -76,8 +76,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         public Iter(SSTableReader sstable)
         {
             this.sstable = sstable;
-            bytesTotal += total = sstable.getDataChannel().size();
-        }
+            bytesTotal += total = sstable.getDataChannel().size();    }
 
         @Override
         public void close()

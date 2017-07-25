@@ -18,12 +18,11 @@
 package org.apache.cassandra.db;
 
 import java.net.InetAddress;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
-import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.Monitor;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.BoundsVersion;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.net.Verb.RequestResponse;
@@ -71,26 +70,27 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
         RegistrationHelper helper = helper();
 
         READ = helper.monitoredRequestResponse("READ", ReadCommand.class, ReadResponse.class)
-                     .stage(Stage.READ)
                      .timeout(command -> command instanceof SinglePartitionReadCommand
                                          ? DatabaseDescriptor.getReadRpcTimeout()
                                          : DatabaseDescriptor.getRangeRpcTimeout())
-                     .syncHandler((from, command, monitor) ->
-                                  {
-                                      // Note that we want to allow locally delivered reads no matter what
-                                      if (StorageService.instance.isBootstrapMode() && !from.equals(local))
-                                          throw new RuntimeException("Cannot service reads while bootstrapping!");
+                     .handler((from, command, monitor) ->
+                              {
+                                  final boolean isLocal = from.equals(local);
 
-                                      // Monitoring tests want to artificially slow down their reads, but we don't want this
-                                      // to impact the queries drivers do on system/schema tables
-                                      if (Monitor.isTesting() && SchemaConstants.isSystemKeyspace(command.metadata().keyspace))
-                                          monitor = null;
+                                  // Note that we want to allow locally delivered reads no matter what
+                                  if (StorageService.instance.isBootstrapMode() && !isLocal)
+                                      throw new RuntimeException("Cannot service reads while bootstrapping!");
 
-                                      try (ReadExecutionController executionController = command.executionController(monitor);
-                                           UnfilteredPartitionIterator iterator = command.executeLocally(executionController))
-                                      {
-                                          return command.createResponse(iterator);
-                                      }
-                                  });
+                                  // Monitoring tests want to artificially slow down their reads, but we don't want this
+                                  // to impact the queries drivers do on system/schema tables
+                                  if (Monitor.isTesting() && SchemaConstants.isSystemKeyspace(command.metadata().keyspace))
+                                      monitor = null;
+
+                                  CompletableFuture<ReadResponse> result = new CompletableFuture<>();
+                                  command.createResponse(command.executeLocally(monitor), isLocal)
+                                         .subscribe(result::complete, result::completeExceptionally);
+
+                                  return result;
+                              });
     }
 }

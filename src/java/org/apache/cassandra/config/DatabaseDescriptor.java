@@ -19,6 +19,7 @@ package org.apache.cassandra.config;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.lang.reflect.Constructor;
 import java.net.*;
 import java.nio.file.FileStore;
@@ -33,10 +34,11 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
-
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sun.management.OperatingSystemMXBean;
 import org.apache.cassandra.auth.AllowAllInternodeAuthenticator;
 import org.apache.cassandra.auth.AuthConfig;
 import org.apache.cassandra.auth.IAuthenticator;
@@ -61,6 +63,7 @@ import org.apache.cassandra.net.RateBasedBackPressure;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.service.CacheService.CacheType;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.LineNumberInference;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -125,6 +128,9 @@ public class DatabaseDescriptor
             throw new AssertionError("toolInitialization() already called");
         if (clientInitialized)
             throw new AssertionError("clientInitialization() already called");
+
+        // initialise line number inference, as it has to set dumpProxyClasses property before the lambdas start loading
+        LineNumberInference.init();
 
         // Some unit tests require this :(
         if (daemonInitialized)
@@ -397,7 +403,10 @@ public class DatabaseDescriptor
             logger.warn("concurrent_replicates has been deprecated and should be removed from cassandra.yaml");
 
         if (conf.file_cache_size_in_mb == null)
-            conf.file_cache_size_in_mb = Math.min(512, (int) (Runtime.getRuntime().maxMemory() / (4 * 1048576)));
+        {
+            OperatingSystemMXBean bean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+            conf.file_cache_size_in_mb = (int) (bean.getTotalPhysicalMemorySize() / (3 * 1048576));
+        }
 
         if (conf.memtable_offheap_space_in_mb == null)
             conf.memtable_offheap_space_in_mb = (int) (Runtime.getRuntime().maxMemory() / (4 * 1048576));
@@ -420,19 +429,13 @@ public class DatabaseDescriptor
         // if data dirs, commitlog dir, or saved caches dir are set in cassandra.yaml, use that.  Otherwise,
         // use -Dcassandra.storagedir (set in cassandra-env.sh) as the parent dir for data/, commitlog/, and saved_caches/
         if (conf.commitlog_directory == null)
-        {
             conf.commitlog_directory = storagedirFor("commitlog");
-        }
 
         if (conf.hints_directory == null)
-        {
             conf.hints_directory = storagedirFor("hints");
-        }
 
         if (conf.cdc_raw_directory == null)
-        {
             conf.cdc_raw_directory = storagedirFor("cdc_raw");
-        }
 
         if (conf.commitlog_total_space_in_mb == null)
         {
@@ -494,13 +497,10 @@ public class DatabaseDescriptor
         }
 
         if (conf.saved_caches_directory == null)
-        {
             conf.saved_caches_directory = storagedirFor("saved_caches");
-        }
+
         if (conf.data_file_directories == null || conf.data_file_directories.length == 0)
-        {
             conf.data_file_directories = new String[]{ storagedir("data_file_directories") + File.separator + "data" };
-        }
 
         long dataFreeBytes = 0;
         /* data file and commit log directories. they get created later, when they're needed. */
@@ -869,12 +869,15 @@ public class DatabaseDescriptor
     // definitely not safe for tools + clients - implicitly instantiates StorageService
     public static void applySnitch()
     {
+        if (snitch == null)
+        { // if set by tests, don't change it
         /* end point snitch */
-        if (conf.endpoint_snitch == null)
-        {
-            throw new ConfigurationException("Missing endpoint_snitch directive", false);
+            if (conf.endpoint_snitch == null)
+            {
+                throw new ConfigurationException("Missing endpoint_snitch directive", false);
+            }
+            snitch = createEndpointSnitch(conf.dynamic_snitch, conf.endpoint_snitch);
         }
-        snitch = createEndpointSnitch(conf.dynamic_snitch, conf.endpoint_snitch);
         EndpointSnitchInfo.create();
 
         localDC = snitch.getDatacenter(FBUtilities.getBroadcastAddress());
@@ -896,18 +899,21 @@ public class DatabaseDescriptor
     // definitely not safe for tools + clients - implicitly instantiates schema
     public static void applyPartitioner()
     {
-        /* Hashing strategy */
-        if (conf.partitioner == null)
-        {
-            throw new ConfigurationException("Missing directive: partitioner", false);
-        }
-        try
-        {
-            partitioner = FBUtilities.newPartitioner(System.getProperty(Config.PROPERTY_PREFIX + "partitioner", conf.partitioner));
-        }
-        catch (Exception e)
-        {
-            throw new ConfigurationException("Invalid partitioner class " + conf.partitioner, false);
+        if (partitioner == null)
+        { // only set partitioner if tests haven't already changed
+            /* Hashing strategy */
+            if (conf.partitioner == null)
+            {
+                throw new ConfigurationException("Missing directive: partitioner", false);
+            }
+            try
+            {
+                partitioner = FBUtilities.newPartitioner(System.getProperty(Config.PROPERTY_PREFIX + "partitioner", conf.partitioner));
+            }
+            catch (Exception e)
+            {
+                throw new ConfigurationException("Invalid partitioner class " + conf.partitioner, false);
+            }
         }
 
         paritionerName = partitioner.getClass().getCanonicalName();
@@ -2369,5 +2375,24 @@ public class DatabaseDescriptor
             system_memory_in_mb = Long.getLong("system_memory_in_mb", 2048); // calculated and set in cassandra-env.sh
         }
         return (long) (conf.max_memory_to_lock_fraction * (system_memory_in_mb * 1024 * 1024));
+    }
+
+    public static int getMetricsHistogramUpdateTimeMillis()
+    {
+        return conf.metrics_histogram_update_interval_millis;
+    }
+
+    @VisibleForTesting
+    public static void setMetricsHistogramUpdateTimeMillis(int interval)
+    {
+        conf.metrics_histogram_update_interval_millis = interval;
+    }
+
+    public static int getTPCCores()
+    {
+        // Checking conf == null allows running micro benchmarks without calling DatabaseDescriptor.daemonInitialization(),
+        // which in turns causes initialization problems when running the micro benchmarks directly from the jar, e.g.
+        // java -jar build/test/benchmarks.jar MyBench
+        return conf == null || conf.tpc_cores == null ? FBUtilities.getAvailableProcessors() : conf.tpc_cores;
     }
 }

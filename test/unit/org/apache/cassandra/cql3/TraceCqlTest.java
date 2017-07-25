@@ -55,8 +55,6 @@ public class TraceCqlTest extends CQLTester
     @Test
     public void testCqlStatementTracing() throws Throwable
     {
-        requireNetwork();
-
         createTable("CREATE TABLE %s (id int primary key, v1 text, v2 text)");
         execute("INSERT INTO %s (id, v1, v2) VALUES (?, ?, ?)", 1, "Apache", "Cassandra");
         execute("INSERT INTO %s (id, v1, v2) VALUES (?, ?, ?)", 2, "trace", "test");
@@ -67,13 +65,19 @@ public class TraceCqlTest extends CQLTester
             PreparedStatement pstmt = session.prepare(cql)
                                              .enableTracing();
             QueryTrace trace = session.execute(pstmt.bind(1)).getExecutionInfo().getQueryTrace();
-            assertEquals(cql, trace.getParameters().get("query"));
 
+            // Note that trace.getParameters() will fetch the trace
+            waitForTracingEvents();
+
+            assertEquals(cql, trace.getParameters().get("query"));
             assertEquals("1", trace.getParameters().get("bound_var_0_id"));
 
             String cql2 = "SELECT id, v1, v2 FROM " + KEYSPACE + '.' + currentTable() + " WHERE id IN (?, ?, ?)";
             pstmt = session.prepare(cql2).enableTracing();
             trace = session.execute(pstmt.bind(19, 15, 16)).getExecutionInfo().getQueryTrace();
+
+            waitForTracingEvents();
+
             assertEquals(cql2, trace.getParameters().get("query"));
             assertEquals("19", trace.getParameters().get("bound_var_0_id"));
             assertEquals("15", trace.getParameters().get("bound_var_1_id"));
@@ -97,12 +101,17 @@ public class TraceCqlTest extends CQLTester
             value.setFloat(2, 2.1f);
 
             trace = session.execute(pstmt.bind(value)).getExecutionInfo().getQueryTrace();
+
+            waitForTracingEvents();
+
             assertEquals(cql, trace.getParameters().get("query"));
             assertEquals("(3, 'bar', 2.1)", trace.getParameters().get("bound_var_0_v2"));
 
             cql2 = "SELECT id, v1, v2, v3 FROM " + KEYSPACE + '.' + currentTable() + " WHERE v3 CONTAINS KEY ? ALLOW FILTERING";
             pstmt = session.prepare(cql2).enableTracing();
             trace = session.execute(pstmt.bind(9181)).getExecutionInfo().getQueryTrace();
+
+            waitForTracingEvents();
 
             assertEquals(cql2, trace.getParameters().get("query"));
             assertEquals("9181", trace.getParameters().get("bound_var_0_key(v3)"));
@@ -134,6 +143,8 @@ public class TraceCqlTest extends CQLTester
             String cql3 = "SELECT id, v1, v2, v3 FROM " + KEYSPACE + '.' + currentTable() + " WHERE v3 CONTAINS ? ALLOW FILTERING";
             pstmt = session.prepare(cql3).enableTracing();
             trace = session.execute(pstmt.bind(boundValue)).getExecutionInfo().getQueryTrace();
+
+            waitForTracingEvents();
 
             assertEquals(cql3, trace.getParameters().get("query"));
 

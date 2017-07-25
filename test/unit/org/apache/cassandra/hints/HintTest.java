@@ -89,7 +89,7 @@ public class HintTest
         tokenMeta.updateNormalTokens(BootStrapper.getRandomTokens(tokenMeta, 1), local);
 
         for (TableMetadata table : Schema.instance.getTablesAndViews(KEYSPACE))
-            MigrationManager.announceTableUpdate(table.unbuild().gcGraceSeconds(TableParams.DEFAULT_GC_GRACE_SECONDS).build(), true);
+            MigrationManager.announceTableUpdate(table.unbuild().gcGraceSeconds(TableParams.DEFAULT_GC_GRACE_SECONDS).build(), true).blockingAwait();
     }
 
     @Test
@@ -179,7 +179,7 @@ public class HintTest
                   .unbuild()
                   .gcGraceSeconds(0)
                   .build();
-        MigrationManager.announceTableUpdate(updated, true);
+        MigrationManager.announceTableUpdate(updated, true).blockingAwait();
 
         Mutation mutation = createMutation(key, now);
         Hint.create(mutation, now / 1000).apply();
@@ -208,7 +208,7 @@ public class HintTest
                   .unbuild()
                   .gcGraceSeconds(0)
                   .build();
-        MigrationManager.announceTableUpdate(updated, true);
+        MigrationManager.announceTableUpdate(updated, true).blockingAwait();
 
         Mutation mutation = createMutation(key, now);
         Hint hint = Hint.create(mutation, now / 1000);
@@ -348,8 +348,7 @@ public class HintTest
     {
         ReadCommand cmd = Util.cmd(cfs(table), key).build();
 
-        try (ReadExecutionController executionController = cmd.executionController();
-             PartitionIterator iterator = cmd.executeInternal(executionController))
+        try (PartitionIterator iterator = cmd.executeInternalForTests())
         {
             assertFalse(iterator.hasNext());
         }

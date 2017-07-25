@@ -17,14 +17,22 @@
  */
 package org.apache.cassandra.db;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
+
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCBoundaries;
+import org.apache.cassandra.utils.flow.Flow;
+import io.reactivex.Single;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,10 +49,13 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Murmur3Partitioner.LongToken;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
+import org.apache.cassandra.io.FSDiskFullWriteError;
+import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -54,12 +65,19 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrderSimple;
+import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.memory.HeapPool;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.apache.cassandra.utils.memory.MemtablePool;
 import org.apache.cassandra.utils.memory.NativePool;
 import org.apache.cassandra.utils.memory.SlabPool;
+
+import static org.apache.cassandra.utils.Throwables.maybeFail;
 
 public class Memtable implements Comparable<Memtable>
 {
@@ -120,15 +138,27 @@ public class Memtable implements Comparable<Memtable>
         }
     }
 
+    // The boundaries for the keyspace as they were calculated when the memtable is created.
+    // The boundaries will be NONE for system keyspaces or if StorageService is not yet initialized.
+    // The fact this is fixed for the duration of the memtable lifetime, guarantees we'll always pick the same core
+    // for the a given key, even if we race with the StorageService initialization or with topology changes.
+    private final TPCBoundaries boundaries;
+
     // We index the memtable by PartitionPosition only for the purpose of being able
     // to select key range using Token.KeyBound. However put() ensures that we
     // actually only store DecoratedKey.
-    private final ConcurrentNavigableMap<PartitionPosition, AtomicBTreePartition> partitions = new ConcurrentSkipListMap<>();
+    private final List<TreeMap<PartitionPosition, AtomicBTreePartition>> partitions;
+
     public final ColumnFamilyStore cfs;
     private final long creationNano = System.nanoTime();
 
     // The smallest timestamp for all partitions stored in this memtable
-    private long minTimestamp = Long.MAX_VALUE;
+    private AtomicLong minTimestamp = new AtomicLong(Long.MAX_VALUE);
+
+    // The smallest min local deletion time for all partitions in this memtable
+    // This is actually an integer but to avoid duplicating the code to set the minimum
+    // it is stored as a long, see updateIfMin
+    private AtomicLong minLocalDeletionTime = new AtomicLong(Integer.MAX_VALUE);
 
     // Record the comparator of the CFS at the creation of the memtable. This
     // is only used when a user update the CF comparator, to know if the
@@ -147,6 +177,8 @@ public class Memtable implements Comparable<Memtable>
         this.initialComparator = cfs.metadata().comparator;
         this.cfs.scheduleFlush();
         this.columnsCollector = new ColumnsCollector(cfs.metadata().regularAndStaticColumns());
+        this.boundaries = cfs.keyspace.getTPCBoundaries();
+        this.partitions = generatePartitionMaps();
     }
 
     // ONLY to be used for testing, to create a mock Memtable
@@ -157,6 +189,28 @@ public class Memtable implements Comparable<Memtable>
         this.cfs = null;
         this.allocator = null;
         this.columnsCollector = new ColumnsCollector(metadata.regularAndStaticColumns());
+        this.boundaries = TPCBoundaries.NONE;
+        this.partitions = generatePartitionMaps();
+    }
+
+    private List<TreeMap<PartitionPosition, AtomicBTreePartition>> generatePartitionMaps()
+    {
+        int splits = boundaries.supportedCores();
+
+        if (splits == 1)
+            return Collections.singletonList(new TreeMap<>());
+
+        ArrayList<TreeMap<PartitionPosition, AtomicBTreePartition>> partitionMapContainer = new ArrayList<>(splits);
+        for (int i = 0; i < splits; i++)
+            partitionMapContainer.add(new TreeMap<>());
+        return partitionMapContainer;
+    }
+
+    private int getCoreFor(DecoratedKey key)
+    {
+        int coreId = TPC.getCoreForKey(boundaries, key);
+        assert coreId >= 0 && coreId < partitions.size() : "Received invalid core id : " + coreId;
+        return coreId;
     }
 
     public MemtableAllocator getAllocator()
@@ -233,9 +287,16 @@ public class Memtable implements Comparable<Memtable>
         return allocator.isLive();
     }
 
+    // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has
+    // been issued and all writes to the memtable have completed
     public boolean isClean()
     {
-        return partitions.isEmpty();
+        for (Map<PartitionPosition, AtomicBTreePartition> memtableSubrange : partitions)
+        {
+            if (!memtableSubrange.isEmpty())
+                return false;
+        }
+        return true;
     }
 
     public boolean mayContainDataBefore(CommitLogPosition position)
@@ -258,40 +319,65 @@ public class Memtable implements Comparable<Memtable>
      *
      * commitLogSegmentPosition should only be null if this is a secondary index, in which case it is *expected* to be null
      */
-    long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
+    Single<Long> put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
     {
-        AtomicBTreePartition previous = partitions.get(update.partitionKey());
+        final DecoratedKey key = update.partitionKey();
+        final AtomicLong initialSize = new AtomicLong(0);
 
-        long initialSize = 0;
-        if (previous == null)
+        final int coreId = getCoreFor(key);
+
+        return Single.defer(() -> {
+                        Map<PartitionPosition, AtomicBTreePartition> partitionMap = partitions.get(coreId);
+                        AtomicBTreePartition previous = partitionMap.get(key);
+                        assert TPC.getCoreId() == coreId;
+                        if (logger.isTraceEnabled())
+                            logger.trace("Adding key {} to memtable", key);
+
+                        assert writeBarrier == null || writeBarrier.isAfter(opGroup)
+                            : String.format("Put called after write barrier\n%s", FBUtilities.Debug.getStackTrace());
+
+                        if (previous == null)
+                        {
+                           final DecoratedKey cloneKey = allocator.clone(key, opGroup);
+                           AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
+                           int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
+                           allocator.onHeap().allocate(overhead, opGroup);
+                           initialSize.set(8);
+
+                           // We'll add the columns later.
+                           partitionMap.put(cloneKey, empty);
+                           previous = empty;
+                        }
+                        return previous.addAllWithSizeDelta(update, opGroup, indexer);
+                   }).map(p -> {
+                       updateIfMin(minTimestamp, p.right.stats().minTimestamp);
+                       updateIfMin(minLocalDeletionTime, p.right.stats().minLocalDeletionTime);
+                       liveDataSize.addAndGet(initialSize.get() + p.left[0]);
+                       columnsCollector.update(update.columns());
+                       statsCollector.update(update.stats());
+                       currentOperations.addAndGet(update.operationCount());
+
+                       return p.left[1];
+                   }).subscribeOn(TPC.getForCore(coreId));
+    }
+
+    private void updateIfMin(AtomicLong val, long newVal)
+    {
+        long current = val.get();
+        while(newVal < current)
         {
-            final DecoratedKey cloneKey = allocator.clone(update.partitionKey(), opGroup);
-            AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
-            // We'll add the columns later. This avoids wasting works if we get beaten in the putIfAbsent
-            previous = partitions.putIfAbsent(cloneKey, empty);
-            if (previous == null)
-            {
-                previous = empty;
-                // allocate the row overhead after the fact; this saves over allocating and having to free after, but
-                // means we can overshoot our declared limit.
-                int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
-                allocator.onHeap().allocate(overhead, opGroup);
-                initialSize = 8;
-            }
-        }
+            if (val.compareAndSet(current, newVal))
+                break;
 
-        long[] pair = previous.addAllWithSizeDelta(update, opGroup, indexer);
-        minTimestamp = Math.min(minTimestamp, previous.stats().minTimestamp);
-        liveDataSize.addAndGet(initialSize + pair[0]);
-        columnsCollector.update(update.columns());
-        statsCollector.update(update.stats());
-        currentOperations.addAndGet(update.operationCount());
-        return pair[1];
+            current = val.get();
+        }
     }
 
     public int partitionCount()
     {
-        return partitions.size();
+        // technically we should scatter gather on all the core threads because the size in TreeMap
+        // is not volatile but for metrics purpose this should be good enough
+        return partitions.stream().map(m -> m.size()).reduce(Integer::sum).orElse(0);
     }
 
     public List<FlushRunnable> flushRunnables(LifecycleTransaction txn)
@@ -324,16 +410,9 @@ public class Memtable implements Comparable<Memtable>
         }
         catch (Throwable e)
         {
-            throw Throwables.propagate(abortRunnables(runnables, e));
+            runnables.stream().forEach(FlushRunnable::abort);
+            throw Throwables.propagate(e);
         }
-    }
-
-    public Throwable abortRunnables(List<FlushRunnable> runnables, Throwable t)
-    {
-        if (runnables != null)
-            for (FlushRunnable runnable : runnables)
-                t = runnable.writer.abort(t);
-        return t;
     }
 
     public String toString()
@@ -343,7 +422,7 @@ public class Memtable implements Comparable<Memtable>
                              100 * allocator.onHeap().ownershipRatio(), 100 * allocator.offHeap().ownershipRatio());
     }
 
-    public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
+    public Flow<FlowableUnfilteredPartition> makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -353,44 +432,83 @@ public class Memtable implements Comparable<Memtable>
         boolean isBound = keyRange instanceof Bounds;
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
-        Map<PartitionPosition, AtomicBTreePartition> subMap;
-        if (startIsMin)
-            subMap = stopIsMin ? partitions : partitions.headMap(keyRange.right, includeStop);
-        else
-            subMap = stopIsMin
-                   ? partitions.tailMap(keyRange.left, includeStart)
-                   : partitions.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
 
-        int minLocalDeletionTime = Integer.MAX_VALUE;
+        ArrayList<Pair<Integer, Callable<List<FlowableUnfilteredPartition>>>> all = new ArrayList<>(partitions.size());
 
-        // avoid iterating over the memtable if we purge all tombstones
-        if (cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones())
-            minLocalDeletionTime = findMinLocalDeletionTime(subMap.entrySet().iterator());
-
-        final Iterator<Map.Entry<PartitionPosition, AtomicBTreePartition>> iter = subMap.entrySet().iterator();
-
-        return new MemtableUnfilteredPartitionIterator(cfs, iter, minLocalDeletionTime, columnFilter, dataRange);
-    }
-
-    private int findMinLocalDeletionTime(Iterator<Map.Entry<PartitionPosition, AtomicBTreePartition>> iterator)
-    {
-        int minLocalDeletionTime = Integer.MAX_VALUE;
-        while (iterator.hasNext())
+        for (int i = 0; i < partitions.size(); i++)
         {
-            Map.Entry<PartitionPosition, AtomicBTreePartition> entry = iterator.next();
-            minLocalDeletionTime = Math.min(minLocalDeletionTime, entry.getValue().stats().minLocalDeletionTime);
+            final int coreId = i;
+
+            all.add(Pair.create(coreId, () -> {
+                TreeMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(coreId);
+                SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange;
+
+                if (startIsMin)
+                   trimmedMemtableSubrange = stopIsMin ? memtableSubrange : memtableSubrange.headMap(keyRange.right, includeStop);
+                else
+                   trimmedMemtableSubrange = stopIsMin
+                                             ? memtableSubrange.tailMap(keyRange.left, includeStart)
+                                             : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
+
+                List<FlowableUnfilteredPartition> ret = new ArrayList<>(trimmedMemtableSubrange.size());
+                for (Map.Entry<PartitionPosition, AtomicBTreePartition> entry : trimmedMemtableSubrange.entrySet())
+                {
+                    PartitionPosition position = entry.getKey();
+                    assert position instanceof DecoratedKey;
+                    DecoratedKey key = (DecoratedKey)position;
+                    ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
+                    ret.add(filter.getFlowableUnfilteredPartition(columnFilter, entry.getValue()));
+                }
+                return ret;
+            }));
         }
-        return minLocalDeletionTime;
+
+        return Flow.fromIterable(all)
+                   .flatMap(pair -> Threads.evaluateOnCore(pair.right, pair.left))
+                   .flatMap(list -> Flow.fromIterable(list));
     }
 
-    public Partition getPartition(DecoratedKey key)
+    // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has
+    // been issued and all writes to the memtable have completed
+    private List<SortedMap<PartitionPosition, AtomicBTreePartition>> getAllSortedPartitions()
     {
-        return partitions.get(key);
+        List<SortedMap<PartitionPosition, AtomicBTreePartition>> ret = new ArrayList<>(partitions.size());
+        for (TreeMap<PartitionPosition, AtomicBTreePartition> partitionSubrange : partitions)
+            ret.add(partitionSubrange);
+
+        return ret;
+    }
+
+    // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has
+    // been issued and all writes to the memtable have completed
+    private List<SortedMap<PartitionPosition, AtomicBTreePartition>> getSortedSubrange(PartitionPosition from, PartitionPosition to)
+    {
+        List<SortedMap<PartitionPosition, AtomicBTreePartition>> ret = new ArrayList<>(partitions.size());
+
+        for (TreeMap<PartitionPosition, AtomicBTreePartition> partitionSubrange : partitions)
+        {
+            SortedMap<PartitionPosition, AtomicBTreePartition> submap = partitionSubrange.subMap(from, to);
+            // TreeMap returns these in normal sorted order
+            if (!submap.isEmpty())
+                ret.add(submap);
+        }
+        return ret;
+    }
+
+    public Flow<Partition> getPartition(DecoratedKey key)
+    {
+        int coreId = getCoreFor(key);
+        return Threads.evaluateOnCore(() -> partitions.get(coreId).get(key), coreId);
     }
 
     public long getMinTimestamp()
     {
-        return minTimestamp;
+        return minTimestamp.get();
+    }
+
+    public int getMinLocalDeletionTime()
+    {
+        return Math.toIntExact(minLocalDeletionTime.get());
     }
 
     /**
@@ -399,13 +517,13 @@ public class Memtable implements Comparable<Memtable>
     @VisibleForTesting
     public void makeUnflushable()
     {
-        liveDataSize.addAndGet(1L * 1024 * 1024 * 1024 * 1024 * 1024);
+        liveDataSize.addAndGet((long) 1024 * 1024 * 1024 * 1024 * 1024);
     }
 
     class FlushRunnable implements Callable<SSTableMultiWriter>
     {
         private final long estimatedSize;
-        private final ConcurrentNavigableMap<PartitionPosition, AtomicBTreePartition> toFlush;
+        private final List<SortedMap<PartitionPosition, AtomicBTreePartition>> toFlush;
 
         private final boolean isBatchLogTable;
         private final SSTableMultiWriter writer;
@@ -414,28 +532,36 @@ public class Memtable implements Comparable<Memtable>
         private final PartitionPosition from;
         private final PartitionPosition to;
 
+        private volatile boolean aborted;
+
         FlushRunnable(PartitionPosition from, PartitionPosition to, Directories.DataDirectory flushLocation, LifecycleTransaction txn)
         {
-            this(partitions.subMap(from, to), flushLocation, from, to, txn);
+            this(getSortedSubrange(from, to), flushLocation, from, to, txn);
         }
 
         FlushRunnable(LifecycleTransaction txn)
         {
-            this(partitions, null, null, null, txn);
+            this(getAllSortedPartitions(), null, null, null, txn);
         }
 
-        FlushRunnable(ConcurrentNavigableMap<PartitionPosition, AtomicBTreePartition> toFlush, Directories.DataDirectory flushLocation, PartitionPosition from, PartitionPosition to, LifecycleTransaction txn)
+        private FlushRunnable(List<SortedMap<PartitionPosition, AtomicBTreePartition>> toFlush,
+                              Directories.DataDirectory flushLocation, PartitionPosition from, PartitionPosition to, LifecycleTransaction txn)
         {
             this.toFlush = toFlush;
             this.from = from;
             this.to = to;
             long keySize = 0;
-            for (PartitionPosition key : toFlush.keySet())
+
+            for (Set<PartitionPosition> keySet : keysToFlush())
             {
-                //  make sure we don't write non-sensical keys
-                assert key instanceof DecoratedKey;
-                keySize += ((DecoratedKey) key).getKey().remaining();
+                for (PartitionPosition key : keySet)
+                {
+                    // make sure we don't write nonsensical keys
+                    assert key instanceof DecoratedKey;
+                    keySize += ((DecoratedKey) key).getKey().remaining();
+                }
             }
+
             estimatedSize = (long) ((keySize // index entries
                                     + keySize // keys in data file
                                     + liveDataSize.get()) // data
@@ -444,10 +570,32 @@ public class Memtable implements Comparable<Memtable>
             this.isBatchLogTable = cfs.name.equals(SystemKeyspace.BATCHES) && cfs.keyspace.getName().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME);
 
             if (flushLocation == null)
+            {
                 writer = createFlushWriter(txn, cfs.newSSTableDescriptor(getDirectories().getWriteableLocationAsFile(estimatedSize)), columnsCollector.get(), statsCollector.get());
+            }
             else
-                writer = createFlushWriter(txn, cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(flushLocation)), columnsCollector.get(), statsCollector.get());
+            {
+                // Don't write to blacklisted disks
+                File flushTableDir = getDirectories().getLocationForDisk(flushLocation);
+                if (BlacklistedDirectories.isUnwritable(flushTableDir))
+                    throw new FSWriteError(new IOException("SSTable flush dir has been blacklisted"), flushTableDir.getAbsolutePath());
 
+                // exclude directory if its total writeSize does not fit to data directory
+                if (flushLocation.getAvailableSpace() < estimatedSize)
+                    throw new FSDiskFullWriteError(new IOException("Insufficient disk space to write " + estimatedSize + " bytes"), "");
+
+                writer = createFlushWriter(txn, cfs.newSSTableDescriptor(flushTableDir), columnsCollector.get(), statsCollector.get());
+            }
+        }
+
+        private List<Set<PartitionPosition>> keysToFlush()
+        {
+            return toFlush.stream().map(m -> m.keySet()).collect(Collectors.toList());
+        }
+
+        private List<Iterator<AtomicBTreePartition>> partitionsToFlush()
+        {
+            return toFlush.stream().map(m -> m.values().iterator()).collect(Collectors.toList());
         }
 
         protected Directories getDirectories()
@@ -459,42 +607,97 @@ public class Memtable implements Comparable<Memtable>
         {
             logger.debug("Writing {}, flushed range = ({}, {}]", Memtable.this.toString(), from, to);
 
-            boolean trackContention = logger.isTraceEnabled();
-            int heavilyContendedRowCount = 0;
-            // (we can't clear out the map as-we-go to free up memory,
-            //  since the memtable is being used for queries in the "pending flush" category)
-            for (AtomicBTreePartition partition : toFlush.values())
+            try
             {
-                // Each batchlog partition is a separate entry in the log. And for an entry, we only do 2
-                // operations: 1) we insert the entry and 2) we delete it. Further, BL data is strictly local,
-                // we don't need to preserve tombstones for repair. So if both operation are in this
-                // memtable (which will almost always be the case if there is no ongoing failure), we can
-                // just skip the entry (CASSANDRA-4667).
-                if (isBatchLogTable && !partition.partitionLevelDeletion().isLive() && partition.hasRows())
-                    continue;
+                List<Iterator<AtomicBTreePartition>> partitions = partitionsToFlush();
 
-                if (trackContention && partition.usePessimisticLocking())
-                    heavilyContendedRowCount++;
-
-                if (!partition.isEmpty())
+                // TPC: For OrderPreservingPartitioners we must merge across the memtable ranges
+                // To ensure the partitions are written in the correct order.
+                // As the ranges in TPC are based on long token and not the ordered token
+                if (cfs.metadata().partitioner.preservesOrder() && partitions.size() > 1)
                 {
-                    try (UnfilteredRowIterator iter = partition.unfilteredIterator())
+                    partitions = Collections.singletonList(MergeIterator.get(partitions, Comparator.comparing(AtomicBTreePartition::partitionKey), new Reducer<AtomicBTreePartition, AtomicBTreePartition>()
                     {
-                        writer.append(iter);
+                        AtomicBTreePartition reduced = null;
+
+                        @Override
+                        public boolean trivialReduceIsTrivial()
+                        {
+                            return true;
+                        }
+
+                        public void reduce(int idx, AtomicBTreePartition current)
+                        {
+                            reduced = current;
+                        }
+
+                        public AtomicBTreePartition getReduced()
+                        {
+                            return reduced;
+                        }
+                    }));
+                }
+
+                // (we can't clear out the map as-we-go to free up memory,
+                //  since the memtable is being used for queries in the "pending flush" category)
+                for (Iterator<AtomicBTreePartition> partitionSet : partitions)
+                {
+                    if (aborted)
+                        break;
+
+                    while (partitionSet.hasNext())
+                    {
+                        if (aborted)
+                            break;
+
+                        AtomicBTreePartition partition = partitionSet.next();
+
+                        // Each batchlog partition is a separate entry in the log. And for an entry, we only do 2
+                        // operations: 1) we insert the entry and 2) we delete it. Further, BL data is strictly local,
+                        // we don't need to preserve tombstones for repair. So if both operation are in this
+                        // memtable (which will almost always be the case if there is no ongoing failure), we can
+                        // just skip the entry (CASSANDRA-4667).
+                        if (isBatchLogTable && !partition.partitionLevelDeletion().isLive() && partition.hasRows())
+                            continue;
+
+                        if (!partition.isEmpty())
+                        {
+                            try (UnfilteredRowIterator iter = partition.unfilteredIterator())
+                            {
+                                writer.append(iter);
+                            }
+                            catch (Throwable t)
+                            {
+                                logger.debug("Error when flushing rows: {}/{}", t.getClass().getName(), t.getMessage());
+                                Throwables.propagate(t);
+                            }
+                        }
                     }
                 }
             }
+            finally
+            {
+                if (aborted)
+                {
+                    logger.debug("Flushing of {} aborted", writer.getFilename());
+                    maybeFail(writer.abort(null));
+                }
+                else
+                {
+                    long bytesFlushed = writer.getFilePointer();
+                    logger.debug("Completed flushing {} ({}) for commitlog position {}",
+                                 writer.getFilename(),
+                                 FBUtilities.prettyPrintMemory(bytesFlushed),
+                                 commitLogUpperBound);
+                    // Update the metrics
+                    cfs.metric.bytesFlushed.inc(bytesFlushed);
+                }
+            }
+        }
 
-            long bytesFlushed = writer.getFilePointer();
-            logger.debug("Completed flushing {} ({}) for commitlog position {}",
-                                                                              writer.getFilename(),
-                                                                              FBUtilities.prettyPrintMemory(bytesFlushed),
-                                                                              commitLogUpperBound);
-            // Update the metrics
-            cfs.metric.bytesFlushed.inc(bytesFlushed);
-
-            if (heavilyContendedRowCount > 0)
-                logger.trace("High update contention in {}/{} partitions of {} ", heavilyContendedRowCount, toFlush.size(), Memtable.this);
+        public void abort()
+        {
+            this.aborted = true;
         }
 
         public SSTableMultiWriter createFlushWriter(LifecycleTransaction txn,
@@ -524,7 +727,7 @@ public class Memtable implements Comparable<Memtable>
     private static int estimateRowOverhead(final int count)
     {
         // calculate row overhead
-        try (final OpOrder.Group group = new OpOrder().start())
+        try (final OpOrder.Group group = new OpOrderSimple().start())
         {
             int rowOverhead;
             MemtableAllocator allocator = MEMORY_POOL.newAllocator();
@@ -539,50 +742,6 @@ public class Memtable implements Comparable<Memtable>
             allocator.setDiscarding();
             allocator.setDiscarded();
             return rowOverhead;
-        }
-    }
-
-    public static class MemtableUnfilteredPartitionIterator extends AbstractUnfilteredPartitionIterator
-    {
-        private final ColumnFamilyStore cfs;
-        private final Iterator<Map.Entry<PartitionPosition, AtomicBTreePartition>> iter;
-        private final int minLocalDeletionTime;
-        private final ColumnFilter columnFilter;
-        private final DataRange dataRange;
-
-        public MemtableUnfilteredPartitionIterator(ColumnFamilyStore cfs, Iterator<Map.Entry<PartitionPosition, AtomicBTreePartition>> iter, int minLocalDeletionTime, ColumnFilter columnFilter, DataRange dataRange)
-        {
-            this.cfs = cfs;
-            this.iter = iter;
-            this.minLocalDeletionTime = minLocalDeletionTime;
-            this.columnFilter = columnFilter;
-            this.dataRange = dataRange;
-        }
-
-        public int getMinLocalDeletionTime()
-        {
-            return minLocalDeletionTime;
-        }
-
-        public TableMetadata metadata()
-        {
-            return cfs.metadata();
-        }
-
-        public boolean hasNext()
-        {
-            return iter.hasNext();
-        }
-
-        public UnfilteredRowIterator next()
-        {
-            Map.Entry<PartitionPosition, AtomicBTreePartition> entry = iter.next();
-            // Actual stored key should be true DecoratedKey
-            assert entry.getKey() instanceof DecoratedKey;
-            DecoratedKey key = (DecoratedKey)entry.getKey();
-            ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
-
-            return filter.getUnfilteredRowIterator(columnFilter, entry.getValue());
         }
     }
 

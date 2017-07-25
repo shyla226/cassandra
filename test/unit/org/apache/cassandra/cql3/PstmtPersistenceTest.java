@@ -95,7 +95,7 @@ public class PstmtPersistenceTest extends CQLTester
 
         // validate that the prepared statements are in the system table
         String queryAll = "SELECT * FROM " + SchemaConstants.SYSTEM_KEYSPACE_NAME + '.' + SystemKeyspace.PREPARED_STATEMENTS;
-        for (UntypedResultSet.Row row : QueryProcessor.executeOnceInternal(queryAll))
+        for (UntypedResultSet.Row row : QueryProcessor.executeOnceInternal(queryAll).blockingGet())
         {
             MD5Digest digest = MD5Digest.wrap(ByteBufferUtil.getArray(row.getBytes("prepared_id")));
             ParsedStatement.Prepared prepared = QueryProcessor.instance.getPrepared(digest);
@@ -185,6 +185,6 @@ public class PstmtPersistenceTest extends CQLTester
 
     private MD5Digest prepareStatement(String stmt, String keyspace, String table, ClientState clientState)
     {
-        return QueryProcessor.prepare(String.format(stmt, keyspace + "." + table), clientState).statementId;
+        return QueryProcessor.prepare(String.format(stmt, keyspace + "." + table), clientState).blockingGet().statementId;
     }
 }

@@ -22,7 +22,9 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.concurrent.TimeUnit;
 
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -33,9 +35,11 @@ import org.junit.runners.Parameterized.Parameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
+import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -94,12 +98,21 @@ public class RecoveryManagerFlushedTest
     /* test that commit logs do not replay flushed data */
     public void testWithFlush() throws Exception
     {
-        // Flush everything that may be in the commit log now to start fresh
-        FBUtilities.waitOnFutures(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).flush());
-        FBUtilities.waitOnFutures(Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).flush());
+        Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
 
-
+        // disable compactions for system and non-system tables
+        // disable compactions before flushing since a compaction will cause entries to be added to sstable_activity
+        // and compaction_history
         CompactionManager.instance.disableAutoCompaction();
+        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStores().stream().forEach(cfs -> cfs.disableAutoCompaction());
+        Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).getColumnFamilyStores().stream().forEach(cfs -> cfs.disableAutoCompaction());
+
+        // the global tidiers called after compaction actually insert into sstable_activity
+        LifecycleTransaction.waitForDeletions();
+
+        // Flush everything that may be in the commit log now to start fresh
+        Single.concat(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).flush()).blockingLast();
+        Single.concat(Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).flush()).blockingLast();
 
         // add a row to another CF so we test skipping mutations within a not-entirely-flushed CF
         insertRow("Standard2", "key");

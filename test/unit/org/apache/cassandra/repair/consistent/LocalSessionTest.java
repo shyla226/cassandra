@@ -925,4 +925,3 @@ public class LocalSessionTest extends AbstractRepairTest
         Assert.assertEquals(session, checkedSession.get());
     }
 }
-

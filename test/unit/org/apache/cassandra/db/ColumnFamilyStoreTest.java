@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.Assume;
 import org.junit.BeforeClass;
@@ -34,6 +35,7 @@ import static org.junit.Assert.assertTrue;
 
 import com.google.common.collect.Iterators;
 import org.apache.cassandra.*;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.rows.*;
@@ -44,7 +46,6 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -52,6 +53,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.WrappedRunnable;
 import static junit.framework.Assert.assertNotNull;
+
 @RunWith(OrderedJUnit4ClassRunner.class)
 public class ColumnFamilyStoreTest
 {
@@ -63,10 +65,16 @@ public class ColumnFamilyStoreTest
     public static final String CF_SUPER6 = "Super6";
     public static final String CF_INDEX1 = "Indexed1";
 
+    private static int defaultMetricsHistogramUpdateInterval;
+
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
         SchemaLoader.prepareServer();
+
+        defaultMetricsHistogramUpdateInterval = DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis();
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0); // this guarantees metrics histograms are updated on read
+
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1),
@@ -78,6 +86,12 @@ public class ColumnFamilyStoreTest
         SchemaLoader.createKeyspace(KEYSPACE2,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE2, CF_STANDARD1));
+    }
+
+    @AfterClass
+    public static void afterClass()
+    {
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateInterval);
     }
 
     @Before
@@ -111,9 +125,9 @@ public class ColumnFamilyStoreTest
                 .applyUnsafe();
         cfs.forceBlockingFlush();
 
-        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear(); // resets counts
+        cfs.metric.sstablesPerReadHistogram.clear(); // resets counts
         Util.getAll(Util.cmd(cfs, "key1").includeRow("c1").build());
-        assertEquals(1, cfs.metric.sstablesPerReadHistogram.cf.getCount());
+        assertEquals(1, cfs.metric.sstablesPerReadHistogram.getCount());
     }
 
     @Test

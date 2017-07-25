@@ -29,6 +29,7 @@ import org.junit.Test;
 
 import com.google.common.collect.Iterators;
 
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.SystemKeyspace;

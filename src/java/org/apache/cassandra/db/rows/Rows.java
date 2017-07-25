@@ -22,11 +22,13 @@ import java.util.*;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 
+import io.reactivex.Single;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.WrappedInt;
 
 /**
@@ -153,7 +155,7 @@ public abstract class Rows
         for (Row row : inputs)
             inputIterators.add(row == null ? Collections.emptyIterator() : row.iterator());
 
-        Iterator<?> iter = MergeIterator.get(inputIterators, ColumnData.comparator, new MergeIterator.Reducer<ColumnData, Object>()
+        Iterator<?> iter = MergeIterator.get(inputIterators, ColumnData.comparator, new Reducer<ColumnData, Object>()
         {
             ColumnData mergedData;
             ColumnData[] inputDatas = new ColumnData[inputs.length];
@@ -165,7 +167,7 @@ public abstract class Rows
                     inputDatas[idx - 1] = current;
             }
 
-            protected Object getReduced()
+            public Object getReduced()
             {
                 for (int i = 0 ; i != inputDatas.length ; i++)
                 {
@@ -227,7 +229,7 @@ public abstract class Rows
                 return null;
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 mergedData = null;
                 Arrays.fill(inputDatas, null);

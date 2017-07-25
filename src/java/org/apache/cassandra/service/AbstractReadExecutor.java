@@ -26,24 +26,26 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
+import io.reactivex.CompletableObserver;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DigestVersion;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadVerbs;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.exceptions.ReadFailureException;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
-import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.MessagingVersion;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.SpeculativeRetryParam;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Sends a read request to the replicas needed to satisfy a given ConsistencyLevel.
@@ -78,33 +80,33 @@ public abstract class AbstractReadExecutor
         this.digestVersion = minVersion.<ReadVerbs.ReadVersion>groupVersion(Verbs.Group.READS).digestVersion;
     }
 
-    protected void makeDataRequests(List<InetAddress> endpoints)
+    protected Completable makeDataRequests(List<InetAddress> endpoints)
     {
         assert !endpoints.isEmpty();
         Tracing.trace("Reading data from {}", endpoints);
         logger.trace("Reading data from {}", endpoints);
-        makeRequests(command, endpoints);
-
+        return makeRequests(command, endpoints);
     }
 
-    protected void makeDigestRequests(List<InetAddress> endpoints)
+    protected Completable makeDigestRequests(List<InetAddress> endpoints)
     {
         assert !endpoints.isEmpty();
         Tracing.trace("Reading digests from {}", endpoints);
         logger.trace("Reading digests from {}", endpoints);
-        makeRequests(command.createDigestCommand(digestVersion), endpoints);
+        return makeRequests(command.createDigestCommand(digestVersion), endpoints);
     }
 
-    private void makeRequests(ReadCommand readCommand, List<InetAddress> endpoints)
+    private Completable makeRequests(ReadCommand readCommand, List<InetAddress> endpoints)
     {
         MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, readCommand), handler);
+        return Completable.complete();
     }
 
     /**
      * Perform additional requests if it looks like the original will time out.  May block while it waits
      * to see if the original requests are answered first.
      */
-    public abstract void maybeTryAdditionalReplicas();
+    public abstract Completable maybeTryAdditionalReplicas();
 
     /**
      * Get the replicas involved in the [finished] request.
@@ -116,29 +118,20 @@ public abstract class AbstractReadExecutor
     /**
      * send the initial set of requests
      */
-    public abstract void executeAsync();
+    public abstract Completable executeAsync();
 
     /**
      * wait for an answer.  Blocks until success or timeout, so it is caller's
      * responsibility to call maybeTryAdditionalReplicas first.
      */
-    public PartitionIterator get() throws ReadFailureException, ReadTimeoutException, DigestMismatchException
+    public Flow<FlowablePartition> result()
     {
-        try
-        {
-            return handler.get();
-        }
-        catch (ReadTimeoutException e)
-        {
-            try
-            {
-                onReadTimeout();
-            }
-            finally
-            {
-                throw e;
-            }
-        }
+            return handler.result().doOnError(e ->
+                                              {
+                                                  if (e instanceof ReadTimeoutException)
+                                                      this.onReadTimeout();
+                                              });
+
     }
 
     private static ReadRepairDecision newReadRepairDecision(TableMetadata metadata)
@@ -225,16 +218,16 @@ public abstract class AbstractReadExecutor
     }
 
     /**
-     *  Returns true if speculation should occur and if it should then block until it is time to
-     *  send the speculative reads
+     *  Returns true if speculation should occur.
      */
-    boolean shouldSpeculateAndMaybeWait()
+    boolean shouldSpeculate()
     {
         // no latency information, or we're overloaded
-        if (cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
+        if (cfs.keyspace.getReplicationStrategy().getReplicationFactor() == 1 ||
+            cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
             return false;
 
-        return !handler.await(cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+        return true;
     }
 
     void onReadTimeout() {}
@@ -254,19 +247,32 @@ public abstract class AbstractReadExecutor
             this.logFailedSpeculation = logFailedSpeculation;
         }
 
-        public void executeAsync()
+        public Completable executeAsync()
         {
-            makeDataRequests(targetReplicas.subList(0, 1));
+            Completable result = makeDataRequests(targetReplicas.subList(0, 1));
             if (targetReplicas.size() > 1)
-                makeDigestRequests(targetReplicas.subList(1, targetReplicas.size()));
+                result = result.concatWith(makeDigestRequests(targetReplicas.subList(1, targetReplicas.size())));
+
+            return result;
         }
 
-        public void maybeTryAdditionalReplicas()
+        public Completable maybeTryAdditionalReplicas()
         {
-            if (shouldSpeculateAndMaybeWait() && logFailedSpeculation)
-            {
-                cfs.metric.speculativeInsufficientReplicas.inc();
-            }
+            return Completable.defer(() -> {
+
+                if (!shouldSpeculate() || !logFailedSpeculation)
+                    return CompletableObserver::onComplete;
+
+                command.getScheduler().scheduleDirect(() ->
+                                                           {
+                                                               if (!handler.hasValue())
+
+                                                                   cfs.metric.speculativeInsufficientReplicas.inc();
+
+                                                           }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+
+                return CompletableObserver::onComplete;
+            });
         }
 
         public List<InetAddress> getContactedReplicas()
@@ -289,48 +295,62 @@ public abstract class AbstractReadExecutor
             super(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
         }
 
-        public void executeAsync()
+        public Completable executeAsync()
         {
             // if CL + RR result in covering all replicas, getReadExecutor forces AlwaysSpeculating.  So we know
             // that the last replica in our list is "extra."
             List<InetAddress> initialReplicas = targetReplicas.subList(0, targetReplicas.size() - 1);
 
+            Completable result;
             if (handler.blockFor() < initialReplicas.size())
             {
                 // We're hitting additional targets for read repair.  Since our "extra" replica is the least-
                 // preferred by the snitch, we do an extra data read to start with against a replica more
                 // likely to reply; better to let RR fail than the entire query.
-                makeDataRequests(initialReplicas.subList(0, 2));
+                result = makeDataRequests(initialReplicas.subList(0, 2));
                 if (initialReplicas.size() > 2)
-                    makeDigestRequests(initialReplicas.subList(2, initialReplicas.size()));
+                    result = result.concatWith(makeDigestRequests(initialReplicas.subList(2, initialReplicas.size())));
             }
             else
             {
                 // not doing read repair; all replies are important, so it doesn't matter which nodes we
                 // perform data reads against vs digest.
-                makeDataRequests(initialReplicas.subList(0, 1));
+                result = makeDataRequests(initialReplicas.subList(0, 1));
                 if (initialReplicas.size() > 1)
-                    makeDigestRequests(initialReplicas.subList(1, initialReplicas.size()));
+                    result = result.concatWith(makeDigestRequests(initialReplicas.subList(1, initialReplicas.size())));
             }
+
+            return result;
         }
 
-        public void maybeTryAdditionalReplicas()
+        public Completable maybeTryAdditionalReplicas()
         {
-            if (shouldSpeculateAndMaybeWait())
-            {
-                //Handle speculation stats first in case the callback fires immediately
-                speculated = true;
-                cfs.metric.speculativeRetries.inc();
-                // Could be waiting on the data, or on enough digests.
-                ReadCommand retryCommand = command;
-                if (handler.resolver.isDataPresent())
-                    retryCommand = command.createDigestCommand(digestVersion);
+            return Completable.defer(
+            () -> {
 
-                InetAddress extraReplica = Iterables.getLast(targetReplicas);
-                Tracing.trace("Speculating read retry on {}", extraReplica);
-                logger.trace("Speculating read retry on {}", extraReplica);
-                MessagingService.instance().send(Verbs.READS.READ.newRequest(extraReplica, retryCommand), handler);
-            }
+                if (!shouldSpeculate())
+                    return CompletableObserver::onComplete;
+
+                command.getScheduler().scheduleDirect(() -> {
+                       if (!handler.hasValue())
+                       {
+                           //Handle speculation stats first in case the callback fires immediately
+                           speculated = true;
+                           cfs.metric.speculativeRetries.inc();
+                           // Could be waiting on the data, or on enough digests.
+                           ReadCommand retryCommand = command;
+                           if (handler.resolver.isDataPresent())
+                               retryCommand = command.createDigestCommand(digestVersion);
+
+                           InetAddress extraReplica = Iterables.getLast(targetReplicas);
+                           Tracing.trace("Speculating read retry on {}", extraReplica);
+                           logger.trace("Speculating read retry on {}", extraReplica);
+                           MessagingService.instance().send(Verbs.READS.READ.newRequest(extraReplica, retryCommand), handler);
+                       }
+                   }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+
+                return CompletableObserver::onComplete;
+            });
         }
 
         public List<InetAddress> getContactedReplicas()
@@ -362,9 +382,10 @@ public abstract class AbstractReadExecutor
             super(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
         }
 
-        public void maybeTryAdditionalReplicas()
+        public Completable maybeTryAdditionalReplicas()
         {
             // no-op
+            return Completable.complete();
         }
 
         public List<InetAddress> getContactedReplicas()
@@ -373,12 +394,14 @@ public abstract class AbstractReadExecutor
         }
 
         @Override
-        public void executeAsync()
+        public Completable executeAsync()
         {
-            makeDataRequests(targetReplicas.subList(0, targetReplicas.size() > 1 ? 2 : 1));
+            Completable result = makeDataRequests(targetReplicas.subList(0, targetReplicas.size() > 1 ? 2 : 1));
             if (targetReplicas.size() > 2)
-                makeDigestRequests(targetReplicas.subList(2, targetReplicas.size()));
+                result = result.concatWith(makeDigestRequests(targetReplicas.subList(2, targetReplicas.size())));
+
             cfs.metric.speculativeRetries.inc();
+            return result;
         }
 
         @Override

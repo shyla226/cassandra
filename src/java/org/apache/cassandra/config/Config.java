@@ -62,6 +62,8 @@ public class Config
     public volatile int credentials_cache_max_entries = 1000;
     public volatile int credentials_update_interval_in_ms = -1;
 
+    public Integer tpc_cores;
+
     /* Hashing strategy Random or OPHF */
     public String partitioner;
 
@@ -161,8 +163,7 @@ public class Config
 
     public boolean snapshot_before_compaction = false;
     public boolean auto_snapshot = true;
-
-    /* if the size of columns or super-columns are more than this, indexing will kick in */
+/* if the size of columns or super-columns are more than this, indexing will kick in */
     public int column_index_size_in_kb = 64;
     public int column_index_cache_size_in_kb = 2;
     public volatile int batch_size_warn_threshold_in_kb = 5;
@@ -212,7 +213,7 @@ public class Config
 
     public String endpoint_snitch;
     public boolean dynamic_snitch = true;
-    public int dynamic_snitch_update_interval_in_ms = 100;
+    public int dynamic_snitch_update_interval_in_ms = 500;
     public int dynamic_snitch_reset_interval_in_ms = 600000;
     public double dynamic_snitch_badness_threshold = 0.1;
 
@@ -252,7 +253,7 @@ public class Config
 
     public Integer file_cache_size_in_mb;
 
-    public boolean buffer_pool_use_heap_if_exhausted = true;
+    public boolean buffer_pool_use_heap_if_exhausted = false;
 
     public DiskOptimizationStrategy disk_optimization_strategy = DiskOptimizationStrategy.ssd;
 
@@ -350,13 +351,15 @@ public class Config
     public volatile boolean back_pressure_enabled = false;
     public volatile ParameterizedClass back_pressure_strategy;
 
-	/** The configuration for continuous paging */
+    /** The configuration for continuous paging */
     public ContinuousPagingConfig continuous_paging = new ContinuousPagingConfig();
 
     // main memory options
     public int max_memory_to_lock_mb = 0;
     public double max_memory_to_lock_fraction = 0.20;
 
+    /** How often histograms used by JMX metrics are updated, in milliseconds */
+    public int metrics_histogram_update_interval_millis = 1000;
 
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}

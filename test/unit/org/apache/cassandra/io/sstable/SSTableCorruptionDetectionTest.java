@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.function.*;
 
+import com.google.common.collect.Sets;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -55,7 +56,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
     private static final Logger logger = LoggerFactory.getLogger(SSTableCorruptionDetectionTest.class);
 
     private static final int numberOfPks = 1000;
-    private static final int numberOfRuns = 100;
+    private static final int numberOfRuns = 6; //AIO is too hard on the CI disks
     private static final int valueSize = 512 * 1024;
     // Set corruption size larger or in comparable size to value size, otherwise
     // chance for corruption to land in the middle of value is quite high.
@@ -101,9 +102,19 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
 
         // Setting up/writing large values is an expensive operation, we only want to do it once per run
         writer = getWriter(cfs, dir, txn);
+
+        SortedSet<String> sortedTokens = Sets.newTreeSet(Comparator.comparing(a -> DatabaseDescriptor.getPartitioner().decorateKey(UTF8Type.instance.decompose(a))));
+
         for (int i = 0; i < numberOfPks; i++)
+            sortedTokens.add(String.format("pkvalue_%07d", i));
+
+
+        Iterator<String> it = sortedTokens.iterator();
+
+        int i=0;
+        while (it.hasNext())
         {
-            UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), String.format("pkvalue_%07d", i)).withTimestamp(1);
+            UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), it.next()).withTimestamp(1);
             byte[] reg1 = new byte[valueSize];
             random.nextBytes(reg1);
             byte[] reg2 = new byte[valueSize];
@@ -112,6 +123,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
                    .add("reg1", ByteBuffer.wrap(reg1))
                    .add("reg2", ByteBuffer.wrap(reg2));
             writer.append(builder.build().unfilteredIterator());
+            i ++;
         }
         cfs.forceBlockingFlush();
 

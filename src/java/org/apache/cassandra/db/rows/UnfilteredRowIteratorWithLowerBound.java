@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.List;
 
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.sstable.format.big.BigRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.sstable.format.big.IndexInfo;
@@ -188,7 +189,7 @@ public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilt
         if (rowIndexEntry == null || !rowIndexEntry.indexOnHeap())
             return null;
 
-        try (BigRowIndexEntry.IndexInfoRetriever onHeapRetriever = rowIndexEntry.openWithIndex(null))
+        try (BigRowIndexEntry.IndexInfoRetriever onHeapRetriever = rowIndexEntry.openWithIndex(null, Rebufferer.ReaderConstraint.NONE))
         {
             IndexInfo column = onHeapRetriever.columnsIndex(filter.isReversed() ? rowIndexEntry.rowIndexCount() - 1 : 0);
             ClusteringPrefix lowerBoundPrefix = filter.isReversed() ? column.lastName : column.firstName;

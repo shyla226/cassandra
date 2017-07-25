@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Maybe;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.*;
@@ -98,15 +99,15 @@ public class AlterKeyspaceStatement extends SchemaAlteringStatement
             ClientWarn.instance.warn("When increasing replication factor you need to run a full (-full) repair to distribute the data.");
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
         KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(name);
         // In the (very) unlikely case the keyspace was dropped since validate()
         if (oldKsm == null)
-            throw new InvalidRequestException("Unknown keyspace " + name);
+            return error("Unknown keyspace " + name);
 
         KeyspaceMetadata newKsm = oldKsm.withSwapped(attrs.asAlteredKeyspaceParams(oldKsm.params));
-        MigrationManager.announceKeyspaceUpdate(newKsm, isLocalOnly);
-        return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, keyspace());
+        return MigrationManager.announceKeyspaceUpdate(newKsm, isLocalOnly)
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, keyspace())));
     }
 }

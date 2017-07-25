@@ -19,6 +19,8 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.Set;
 
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -35,9 +37,11 @@ public class RevokePermissionsStatement extends PermissionsManagementStatement
         super(permissions, resource, grantee);
     }
 
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        DatabaseDescriptor.getAuthorizer().revoke(state.getUser(), permissions, resource, grantee);
-        return null;
+        return Single.fromCallable(() -> {
+           DatabaseDescriptor.getAuthorizer().revoke(state.getUser(), permissions, resource, grantee);
+           return new ResultMessage.Void();
+       });
     }
 }

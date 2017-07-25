@@ -913,13 +913,19 @@ public class SelectGroupByTest extends CQLTester
 
             execute("INSERT INTO %s (a, b, c, d, e) VALUES (1, 2, 1, 3, 6)");
             execute("INSERT INTO %s (a, b, c, d, e) VALUES (1, 2, 2, 6, 12)");
+
+           // flush();
+
             execute("INSERT INTO %s (a, b, c, d, e) VALUES (1, 3, 2, 12, 24)");
             execute("INSERT INTO %s (a, b, c, d, e) VALUES (1, 4, 2, 12, 24)");
             execute("INSERT INTO %s (a, b, c, d, e) VALUES (1, 4, 2, 6, 12)");
+
             execute("INSERT INTO %s (a, b, c, d, e) VALUES (2, 2, 3, 3, 6)");
             execute("INSERT INTO %s (a, b, c, d, e) VALUES (2, 4, 3, 6, 12)");
             execute("INSERT INTO %s (a, b, c, d, e) VALUES (3, 3, 2, 12, 24)");
             execute("INSERT INTO %s (a, b, c, d, e) VALUES (4, 8, 2, 12, 24)");
+
+           // flush();
 
             // Makes sure that we have some tombstones
             execute("DELETE FROM %s WHERE a = 1 AND b = 3 AND c = 2 AND d = 12");
@@ -927,6 +933,8 @@ public class SelectGroupByTest extends CQLTester
 
             for (int pageSize = 1; pageSize < 10; pageSize++)
             {
+                logger.info("Testing page size {}", pageSize);
+
                 // Range queries
                 assertRowsNet(executeNetWithPaging("SELECT a, b, e, count(b), max(e) FROM %s GROUP BY a", pageSize),
                               row(1, 2, 6, 4L, 24),

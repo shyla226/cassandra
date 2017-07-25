@@ -23,6 +23,7 @@ import java.io.Closeable;
 import java.util.concurrent.ExecutionException;
 
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
@@ -35,8 +36,14 @@ import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.service.CassandraDaemon;
+import org.apache.cassandra.service.DefaultFSErrorHandler;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 
@@ -45,6 +52,17 @@ import org.apache.cassandra.utils.KillerForTests;
  */
 public class OutOfSpaceTest extends CQLTester
 {
+    @BeforeClass
+    public static void setup()
+    {
+        FileUtils.setFSErrorHandler(new DefaultFSErrorHandler());
+
+        //Needed for stop and ignore handlers
+        CassandraDaemon d = new CassandraDaemon();
+        d.completeSetup();
+        StorageService.instance.registerDaemon(d);
+    }
+
     @Test
     public void testFlushUnwriteableDie() throws Throwable
     {
@@ -144,16 +162,22 @@ public class OutOfSpaceTest extends CQLTester
     {
         try
         {
-            Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).forceFlush().get();
+            Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).forceFlush().blockingGet();
             fail(errorClass.getSimpleName() + " expected.");
         }
-        catch (ExecutionException e)
+        catch (Throwable e)
         {
             // Correct path.
             Throwable t = e.getCause();
-            while (t.getClass() == ExecutionException.class || t.getClass() == RuntimeException.class)
+            while (t != null && (t.getClass() == ExecutionException.class || t.getClass() == RuntimeException.class))
                 t = t.getCause();
-            Assert.assertTrue(errorClass.isInstance(t));
+            Assert.assertTrue(String.format("%s is not an instance of %s", t.getClass().getName(), errorClass.getName()),
+                              errorClass.isInstance(t));
+
+            if (t instanceof FSError)
+                FileUtils.handleFSError((FSError) t);
+            else if (t instanceof CorruptSSTableException)
+                FileUtils.handleCorruptSSTable((CorruptSSTableException) t);
         }
 
         // Make sure commit log wasn't discarded.

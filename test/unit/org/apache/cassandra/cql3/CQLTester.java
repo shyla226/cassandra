@@ -22,20 +22,19 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
-import java.net.ServerSocket;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
-import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.*;
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,7 +44,9 @@ import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.functions.FunctionName;
@@ -58,22 +59,25 @@ import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.*;
-import org.apache.cassandra.transport.RequestThreadPoolExecutor;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static junit.framework.Assert.assertNotNull;
-import static junit.framework.Assert.assertTrue;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * Base class for CQL tests.
@@ -95,13 +99,23 @@ public abstract class CQLTester
     public static final String DATA_CENTER = "datacenter1";
     public static final String RACK1 = "rack1";
 
-    private static org.apache.cassandra.transport.Server server;
+    private static NativeTransportService server;
+
     protected static final int nativePort;
     protected static final InetAddress nativeAddr;
     private static final Map<ProtocolVersion, Cluster> clusters = new HashMap<>();
     private static final Map<ProtocolVersion, Session> sessions = new HashMap<>();
 
-    private static boolean isServerPrepared = false;
+    private enum ServerStatus
+    {
+        NONE,
+        PENDING,
+        INITIALIZED,
+        FAILED
+    };
+
+    private static AtomicReference<ServerStatus> serverStatus = new AtomicReference<>(ServerStatus.NONE);
+    private static CountDownLatch serverReady = new CountDownLatch(1);
 
     public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>();
 
@@ -124,10 +138,9 @@ public abstract class CQLTester
                ? ProtocolVersion.CURRENT
                : PROTOCOL_VERSIONS.get(PROTOCOL_VERSIONS.size() - 1);
     }
+
     static
     {
-        DatabaseDescriptor.daemonInitialization();
-
         // The latest versions might not be supported yet by the java driver
         for (ProtocolVersion version : ProtocolVersion.SUPPORTED)
         {
@@ -142,8 +155,6 @@ public abstract class CQLTester
             }
         }
 
-        nativeAddr = InetAddress.getLoopbackAddress();
-
         // Register an EndpointSnitch which returns fixed values for test.
         DatabaseDescriptor.setEndpointSnitch(new AbstractEndpointSnitch()
         {
@@ -152,18 +163,14 @@ public abstract class CQLTester
             @Override public int compareEndpoints(InetAddress target, InetAddress a1, InetAddress a2) { return 0; }
         });
 
-        try
-        {
-            try (ServerSocket serverSocket = new ServerSocket(0))
-            {
-                nativePort = serverSocket.getLocalPort();
-            }
-            Thread.sleep(250);
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
-        }
+        // call after setting the snitch so that DD.applySnitch will not set the snitch to the conf snitch. On slow
+        // Jenkins machines, DynamicEndpointSnitch::updateScores may initialize SS with a wrong TMD before we have a
+        // chance to change the partitioner, so changing the DD snitch is not enough, we must prevent the config snitch
+        // from being initialized.
+        DatabaseDescriptor.daemonInitialization();
+
+        nativeAddr = DatabaseDescriptor.getRpcAddress();
+        nativePort = DatabaseDescriptor.getNativeTransportPort();
     }
 
     public static ResultMessage lastSchemaChangeResult;
@@ -179,6 +186,8 @@ public abstract class CQLTester
     private boolean usePrepared = USE_PREPARED_VALUES;
     private static boolean reusePrepared = REUSE_PREPARED;
 
+    public static Runnable preJoinHook = () -> {};
+
     protected boolean usePrepared()
     {
         return usePrepared;
@@ -186,35 +195,94 @@ public abstract class CQLTester
 
     public static void prepareServer()
     {
-        if (isServerPrepared)
+        if (serverStatus.get() == ServerStatus.INITIALIZED)
             return;
 
-        DatabaseDescriptor.daemonInitialization();
+        if (!serverStatus.compareAndSet(ServerStatus.NONE, ServerStatus.PENDING))
+        {   // Once per-JVM is enough, the first test to execute gets to initialize the server,
+            // unless sub-classes call this method from static initialization methods such as
+            // requireNetwork(). Note that this method cannot be called by the base class setUp
+            // static method because this would make it impossible to change the partitioner in
+            // sub-classed. Normally we run tests sequentially but, to be safe, this ensures
+            // that if 2 tests execute in parallel, only one test initializes the server and the
+            // other test waits.
 
-        // Cleanup first
+            // if we couldn't set the server status to pending because another test previously failed
+            // then abort without waiting
+            if (serverStatus.get() == ServerStatus.FAILED)
+                fail("A previous test failed to initialize the server");
+
+            // if we've raced with another test then wait for a sufficient amount of time (Jenkins is quite slow)
+            Uninterruptibles.awaitUninterruptibly(serverReady, 3, TimeUnit.MINUTES);
+
+            // now check again if the test that ran in parallel failed
+            if (serverStatus.get() == ServerStatus.FAILED)
+                fail("A previous test failed to initialize the server: " + serverStatus);
+
+            // otherwise the server must have been initialized
+            assertTrue("Unexpected server status: " + serverStatus, serverStatus.get() == ServerStatus.INITIALIZED);
+            return;
+        }
+
+        assertTrue("Unexpected server status: " + serverStatus, serverStatus.get() == ServerStatus.PENDING);
+
         try
         {
-            cleanupAndLeaveDirs();
-        }
-        catch (IOException e)
-        {
-            logger.error("Failed to cleanup and recreate directories.");
-            throw new RuntimeException(e);
-        }
+            // Not really required, but doesn't hurt either
+            TPC.ensureInitialized();
 
-        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler()
-        {
-            public void uncaughtException(Thread t, Throwable e)
+            // Cleanup first
+            try
             {
-                logger.error("Fatal exception in thread " + t, e);
+                cleanupAndLeaveDirs();
             }
-        });
+            catch (IOException e)
+            {
+                logger.error("Failed to cleanup and recreate directories.");
+                throw new RuntimeException(e);
+            }
 
-        ThreadAwareSecurityManager.install();
+            Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler()
+            {
+                public void uncaughtException(Thread t, Throwable e)
+                {
+                    logger.error("Fatal exception in thread " + t, e);
+                }
+            });
 
-        Keyspace.setInitialized();
-        SystemKeyspace.persistLocalMetadata();
-        isServerPrepared = true;
+            ThreadAwareSecurityManager.install();
+
+            Keyspace.setInitialized();
+            SystemKeyspace.persistLocalMetadata();
+
+            SystemKeyspace.finishStartup();
+            SystemKeyspace.persistLocalMetadata();
+            StorageService.instance.populateTokenMetadata();
+
+            preJoinHook.run();
+
+            //TPC requires local vnodes to be generated so we need to
+            //put the SS through join.
+            StorageService.instance.initServer();
+
+            // clear the SS shutdown hook as it makes the test take longer on Jenkins
+            JVMStabilityInspector.removeShutdownHooks();
+
+            logger.info("Server initialized");
+            boolean ret = serverStatus.compareAndSet(ServerStatus.PENDING, ServerStatus.INITIALIZED);
+            assertTrue("Unexpected server status: " + serverStatus, ret);
+        }
+        catch (Throwable t)
+        {
+            logger.error("Failed to initialize the server: {}", t.getMessage(), t);
+            boolean ret = serverStatus.compareAndSet(ServerStatus.PENDING, ServerStatus.FAILED);
+            assertTrue("Unexpected server status: " + serverStatus, ret);
+        }
+        finally
+        {
+            // signal to any other waiting test that the server is ready
+            serverReady.countDown();
+        }
     }
 
     public static void cleanupAndLeaveDirs() throws IOException
@@ -276,10 +344,7 @@ public abstract class CQLTester
         if (ROW_CACHE_SIZE_IN_MB > 0)
             DatabaseDescriptor.setRowCacheSizeInMB(ROW_CACHE_SIZE_IN_MB);
 
-        StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
-
-        // Once per-JVM is enough
-        prepareServer();
+        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
     }
 
     @AfterClass
@@ -302,6 +367,11 @@ public abstract class CQLTester
     @Before
     public void beforeTest() throws Throwable
     {
+        // this call is idempotent and will only prepare the server on the first call
+        // we cannot prepare the server in setUpClass() because otherwise it would
+        // be impossible to change the partitioner in sub-classes, e.g. SelectOrderedPartitionerTest
+        prepareServer();
+
         schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", KEYSPACE));
         schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", KEYSPACE_PER_TEST));
     }
@@ -327,24 +397,29 @@ public abstract class CQLTester
         aggregates = null;
 
         // We want to clean up after the test, but dropping a table is rather long so just do that asynchronously
-        ScheduledExecutors.optionalTasks.execute(new Runnable()
+        Executors.newSingleThreadExecutor().execute(new Runnable()
         {
             public void run()
             {
                 try
                 {
+                    logger.debug("Dropping {} tables created in previous test", tablesToDrop.size());
                     for (int i = tablesToDrop.size() - 1; i >= 0; i--)
                         schemaChange(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, tablesToDrop.get(i)));
 
+                    logger.debug("Dropping {} aggregate functions created in previous test", aggregatesToDrop.size());
                     for (int i = aggregatesToDrop.size() - 1; i >= 0; i--)
                         schemaChange(String.format("DROP AGGREGATE IF EXISTS %s", aggregatesToDrop.get(i)));
 
+                    logger.debug("Dropping {} scalar functions created in previous test", functionsToDrop.size());
                     for (int i = functionsToDrop.size() - 1; i >= 0; i--)
                         schemaChange(String.format("DROP FUNCTION IF EXISTS %s", functionsToDrop.get(i)));
 
+                    logger.debug("Dropping {} types created in previous test", typesToDrop.size());
                     for (int i = typesToDrop.size() - 1; i >= 0; i--)
                         schemaChange(String.format("DROP TYPE IF EXISTS %s.%s", KEYSPACE, typesToDrop.get(i)));
 
+                    logger.debug("Dropping {} keyspaces created in previous test", keyspacesToDrop.size());
                     for (int i = keyspacesToDrop.size() - 1; i >= 0; i--)
                         schemaChange(String.format("DROP KEYSPACE IF EXISTS %s", keyspacesToDrop.get(i)));
 
@@ -353,6 +428,7 @@ public abstract class CQLTester
                     // have run or they will be unhappy. Since those taks are scheduled on StorageService.tasks and that's
                     // mono-threaded, just push a task on the queue to find when it's empty. No perfect but good enough.
 
+                    logger.debug("Awaiting sstable cleanup");
                     final CountDownLatch latch = new CountDownLatch(1);
                     ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
                     {
@@ -361,8 +437,10 @@ public abstract class CQLTester
                             latch.countDown();
                         }
                     });
-                    latch.await(2, TimeUnit.SECONDS);
+                    if (!latch.await(2, TimeUnit.SECONDS))
+                        logger.warn("TImes out waiting for shutdown");
 
+                    logger.debug("Removing sstables");
                     removeAllSSTables(KEYSPACE, tablesToDrop);
                 }
                 catch (Exception e)
@@ -381,19 +459,26 @@ public abstract class CQLTester
 
     public static void requireNetwork(boolean initClientClusters) throws ConfigurationException
     {
+        prepareServer();
+
         if (server != null)
+        {
+            if (initClientClusters && sessions.isEmpty())
+            {
+                for (ProtocolVersion version : PROTOCOL_VERSIONS)
+                    initClientCluster(version, NettyOptions.DEFAULT_INSTANCE);
+            }
             return;
+        }
 
         SystemKeyspace.finishStartup();
+        SystemKeyspace.persistLocalMetadata();
+        StorageService.instance.populateTokenMetadata();
         StorageService.instance.initServer();
+        Gossiper.instance.register(StorageService.instance);
         SchemaLoader.startGossiper();
 
-        server = new Server.Builder()
-                 .withHost(nativeAddr)
-                 .withPort(nativePort)
-                 .withEventExecutor(new RequestThreadPoolExecutor())
-                 .build();
-
+        server = new NativeTransportService(nativeAddr, nativePort);
         server.start();
 
         if (initClientClusters)
@@ -417,14 +502,14 @@ public abstract class CQLTester
 
     public static Cluster createClientCluster(ProtocolVersion version, String clusterName, NettyOptions nettyOptions)
     {
-        return  Cluster.builder()
-                       .addContactPoints(nativeAddr)
-                       .withClusterName(clusterName)
-                       .withPort(nativePort)
-                       .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt()))
-                       .withNettyOptions(nettyOptions)
-                       .withoutMetrics()
-                       .build();
+        return Cluster.builder()
+                      .addContactPoints(nativeAddr)
+                      .withClusterName(clusterName)
+                      .withPort(nativePort)
+                      .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt())).withoutMetrics()
+                      .withNettyOptions(nettyOptions)
+                      .withoutMetrics()
+                      .build();
     }
 
     public static void closeClientCluster(Cluster cluster)
@@ -657,7 +742,7 @@ public abstract class CQLTester
         String currentTable = createTableName();
         String fullQuery = formatQuery(query);
         logger.info(fullQuery);
-        QueryProcessor.executeOnceInternal(fullQuery);
+        QueryProcessor.executeOnceInternal(fullQuery).blockingGet();
     }
 
     protected void alterTable(String query)
@@ -671,7 +756,7 @@ public abstract class CQLTester
     {
         String fullQuery = formatQuery(query);
         logger.info(fullQuery);
-        QueryProcessor.executeOnceInternal(fullQuery);
+        QueryProcessor.executeOnceInternal(fullQuery).blockingGet();
     }
 
     public void dropTable(String query)
@@ -760,7 +845,7 @@ public abstract class CQLTester
     {
         String fullQuery = formatQuery(query);
         logger.info(fullQuery);
-        QueryProcessor.executeOnceInternal(fullQuery);
+        QueryProcessor.executeOnceInternal(fullQuery).blockingGet();
     }
 
     protected void dropIndex(String query) throws Throwable
@@ -770,11 +855,28 @@ public abstract class CQLTester
         schemaChange(fullQuery);
     }
 
+    /**
+     *  Because the tracing executor is single threaded, submitting an empty event should ensure
+     *  that all tracing events mutations have been applied.
+     */
+    protected void waitForTracingEvents()
+    {
+        try
+        {
+            StageManager.tracingExecutor.submit(() -> {}).get();
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Failed to wait for tracing events: {}", t);
+        }
+    }
+
     protected void assertLastSchemaChange(Event.SchemaChange.Change change, Event.SchemaChange.Target target,
                                           String keyspace, String name,
                                           String... argTypes)
     {
-        Assert.assertTrue(lastSchemaChangeResult instanceof ResultMessage.SchemaChange);
+        assertTrue(lastSchemaChangeResult instanceof ResultMessage.SchemaChange);
         ResultMessage.SchemaChange schemaChange = (ResultMessage.SchemaChange) lastSchemaChangeResult;
         Assert.assertSame(change, schemaChange.change.change);
         Assert.assertSame(target, schemaChange.change.target);
@@ -787,6 +889,8 @@ public abstract class CQLTester
     {
         try
         {
+            logger.info("SCHEMA CHANGE: " + query);
+
             ClientState state = ClientState.forInternalCalls();
             state.setKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME);
             QueryState queryState = new QueryState(state);
@@ -796,7 +900,7 @@ public abstract class CQLTester
 
             QueryOptions options = QueryOptions.forInternalCalls(Collections.<ByteBuffer>emptyList());
 
-            lastSchemaChangeResult = prepared.statement.executeInternal(queryState, options);
+            lastSchemaChangeResult = prepared.statement.executeInternal(queryState, options).blockingGet();
         }
         catch (Exception e)
         {
@@ -813,6 +917,21 @@ public abstract class CQLTester
     protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, String query, Object... values) throws Throwable
     {
         return sessionNet(protocolVersion).execute(formatQuery(query), values);
+    }
+
+    protected com.datastax.driver.core.PreparedStatement prepareNet(ProtocolVersion protocolVersion, String query)
+    {
+        return sessionNet(protocolVersion).prepare(query);
+    }
+
+    protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, BoundStatement statement)
+    {
+        return sessionNet(protocolVersion).execute(statement);
+    }
+
+    protected com.datastax.driver.core.ResultSetFuture executeNetAsync(ProtocolVersion protocolVersion, BoundStatement statement)
+    {
+        return sessionNet(protocolVersion).executeAsync(statement);
     }
 
     protected com.datastax.driver.core.ResultSet executeNetWithPaging(String query, int pageSize) throws Throwable
@@ -845,7 +964,7 @@ public abstract class CQLTester
 
     protected ResultMessage.Prepared prepare(String query) throws Throwable
     {
-        return QueryProcessor.prepare(formatQuery(query), ClientState.forInternalCalls());
+        return QueryProcessor.prepare(formatQuery(query), ClientState.forInternalCalls()).blockingGet();
     }
 
     public UntypedResultSet execute(String query, Object... values) throws Throwable
@@ -873,7 +992,7 @@ public abstract class CQLTester
             }
             else
             {
-                rs = QueryProcessor.executeOnceInternal(query, transformValues(values));
+                rs = QueryProcessor.executeOnceInternal(query, transformValues(values)).blockingGet();
             }
         }
         else
@@ -881,7 +1000,7 @@ public abstract class CQLTester
             query = replaceValues(query, values);
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {}", query);
-            rs = QueryProcessor.executeOnceInternal(query);
+            rs = QueryProcessor.executeOnceInternal(query).blockingGet();
         }
         if (rs != null)
         {
@@ -926,7 +1045,7 @@ public abstract class CQLTester
         if (result == null)
         {
             if (rows.length > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", rows.length));
+                fail(String.format("No rows returned by query but %d expected", rows.length));
             return;
         }
 
@@ -946,7 +1065,7 @@ public abstract class CQLTester
                                               i, protocolVersion),
                                 meta.size(), rows[i].length);
 
-            Assert.assertTrue(String.format("Got fewer rows than epected. Expected %d but got %d", rows.length, i), iter.hasNext());
+            assertTrue(String.format("Got fewer rows than expected. Expected %d but got %d", rows.length, i), iter.hasNext());
             Row actual = iter.next();
 
             List<ByteBuffer> expectedRow = new ArrayList<>(meta.size());
@@ -967,13 +1086,46 @@ public abstract class CQLTester
 
         if (iter.hasNext())
         {
+            List<Row> unexpectedRows = new ArrayList<>(2);
             while (iter.hasNext())
             {
-                iter.next();
+                unexpectedRows.add(iter.next());
                 i++;
             }
-            Assert.fail(String.format("Got more rows than expected. Expected %d but got %d (using protocol version %s).",
-                                      rows.length, i, protocolVersion));
+
+            String[][] formattedRows = new String[actualRows.size() + unexpectedRows.size()][meta.size()];
+            for (int k = 0; k < actualRows.size(); k++)
+            {
+                List<ByteBuffer> row = actualRows.get(k);
+                for (int j = 0; j < meta.size(); j++)
+                {
+                    DataType type = meta.getType(j);
+                    com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
+                                                                               .getCodecRegistry()
+                                                                               .codecFor(type);
+
+                    formattedRows[k][j] = codec.format(codec.deserialize(row.get(j), driverVersion));
+                }
+            }
+
+            for (int k = actualRows.size(); k < actualRows.size() + unexpectedRows.size(); k++)
+            {
+                Row row = unexpectedRows.get(k - actualRows.size());
+                for (int j = 0; j < meta.size(); j++)
+                {
+                    DataType type = meta.getType(j);
+                    com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
+                                                                               .getCodecRegistry()
+                                                                               .codecFor(type);
+
+                    formattedRows[k][j] = codec.format(codec.deserialize(row.getBytesUnsafe(meta.getName(j)), driverVersion));
+                }
+            }
+
+            fail(String.format("Got more rows than expected. Expected %d but got %d (using protocol version %s)." +
+                                      "\nReceived rows:\n%s",
+                                      rows.length, i, protocolVersion,
+                                      Arrays.stream(formattedRows).map(Arrays::toString).collect(Collectors.toList())));
         }
 
         if (ignoreOrder)
@@ -995,14 +1147,14 @@ public abstract class CQLTester
                                                                            .codecFor(type);
 
                 if (!Objects.equal(expected.get(j), actual.get(j)))
-                    Assert.fail(String.format("Invalid value for row %d column %d (%s of type %s), " +
+                    fail(String.format("Invalid value for row %d column %d (%s of type %s), " +
                                               "expected <%s> (%d bytes) but got <%s> (%d bytes) " +
-                                              "(using protocol version %d)",
+                                              "(using protocol version %s)",
                                               i, j, meta.getName(j), type,
                                               codec.format(codec.deserialize(expected.get(j),driverVersion)),
-                                              expected.size(),
+                                              expected.get(j) == null ? 0 : expected.get(j).capacity(),
                                               codec.format(codec.deserialize(actual.get(j), driverVersion)),
-                                              actual.size(),
+                                              actual.get(j) == null ? 0 : actual.get(j).capacity(),
                                               protocolVersion));
             }
         }
@@ -1036,9 +1188,12 @@ public abstract class CQLTester
         if (result == null)
         {
             if (rows.length > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", rows.length));
+                fail(String.format("No rows returned by query but %d expected", rows.length));
             return;
         }
+
+        if (logger.isTraceEnabled())
+            logger.trace("ROWS:\n{}", String.join("\n", Arrays.stream(getRows(result)).map(row -> Arrays.toString(row)).collect(Collectors.toList())));
 
         List<ColumnSpecification> meta = result.metadata();
         Iterator<UntypedResultSet.Row> iter = result.iterator();
@@ -1060,7 +1215,7 @@ public abstract class CQLTester
                 {
                     Object actualValueDecoded = actualValue == null ? null : column.type.getSerializer().deserialize(actualValue);
                     if (!Objects.equal(expected[j], actualValueDecoded))
-                        Assert.fail(String.format("Invalid value for row %d column %d (%s of type %s), expected <%s> but got <%s>",
+                        fail(String.format("Invalid value for row %d column %d (%s of type %s), expected <%s> but got <%s>",
                                                   i,
                                                   j,
                                                   column.name,
@@ -1088,10 +1243,10 @@ public abstract class CQLTester
                 }
                 logger.info("Extra row num {}: {}", i, str.toString());
             }
-            Assert.fail(String.format("Got more rows than expected. Expected %d but got %d.", rows.length, i));
+            fail(String.format("Got more rows than expected. Expected %d but got %d.", rows.length, i));
         }
 
-        Assert.assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", rows.length>i ? "less" : "more", rows.length, i), i == rows.length);
+        assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", rows.length>i ? "less" : "more", rows.length, i), i == rows.length);
     }
 
     /**
@@ -1112,7 +1267,7 @@ public abstract class CQLTester
         if (result == null)
         {
             if (rows.length > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", rows.length));
+                fail(String.format("No rows returned by query but %d expected", rows.length));
             return;
         }
 
@@ -1153,11 +1308,11 @@ public abstract class CQLTester
                 sb.append(extraRows.stream().collect(Collectors.joining("\n    ")));
                 if (!missing.isEmpty())
                     sb.append("\nMissing Rows:\n    ").append(missingRows.stream().collect(Collectors.joining("\n    ")));
-                Assert.fail(sb.toString());
+                fail(sb.toString());
             }
 
             if (!missing.isEmpty())
-                Assert.fail("Missing " + missing.size() + " row(s) in result: \n    " + missingRows.stream().collect(Collectors.joining("\n    ")));
+                fail("Missing " + missing.size() + " row(s) in result: \n    " + missingRows.stream().collect(Collectors.joining("\n    ")));
         }
 
         assert ignoreExtra || expectedRows.size() == actualRows.size();
@@ -1202,7 +1357,7 @@ public abstract class CQLTester
         if (result == null)
         {
             if (numExpectedRows > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", numExpectedRows));
+                fail(String.format("No rows returned by query but %d expected", numExpectedRows));
             return;
         }
 
@@ -1223,13 +1378,13 @@ public abstract class CQLTester
                 iter.next();
                 i++;
             }
-            Assert.fail(String.format("Got less rows than expected. Expected %d but got %d.", numExpectedRows, i));
+            fail(String.format("Got less rows than expected. Expected %d but got %d.", numExpectedRows, i));
         }
 
-        Assert.assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", numExpectedRows>i ? "less" : "more", numExpectedRows, i), i == numExpectedRows);
+        assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", numExpectedRows>i ? "less" : "more", numExpectedRows, i), i == numExpectedRows);
     }
 
-    protected Object[][] getRows(UntypedResultSet result)
+    protected static Object[][] getRows(UntypedResultSet result)
     {
         if (result == null)
             return new Object[0][];
@@ -1260,7 +1415,7 @@ public abstract class CQLTester
     {
         if (result == null)
         {
-            Assert.fail("No rows returned by query.");
+            fail("No rows returned by query.");
             return;
         }
 
@@ -1328,15 +1483,16 @@ public abstract class CQLTester
             String q = USE_PREPARED_VALUES
                        ? query + " (values: " + formatAllValues(values) + ")"
                        : replaceValues(query, values);
-            Assert.fail("Query should be invalid but no error was thrown. Query is: " + q);
+            fail("Query should be invalid but no error was thrown. Query is: " + q);
         }
         catch (Exception e)
         {
             if (exception != null && !exception.isAssignableFrom(e.getClass()))
             {
-                Assert.fail("Query should be invalid but wrong error was thrown. " +
-                            "Expected: " + exception.getName() + ", got: " + e.getClass().getName() + ". " +
-                            "Query is: " + queryInfo(query, values));
+                fail("Query should be invalid but wrong error was thrown. " +
+                     "Expected: " + exception.getName() + ", got: " + e.getClass().getName() + ". " +
+                     "Query is: " + queryInfo(query, values) + ". Stack trace of unexpected exception is:\n" +
+                    String.join("\n", Arrays.stream(e.getStackTrace()).map(t -> t.toString()).collect(Collectors.toList())));
             }
             if (errorMessage != null)
             {
@@ -1360,7 +1516,7 @@ public abstract class CQLTester
         }
         catch(SyntaxException e)
         {
-            Assert.fail(String.format("Expected query syntax to be valid but was invalid. Query is: %s; Error is %s",
+            fail(String.format("Expected query syntax to be valid but was invalid. Query is: %s; Error is %s",
                                       query, e.getMessage()));
         }
     }
@@ -1375,7 +1531,7 @@ public abstract class CQLTester
         try
         {
             execute(query, values);
-            Assert.fail("Query should have invalid syntax but no error was thrown. Query is: " + queryInfo(query, values));
+            fail("Query should have invalid syntax but no error was thrown. Query is: " + queryInfo(query, values));
         }
         catch (SyntaxException e)
         {
@@ -1394,8 +1550,18 @@ public abstract class CQLTester
      */
     private static void assertMessageContains(String text, Exception e)
     {
-        Assert.assertTrue("Expected error message to contain '" + text + "', but got '" + e.getMessage() + "'",
+        assertTrue("Expected error message to contain '" + text + "', but got '" + e.getMessage() + "'",
                 e.getMessage().contains(text));
+    }
+
+    /**
+     * Sorts a list of int32 keys by their Murmur3Partitioner token order.
+     */
+    public static List<Integer> partitionerSortedKeys(List<Integer> unsortedKeys)
+    {
+        List<DecoratedKey> decoratedKeys = unsortedKeys.stream().map(i -> Murmur3Partitioner.instance.decorateKey(Int32Type.instance.getSerializer().serialize(i))).collect(Collectors.toList());
+        Collections.sort(decoratedKeys, DecoratedKey.comparator);
+        return decoratedKeys.stream().map(dk -> Int32Type.instance.getSerializer().deserialize(dk.getKey())).collect(Collectors.toList());
     }
 
     @FunctionalInterface
@@ -1629,7 +1795,7 @@ public abstract class CQLTester
         return type.decompose(serializeTuples(value));
     }
 
-    private static String formatValue(ByteBuffer bb, AbstractType<?> type)
+    protected static String formatValue(ByteBuffer bb, AbstractType<?> type)
     {
         if (bb == null)
             return "null";
@@ -1673,12 +1839,12 @@ public abstract class CQLTester
         return Arrays.asList(values);
     }
 
-    protected Object set(Object...values)
+    protected Set set(Object...values)
     {
         return ImmutableSet.copyOf(values);
     }
 
-    protected Object map(Object...values)
+    protected Map map(Object...values)
     {
         if (values.length % 2 != 0)
             throw new IllegalArgumentException("Invalid number of arguments, got " + values.length);

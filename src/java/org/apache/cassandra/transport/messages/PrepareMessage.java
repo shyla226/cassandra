@@ -20,6 +20,7 @@ package org.apache.cassandra.transport.messages;
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
+import io.reactivex.Single;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
@@ -55,7 +56,7 @@ public class PrepareMessage extends Message.Request
         this.query = query;
     }
 
-    public Message.Response execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
     {
         try
         {
@@ -65,20 +66,18 @@ public class PrepareMessage extends Message.Request
                 Tracing.instance.begin("Preparing CQL3 query", state.getClientAddress(), ImmutableMap.of("query", query));
             }
 
-            Message.Response response = ClientState.getCQLQueryHandler().prepare(query, state, getCustomPayload());
-
-            response.setTracingId(state.getPreparedTracingSession());
-
-            return response;
+            return ClientState.getCQLQueryHandler().prepare(query, state, getCustomPayload())
+                              .map(response ->
+                                  {
+                                      response.setTracingId(state.getPreparedTracingSession());
+                                      return response;
+                                  })
+                              .flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
         }
         catch (Exception e)
         {
             JVMStabilityInspector.inspectThrowable(e);
-            return ErrorMessage.fromException(e);
-        }
-        finally
-        {
-            Tracing.instance.stopSession();
+            return Single.just(ErrorMessage.fromException(e));
         }
     }
 

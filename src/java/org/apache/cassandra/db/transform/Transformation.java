@@ -37,10 +37,6 @@ import org.apache.cassandra.db.rows.*;
  */
 public abstract class Transformation<I extends BaseRowIterator<?>>
 {
-    // internal methods for StoppableTransformation only
-    void attachTo(BasePartitions partitions) { }
-    void attachTo(BaseRows rows) { }
-
     /**
      * Run on the close of any (logical) partitions iterator this function was applied to
      *
@@ -48,7 +44,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
      * object may be longer than the lifetime of the "logical" iterator it was applied to; if the iterator
      * is refilled with MoreContents, for instance, the iterator may outlive this function
      */
-    protected void onClose() { }
+    public void onClose() { }
 
     /**
      * Run on the close of any (logical) rows iterator this function was applied to
@@ -57,7 +53,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
      * object may be longer than the lifetime of the "logical" iterator it was applied to; if the iterator
      * is refilled with MoreContents, for instance, the iterator may outlive this function
      */
-    protected void onPartitionClose() { }
+    public void onPartitionClose() { }
 
     /**
      * Applied to any rows iterator (partition) we encounter in a partitions iterator
@@ -94,7 +90,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
      * NOTE that this is only applied to the first iterator in any sequence of iterators filled by a MoreContents;
      * the static data for such iterators is all expected to be equal
      */
-    protected Row applyToStatic(Row row)
+    public Row applyToStatic(Row row)
     {
         return row;
     }
@@ -121,6 +117,13 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         return columns;
     }
 
+    public Unfiltered applyToUnfiltered(Unfiltered item)
+    {
+        if (item.isRow())
+            return applyToRow((Row) item);
+        else
+            return applyToMarker((RangeTombstoneMarker) item);
+    }
 
     //******************************************************
     //          Static Application Methods
@@ -203,5 +206,4 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         to.add(add);
         return to;
     }
-
 }

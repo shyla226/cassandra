@@ -20,35 +20,21 @@
  */
 package org.apache.cassandra.db.transform;
 
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
 
-abstract class BaseIterator<V, I extends CloseableIterator<? extends V>, O extends V> extends Stack implements AutoCloseable, Iterator<O>
+public abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends V> extends Stack implements AutoCloseable, Iterator<O>
 {
     I input;
     V next;
-
-    // We require two stop signals for correctness, since the `stop` reference of the base iterator can "leak"
-    // into the transformations stack. Using a single `stop` signal may result into the inconsistent state,
-    // since stopping transformation would stop only the child iterator.
-
-    // Signals that the base iterator has been signalled to stop. Applies at the end of the current next().
-    Stop stop;
-    // Signals that the current child iterator has been signalled to stop.
-    Stop stopChild;
-
-    static class Stop
-    {
-        // TODO: consider moving "next" into here, so that a stop() when signalled outside of a function call (e.g. in attach)
-        // can take effect immediately; this doesn't seem to be necessary at the moment, but it might cause least surprise in future
-        boolean isSignalled;
-    }
 
     // responsibility for initialising next lies with the subclass
     BaseIterator(BaseIterator<? extends V, ? extends I, ?> copyFrom)
@@ -56,15 +42,11 @@ abstract class BaseIterator<V, I extends CloseableIterator<? extends V>, O exten
         super(copyFrom);
         this.input = copyFrom.input;
         this.next = copyFrom.next;
-        this.stop = copyFrom.stop;
-        this.stopChild = copyFrom.stopChild;
     }
 
     BaseIterator(I input)
     {
         this.input = input;
-        this.stop = new Stop();
-        this.stopChild = this.stop;
     }
 
     /**
@@ -89,8 +71,17 @@ abstract class BaseIterator<V, I extends CloseableIterator<? extends V>, O exten
             try { ((AutoCloseable) next).close(); }
             catch (Throwable t) { fail = merge(fail, t); }
         }
-        try { input.close(); }
+        try
+        {
+            if (input instanceof CloseableIterator)
+                ((CloseableIterator)input).close();
+        }
         catch (Throwable t) { fail = merge(fail, t); }
+
+        if (moreContents.length > 0)
+        {
+            fail = Throwables.perform(fail, Arrays.stream(moreContents).map(m -> () -> m.close()));
+        }
         maybeFail(fail);
     }
 
@@ -112,6 +103,8 @@ abstract class BaseIterator<V, I extends CloseableIterator<? extends V>, O exten
     }
 
     @DontInline
+    @SuppressWarnings("resource") // holder does not need closing if provider is null
+                                  // and provider will be closed since it becomes an input
     private boolean tryGetMoreContents()
     {
         for (int i = 0 ; i < moreContents.length ; i++)
@@ -122,7 +115,9 @@ abstract class BaseIterator<V, I extends CloseableIterator<? extends V>, O exten
             if (newContents == null)
                 continue;
 
-            input.close();
+            if (input instanceof CloseableIterator)
+                ((CloseableIterator)input).close();
+
             input = newContents;
             Stack prefix = EMPTY;
             if (newContents instanceof BaseIterator)
@@ -132,8 +127,7 @@ abstract class BaseIterator<V, I extends CloseableIterator<? extends V>, O exten
                 BaseIterator abstr = (BaseIterator) newContents;
                 prefix = abstr;
                 input = (I) abstr.input;
-                stopChild = abstr.stop;
-                next = apply((V) abstr.next, holder.length); // must apply all remaining functions to the next, if any
+                next = apply((V)abstr.next, holder.length); // must apply all remaining functions to the next, if any
             }
 
             // since we're truncating our transformation stack to only those occurring after the extend transformation

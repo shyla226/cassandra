@@ -22,16 +22,19 @@ import java.util.NoSuchElementException;
 
 import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.Rebufferer;
 
 /**
  *  A Cell Iterator over SSTable
@@ -48,15 +51,16 @@ class SSTableIterator extends AbstractSSTableIterator
                            DecoratedKey key,
                            RowIndexEntry indexEntry,
                            Slices slices,
-                           ColumnFilter columns)
+                           ColumnFilter columns,
+                           Rebufferer.ReaderConstraint readerConstraint)
     {
-        super(sstable, file, key, indexEntry, slices, columns);
+        super(sstable, file, key, indexEntry, slices, columns, readerConstraint);
     }
 
-    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
     {
         return indexEntry.isIndexed()
-             ? new ForwardIndexedReader(indexEntry, file, shouldCloseFile)
+             ? new ForwardIndexedReader(indexEntry, file, shouldCloseFile, rc)
              : new ForwardReader(file, shouldCloseFile);
     }
 
@@ -65,6 +69,12 @@ class SSTableIterator extends AbstractSSTableIterator
         int next = slice;
         slice++;
         return next;
+    }
+
+    protected int currentSliceIndex()
+    {
+        assert slice > 0 : slice;
+        return slice - 1;
     }
 
     protected boolean hasMoreSlices()
@@ -212,13 +222,14 @@ class SSTableIterator extends AbstractSSTableIterator
     private class ForwardIndexedReader extends ForwardReader
     {
         private final RowIndexReader indexReader;
+        Slice currentSlice;
         long basePosition;
 
-        private ForwardIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+        private ForwardIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
         {
             super(file, shouldCloseFile);
             basePosition = indexEntry.position;
-            indexReader = new RowIndexReader(((TrieIndexSSTableReader) sstable).rowIndexFile, indexEntry);
+            indexReader = new RowIndexReader(((TrieIndexSSTableReader) sstable).rowIndexFile, indexEntry, rc);
         }
 
         @Override
@@ -232,13 +243,18 @@ class SSTableIterator extends AbstractSSTableIterator
         public void setForSlice(Slice slice) throws IOException
         {
             super.setForSlice(slice);
-            IndexInfo indexInfo = indexReader.separatorFloor(metadata.comparator.asByteComparableSource(slice.start()));
-            assert indexInfo != null;
-            long position = basePosition + indexInfo.offset;
-            if (file == null || position > file.getFilePointer())
+
+            if (currentSlice == null || !slice.equals(currentSlice))
             {
-                openMarker = indexInfo.openDeletion;
-                seekToPosition(position);
+                IndexInfo indexInfo = indexReader.separatorFloor(metadata.comparator.asByteComparableSource(slice.start()));
+                assert indexInfo != null;
+                long position = basePosition + indexInfo.offset;
+                if (file == null || position > file.getFilePointer())
+                {
+                    openMarker = indexInfo.openDeletion;
+                    seekToPosition(position);
+                }
+                currentSlice = slice;
             }
             // Otherwise we are already in the relevant index block, there is no point to go back to its beginning.
         }

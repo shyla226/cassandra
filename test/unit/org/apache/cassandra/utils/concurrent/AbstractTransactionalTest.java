@@ -23,13 +23,14 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 import junit.framework.Assert;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 @Ignore
 public abstract class AbstractTransactionalTest
 {
     @BeforeClass
-    public static void setupDD()
+    public static void setupClass()
     {
         DatabaseDescriptor.daemonInitialization();
     }

@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.db.commitlog;
 
+import java.util.concurrent.TimeUnit;
+
+import io.reactivex.Completable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 class PeriodicCommitLogService extends AbstractCommitLogService
@@ -28,14 +31,22 @@ class PeriodicCommitLogService extends AbstractCommitLogService
         super(commitLog, "PERIODIC-COMMIT-LOG-SYNCER", DatabaseDescriptor.getCommitLogSyncPeriod());
     }
 
-    protected void maybeWaitForSync(CommitLogSegment.Allocation alloc)
+    protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc)
     {
         long expectedSyncTime = System.nanoTime() - blockWhenSyncLagsNanos;
         if (lastSyncedAt < expectedSyncTime)
         {
             pending.incrementAndGet();
-            awaitSyncAt(expectedSyncTime, commitLog.metrics.waitingOnCommit.timer());
-            pending.decrementAndGet();
+            long startTime = System.nanoTime();
+
+            return awaitSyncAt(expectedSyncTime).doOnEvent((timestamp, exc) -> {
+                commitLog.metrics.waitingOnCommit.update(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+                pending.decrementAndGet();
+            }).toCompletable();
+        }
+        else
+        {
+            return Completable.complete();
         }
     }
 }

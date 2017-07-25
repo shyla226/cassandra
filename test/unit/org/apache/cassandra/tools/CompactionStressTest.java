@@ -20,14 +20,23 @@ package org.apache.cassandra.tools;
 
 import java.io.File;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
+import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.config.DatabaseDescriptor;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
 public class CompactionStressTest extends ToolsTester
 {
+    @BeforeClass
+    public static void setUp()
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     @Test
     public void testNoArgs()
     {

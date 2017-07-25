@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
+import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.ExecutorLocal;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
@@ -203,18 +204,25 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
      */
     public void stopSession()
     {
+        stopSessionAsync().blockingAwait();
+    }
+
+    public Completable stopSessionAsync()
+    {
         TraceState state = get();
         if (state == null) // inline isTracing to avoid implicit two calls to state.get()
         {
-            logger.trace("request complete");
+            //logger.trace("request complete");
+            return Completable.complete();
         }
         else
         {
-            stopSessionImpl();
-
-            state.stop();
-            sessions.remove(state.sessionId);
-            set(null);
+            return Completable.fromRunnable(this::stopSessionImpl)
+                              .andThen(state.stop())
+                              .doOnComplete(() -> {
+                                  sessions.remove(state.sessionId);
+                                  set(null);
+                              });
         }
     }
 

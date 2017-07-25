@@ -49,7 +49,7 @@ public class AsyncRepairCallback implements MessageCallback<ReadResponse>
             {
                 protected void runMayThrow()
                 {
-                    repairResolver.compareResponses();
+                    repairResolver.compareResponses().blockingAwait();
                 }
             });
         }

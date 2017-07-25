@@ -254,7 +254,7 @@ public final class SystemDistributedKeyspace
                                Lists.newArrayList(bytes(keyspace),
                                                   bytes(view),
                                                   bytes(hostId),
-                                                  bytes(BuildStatus.STARTED.toString())));
+                                                  bytes(BuildStatus.STARTED.toString()))).blockingGet();
     }
 
     public static void successfulViewBuild(String keyspace, String view, UUID hostId)
@@ -265,7 +265,7 @@ public final class SystemDistributedKeyspace
                                Lists.newArrayList(bytes(BuildStatus.SUCCESS.toString()),
                                                   bytes(keyspace),
                                                   bytes(view),
-                                                  bytes(hostId)));
+                                                  bytes(hostId))).blockingGet();
     }
 
     public static Map<UUID, String> viewStatus(String keyspace, String view)
@@ -296,6 +296,7 @@ public final class SystemDistributedKeyspace
     public static void setViewRemoved(String keyspaceName, String viewName)
     {
         String buildReq = "DELETE FROM %s.%s WHERE keyspace_name = ? AND view_name = ?";
+        // TODO make async?
         QueryProcessor.executeInternal(format(buildReq, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS), keyspaceName, viewName);
         forceBlockingFlush(VIEW_BUILD_STATUS);
     }
@@ -309,7 +310,7 @@ public final class SystemDistributedKeyspace
             {
                 valueList.add(bytes(v));
             }
-            QueryProcessor.process(fmtQry, ConsistencyLevel.ONE, valueList);
+            QueryProcessor.process(fmtQry, ConsistencyLevel.ONE, valueList).blockingGet();
         }
         catch (Throwable t)
         {
@@ -320,7 +321,7 @@ public final class SystemDistributedKeyspace
     public static void forceBlockingFlush(String table)
     {
         if (!DatabaseDescriptor.isUnsafeSystem())
-            FBUtilities.waitOnFuture(Keyspace.open(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(table).forceFlush());
+            Keyspace.open(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(table).forceFlush().blockingGet();
     }
 
     private enum RepairState

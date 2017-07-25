@@ -50,11 +50,6 @@ public class MappedBuffer implements Closeable
         this.path = other.path;
     }
 
-    public MappedBuffer(RandomAccessReader file)
-    {
-        this(file.getChannel(), 30);
-    }
-
     public MappedBuffer(ChannelProxy file)
     {
         this(file, 30);

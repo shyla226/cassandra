@@ -27,6 +27,7 @@ import com.google.common.collect.*;
 
 import org.junit.Test;
 
+import io.reactivex.Single;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -383,6 +384,11 @@ public class CompactionIteratorTest
         public String getBackingFiles()
         {
             return null;
+        }
+
+        public void close()
+        {
+
         }
     }
 }

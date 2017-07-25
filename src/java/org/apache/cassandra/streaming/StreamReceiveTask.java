@@ -29,6 +29,7 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -45,8 +46,10 @@ import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.WrappedBoolean;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 /**
@@ -180,6 +183,7 @@ public class StreamReceiveTask extends StreamTask
 
         private void sendThroughWritePath(ColumnFamilyStore cfs, Collection<SSTableReader> readers) {
             boolean hasCdc = hasCDC(cfs);
+            List<Completable> writes = new ArrayList<>();
             for (SSTableReader reader : readers)
             {
                 Keyspace ks = Keyspace.open(reader.getKeyspaceName());
@@ -194,11 +198,13 @@ public class StreamReceiveTask extends StreamTask
                             //
                             // If the CFS has CDC, however, these updates need to be written to the CommitLog
                             // so they get archived into the cdc_raw folder
-                            ks.apply(createMutation(cfs, rowIterator), hasCdc, true, false);
+                            writes.add(ks.apply(createMutation(cfs, rowIterator), hasCdc, true, false));
                         }
                     }
                 }
+                Completable.merge(writes).blockingAwait();
             }
+
         }
 
         public void run()

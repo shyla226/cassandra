@@ -18,24 +18,15 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.epoll.Epoll;
-import io.netty.channel.epoll.EpollEventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.util.concurrent.EventExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.metrics.AuthMetrics;
 import org.apache.cassandra.metrics.ClientMetrics;
-import org.apache.cassandra.transport.RequestThreadPoolExecutor;
 import org.apache.cassandra.transport.Server;
 
 /**
@@ -43,14 +34,27 @@ import org.apache.cassandra.transport.Server;
  */
 public class NativeTransportService
 {
-
     private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
 
-    private Collection<Server> servers = Collections.emptyList();
+    private List<Server> servers = Collections.emptyList();
 
     private boolean initialized = false;
-    private EventLoopGroup workerGroup;
-    private EventExecutor eventExecutorGroup;
+
+    private final InetAddress nativeAddr;
+    private final int nativePort;
+
+    @VisibleForTesting
+    public NativeTransportService(InetAddress nativeAddr, int nativePort)
+    {
+        this.nativeAddr = nativeAddr;
+        this.nativePort = nativePort;
+    }
+
+    public NativeTransportService()
+    {
+        this.nativeAddr = DatabaseDescriptor.getRpcAddress();
+        this.nativePort = DatabaseDescriptor.getNativeTransportPort();
+    }
 
     /**
      * Creates netty thread pools and event loops.
@@ -61,49 +65,39 @@ public class NativeTransportService
         if (initialized)
             return;
 
-        // prepare netty resources
-        eventExecutorGroup = new RequestThreadPoolExecutor();
-
-        if (useEpoll())
-        {
-            workerGroup = new EpollEventLoopGroup();
-            logger.info("Netty using native Epoll event loop");
-        }
-        else
-        {
-            workerGroup = new NioEventLoopGroup();
-            logger.info("Netty using Java NIO event loop");
-        }
-
-        int nativePort = DatabaseDescriptor.getNativeTransportPort();
         int nativePortSSL = DatabaseDescriptor.getNativeTransportPortSSL();
-        InetAddress nativeAddr = DatabaseDescriptor.getRpcAddress();
-
-        org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
-                                                                .withEventExecutor(eventExecutorGroup)
-                                                                .withEventLoopGroup(workerGroup)
-                                                                .withHost(nativeAddr);
 
         if (!DatabaseDescriptor.getClientEncryptionOptions().enabled)
         {
-            servers = Collections.singleton(builder.withSSL(false).withPort(nativePort).build());
+            servers = new ArrayList<>(1);
+
+            org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
+                                                                    .withHost(nativeAddr)
+                                                                    .withPort(nativePort)
+                                                                    .withSSL(false);
+
+            servers.add(builder.build());
         }
         else
         {
+
+            org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
+                    .withHost(nativeAddr);
+
             if (nativePort != nativePortSSL)
             {
                 // user asked for dedicated ssl port for supporting both non-ssl and ssl connections
                 servers = Collections.unmodifiableList(
-                                                      Arrays.asList(
-                                                                   builder.withSSL(false).withPort(nativePort).build(),
-                                                                   builder.withSSL(true).withPort(nativePortSSL).build()
-                                                      )
+                    Arrays.asList(
+                        builder.withSSL(false).withPort(nativePort).build(),
+                        builder.withSSL(true).withPort(nativePortSSL).build()
+                    )
                 );
             }
             else
             {
                 // ssl only mode using configured native port
-                servers = Collections.singleton(builder.withSSL(true).withPort(nativePort).build());
+                servers = Collections.singletonList(builder.withSSL(true).withPort(nativePort).build());
             }
         }
 
@@ -127,6 +121,7 @@ public class NativeTransportService
     public void start()
     {
         initialize();
+
         servers.forEach(Server::start);
     }
 
@@ -145,21 +140,6 @@ public class NativeTransportService
     {
         stop();
         servers = Collections.emptyList();
-
-        // shutdown executors used by netty for native transport server
-        workerGroup.shutdownGracefully(3, 5, TimeUnit.SECONDS).awaitUninterruptibly();
-
-        // shutdownGracefully not implemented yet in RequestThreadPoolExecutor
-        eventExecutorGroup.shutdown();
-    }
-
-    /**
-     * @return intend to use epoll bassed event looping
-     */
-    public static boolean useEpoll()
-    {
-        final boolean enableEpoll = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"));
-        return enableEpoll && Epoll.isAvailable();
     }
 
     /**
@@ -170,18 +150,6 @@ public class NativeTransportService
         for (Server server : servers)
             if (server.isRunning()) return true;
         return false;
-    }
-
-    @VisibleForTesting
-    EventLoopGroup getWorkerGroup()
-    {
-        return workerGroup;
-    }
-
-    @VisibleForTesting
-    EventExecutor getEventExecutor()
-    {
-        return eventExecutorGroup;
     }
 
     @VisibleForTesting

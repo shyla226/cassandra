@@ -26,15 +26,17 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
 
+import io.reactivex.Completable;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CollatedViewIndexBuilder;
@@ -421,7 +423,7 @@ public interface Index
          * Notification of a top level partition delete.
          * @param deletionTime
          */
-        public void partitionDelete(DeletionTime deletionTime);
+        public Completable partitionDelete(DeletionTime deletionTime);
 
         /**
          * Notification of a RangeTombstone.
@@ -429,7 +431,7 @@ public interface Index
          * and a notification will be passed for each of them.
          * @param tombstone
          */
-        public void rangeTombstone(RangeTombstone tombstone);
+        public Completable rangeTombstone(RangeTombstone tombstone);
 
         /**
          * Notification that a new row was inserted into the Memtable holding the partition.
@@ -439,7 +441,7 @@ public interface Index
          *
          * @param row the Row being inserted into the base table's Memtable.
          */
-        public void insertRow(Row row);
+        public Completable insertRow(Row row);
 
         /**
          * Notification of a modification to a row in the base table's Memtable.
@@ -460,7 +462,7 @@ public interface Index
          * @param newRowData data that was not present in the existing row and is being inserted
          *                   into the base table's Memtable
          */
-        public void updateRow(Row oldRowData, Row newRowData);
+        public Completable updateRow(Row oldRowData, Row newRowData);
 
         /**
          * Notification that a row was removed from the partition.
@@ -478,13 +480,13 @@ public interface Index
          *
          * @param row data being removed from the base table
          */
-        public void removeRow(Row row);
+        public Completable removeRow(Row row);
 
         /**
          * Notification of the end of the partition update.
          * This event always occurs after all others for the particular update.
          */
-        public void finish();
+        public Completable finish();
     }
 
     /*
@@ -519,11 +521,11 @@ public interface Index
      * transformed in this way but this may change over time as usage is generalized.
      * See CASSANDRA-8717 for further discussion.
      *
-     * The function takes a PartitionIterator of the results from the replicas which has already been collated
-     * and reconciled, along with the command being executed. It returns another PartitionIterator containing the results
+     * The function takes a flow of filtered partitions of the results from the replicas which has already been collated
+     * and reconciled, along with the command being executed. It returns another flow containing the results
      * of the transformation (which may be the same as the input if the transformation is a no-op).
      */
-    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command);
+    public BiFunction<Flow<FlowablePartition>, ReadCommand, Flow<FlowablePartition>> postProcessorFor(ReadCommand command);
 
     /**
      * Factory method for query time search helper.
@@ -544,6 +546,6 @@ public interface Index
          * @param executionController the collection of OpOrder.Groups which the ReadCommand is being performed under.
          * @return partitions from the base table matching the criteria of the search.
          */
-        public UnfilteredPartitionIterator search(ReadExecutionController executionController);
+        public Flow<FlowableUnfilteredPartition> search(ReadExecutionController executionController);
     }
 }

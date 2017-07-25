@@ -38,6 +38,11 @@ import com.google.common.base.*;
 import com.google.common.base.Throwables;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
+
+import io.reactivex.Completable;
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
+import io.reactivex.subjects.BehaviorSubject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -69,6 +74,7 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.*;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TableMetrics.Sampler;
 import org.apache.cassandra.schema.*;
@@ -84,6 +90,7 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
+import static org.apache.cassandra.utils.Throwables.perform;
 
 public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 {
@@ -227,7 +234,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     private final Tracker data;
 
     /* The read order, used to track accesses to off-heap memtable storage */
-    public final OpOrder readOrdering = new OpOrder();
+    public final OpOrder readOrdering = TPC.newOpOrder(this);
 
     /* This is used to generate the next index for a SSTable */
     private final AtomicInteger fileIndexGenerator = new AtomicInteger(0);
@@ -308,7 +315,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                             else
                             {
                                 // we'll be rescheduled by the constructor of the Memtable.
-                                forceFlush();
+                                forceFlush().subscribe();
                             }
                         }
                     }
@@ -453,10 +460,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             this.compactionStrategyManager.disable();
         }
 
-        // create the private ColumnFamilyStores for the secondary column indexes
+        // create the private ColumnFamilyStores for the secondary column indexes and build the indexes
         indexManager = new SecondaryIndexManager(this);
-        for (IndexMetadata info : metadata.get().indexes)
-            indexManager.addIndex(info);
+        indexManager.loadIndexesAsync(metadata());
 
         if (registerBookeeping)
         {
@@ -544,6 +550,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public void invalidate(boolean expectMBean)
     {
+        if (!valid)
+            return;
+
         // disable and cancel in-progress compactions before invalidating
         valid = false;
 
@@ -868,7 +877,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      *
      * @param memtable
      */
-    public ListenableFuture<CommitLogPosition> switchMemtableIfCurrent(Memtable memtable)
+    public Single<CommitLogPosition> switchMemtableIfCurrent(Memtable memtable)
     {
         synchronized (data)
         {
@@ -885,15 +894,29 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * not complete until the Memtable (and all prior Memtables) have been successfully flushed, and the CL
      * marked clean up to the position owned by the Memtable.
      */
-    public ListenableFuture<CommitLogPosition> switchMemtable()
+    public Single<CommitLogPosition> switchMemtable()
     {
         synchronized (data)
         {
             logFlush();
             Flush flush = new Flush(false);
             flushExecutor.execute(flush);
-            postFlushExecutor.execute(flush.postFlushTask);
-            return flush.postFlushTask;
+            BehaviorSubject<CommitLogPosition> publisher = BehaviorSubject.create();
+            postFlushExecutor.execute(() -> {
+                flush.postFlushTask.run();
+                try
+                {
+                    publisher.onNext(flush.postFlushTask.get());
+                    // Note: If we issue onComplete or the subscribers will not get the onNext notification.
+                }
+                catch (InterruptedException|ExecutionException exc)
+                {
+                    logger.error("Unexpected exception running post flush task", exc);
+                    JVMStabilityInspector.inspectThrowable(exc);
+                    publisher.onError(exc);
+                }
+            });
+            return publisher.first(CommitLogPosition.NONE).observeOn(Schedulers.io());
         }
     }
 
@@ -934,7 +957,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    public ListenableFuture<CommitLogPosition> forceFlush()
+    public Single<CommitLogPosition> forceFlush()
     {
         synchronized (data)
         {
@@ -953,7 +976,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    public ListenableFuture<?> forceFlush(CommitLogPosition flushIfDirtyBefore)
+    public Single<CommitLogPosition> forceFlush(CommitLogPosition flushIfDirtyBefore)
     {
         // we don't loop through the remaining memtables since here we only care about commit log dirtiness
         // and this does not vary between a table and its table-backed indexes
@@ -967,22 +990,26 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    private ListenableFuture<CommitLogPosition> waitForFlushes()
+    private Single<CommitLogPosition> waitForFlushes()
     {
         // we grab the current memtable; once any preceding memtables have flushed, we know its
         // commitLogLowerBound has been set (as this it is set with the upper bound of the preceding memtable)
         final Memtable current = data.getView().getCurrentMemtable();
-        ListenableFutureTask<CommitLogPosition> task = ListenableFutureTask.create(() -> {
-            logger.debug("forceFlush requested but everything is clean in {}", name);
-            return current.getCommitLogLowerBound();
-        });
-        postFlushExecutor.execute(task);
-        return task;
+        BehaviorSubject<CommitLogPosition> publisher = BehaviorSubject.create();
+        postFlushExecutor.execute(() ->
+                                  {
+                                      logger.debug("forceFlush requested but everything is clean in {}", name);
+                                      CommitLogPosition pos = current.getCommitLogLowerBound();
+                                      publisher.onNext(pos == null ? CommitLogPosition.NONE : pos);
+                                      // Note: If we issue onComplete or the subscribers will not get the onNext notification.
+                                  });
+
+        return publisher.first(CommitLogPosition.NONE).observeOn(Schedulers.io());
     }
 
     public CommitLogPosition forceBlockingFlush()
     {
-        return FBUtilities.waitOnFuture(forceFlush());
+        return forceFlush().blockingGet();
     }
 
     /**
@@ -1081,10 +1108,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             // records owned by this memtable
             setCommitLogUpperBound(commitLogUpperBound);
 
-            // we then issue the barrier; this lets us wait for all operations started prior to the barrier to complete;
+            // we issue the barrier; this lets us wait for all operations started prior to the barrier to complete;
             // since this happens after wiring up the commitLogUpperBound, we also know all operations with earlier
             // commit log segment position have also completed, i.e. the memtables are done and ready to flush
             writeBarrier.issue();
+
             postFlush = new PostFlush(memtables);
             postFlushTask = ListenableFutureTask.create(postFlush);
         }
@@ -1155,14 +1183,27 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     if (flushNonCf2i)
                         indexManager.flushAllNonCFSBackedIndexesBlocking();
 
-                    flushResults = Lists.newArrayList(FBUtilities.waitOnFutures(futures));
                 }
                 catch (Throwable t)
                 {
                     logger.error("Flushing {} failed with error", memtable.toString(), t);
-                    t = memtable.abortRunnables(flushRunnables, t);
+                    if (flushRunnables != null)
+                        flushRunnables.stream().forEach(Memtable.FlushRunnable::abort);
+
+                    t = perform(t, () -> FBUtilities.waitOnFutures(futures));
                     t = txn.abort(t);
-                    throw Throwables.propagate(t);
+                    Throwables.propagate(t);
+                }
+
+                try
+                {
+                    flushResults = Lists.newArrayList(FBUtilities.waitOnFutures(futures));
+                }
+                catch (Throwable t)
+                {
+                    logger.error("Flushing {} failed when waiting for flush runnables", memtable.toString(), t);
+                    t = txn.abort(t);
+                    Throwables.propagate(t);
                 }
 
                 try
@@ -1188,7 +1229,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     for (SSTableMultiWriter writer : flushResults)
                         t = writer.abort(t);
                     t = txn.abort(t);
-                    Throwables.propagate(t);
+                    throw Throwables.propagate(t);
                 }
 
                 txn.prepareToCommit();
@@ -1331,33 +1372,37 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * param @ key - key for update/insert
      * param @ columnFamily - columnFamily changes
      */
-    public void apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
-
+    public Completable apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         long start = System.nanoTime();
-        try
-        {
-            Memtable mt = data.getMemtableFor(opGroup, commitLogPosition);
-            long timeDelta = mt.put(update, indexer, opGroup);
-            DecoratedKey key = update.partitionKey();
-            invalidateCachedPartition(key);
-            metric.samplers.get(Sampler.WRITES).addSample(key.getKey(), key.hashCode(), 1);
-            StorageHook.instance.reportWrite(metadata.id, update);
-            metric.writeLatency.addNano(System.nanoTime() - start);
-            // CASSANDRA-11117 - certain resolution paths on memtable put can result in very
-            // large time deltas, either through a variety of sentinel timestamps (used for empty values, ensuring
-            // a minimal write, etc). This limits the time delta to the max value the histogram
-            // can bucket correctly. This also filters the Long.MAX_VALUE case where there was no previous value
-            // to update.
-            if(timeDelta < Long.MAX_VALUE)
-                metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
-        }
-        catch (RuntimeException e)
-        {
-            throw new RuntimeException(e.getMessage()
-                                       + " for ks: "
-                                       + keyspace.getName() + ", table: " + name, e);
-        }
+        Memtable mt = data.getMemtableFor(opGroup, commitLogPosition);
+        return mt.put(update, indexer, opGroup)
+                 .map(timeDelta ->
+                      {
+                          DecoratedKey key = update.partitionKey();
+                          invalidateCachedPartition(key);
+                          metric.samplers.get(Sampler.WRITES).addSample(key.getKey(), key.hashCode(), 1);
+                          StorageHook.instance.reportWrite(metadata.id, update);
+                          metric.writeLatency.addNano(System.nanoTime() - start);
+
+                          // CASSANDRA-11117 - certain resolution paths on memtable put can result in very
+                          // large time deltas, either through a variety of sentinel timestamps (used for empty values, ensuring
+                          // a minimal write, etc). This limits the time delta to the max value the histogram
+                          // can bucket correctly. This also filters the Long.MAX_VALUE case where there was no previous value
+                          // to update.
+                          if (timeDelta < Long.MAX_VALUE)
+                              metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
+
+                          return 0;
+                      })
+                 .onErrorResumeNext(e ->
+                                    {
+                                        RuntimeException exc = new RuntimeException(e.getMessage()
+                                                                                    + " for ks: "
+                                                                                    + keyspace.getName() + ", table: " + name, e);
+                                        return Single.error(exc);
+                                    })
+                 .toCompletable();
     }
 
     /**
@@ -1701,7 +1746,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             for (SSTableReader sstr : select(View.select(SSTableSet.LIVE, dk)).sstables)
             {
                 // check if the key actually exists in this sstable
-                if (sstr.contains(dk))
+                if (sstr.contains(dk, Rebufferer.ReaderConstraint.NONE))
                     files.add(sstr.getFilename());
             }
             return files;

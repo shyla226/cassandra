@@ -24,6 +24,7 @@ import java.nio.channels.WritableByteChannel;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
+import io.netty.util.Recycler;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.config.Config;
 
@@ -48,8 +49,7 @@ public class DataOutputBuffer extends BufferedDataOutputStreamPlus
     private static final int DEFAULT_INITIAL_BUFFER_SIZE = 128;
 
     /**
-     * Scratch buffers used mostly for serializing in memory. It's important to call #recycle() when finished
-     * to keep the memory overhead from being too large in the system.
+     * Used for Non-Async throw-away buffers
      */
     public static final FastThreadLocal<DataOutputBuffer> scratchBuffer = new FastThreadLocal<DataOutputBuffer>()
     {
@@ -72,19 +72,55 @@ public class DataOutputBuffer extends BufferedDataOutputStreamPlus
         }
     };
 
+    /**
+     * Scratch buffers used mostly for serializing in memory. It's important to call #recycle() when finished
+     * to keep the memory overhead from being too large in the system.
+     */
+    public static final Recycler<DataOutputBuffer> RECYCLER = new Recycler<DataOutputBuffer>()
+    {
+        protected DataOutputBuffer newObject(Handle handle)
+        {
+            return new DataOutputBuffer(handle);
+        }
+    };
+
+    private final Recycler.Handle handle;
+
+    private DataOutputBuffer(Recycler.Handle handle)
+    {
+        this(DEFAULT_INITIAL_BUFFER_SIZE, handle);
+    }
+
     public DataOutputBuffer()
     {
-        this(DEFAULT_INITIAL_BUFFER_SIZE);
+        this(DEFAULT_INITIAL_BUFFER_SIZE, null);
     }
 
     public DataOutputBuffer(int size)
     {
-        super(ByteBuffer.allocate(size));
+        this(ByteBuffer.allocate(size), null);
     }
 
-    public DataOutputBuffer(ByteBuffer buffer)
+    public DataOutputBuffer(int size, Recycler.Handle handle)
+    {
+        this(ByteBuffer.allocate(size), handle);
+    }
+
+    public DataOutputBuffer(ByteBuffer buffer, Recycler.Handle handle)
     {
         super(buffer);
+        this.handle = handle;
+    }
+
+    public void recycle()
+    {
+        assert handle != null;
+
+        if (buffer().capacity() <= MAX_RECYCLE_BUFFER_SIZE)
+        {
+            buffer.rewind();
+            handle.recycle(this);
+        }
     }
 
     @Override

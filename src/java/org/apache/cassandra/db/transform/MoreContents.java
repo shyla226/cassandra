@@ -20,9 +20,42 @@
  */
 package org.apache.cassandra.db.transform;
 
+import org.apache.cassandra.utils.Throwables;
+
 // a shared internal interface, that is hidden to provide type-safety to the user
-interface MoreContents<I>
+interface MoreContents<I extends AutoCloseable> extends AutoCloseable
 {
     public abstract I moreContents();
+
+    public default boolean closeNonAttachedContents()
+    {
+        return true;
+    }
+
+    /** Close the contents that were not attached yet */
+    @SuppressWarnings("resource") // unsure why eclipse-warnings thinks next is not closed, it looks OK to me
+    public default void close()
+    {
+        if (!closeNonAttachedContents())
+            return;
+
+        Throwable err = null;
+        I next = moreContents();
+        while (next != null)
+        {
+            try
+            {
+                next.close();
+            }
+            catch (Throwable t)
+            {
+                err = Throwables.merge(err, t);
+            }
+
+            next = moreContents();
+        }
+
+        Throwables.maybeFail(err);
+    }
 }
 

@@ -3,6 +3,7 @@
 # Consider the effects on 'o.a.c.i.s.LegacySSTableTest' before changing schemas in this file.
 #
 cluster_name: Test Cluster
+num_tokens: 1
 # memtable_allocation_type: heap_buffers
 memtable_allocation_type: offheap_objects
 commitlog_sync: batch
@@ -12,7 +13,7 @@ commitlog_directory: build/test/cassandra/commitlog
 cdc_raw_directory: build/test/cassandra/cdc_raw
 cdc_enabled: false
 hints_directory: build/test/cassandra/hints
-partitioner: org.apache.cassandra.dht.ByteOrderedPartitioner
+partitioner: org.apache.cassandra.dht.Murmur3Partitioner
 listen_address: 127.0.0.1
 storage_port: 7010
 start_native_transport: true
@@ -35,6 +36,7 @@ server_encryption_options:
     truststore: conf/.truststore
     truststore_password: cassandra
 incremental_backups: true
+file_cache_size_in_mb: 512
 concurrent_compactors: 4
 compaction_throughput_mb_per_sec: 0
 row_cache_class_name: org.apache.cassandra.cache.OHCProvider

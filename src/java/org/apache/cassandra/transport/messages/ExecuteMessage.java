@@ -20,6 +20,8 @@ package org.apache.cassandra.transport.messages;
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
+import io.reactivex.Single;
+
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryHandler;
@@ -84,7 +86,7 @@ public class ExecuteMessage extends Message.Request
         this.options = options;
     }
 
-    public Message.Response execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
     {
         try
         {
@@ -102,22 +104,19 @@ public class ExecuteMessage extends Message.Request
             // Some custom QueryHandlers are interested by the bound names. We provide them this information
             // by wrapping the QueryOptions.
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.boundNames);
-            Message.Response response = handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime);
-            if (options.skipMetadata() && response instanceof ResultMessage.Rows)
-                ((ResultMessage.Rows)response).result.metadata.setSkipMetadata();
+            return handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime)
+                          .map(response -> {
+                                  if (options.skipMetadata() && response instanceof ResultMessage.Rows)
+                                      ((ResultMessage.Rows) response).result.metadata.setSkipMetadata();
 
-            response.setTracingId(state.getPreparedTracingSession());
-
-            return response;
+                                  response.setTracingId(state.getPreparedTracingSession());
+                                  return response;
+                          }).flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
         }
         catch (Exception e)
         {
             JVMStabilityInspector.inspectThrowable(e);
-            return ErrorMessage.fromException(e);
-        }
-        finally
-        {
-            Tracing.instance.stopSession();
+            return Single.just(ErrorMessage.fromException(e));
         }
     }
 

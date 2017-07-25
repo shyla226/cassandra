@@ -17,7 +17,9 @@
  */
 package org.apache.cassandra.exceptions;
 
-public abstract class RequestExecutionException extends CassandraException
+import org.apache.cassandra.utils.flow.Flow;
+
+public abstract class RequestExecutionException extends CassandraException implements Flow.NonWrappableException
 {
     protected RequestExecutionException(ExceptionCode code, String msg)
     {

@@ -19,6 +19,8 @@ package org.apache.cassandra.utils;
 
 import java.io.FileNotFoundException;
 import java.net.SocketException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -31,7 +33,6 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
-import org.apache.cassandra.service.StorageService;
 
 /**
  * Responsible for deciding whether to kill the JVM if it gets in an "unstable" state (think OOM).
@@ -40,7 +41,7 @@ public final class JVMStabilityInspector
 {
     private static final Logger logger = LoggerFactory.getLogger(JVMStabilityInspector.class);
     private static Killer killer = new Killer();
-
+    private static final List<Pair<Thread, Runnable>> shutdownHooks = new ArrayList<>(1);
 
     private JVMStabilityInspector() {}
 
@@ -53,6 +54,7 @@ public final class JVMStabilityInspector
     public static void inspectThrowable(Throwable t)
     {
         boolean isUnstable = false;
+
         if (t instanceof OutOfMemoryError)
         {
             isUnstable = true;
@@ -61,7 +63,7 @@ public final class JVMStabilityInspector
 
         if (DatabaseDescriptor.getDiskFailurePolicy() == Config.DiskFailurePolicy.die)
             if (t instanceof FSError || t instanceof CorruptSSTableException)
-            isUnstable = true;
+                isUnstable = true;
 
         // Check for file handle exhaustion
         if (t instanceof FileNotFoundException || t instanceof SocketException)
@@ -77,9 +79,9 @@ public final class JVMStabilityInspector
             inspectThrowable(t.getCause());
     }
 
-    public static void inspectCommitLogThrowable(Throwable t)
+    public static void inspectCommitLogThrowable(Throwable t, boolean startupCompleted)
     {
-        if (!StorageService.instance.isDaemonSetupCompleted())
+        if (!startupCompleted)
         {
             logger.error("Exiting due to error while processing commit log during initialization.", t);
             killer.killCurrentJVM(t, true);
@@ -112,12 +114,34 @@ public final class JVMStabilityInspector
         }
     }
 
+    public static void registerShutdownHook(Thread hook, Runnable runOnHookRemoved)
+    {
+        Runtime.getRuntime().addShutdownHook(hook);
+        shutdownHooks.add(Pair.create(hook, runOnHookRemoved));
+    }
+
     @VisibleForTesting
     public static Killer replaceKiller(Killer newKiller)
     {
         Killer oldKiller = JVMStabilityInspector.killer;
         JVMStabilityInspector.killer = newKiller;
         return oldKiller;
+    }
+
+    public static void removeShutdownHooks()
+    {
+        Throwable err = null;
+        for (Pair<Thread, Runnable> hook : shutdownHooks)
+        {
+            err = Throwables.perform(err,
+                                     () -> Runtime.getRuntime().removeShutdownHook(hook.left),
+                                     hook.right::run);
+        }
+
+        if (err != null)
+            logger.error("Got error when removing shutdown hook(s): {}", err.getMessage(), err);
+
+        shutdownHooks.clear();
     }
 
     @VisibleForTesting
@@ -145,7 +169,7 @@ public final class JVMStabilityInspector
             }
             if (killing.compareAndSet(false, true))
             {
-                StorageService.instance.removeShutdownHook();
+                removeShutdownHooks();
                 System.exit(100);
             }
         }

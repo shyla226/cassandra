@@ -73,20 +73,20 @@ public class TokenMetadataTest
     public void testRingIterator()
     {
         ArrayList<Token> ring = tmd.sortedTokens();
-        testRingIterator(ring, "2", false, "6", "1");
+        testRingIterator(ring, "2", false, "1", "6");
         testRingIterator(ring, "7", false, "1", "6");
         testRingIterator(ring, "0", false, "1", "6");
-        testRingIterator(ring, "", false, "1", "6");
+        testRingIterator(ring, "", false, "6", "1");
     }
 
     @Test
     public void testRingIteratorIncludeMin()
     {
         ArrayList<Token> ring = tmd.sortedTokens();
-        testRingIterator(ring, "2", true, "6", "", "1");
-        testRingIterator(ring, "7", true, "", "1", "6");
-        testRingIterator(ring, "0", true, "1", "6", "");
-        testRingIterator(ring, "", true, "1", "6", "");
+        testRingIterator(ring, "2", true, "1", "", "6");
+        testRingIterator(ring, "7", true, "1", "", "6");
+        testRingIterator(ring, "0", true, "1", "", "6");
+        testRingIterator(ring, "", true, "6", "1", "");
     }
 
     @Test

@@ -17,11 +17,17 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import org.apache.cassandra.auth.*;
+import io.reactivex.Single;
+import org.apache.cassandra.auth.AuthenticatedUser;
+import org.apache.cassandra.auth.RoleResource;
+import org.apache.cassandra.auth.Roles;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -38,6 +44,16 @@ public class DropRoleStatement extends AuthenticationStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
+        // validate login first to avoid leaking user existence to anonymous users.
+        state.ensureNotAnonymous();
+
+        if (!ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
+            throw new InvalidRequestException(String.format("%s doesn't exist", role.getRoleName()));
+
+        AuthenticatedUser user = state.getUser();
+        if (user != null && user.getName().equals(role.getRoleName()))
+            throw new InvalidRequestException("Cannot DROP primary role for current login");
+
         super.checkPermission(state, CorePermission.DROP, role);
 
         // We only check superuser status for existing roles to avoid
@@ -50,27 +66,21 @@ public class DropRoleStatement extends AuthenticationStatement
 
     public void validate(ClientState state) throws RequestValidationException
     {
-        // validate login here before checkAccess to avoid leaking user existence to anonymous users.
-        state.ensureNotAnonymous();
-
-        if (!ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            throw new InvalidRequestException(String.format("%s doesn't exist", role.getRoleName()));
-
-        AuthenticatedUser user = state.getUser();
-        if (user != null && user.getName().equals(role.getRoleName()))
-            throw new InvalidRequestException("Cannot DROP primary role for current login");
     }
 
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        // not rejected in validate()
-        if (ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            return null;
+        return Single.fromCallable(() -> {
 
-        // clean up grants and permissions of/on the dropped role.
-        DatabaseDescriptor.getRoleManager().dropRole(state.getUser(), role);
-        DatabaseDescriptor.getAuthorizer().revokeAllFrom(role);
-        DatabaseDescriptor.getAuthorizer().revokeAllOn(role);
-        return null;
+            // not rejected in validate()
+            if (ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
+                return new ResultMessage.Void();
+
+            // clean up grants and permissions of/on the dropped role.
+            DatabaseDescriptor.getRoleManager().dropRole(state.getUser(), role);
+            DatabaseDescriptor.getAuthorizer().revokeAllFrom(role);
+            DatabaseDescriptor.getAuthorizer().revokeAllOn(role);
+            return (ResultMessage)(new ResultMessage.Void());
+        });
     }
 }

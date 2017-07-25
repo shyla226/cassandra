@@ -23,20 +23,17 @@ import java.util.*;
 
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
-import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
-
 import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.UUIDType;
-import org.apache.cassandra.utils.MergeIterator.Reducer;
 
 public class MergeIteratorComparisonTest
 {
@@ -481,7 +478,7 @@ public class MergeIteratorComparisonTest
         System.out.println();
         for (int i=0; i<10; ++i) {
             benchmarkIterator(MergeIterator.get(closeableIterators(lists), cmp, reducer), cmp);
-            benchmarkIterator(new MergeIteratorPQ<>(closeableIterators(lists), cmpb, reducer), cmpb);
+//            benchmarkIterator(new MergeIteratorPQ<>(closeableIterators(lists), cmpb, reducer), cmpb);
         }
         System.out.format("MI: %.2f\n", cmp.count / (double) cmpb.count);
     }
@@ -546,13 +543,13 @@ public class MergeIteratorComparisonTest
         public void reduce(int idx, T next)
         {
             if (current == null)
-                current = new Counted<T>(next);
+                current = new Counted<>(next);
             assert current.item.equals(next);
             ++current.count;
         }
 
         @Override
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             assert read;
             current = null;
@@ -560,7 +557,7 @@ public class MergeIteratorComparisonTest
         }
 
         @Override
-        protected Counted<T> getReduced()
+        public Counted<T> getReduced()
         {
             assert current != null;
             read = true;
@@ -603,7 +600,7 @@ public class MergeIteratorComparisonTest
         }
 
         @Override
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             assert read;
             current = null;
@@ -611,7 +608,7 @@ public class MergeIteratorComparisonTest
         }
 
         @Override
-        protected KeyedSet<K, V> getReduced()
+        public KeyedSet<K, V> getReduced()
         {
             assert current != null;
             read = true;

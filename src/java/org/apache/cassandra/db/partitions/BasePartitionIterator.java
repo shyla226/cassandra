@@ -23,5 +23,5 @@ import org.apache.cassandra.utils.CloseableIterator;
 
 public interface BasePartitionIterator<I extends BaseRowIterator<?>> extends CloseableIterator<I>
 {
-    public void close();
+    void close();
 }

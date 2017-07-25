@@ -21,6 +21,9 @@ import java.net.InetAddress;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -122,5 +125,9 @@ public class Response<Q> extends Message<Q>
                ? messageData.payloadSize
                : version.serializer(verb()).responseSerializer.serializedSize(payload());
     }
-}
 
+    TracingAwareExecutor executor()
+    {
+        return StageManager.getStage(group().isInternal() ? Stage.INTERNAL_RESPONSE : Stage.REQUEST_RESPONSE);
+    }
+}

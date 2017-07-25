@@ -28,6 +28,7 @@ import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
@@ -63,6 +64,7 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
     @Override
     public abstract Void get() throws WriteTimeoutException, WriteFailureException;
 
+    public abstract Completable toObservable();
     long currentTimeout()
     {
         long requestTimeout = writeType() == WriteType.COUNTER

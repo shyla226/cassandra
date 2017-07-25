@@ -19,6 +19,7 @@ package org.apache.cassandra.service;
 
 import java.net.InetAddress;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.WriteFailureException;
@@ -39,6 +40,9 @@ public abstract class WrappingWriteHandler extends WriteHandler
         // we install a callback that will be executed when
         // wrapped completes, either with a result or exceptionally
         wrapped.whenComplete((x, t) -> {
+            if (logger.isTraceEnabled())
+                logger.trace("{}/{} - Completed", WrappingWriteHandler.this.hashCode(), wrapped.hashCode());
+
             if (t == null)
                 complete(null);
             else
@@ -72,6 +76,11 @@ public abstract class WrappingWriteHandler extends WriteHandler
         return wrapped.get();
     }
 
+    public Completable toObservable()
+    {
+        return wrapped.toObservable();
+    }
+
     public void onResponse(Response<EmptyPayload> response)
     {
         wrapped.onResponse(response);
@@ -87,4 +96,3 @@ public abstract class WrappingWriteHandler extends WriteHandler
         wrapped.onTimeout(host);
     }
 }
-

@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Maybe;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
@@ -56,16 +57,16 @@ public class AlterViewStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
         TableMetadata meta = Schema.instance.validateTable(keyspace(), columnFamily());
         if (!meta.isView())
-            throw new InvalidRequestException("Cannot use ALTER MATERIALIZED VIEW on Table");
+            return error("Cannot use ALTER MATERIALIZED VIEW on Table");
 
         ViewMetadata current = Schema.instance.getView(keyspace(), columnFamily());
 
         if (attrs == null)
-            throw new InvalidRequestException("ALTER MATERIALIZED VIEW WITH invoked, but no parameters found");
+            return error("ALTER MATERIALIZED VIEW WITH invoked, but no parameters found");
 
         attrs.validate();
 
@@ -78,9 +79,9 @@ public class AlterViewStatement extends SchemaAlteringStatement
 
         if (params.gcGraceSeconds == 0)
         {
-            throw new InvalidRequestException("Cannot alter gc_grace_seconds of a materialized view to 0, since this " +
-                                              "value is used to TTL undelivered updates. Setting gc_grace_seconds too " +
-                                              "low might cause undelivered updates to expire before being replayed.");
+            return error("Cannot alter gc_grace_seconds of a materialized view to 0, since this " +
+                         "value is used to TTL undelivered updates. Setting gc_grace_seconds too " +
+                         "low might cause undelivered updates to expire before being replayed.");
         }
 
         if (params.defaultTimeToLive > 0)
@@ -92,8 +93,11 @@ public class AlterViewStatement extends SchemaAlteringStatement
 
         ViewMetadata updated = current.copy(current.metadata.unbuild().params(params).build());
 
-        MigrationManager.announceViewUpdate(updated, isLocalOnly);
-        return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily());
+        return MigrationManager.announceViewUpdate(updated, isLocalOnly)
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED,
+                                                                          Event.SchemaChange.Target.TABLE,
+                                                                          keyspace(),
+                                                                          columnFamily())));
     }
 
     public String toString()

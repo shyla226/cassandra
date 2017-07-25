@@ -27,6 +27,7 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -35,7 +36,6 @@ import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
@@ -56,18 +56,13 @@ public class KeyCollisionTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        oldPartitioner = DatabaseDescriptor.setPartitionerUnsafe(LengthPartitioner.instance);
         DatabaseDescriptor.daemonInitialization();
-        oldPartitioner = StorageService.instance.setPartitionerUnsafe(LengthPartitioner.instance);
+
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF));
-    }
-
-    @AfterClass
-    public static void tearDown()
-    {
-        DatabaseDescriptor.setPartitionerUnsafe(oldPartitioner);
     }
 
     @Test
@@ -101,23 +96,23 @@ public class KeyCollisionTest
         builder.clustering("c").add("val", "asdf").build().applyUnsafe();
     }
 
-    static class BigIntegerToken extends ComparableObjectToken<BigInteger>
+    static class BigIntegerToken extends ComparableObjectToken<Long>
     {
         private static final long serialVersionUID = 1L;
 
-        public BigIntegerToken(BigInteger token)
+        public BigIntegerToken(Long token)
         {
             super(token);
         }
 
         // convenience method for testing
         public BigIntegerToken(String token) {
-            this(new BigInteger(token));
+            this(Long.valueOf(token));
         }
 
         public ByteSource asByteComparableSource()
         {
-            return IntegerType.instance.asByteComparableSource(IntegerType.instance.decompose(token));
+            return IntegerType.instance.asByteComparableSource(LongType.instance.decompose(token));
         }
 
         @Override
@@ -130,6 +125,15 @@ public class KeyCollisionTest
         public long getHeapSize()
         {
             return 0;
+        }
+
+        @Override
+        public double size(Token next)
+        {
+            BigIntegerToken n = (BigIntegerToken) next;
+            long v = n.token - token;  // Overflow acceptable and desired.
+            double d = Math.scalb((double)v, -127); // Scale so that the full range is 1.
+            return d > 0.0 ? d : (d + 1.0); // Adjust for signed long, also making sure t.size(t) == 1.
         }
     }
 }

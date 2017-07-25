@@ -19,11 +19,10 @@
 package org.apache.cassandra.db.monitoring;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class Monitor
 {
@@ -233,26 +232,31 @@ public class Monitor
             abort();
     }
 
-    public UnfilteredPartitionIterator withMonitoring(UnfilteredPartitionIterator iter)
+    public Flow<FlowableUnfilteredPartition> withMonitoring(Flow<FlowableUnfilteredPartition> partitions)
     {
-        return Transformation.apply(iter, new CheckForAbort());
-    }
-
-    private class CheckForAbort extends Transformation<UnfilteredRowIterator>
-    {
-        protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
-        {
-            check();
-            return Transformation.apply(partition, this);
-        }
-
-        protected Row applyToRow(Row row)
+        Flow.MappingOp<Unfiltered, Unfiltered> checkForAbort = unfiltered ->
         {
             if (isTesting()) // delay for testing
                 FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
 
             check();
-            return row;
-        }
+            return unfiltered;
+        };
+
+        return partitions.map(partition ->
+                              {
+                                  try
+                                  {
+                                      check();
+                                      return new FlowableUnfilteredPartition(partition.header,
+                                                                             partition.staticRow,
+                                                                             partition.content.map(checkForAbort));
+                                  }
+                                  catch (Throwable t)
+                                  {
+                                      partition.unused();
+                                      throw t;
+                                  }
+                              });
     }
 }

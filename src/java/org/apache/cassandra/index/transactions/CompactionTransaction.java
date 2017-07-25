@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.transactions;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.db.rows.Row;
 
 /**
@@ -38,6 +39,9 @@ public interface CompactionTransaction extends IndexTransaction
     {
         public void start(){}
         public void onRowMerge(Row merged, Row...versions){}
-        public void commit(){}
+        public Completable commit()
+        {
+            return Completable.complete();
+        }
     };
 }

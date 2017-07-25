@@ -18,7 +18,16 @@
 
 package org.apache.cassandra.io.util;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+
+import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.concurrent.ExecutorLocals;
 
 /**
  * Rebufferer for reading data by a RandomAccessReader.
@@ -37,6 +46,76 @@ public interface Rebufferer extends ReaderFileProxy
      * Called when a reader is closed. Should clean up reader-specific data.
      */
     void closeReader();
+
+    // Extensions for TPC/optimistic read below.
+
+    default BufferHolder rebuffer(long position, ReaderConstraint constraint)
+    {
+        if (constraint == ReaderConstraint.IN_CACHE_ONLY)
+            throw new IllegalStateException("In cache only constraint requires the cache rebufferer");
+
+        return rebuffer(position);
+    }
+
+    public enum ReaderConstraint
+    {
+        NONE,
+        IN_CACHE_ONLY
+    }
+
+    public static class NotInCacheException extends RuntimeException
+    {
+        private static final long serialVersionUID = 1L;
+
+        private final CompletableFuture<ChunkCache.Buffer> asyncBuffer;
+
+        public NotInCacheException(CompletableFuture<ChunkCache.Buffer> asyncBuffer)
+        {
+            super("Requested data is not in cache. Retry with ReaderConstraint.NONE.");
+            this.asyncBuffer = asyncBuffer;
+        }
+
+        @Override
+        public synchronized Throwable fillInStackTrace()
+        {
+            //Avoids generating a stack trace for every instance
+            return this;
+        }
+
+        /**
+         * Handles callbacks for async buffers
+         * @param onReady will be run if completable future is ready
+         * @param onError will be run if the buffer errored
+         * @param executor the executor to schedule on
+         */
+        public void accept(Runnable onReady, Consumer<Throwable> onError, Executor executor)
+        {
+            //Registers a callback to be issued when the async buffer is ready
+            assert asyncBuffer != null;
+
+            if (asyncBuffer.isDone() && !asyncBuffer.isCompletedExceptionally())
+            {
+                onReady.run();
+            }
+            else
+            {
+                //Track the ThreadLocals
+                Runnable wrappedOnReady = new ExecutorLocals.WrappedRunnable(onReady);
+
+                asyncBuffer.thenRunAsync(() -> wrappedOnReady.run(), executor)
+                            .exceptionally(t ->
+                                           {
+                                               onError.accept(t);
+                                               return null;
+                                           });
+            }
+        }
+
+        public String toString()
+        {
+            return "NotInCache " + asyncBuffer;
+        }
+    }
 
     interface BufferHolder
     {

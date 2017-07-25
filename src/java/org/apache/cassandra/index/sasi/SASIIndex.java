@@ -26,6 +26,7 @@ import com.google.common.collect.Multimap;
 
 import com.googlecode.concurrenttrees.common.Iterables;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.IndexTarget;
@@ -35,8 +36,8 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -62,6 +63,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class SASIIndex implements Index, INotificationConsumer
 {
@@ -73,9 +75,7 @@ public class SASIIndex implements Index, INotificationConsumer
                                                        Set<Index> indexes,
                                                        Collection<SSTableReader> sstablesToRebuild)
         {
-            NavigableMap<SSTableReader, Multimap<ColumnMetadata, ColumnIndex>>sstables = new TreeMap<>((a, b) -> {
-                return Integer.compare(a.descriptor.generation, b.descriptor.generation);
-            });
+            NavigableMap<SSTableReader, Multimap<ColumnMetadata, ColumnIndex>> sstables = new TreeMap<>(Comparator.comparingInt(a -> a.descriptor.generation));
 
             indexes.stream()
                    .filter((i) -> i instanceof SASIIndex)
@@ -254,28 +254,38 @@ public class SASIIndex implements Index, INotificationConsumer
             public void begin()
             {}
 
-            public void partitionDelete(DeletionTime deletionTime)
-            {}
+            public Completable partitionDelete(DeletionTime deletionTime)
+            {
+                return Completable.complete();
+            }
 
-            public void rangeTombstone(RangeTombstone tombstone)
-            {}
+            public Completable rangeTombstone(RangeTombstone tombstone)
+            {
+                return Completable.complete();
+            }
 
-            public void insertRow(Row row)
+            public Completable insertRow(Row row)
             {
                 if (isNewData())
-                    adjustMemtableSize(index.index(key, row), opGroup);
+                    return adjustMemtableSize(index.index(key, row), opGroup);
+
+                return Completable.complete();
             }
 
-            public void updateRow(Row oldRow, Row newRow)
+            public Completable updateRow(Row oldRow, Row newRow)
             {
-                insertRow(newRow);
+                return insertRow(newRow);
             }
 
-            public void removeRow(Row row)
-            {}
+            public Completable removeRow(Row row)
+            {
+                return Completable.complete();
+            }
 
-            public void finish()
-            {}
+            public Completable finish()
+            {
+                return Completable.complete();
+            }
 
             // we are only interested in the data from Memtable
             // everything else is going to be handled by SSTableWriter observers
@@ -284,9 +294,10 @@ public class SASIIndex implements Index, INotificationConsumer
                 return transactionType == IndexTransaction.Type.UPDATE;
             }
 
-            public void adjustMemtableSize(long additionalSpace, OpOrder.Group opGroup)
+            public Completable adjustMemtableSize(long additionalSpace, OpOrder.Group opGroup)
             {
                 baseCfs.getTracker().getView().getCurrentMemtable().getAllocator().onHeap().allocate(additionalSpace, opGroup);
+                return Completable.complete();
             }
         };
     }
@@ -305,9 +316,9 @@ public class SASIIndex implements Index, INotificationConsumer
         return newWriter(baseCfs.metadata().partitionKeyType, descriptor, indexes, opType);
     }
 
-    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command)
+    public BiFunction<Flow<FlowablePartition>, ReadCommand, Flow<FlowablePartition>> postProcessorFor(ReadCommand command)
     {
-        return (partitionIterator, readCommand) -> partitionIterator;
+        return (partitions, readCommand) -> partitions;
     }
 
     public IndexBuildingSupport getBuildTaskSupport()

@@ -35,6 +35,8 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Static methods to work with atom iterators.
@@ -148,9 +150,33 @@ public abstract class UnfilteredRowIterators
      */
     public static void digest(UnfilteredRowIterator iterator, MessageDigest digest, DigestVersion version)
     {
-        digest.update(iterator.partitionKey().getKey().duplicate());
-        iterator.partitionLevelDeletion().digest(digest);
-        iterator.columns().regulars.digest(digest);
+        digestPartition(iterator, digest, version);
+        while (iterator.hasNext())
+            digestUnfiltered(iterator.next(), digest);
+    }
+
+    /**
+     * Digests the provided partition.
+     *
+     * @param partition the partition to digest.
+     * @param digest the {@code MessageDigest} to use for the digest.
+     * @param version the version to use when producing the digest.
+     */
+    public static Flow<Void> digest(FlowableUnfilteredPartition partition, MessageDigest digest, DigestVersion version)
+    {
+        digestPartition(partition, digest, version);
+        return partition.content.process(unfiltered -> digestUnfiltered(unfiltered, digest));
+    }
+
+    /**
+     * Digest the partition common information, excluding its content.
+     */
+    public static MessageDigest digestPartition(PartitionTrait partition, MessageDigest digest, DigestVersion version)
+    {
+        digest.update(partition.partitionKey().getKey().duplicate());
+        partition.partitionLevelDeletion().digest(digest);
+        partition.columns().regulars.digest(digest);
+
         // When serializing an iterator, we skip the static columns if the iterator has not static row, even if the
         // columns() object itself has some (the columns() is a superset of what the iterator actually contains, and
         // will correspond to the queried columns pre-serialization). So we must avoid taking the satic column names
@@ -161,16 +187,21 @@ public abstract class UnfilteredRowIterators
         // (since again, the columns could be different without the information represented by the iterator being
         // different), but removing them entirely is stricly speaking a breaking change (it would create mismatches on
         // upgrade) so we can only do on the next protocol version bump.
-        if (iterator.staticRow() != Rows.EMPTY_STATIC_ROW)
-            iterator.columns().statics.digest(digest);
-        FBUtilities.updateWithBoolean(digest, iterator.isReverseOrder());
-        iterator.staticRow().digest(digest);
+        if (partition.staticRow() != Rows.EMPTY_STATIC_ROW)
+            partition.columns().statics.digest(digest);
+        FBUtilities.updateWithBoolean(digest, partition.isReverseOrder());
+        partition.staticRow().digest(digest);
 
-        while (iterator.hasNext())
-        {
-            Unfiltered unfiltered = iterator.next();
-            unfiltered.digest(digest);
-        }
+        return digest;
+    }
+
+    /**
+     * Digest a single unfiltered.
+     */
+    public static MessageDigest digestUnfiltered(Unfiltered unfiltered, MessageDigest digest)
+    {
+        unfiltered.digest(digest);
+        return digest;
     }
 
     /**
@@ -367,9 +398,10 @@ public abstract class UnfilteredRowIterators
                   mergeStaticRows(iterators, columns.statics, nowInSec, listener, partitionDeletion),
                   reversed,
                   mergeStats(iterators));
-            this.mergeIterator = MergeIterator.get(iterators,
-                                                   reversed ? metadata.comparator.reversed() : metadata.comparator,
-                                                   new MergeReducer(iterators.size(), reversed, nowInSec, listener));
+
+            Comparator<Clusterable> comparator = reversed ? metadata.comparator.reversed() : metadata.comparator;
+            MergeReducer reducer = new MergeReducer(iterators.size(), reversed, partitionDeletion, columns.regulars, nowInSec, listener);
+            this.mergeIterator = MergeIterator.get(iterators, comparator, reducer);
             this.listener = listener;
         }
 
@@ -514,83 +546,87 @@ public abstract class UnfilteredRowIterators
             if (listener != null)
                 listener.close();
         }
+    }
 
-        private class MergeReducer extends MergeIterator.Reducer<Unfiltered, Unfiltered>
+
+    public static class MergeReducer extends Reducer<Unfiltered, Unfiltered>
+    {
+        private final MergeListener listener;
+
+        private Unfiltered.Kind nextKind;
+
+        private final boolean reversed;
+        private final int size;
+
+        private final Row.Merger rowMerger;
+        private RangeTombstoneMarker.Merger markerMerger;
+
+        private final DeletionTime partitionLevelDeletion;
+
+        public MergeReducer(int size, boolean reversed, DeletionTime partitionLevelDeletion, Columns columns, int nowInSec, MergeListener listener)
         {
-            private final MergeListener listener;
+            this.reversed = reversed;
+            this.size = size;
+            this.rowMerger = new Row.Merger(size, nowInSec, columns.size(), columns.hasComplex());
+            this.markerMerger = null;
+            this.listener = listener;
+            this.partitionLevelDeletion = partitionLevelDeletion;
+        }
 
-            private Unfiltered.Kind nextKind;
+        private void maybeInitMarkerMerger()
+        {
+            if (markerMerger == null)
+                markerMerger = new RangeTombstoneMarker.Merger(size, partitionLevelDeletion, reversed);
+        }
 
-            private final boolean reversed;
-            private final int size;
+        @Override
+        public boolean trivialReduceIsTrivial()
+        {
+            // If we have a listener, we must signal it even when we have a single version
+            return listener == null;
+        }
 
-            private final Row.Merger rowMerger;
-            private RangeTombstoneMarker.Merger markerMerger;
-
-            private MergeReducer(int size, boolean reversed, int nowInSec, MergeListener listener)
+        public void reduce(int idx, Unfiltered current)
+        {
+            nextKind = current.kind();
+            if (nextKind == Unfiltered.Kind.ROW)
+                rowMerger.add(idx, (Row) current);
+            else
             {
-                this.reversed = reversed;
-                this.size = size;
-                this.rowMerger = new Row.Merger(size, nowInSec, columns().regulars.size(), columns().regulars.hasComplex());
-                this.markerMerger = null;
-                this.listener = listener;
+                maybeInitMarkerMerger();
+                markerMerger.add(idx, (RangeTombstoneMarker) current);
             }
+        }
 
-            private void maybeInitMarkerMerger()
+        public Unfiltered getReduced()
+        {
+            if (nextKind == Unfiltered.Kind.ROW)
             {
-                if (markerMerger == null)
-                    markerMerger = new RangeTombstoneMarker.Merger(size, partitionLevelDeletion(), reversed);
+                Row merged = rowMerger.merge(markerMerger == null ? partitionLevelDeletion : markerMerger.activeDeletion());
+                if (listener != null)
+                    listener.onMergedRows(merged == null ? BTreeRow.emptyRow(rowMerger.mergedClustering()) : merged, rowMerger.mergedRows());
+                return merged;
             }
-
-            @Override
-            public boolean trivialReduceIsTrivial()
+            else
             {
-                // If we have a listener, we must signal it even when we have a single version
-                return listener == null;
+                maybeInitMarkerMerger();
+                RangeTombstoneMarker merged = markerMerger.merge();
+                if (listener != null)
+                    listener.onMergedRangeTombstoneMarkers(merged, markerMerger.mergedMarkers());
+                return merged;
             }
+        }
 
-            public void reduce(int idx, Unfiltered current)
+        public void onKeyChange()
+        {
+            if (nextKind == Unfiltered.Kind.ROW)
             {
-                nextKind = current.kind();
-                if (nextKind == Unfiltered.Kind.ROW)
-                    rowMerger.add(idx, (Row) current);
-                else
-                {
-                    maybeInitMarkerMerger();
-                    markerMerger.add(idx, (RangeTombstoneMarker) current);
-                }
+                rowMerger.clear();
             }
-
-            protected Unfiltered getReduced()
+            else
             {
-                if (nextKind == Unfiltered.Kind.ROW)
-                {
-                    Row merged = rowMerger.merge(markerMerger == null ? partitionLevelDeletion() : markerMerger.activeDeletion());
-                    if (listener != null)
-                        listener.onMergedRows(merged == null ? BTreeRow.emptyRow(rowMerger.mergedClustering()) : merged, rowMerger.mergedRows());
-                    return merged;
-                }
-                else
-                {
-                    maybeInitMarkerMerger();
-                    RangeTombstoneMarker merged = markerMerger.merge();
-                    if (listener != null)
-                        listener.onMergedRangeTombstoneMarkers(merged, markerMerger.mergedMarkers());
-                    return merged;
-                }
-            }
-
-            protected void onKeyChange()
-            {
-                if (nextKind == Unfiltered.Kind.ROW)
-                {
-                    rowMerger.clear();
-                }
-                else
-                {
-                    if (markerMerger != null)
-                        markerMerger.clear();
-                }
+                if (markerMerger != null)
+                    markerMerger.clear();
             }
         }
     }

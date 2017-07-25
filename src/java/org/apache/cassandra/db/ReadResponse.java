@@ -20,18 +20,20 @@ package org.apache.cassandra.db;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
+import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import io.reactivex.Single;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscription;
 import org.apache.cassandra.utils.versioning.Versioned;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -82,32 +84,41 @@ public abstract class ReadResponse
     {
     }
 
-    public static ReadResponse createDataResponse(UnfilteredPartitionIterator data, ReadCommand command)
+    public static Single<ReadResponse> createDataResponse(Flow<FlowableUnfilteredPartition> partitions, ReadCommand command, boolean forLocalDelivery)
     {
-        return new LocalDataResponse(data, EncodingVersion.last(), command);
+        return forLocalDelivery
+               ? LocalResponse.build(partitions)
+               : LocalDataResponse.build(partitions, EncodingVersion.last(), command);
     }
 
     @VisibleForTesting
-    public static ReadResponse createRemoteDataResponse(UnfilteredPartitionIterator data, ReadCommand command)
+    public static ReadResponse createRemoteDataResponse(Flow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
-        return new RemoteDataResponse(LocalDataResponse.build(data, EncodingVersion.last(), command.columnFilter()), EncodingVersion.last());
+        final EncodingVersion version = EncodingVersion.last();
+        return UnfilteredPartitionsSerializer.serializerForIntraNode(version).serialize(partitions, command.columnFilter())
+                                             .map(buffer -> new RemoteDataResponse(buffer, version))
+                                             .blockingSingle();
     }
 
-    public static ReadResponse createDigestResponse(UnfilteredPartitionIterator data, ReadCommand command)
+    public static Single<ReadResponse> createDigestResponse(Flow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
-        return new DigestResponse(makeDigest(data, command));
+        return makeDigest(partitions, command).map(digest -> new DigestResponse(digest));
     }
 
-    public abstract UnfilteredPartitionIterator makeIterator(ReadCommand command);
-    public abstract ByteBuffer digest(ReadCommand command);
+    public abstract Flow<FlowableUnfilteredPartition> data(ReadCommand command);
+    public abstract Single<ByteBuffer> digest(ReadCommand command);
 
     public abstract boolean isDigestResponse();
 
-    protected static ByteBuffer makeDigest(UnfilteredPartitionIterator iterator, ReadCommand command)
+    protected static Single<ByteBuffer> makeDigest(Flow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
-        MessageDigest digest = FBUtilities.threadLocalMD5Digest();
-        UnfilteredPartitionIterators.digest(iterator, digest, command.digestVersion());
-        return ByteBuffer.wrap(digest.digest());
+        MessageDigest digest = FBUtilities.newMessageDigest("MD5");
+        return UnfilteredPartitionIterators.digest(partitions,
+                                                   // TODO perf. - do we need a cache to replace threadLocalMD5Digest()?
+                                                   digest,
+                                                   command.digestVersion())
+                                           .processToRxCompletable()
+                                           .toSingle(() -> ByteBuffer.wrap(digest.digest()));
     }
 
     private static class DigestResponse extends ReadResponse
@@ -121,18 +132,18 @@ public abstract class ReadResponse
             this.digest = digest;
         }
 
-        public UnfilteredPartitionIterator makeIterator(ReadCommand command)
+        public Flow<FlowableUnfilteredPartition> data(ReadCommand command)
         {
             throw new UnsupportedOperationException();
         }
 
-        public ByteBuffer digest(ReadCommand command)
+        public Single<ByteBuffer> digest(ReadCommand command)
         {
             // We assume that the digest is in the proper version, which bug excluded should be true since this is called with
             // ReadCommand.digestVersion() as argument and that's also what we use to produce the digest in the first place.
             // Validating it's the proper digest in this method would require sending back the digest version along with the
-            // digest which would waste bandwith for little gain.
-            return digest;
+            // digest which would waste bandwidth for little gain.
+            return Single.just(digest);
         }
 
         public boolean isDigestResponse()
@@ -141,30 +152,98 @@ public abstract class ReadResponse
         }
     }
 
-    // built on the owning node responding to a query
-    private static class LocalDataResponse extends DataResponse
+    /**
+     * A local response that is not meant to be serialized. Currently we use an in-memory list of
+     * ImmutableBTreePartition, a possible optimization would be to use the iterator directly, provided
+     * it is not closed and we don't need to iterate more than once (CL.ONE).
+     */
+    private static class LocalResponse extends ReadResponse
     {
-        private LocalDataResponse(UnfilteredPartitionIterator iter, EncodingVersion version, ReadCommand command)
+        private final List<ImmutableBTreePartition> partitions;
+
+        private LocalResponse(List<ImmutableBTreePartition> partitions)
         {
-            super(build(iter, version, command.columnFilter()), version, SerializationHelper.Flag.LOCAL);
+            super();
+            this.partitions = partitions;
         }
 
-        private static ByteBuffer build(UnfilteredPartitionIterator iter, EncodingVersion version, ColumnFilter selection)
+        public static Single<ReadResponse> build(Flow<FlowableUnfilteredPartition> partitions)
         {
-            try (DataOutputBuffer buffer = new DataOutputBuffer())
+            return ImmutableBTreePartition.create(partitions)
+                                          .toList()
+                                          .mapToRxSingle(LocalResponse::new);
+        }
+
+        public Flow<FlowableUnfilteredPartition> data(ReadCommand command)
+        {
+            return new Flow<FlowableUnfilteredPartition>()
             {
-                UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(iter, selection, buffer);
-                return buffer.buffer();
-            }
-            catch (IOException e)
-            {
-                // We're serializing in memory so this shouldn't happen
-                throw new RuntimeException(e);
-            }
+                private int idx = 0;
+                public FlowSubscription subscribe(FlowSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
+                {
+                    return new FlowSubscription()
+                    {
+                        public void request()
+                        {
+                            if (idx < partitions.size())
+                                subscriber.onNext(partitions.get(idx++).unfilteredPartition(command.columnFilter(),
+                                                                                            Slices.ALL,
+                                                                                            command.isReversed()));
+                            else
+                                subscriber.onComplete();
+                        }
+
+                        public void close() throws Exception
+                        {
+                            // no op
+                        }
+
+                        public Throwable addSubscriberChainFromSource(Throwable throwable)
+                        {
+                            return Flow.wrapException(throwable, this);
+                        }
+
+                        public String toString()
+                        {
+                            return Flow.formatTrace("LocalResponse", subscriber);
+                        }
+                    };
+                }
+            };
+        }
+
+        public boolean isDigestResponse()
+        {
+            return false;
+        }
+
+        public Single<ByteBuffer> digest(ReadCommand command)
+        {
+            return makeDigest(data(command), command);
         }
     }
 
-    // built on the coordinator node receiving a response
+    /**
+     * A local response that needs to be serialized, i.e. sent to another node. The iterator
+     * is serialized by the build method and can be closed as soon as this response has been created.
+     */
+    private static class LocalDataResponse extends DataResponse
+    {
+        private LocalDataResponse(ByteBuffer data, EncodingVersion version)
+        {
+            super(data, version, SerializationHelper.Flag.LOCAL);
+        }
+
+        private static Single<ReadResponse> build(Flow<FlowableUnfilteredPartition> partitions, EncodingVersion version, ReadCommand command)
+        {
+            return UnfilteredPartitionsSerializer.serializerForIntraNode(version).serialize(partitions, command.columnFilter())
+                                                 .mapToRxSingle(buffer -> new LocalDataResponse(buffer, version));
+        }
+    }
+
+    /**
+     * A reponse received from a remove node. We kee the response serialized in the byte buffer.
+     */
     private static class RemoteDataResponse extends DataResponse
     {
         protected RemoteDataResponse(ByteBuffer data, EncodingVersion version)
@@ -173,6 +252,10 @@ public abstract class ReadResponse
         }
     }
 
+    /**
+     * The command base class for local or remote responses that stay serialized in a byte buffer,
+     * the data.
+     */
     static abstract class DataResponse extends ReadResponse
     {
         // TODO: can the digest be calculated over the raw bytes now?
@@ -189,29 +272,19 @@ public abstract class ReadResponse
             this.flag = flag;
         }
 
-        public UnfilteredPartitionIterator makeIterator(ReadCommand command)
+        public Flow<FlowableUnfilteredPartition> data(ReadCommand command)
         {
-            try (DataInputBuffer in = new DataInputBuffer(data, true))
-            {
-                // Note that the command parameter shadows the 'command' field and this is intended because
-                // the later can be null (for RemoteDataResponse as those are created in the serializers and
-                // those don't have easy access to the command). This is also why we need the command as parameter here.
-                return UnfilteredPartitionIterators.serializerForIntraNode(version)
-                                                   .deserialize(in, command.metadata(), command.columnFilter(), flag);
-            }
-            catch (IOException e)
-            {
-                // We're deserializing in memory so this shouldn't happen
-                throw new RuntimeException(e);
-            }
+            // Note that the command parameter shadows the 'command' field and this is intended because
+            // the later can be null (for RemoteDataResponse as those are created in the serializers and
+            // those don't have easy access to the command). This is also why we need the command as parameter here.
+            return UnfilteredPartitionsSerializer.serializerForIntraNode(version)
+                                                 .deserialize(data, command.metadata(), command.columnFilter(), flag);
+
         }
 
-        public ByteBuffer digest(ReadCommand command)
+        public Single<ByteBuffer> digest(ReadCommand command)
         {
-            try (UnfilteredPartitionIterator iterator = makeIterator(command))
-            {
-                return makeDigest(iterator, command);
-            }
+            return makeDigest(data(command), command);
         }
 
         public boolean isDigestResponse()

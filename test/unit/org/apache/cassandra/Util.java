@@ -25,7 +25,15 @@ import java.io.IOError;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -33,18 +41,14 @@ import java.util.function.Supplier;
 
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 import com.google.common.collect.Iterators;
 import org.apache.commons.lang3.StringUtils;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
-
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.Directories.DataDirectory;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;
@@ -52,11 +56,15 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.dht.IPartitioner;
-
-import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.ApplicationState;
@@ -64,12 +72,16 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.flow.Flow;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -203,8 +215,8 @@ public class Util
         for (int i=0; i<howMany; i++)
         {
             if(!endpointTokenPrefilled)
-                endpointTokens.add(new BigIntegerToken(String.valueOf(10 * i)));
-            keyTokens.add(new BigIntegerToken(String.valueOf(10 * i + 5)));
+                endpointTokens.add(new Murmur3Partitioner.LongToken(10 * i));
+            keyTokens.add(new Murmur3Partitioner.LongToken(10 * i + 5));
             hostIds.add(hostIdPool.get(i));
         }
 
@@ -283,23 +295,14 @@ public class Util
 
     public static void assertEmptyUnfiltered(ReadCommand command)
     {
-        try (ReadExecutionController executionController = command.executionController();
-             UnfilteredPartitionIterator iterator = command.executeLocally(executionController))
-        {
-            if (iterator.hasNext())
-            {
-                try (UnfilteredRowIterator partition = iterator.next())
-                {
-                    throw new AssertionError("Expected no results for query " + command.toCQLString() + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
-                }
-            }
-        }
+        List<ImmutableBTreePartition> res = getAllUnfiltered(command);
+        if (!res.isEmpty())
+            throw new AssertionError("Expected no results for query " + command.toCQLString() + " but got key " + command.metadata().partitionKeyType.getString(res.get(0).partitionKey().getKey()));
     }
 
     public static void assertEmpty(ReadCommand command)
     {
-        try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController))
+        try (PartitionIterator iterator = command.executeInternalForTests())
         {
             if (iterator.hasNext())
             {
@@ -313,26 +316,13 @@ public class Util
 
     public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
     {
-        List<ImmutableBTreePartition> results = new ArrayList<>();
-        try (ReadExecutionController executionController = command.executionController();
-             UnfilteredPartitionIterator iterator = command.executeLocally(executionController))
-        {
-            while (iterator.hasNext())
-            {
-                try (UnfilteredRowIterator partition = iterator.next())
-                {
-                    results.add(ImmutableBTreePartition.create(partition));
-                }
-            }
-        }
-        return results;
+        return ImmutableBTreePartition.create(command.executeLocally()).toList().blockingSingle();
     }
 
     public static List<FilteredPartition> getAll(ReadCommand command)
     {
         List<FilteredPartition> results = new ArrayList<>();
-        try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController))
+        try (PartitionIterator iterator = command.executeInternalForTests())
         {
             while (iterator.hasNext())
             {
@@ -347,8 +337,7 @@ public class Util
 
     public static Row getOnlyRowUnfiltered(ReadCommand cmd)
     {
-        try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController))
+        try (UnfilteredPartitionIterator iterator = cmd.executeForTests())
         {
             assert iterator.hasNext() : "Expecting one row in one partition but got nothing";
             try (UnfilteredRowIterator partition = iterator.next())
@@ -365,46 +354,51 @@ public class Util
 
     public static Row getOnlyRow(ReadCommand cmd)
     {
-        try (ReadExecutionController executionController = cmd.executionController();
-             PartitionIterator iterator = cmd.executeInternal(executionController))
+        try (PartitionIterator iterator = cmd.executeInternalForTests())
         {
+            Row row;
             assert iterator.hasNext() : "Expecting one row in one partition but got nothing";
             try (RowIterator partition = iterator.next())
             {
-                assert !iterator.hasNext() : "Expecting a single partition but got more";
                 assert partition.hasNext() : "Expecting one row in one partition but got an empty partition";
-                Row row = partition.next();
+                row = partition.next();
                 assert !partition.hasNext() : "Expecting a single row but got more";
-                return row;
             }
+
+            assert !iterator.hasNext() : "Expecting a single partition but got more";
+            return row;
         }
     }
 
     public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd)
     {
-        try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController))
+        try (UnfilteredPartitionIterator iterator = cmd.executeForTests())
         {
+            ImmutableBTreePartition ret;
             assert iterator.hasNext() : "Expecting a single partition but got nothing";
             try (UnfilteredRowIterator partition = iterator.next())
             {
-                assert !iterator.hasNext() : "Expecting a single partition but got more";
-                return ImmutableBTreePartition.create(partition);
+                ret = ImmutableBTreePartition.create(partition);
             }
+
+            assert !iterator.hasNext() : "Expecting a single partition but got more";
+            return ret;
         }
     }
 
     public static FilteredPartition getOnlyPartition(ReadCommand cmd)
     {
-        try (ReadExecutionController executionController = cmd.executionController();
-             PartitionIterator iterator = cmd.executeInternal(executionController))
+        try (PartitionIterator iterator = cmd.executeInternalForTests())
         {
+            FilteredPartition ret;
             assert iterator.hasNext() : "Expecting a single partition but got nothing";
             try (RowIterator partition = iterator.next())
             {
-                assert !iterator.hasNext() : "Expecting a single partition but got more";
-                return FilteredPartition.create(partition);
+                ret = FilteredPartition.create(partition);
             }
+
+            assert !iterator.hasNext() : "Expecting a single partition but got more";
+            return ret;
         }
     }
 
@@ -440,6 +434,29 @@ public class Util
         {
             while (iter.hasNext())
                 iter.next();
+        }
+    }
+
+    public static Flow<DecoratedKey> nonEmptyKeys(FlowablePartitionBase partition)
+    {
+        if (!partition.staticRow.isEmpty() || !partition.header.partitionLevelDeletion.isLive())
+        {
+            partition.unused();
+            return Flow.just(partition.header.partitionKey);
+        }
+        return partition.content.take(1).map(x -> partition.header.partitionKey);
+    }
+
+    public static long size(Flow<FlowableUnfilteredPartition> partitions, int nowInSec)
+    {
+        try
+        {
+            return FlowablePartitions.filterAndSkipEmpty(partitions, nowInSec)
+                                     .countBlocking();
+        }
+        catch (Exception e)
+        {
+            throw Throwables.propagate(e);
         }
     }
 
@@ -651,9 +668,9 @@ public class Util
         }
     }
 
-    public static UnfilteredPartitionIterator executeLocally(PartitionRangeReadCommand command,
-                                                             ColumnFamilyStore cfs,
-                                                             ReadExecutionController controller)
+    public static Flow<FlowableUnfilteredPartition> executeLocally(PartitionRangeReadCommand command,
+                                                                   ColumnFamilyStore cfs,
+                                                                   ReadExecutionController controller)
     {
         return new InternalPartitionRangeReadCommand(command).queryStorageInternal(cfs, controller);
     }
@@ -673,8 +690,8 @@ public class Util
                   Optional.empty());
         }
 
-        private UnfilteredPartitionIterator queryStorageInternal(ColumnFamilyStore cfs,
-                                                                 ReadExecutionController controller)
+        private Flow<FlowableUnfilteredPartition> queryStorageInternal(ColumnFamilyStore cfs,
+                                                                       ReadExecutionController controller)
         {
             return queryStorage(cfs, controller);
         }

@@ -22,14 +22,15 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -37,6 +38,7 @@ import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Basic custom index implementation for testing.
@@ -110,34 +112,40 @@ public class StubIndex implements Index
                 beginCalls++;
             }
 
-            public void partitionDelete(DeletionTime deletionTime)
+            public Completable partitionDelete(DeletionTime deletionTime)
             {
                 partitionDeletions.add(deletionTime);
+                return Completable.complete();
             }
 
-            public void rangeTombstone(RangeTombstone tombstone)
+            public Completable rangeTombstone(RangeTombstone tombstone)
             {
                 rangeTombstones.add(tombstone);
+                return Completable.complete();
             }
 
-            public void insertRow(Row row)
+            public Completable insertRow(Row row)
             {
                 rowsInserted.add(row);
+                return Completable.complete();
             }
 
-            public void removeRow(Row row)
+            public Completable removeRow(Row row)
             {
                 rowsDeleted.add(row);
+                return Completable.complete();
             }
 
-            public void updateRow(Row oldRowData, Row newRowData)
+            public Completable updateRow(Row oldRowData, Row newRowData)
             {
                 rowsUpdated.add(Pair.create(oldRowData, newRowData));
+                return Completable.complete();
             }
 
-            public void finish()
+            public Completable finish()
             {
                 finishCalls++;
+				return Completable.complete();
             }
         };
     }
@@ -209,8 +217,8 @@ public class StubIndex implements Index
         return (controller) -> Util.executeLocally((PartitionRangeReadCommand)command, baseCfs, controller);
     }
 
-    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand readCommand)
+    public BiFunction<Flow<FlowablePartition>, ReadCommand, Flow<FlowablePartition>> postProcessorFor(ReadCommand readCommand)
     {
-        return (iter, command) -> iter;
+        return (partitions, command) -> partitions;
     }
 }

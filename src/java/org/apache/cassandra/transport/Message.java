@@ -17,34 +17,35 @@
  */
 package org.apache.cassandra.transport;
 
-import java.util.ArrayList;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.EnumSet;
-import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import com.google.common.base.Predicate;
+import com.google.common.collect.ImmutableSet;
+import io.netty.util.internal.shaded.org.jctools.queues.MpscArrayQueue;
+import io.reactivex.Single;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.MessageToMessageEncoder;
-
-import com.google.common.base.Predicate;
-import com.google.common.collect.ImmutableSet;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.service.ClientWarn;
-import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
@@ -103,7 +104,7 @@ public abstract class Message
         AUTH_SUCCESS   (16, Direction.RESPONSE, AuthSuccess.codec),
 
         // Private messages
-        CANCEL         (255, Direction.REQUEST,  CancelMessage.codec);
+        CANCEL         (255, Direction.REQUEST, CancelMessage.codec);
 
         public final int opcode;
         public final Direction direction;
@@ -213,7 +214,7 @@ public abstract class Message
                 throw new IllegalArgumentException();
         }
 
-        public abstract Response execute(QueryState queryState, long queryStartNanoTime);
+        public abstract Single<? extends Response> execute(QueryState queryState, long queryStartNanoTime);
 
         public void setTracingRequested()
         {
@@ -453,52 +454,85 @@ public abstract class Message
             }
         }
 
+        private static class ChannelFlusher
+        {
+            final ChannelHandlerContext ctx;
+            final List<FlushItem> flushItems = new ArrayList<>();
+            int runsSinceFlush = 0;
+
+            ChannelFlusher(ChannelHandlerContext ctx)
+            {
+                this.ctx = ctx;
+            }
+
+            void add(FlushItem item)
+            {
+                ctx.write(item.response, ctx.voidPromise());
+                flushItems.add(item);
+            }
+
+            boolean maybeFlush()
+            {
+                if (runsSinceFlush > 2 || flushItems.size() > 50)
+                {
+                    ctx.flush();
+                    for (FlushItem item : flushItems)
+                        item.sourceFrame.release();
+
+                    flushItems.clear();
+
+                    runsSinceFlush = 0;
+                    return true;
+                }
+
+                runsSinceFlush++;
+                return false;
+            }
+
+        }
+
         private static final class Flusher implements Runnable
         {
             final EventLoop eventLoop;
-            final ConcurrentLinkedQueue<FlushItem> queued = new ConcurrentLinkedQueue<>();
+            final MpscArrayQueue<FlushItem> queued = new MpscArrayQueue<>(1 << 16);
             final AtomicBoolean running = new AtomicBoolean(false);
-            final HashSet<ChannelHandlerContext> channels = new HashSet<>();
-            final List<FlushItem> flushed = new ArrayList<>();
-            int runsSinceFlush = 0;
+            final Map<ChannelHandlerContext, ChannelFlusher> channels = new IdentityHashMap<>();
+            final List<ChannelHandlerContext> finishedChannels = new ArrayList<>();
             int runsWithNoWork = 0;
             private Flusher(EventLoop eventLoop)
             {
                 this.eventLoop = eventLoop;
             }
+
             void start()
             {
                 if (!running.get() && running.compareAndSet(false, true))
-                {
                     this.eventLoop.execute(this);
-                }
             }
+
             public void run()
             {
 
                 boolean doneWork = false;
-                FlushItem flush;
-                while ( null != (flush = queued.poll()) )
+                FlushItem item;
+                while ( null != (item = queued.poll()) )
                 {
-                    channels.add(flush.ctx);
-                    flush.ctx.write(flush.response, flush.ctx.voidPromise());
-                    flushed.add(flush);
+                    channels.computeIfAbsent(item.ctx, ChannelFlusher::new).add(item);
                     doneWork = true;
                 }
 
-                runsSinceFlush++;
-
-                if (!doneWork || runsSinceFlush > 2 || flushed.size() > 50)
+                for (Map.Entry<ChannelHandlerContext, ChannelFlusher> c : channels.entrySet())
                 {
-                    for (ChannelHandlerContext channel : channels)
-                        channel.flush();
-                    for (FlushItem item : flushed)
-                        item.sourceFrame.release();
-
-                    channels.clear();
-                    flushed.clear();
-                    runsSinceFlush = 0;
+                    if (c.getKey().channel().isActive())
+                        c.getValue().maybeFlush();
+                    else
+                        finishedChannels.add(c.getKey());
                 }
+
+                for (ChannelHandlerContext c : finishedChannels)
+                    channels.remove(c);
+
+                finishedChannels.clear();
 
                 if (doneWork)
                 {
@@ -510,7 +544,12 @@ public abstract class Message
                     if (++runsWithNoWork > 5)
                     {
                         running.set(false);
-                        if (queued.isEmpty() || !running.compareAndSet(false, true))
+
+                        if (queued.isEmpty())
+                            return;
+
+                        //Somebody already took over so we can exit
+                        if (!running.compareAndSet(false, true))
                             return;
                     }
                 }
@@ -529,48 +568,78 @@ public abstract class Message
         @Override
         public void channelRead0(ChannelHandlerContext ctx, Request request)
         {
-            final Response response;
             final ServerConnection connection;
             long queryStartNanoTime = System.nanoTime();
 
-            try
-            {
-                assert request.connection() instanceof ServerConnection;
-                connection = (ServerConnection)request.connection();
-                if (connection.getVersion().isGreaterOrEqualTo(ProtocolVersion.V4))
-                    ClientWarn.instance.captureWarnings();
+            assert request.connection() instanceof ServerConnection;
+            connection = (ServerConnection) request.connection();
 
-                QueryState qstate = connection.validateNewMessage(request, connection.getVersion());
+            // This resets any Tracing or ClientWarn thread local state
+            ExecutorLocals.set(null);
 
-                logger.trace("Received: {}, v={}", request, connection.getVersion());
-                response = request.execute(qstate, queryStartNanoTime);
+            if (connection.getVersion().isGreaterOrEqualTo(ProtocolVersion.V4))
+                ClientWarn.instance.captureWarnings();
 
-                if (!response.sendToClient)
-                {
-                    request.getSourceFrame().release();
-                    return;
+            QueryState qstate = connection.validateNewMessage(request, connection.getVersion());
+            if (logger.isTraceEnabled())
+                logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
+
+            Single<? extends Response> req = request.execute(qstate, queryStartNanoTime);
+            connection.onNewRequest();
+
+            req.subscribe(
+                // onSuccess
+                response -> {
+                    try
+                    {
+                        if (!response.sendToClient)
+                        {
+                            request.getSourceFrame().release();
+                            return;
+                        }
+                        response.setStreamId(request.getStreamId());
+                        response.setWarnings(ClientWarn.instance.getWarnings());
+                        response.attach(connection);
+                        connection.applyStateTransition(request.type, response.type);
+
+                        if (logger.isTraceEnabled())
+                            logger.trace("Responding: {}, v={} ON {}", response, connection.getVersion(), Thread.currentThread().getName());
+
+                        flush(new FlushItem(ctx, response, request.getSourceFrame()));
+                        ClientWarn.instance.resetWarnings();
+                    }
+                    finally
+                    {
+                        connection.onRequestCompleted();
+                    }
+                },
+
+                // onError
+                t -> {
+                    try
+                    {
+                        if (logger.isTraceEnabled())
+                            logger.trace("Responding with error: {}, v={} ON {}", t.getMessage(), connection.getVersion(), Thread.currentThread().getName());
+
+                        JVMStabilityInspector.inspectThrowable(t);
+                        UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
+                        Message response = ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId());
+                        flush(new FlushItem(ctx, response, request.getSourceFrame()));
+                        ClientWarn.instance.resetWarnings();
+                    }
+                    finally
+                    {
+                        connection.onRequestCompleted();
+                    }
                 }
-                response.setStreamId(request.getStreamId());
-                response.setWarnings(ClientWarn.instance.getWarnings());
-                response.attach(connection);
-                connection.applyStateTransition(request.type, response.type);
-            }
-            catch (Throwable t)
-            {
-                JVMStabilityInspector.inspectThrowable(t);
-                UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
-                flush(new FlushItem(ctx, ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId()), request.getSourceFrame()));
-                return;
-            }
-            finally
-            {
-                ClientWarn.instance.resetWarnings();
-            }
-
-            logger.trace("Responding: {}, v={}", response, connection.getVersion());
-            flush(new FlushItem(ctx, response, request.getSourceFrame()));
+            );
         }
 
+        /**
+         * Aggregates writes from this event loop to be flushed at once
+         * This method will only be called from the eventloop itself so is threadsafe
+         * @param item
+         */
         private void flush(FlushItem item)
         {
             EventLoop loop = item.ctx.channel().eventLoop();
@@ -582,7 +651,8 @@ public abstract class Message
                     flusher = alt;
             }
 
-            flusher.queued.add(item);
+            if( !flusher.queued.offer(item) )
+                throw new RuntimeException("Backpressure");
             flusher.start();
         }
 

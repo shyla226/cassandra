@@ -87,7 +87,7 @@ public class BufferPool
 
     public static ByteBuffer get(int size, BufferType bufferType)
     {
-        boolean direct = bufferType == BufferType.OFF_HEAP;
+        boolean direct = bufferType != BufferType.ON_HEAP;
         if (DISABLED || !direct)
             return allocate(size, !direct);
         else
@@ -107,7 +107,7 @@ public class BufferPool
     {
         return onHeap
                ? ByteBuffer.allocate(size)
-               : ByteBuffer.allocateDirect(size);
+               : BufferType.OFF_HEAP_ALIGNED.allocate(size);
     }
 
     private static ByteBuffer takeFromPool(int size, boolean allocateOnHeapWhenExhausted)
@@ -277,7 +277,7 @@ public class BufferPool
             Chunk chunk;
             try
             {
-                chunk = new Chunk(allocateDirectAligned(MACRO_CHUNK_SIZE));
+                chunk = new Chunk(BufferType.OFF_HEAP_ALIGNED.allocate(MACRO_CHUNK_SIZE));
             }
             catch (OutOfMemoryError oom)
             {
@@ -524,30 +524,6 @@ public class BufferPool
                 }
             }
         });
-    }
-
-    private static ByteBuffer allocateDirectAligned(int capacity)
-    {
-        int align = MemoryUtil.pageSize();
-        if (Integer.bitCount(align) != 1)
-            throw new IllegalArgumentException("Alignment must be a power of 2");
-
-        ByteBuffer buffer = ByteBuffer.allocateDirect(capacity + align);
-        long address = MemoryUtil.getAddress(buffer);
-        long offset = address & (align -1); // (address % align)
-
-        if (offset == 0)
-        { // already aligned
-            buffer.limit(capacity);
-        }
-        else
-        { // shift by offset
-            int pos = (int)(align - offset);
-            buffer.position(pos);
-            buffer.limit(pos + capacity);
-        }
-
-        return buffer.slice();
     }
 
     /**

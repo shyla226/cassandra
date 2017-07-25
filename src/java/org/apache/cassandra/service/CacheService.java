@@ -57,6 +57,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class CacheService implements CacheServiceMBean
 {
@@ -415,11 +416,17 @@ public class CacheService implements CacheServiceMBean
                 {
                     DecoratedKey key = cfs.decorateKey(buffer);
                     int nowInSec = FBUtilities.nowInSeconds();
+
                     SinglePartitionReadCommand cmd = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), nowInSec, key);
-                    try (ReadExecutionController controller = cmd.executionController(); UnfilteredRowIterator iter = cmd.queryMemtableAndDisk(cfs, controller))
+                    try (ReadExecutionController controller = cmd.executionController())
                     {
-                        CachedPartition toCache = CachedBTreePartition.create(DataLimits.cqlLimits(rowsToCache).filter(iter, nowInSec, true), nowInSec);
-                        return Pair.create(new RowCacheKey(cfs.metadata(), key), toCache);
+                        Flow<FlowableUnfilteredPartition> flow = cmd.deferredQuery(cfs, controller);
+                        try (UnfilteredRowIterator iter = FlowablePartitions.toIterator(DataLimits.cqlLimits(rowsToCache)
+                                                                                                  .truncateUnfiltered(flow.blockingSingle(), nowInSec, true)))
+                        {
+                            CachedPartition toCache = CachedBTreePartition.create(iter, nowInSec);
+                            return Pair.create(new RowCacheKey(cfs.metadata(), key), toCache);
+                        }
                     }
                 }
             });

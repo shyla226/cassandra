@@ -33,7 +33,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
-import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -60,6 +59,29 @@ import static org.junit.Assert.fail;
 
 public class TWCSMultiWriterTest extends CQLTester
 {
+    // some of the tests in this test suite rely on the exact sstables and therefore the async cleanup
+    // in CQLTester causes flakiness due to the extra flushing that occurs when dropping tables,
+    // using KEYSPACE_PER_TEST ensures that cleanup is done synchronously
+    // and no extra flushing occurs
+
+    @Override
+    public String createTable(String query)
+    {
+        return super.createTable(KEYSPACE_PER_TEST, query);
+    }
+
+    @Override
+    public UntypedResultSet execute(String query, Object... values) throws Throwable
+    {
+        return super.executeFormattedQuery(formatQuery(KEYSPACE_PER_TEST, query), values);
+    }
+
+    @Override
+    public ColumnFamilyStore getCurrentColumnFamilyStore()
+    {
+        return super.getCurrentColumnFamilyStore(KEYSPACE_PER_TEST);
+    }
+
     @Test
     public void testSimpleSplittingPartitions() throws Throwable
     {
@@ -80,8 +102,7 @@ public class TWCSMultiWriterTest extends CQLTester
                                                                      dr,
                                                                      Optional.empty());
         TWCSMultiWriter.BucketIndexer indexes = TWCSMultiWriter.createBucketIndexes(TimeUnit.MINUTES, 1);
-        try (ReadExecutionController executionController = rc.executionController();
-             UnfilteredPartitionIterator pi = rc.executeLocally(executionController))
+        try (UnfilteredPartitionIterator pi = rc.executeForTests())
         {
             while (pi.hasNext())
             {

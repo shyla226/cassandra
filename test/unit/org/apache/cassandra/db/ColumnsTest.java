@@ -26,6 +26,7 @@ import java.util.function.Predicate;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.junit.AfterClass;
 import org.junit.Test;
 

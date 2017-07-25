@@ -46,12 +46,15 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
+import io.reactivex.Observable;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.IndexTarget;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
@@ -68,6 +71,7 @@ import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.pager.SinglePartitionPager;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -199,7 +203,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     }
 
     @SuppressWarnings("unchecked")
-    private synchronized Future<?> createIndex(IndexMetadata indexDef)
+    private Index createIndex(IndexMetadata indexDef)
     {
         final Index index = createInstance(indexDef);
         index.register(this);
@@ -207,9 +211,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         // now mark as building prior to initializing
         markIndexesBuilding(ImmutableSet.of(index), true);
 
+       return index;
+    }
+
+    private Future<?> buildIndex(final Index index)
+    {
         Callable<?> initialBuildTask = null;
         // if the index didn't register itself, we can probably assume that no initialization needs to happen
-        if (indexes.containsKey(indexDef.name))
+        if (indexes.containsKey(index.getIndexMetadata().name))
         {
             try
             {
@@ -256,12 +265,34 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      *
      * @param indexDef the IndexMetadata describing the index
      */
+    @VisibleForTesting
     public synchronized Future<?> addIndex(IndexMetadata indexDef)
     {
         if (indexes.containsKey(indexDef.name))
             return reloadIndex(indexDef);
         else
-            return createIndex(indexDef);
+            return buildIndex(createIndex(indexDef));
+    }
+
+    /**
+     * Create the table indexes, and then build them asynchronously.
+     *
+     * Note that we need to postpone the build until after all indexes
+     * have been created because of a potential race between flushing the system
+     * index info tables (done by {@link #markIndexesBuilding(Set, boolean)} and
+     * indexing the partition (done by {@link #indexPartition(DecoratedKey, Set, int)}),
+     * see APOLLO-882 for more details.
+     *
+     * @param metadata - the table metadata that contains the metadata of the indexes to create and build
+     */
+    public synchronized void loadIndexesAsync(TableMetadata metadata)
+    {
+        List<Index> indexes = new ArrayList<>(metadata.indexes.size());
+        for (IndexMetadata info : metadata.indexes)
+            indexes.add(createIndex(info));
+
+        for (Index index : indexes)
+            buildIndex(index);
     }
 
     /**
@@ -756,7 +787,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         if (indexes.isEmpty())
             return;
 
-        List<Future<?>> wait = new ArrayList<>();
+        List<Observable<CommitLogPosition>> wait = new ArrayList<>();
         List<Index> nonCfsIndexes = new ArrayList<>();
 
         // for each CFS backed index, submit a flush task which we'll wait on for completion
@@ -765,12 +796,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             indexes.forEach(index ->
                             index.getBackingTable()
-                                 .map(cfs -> wait.add(cfs.forceFlush()))
+                                 .map(cfs -> wait.add(cfs.forceFlush().toObservable()))
                                  .orElseGet(() -> nonCfsIndexes.add(index)));
         }
-
+        Observable.merge(wait).blockingSubscribe();
         executeAllBlocking(nonCfsIndexes.stream(), Index::getBlockingFlushTask, callback);
-        FBUtilities.waitOnFutures(wait);
     }
 
     /**
@@ -780,8 +810,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         Set<String> allIndexNames = new HashSet<>();
         indexes.values().stream()
-               .map(i -> i.getIndexMetadata().name)
-               .forEach(allIndexNames::add);
+                        .map(i -> i.getIndexMetadata().name)
+                        .forEach(allIndexNames::add);
         return SystemKeyspace.getBuiltIndexes(baseCfs.keyspace.getName(), allIndexNames);
     }
 
@@ -822,9 +852,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             SinglePartitionPager pager = new SinglePartitionPager(cmd, null, ProtocolVersion.CURRENT);
             while (!pager.isExhausted())
             {
-                try (ReadExecutionController controller = cmd.executionController();
-                     OpOrder.Group writeGroup = Keyspace.writeOrder.start();
-                     UnfilteredPartitionIterator page = pager.fetchPageUnfiltered(pageSize, controller, baseCfs.metadata()))
+                try (OpOrder.Group writeGroup = Keyspace.writeOrder.start();
+                     UnfilteredPartitionIterator page = FlowablePartitions.toPartitions(pager.fetchPageUnfiltered(pageSize, baseCfs.metadata()),
+                                                                                        baseCfs.metadata()))
                 {
                     if (!page.hasNext())
                         break;
@@ -849,8 +879,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                         if (!readStatic)
                         {
                             if (!partition.staticRow().isEmpty())
-                                indexers.forEach(indexer -> indexer.insertRow(partition.staticRow()));
-                            indexers.forEach((Index.Indexer i) -> i.partitionDelete(partition.partitionLevelDeletion()));
+                                indexers.forEach(indexer -> indexer.insertRow(partition.staticRow()).blockingAwait());
+                            indexers.forEach((Index.Indexer i) -> i.partitionDelete(partition.partitionLevelDeletion()).blockingAwait());
                             readStatic = true;
                         }
 
@@ -863,7 +893,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                             if (unfilteredRow.isRow())
                             {
                                 Row row = (Row) unfilteredRow;
-                                indexers.forEach(indexer -> indexer.insertRow(row));
+                                indexers.forEach(indexer -> indexer.insertRow(row).blockingAwait());
                             }
                             else
                             {
@@ -878,10 +908,10 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                         {
                             Iterator<RangeTombstone> iter = deletionInfo.rangeIterator(false);
                             while (iter.hasNext())
-                                indexers.forEach(indexer -> indexer.rangeTombstone(iter.next()));
+                                indexers.forEach(indexer -> indexer.rangeTombstone(iter.next()).blockingAwait());
                         }
 
-                        indexers.forEach(Index.Indexer::finish);
+                        indexers.forEach(indexer -> indexer.finish().blockingAwait());
                     }
                 }
             }
@@ -942,7 +972,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                                                     nowInSec);
         indexTransaction.start();
         indexTransaction.onPartitionDeletion(new DeletionTime(FBUtilities.timestampMicros(), nowInSec));
-        indexTransaction.commit();
+        indexTransaction.commit().blockingAwait();
 
         while (partition.hasNext())
         {
@@ -955,7 +985,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                                      nowInSec);
             indexTransaction.start();
             indexTransaction.onRowDelete((Row) unfiltered);
-            indexTransaction.commit();
+            indexTransaction.commit().blockingAwait();
         }
     }
 
@@ -1144,12 +1174,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     private static final class WriteTimeTransaction implements UpdateTransaction
     {
         private final Index.Indexer[] indexers;
+        private Completable allCompletables;
 
         private WriteTimeTransaction(Index.Indexer... indexers)
         {
             // don't allow null indexers, if we don't need any use a NullUpdater object
             for (Index.Indexer indexer : indexers) assert indexer != null;
             this.indexers = indexers;
+            this.allCompletables = Completable.complete();
         }
 
         public void start()
@@ -1161,19 +1193,46 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         public void onPartitionDeletion(DeletionTime deletionTime)
         {
             for (Index.Indexer indexer : indexers)
-                indexer.partitionDelete(deletionTime);
+            {
+                try
+                {
+                    allCompletables = allCompletables.concatWith(indexer.partitionDelete(deletionTime));
+                }
+                catch (Exception exc)
+                {
+                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                }
+            }
         }
 
         public void onRangeTombstone(RangeTombstone tombstone)
         {
             for (Index.Indexer indexer : indexers)
-                indexer.rangeTombstone(tombstone);
+            {
+                try
+                {
+                    allCompletables = allCompletables.concatWith(indexer.rangeTombstone(tombstone));
+                }
+                catch (Exception exc)
+                {
+                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                }
+            }
         }
 
         public void onInserted(Row row)
         {
             for (Index.Indexer indexer : indexers)
-                indexer.insertRow(row);
+            {
+                try
+                {
+                    allCompletables = allCompletables.concatWith(indexer.insertRow(row));
+                }
+                catch (Exception exc)
+                {
+                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                }
+            }
         }
 
         public void onUpdated(Row existing, Row updated)
@@ -1213,14 +1272,35 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             Rows.diff(diffListener, updated, existing);
             Row oldRow = toRemove.build();
             Row newRow = toInsert.build();
+
             for (Index.Indexer indexer : indexers)
-                indexer.updateRow(oldRow, newRow);
+            {
+                try
+                {
+                    allCompletables = allCompletables.concatWith(indexer.updateRow(oldRow, newRow));
+                }
+                catch (Exception exc)
+                {
+                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                }
+            }
         }
 
-        public void commit()
+        public Completable commit()
         {
             for (Index.Indexer indexer : indexers)
-                indexer.finish();
+            {
+                try
+                {
+                    allCompletables = allCompletables.concatWith(indexer.finish());
+                }
+                catch (Exception exc)
+                {
+                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                }
+            }
+
+            return allCompletables;
         }
 
         private boolean shouldCleanupOldValue(Cell oldCell, Cell newCell)
@@ -1318,26 +1398,34 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                     rows[i] = builders[i].build();
         }
 
-        public void commit()
+        public Completable commit()
         {
             if (rows == null)
-                return;
+                return Completable.complete();
 
-            try (OpOrder.Group opGroup = Keyspace.writeOrder.start())
-            {
-                for (Index index : indexes)
-                {
-                    Index.Indexer indexer = index.indexerFor(key, columns, nowInSec, opGroup, Type.COMPACTION);
-                    if (indexer == null)
-                        continue;
+            return Completable.using(() -> Keyspace.writeOrder.start(), // resourceFactory
 
-                    indexer.begin();
-                    for (Row row : rows)
-                        if (row != null)
-                            indexer.removeRow(row);
-                    indexer.finish();
-                }
-            }
+                                     (opOrder) -> Completable.defer(() ->  // completableFactory
+                                          {
+                                              Completable r = Completable.complete();
+                                              for (Index index : indexes)
+                                              {
+                                                  Index.Indexer indexer = index.indexerFor(key, columns, nowInSec, opOrder, Type.COMPACTION);
+                                                  if (indexer == null)
+                                                      continue;
+
+                                                  indexer.begin();
+                                                  for (Row row : rows)
+                                                      if (row != null)
+                                                          r = r.concatWith(indexer.removeRow(row));
+
+                                                  r = r.concatWith(indexer.finish());
+                                              }
+
+                                              return r;
+                                          }),
+
+                                     (opOrder) -> opOrder.close());  // resourceDisposer
         }
     }
 
@@ -1382,30 +1470,37 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             this.row = row;
         }
 
-        public void commit()
+        public Completable commit()
         {
             if (row == null && partitionDelete == null)
-                return;
+                return Completable.complete();
 
-            try (OpOrder.Group opGroup = Keyspace.writeOrder.start())
-            {
-                for (Index index : indexes)
-                {
-                    Index.Indexer indexer = index.indexerFor(key, columns, nowInSec, opGroup, Type.CLEANUP);
-                    if (indexer == null)
-                        continue;
+            return Completable.using(() -> Keyspace.writeOrder.start(), // resourceFactory
 
-                    indexer.begin();
+                                     (opOrder) -> Completable.defer(() -> // completableFactory
+                                          {
+                                              Completable r = Completable.complete();
 
-                    if (partitionDelete != null)
-                        indexer.partitionDelete(partitionDelete);
+                                              for (Index index : indexes)
+                                              {
+                                                  Index.Indexer indexer = index.indexerFor(key, columns, nowInSec, opOrder, Type.CLEANUP);
+                                                  if (indexer == null)
+                                                      continue;
 
-                    if (row != null)
-                        indexer.removeRow(row);
+                                                  indexer.begin();
 
-                    indexer.finish();
-                }
-            }
+                                                  if (partitionDelete != null)
+                                                      r = r.concatWith(indexer.partitionDelete(partitionDelete));
+
+                                                  if (row != null)
+                                                      r = r.concatWith(indexer.removeRow(row));
+
+                                                  r = r.concatWith(indexer.finish());
+                                              }
+                                              return r;
+                                          }),
+
+                                     (opOrder) -> opOrder.close());  // resourceDisposer
         }
     }
 

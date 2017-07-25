@@ -18,17 +18,19 @@
 package org.apache.cassandra.service.pager;
 
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.AbstractIterator;
 
 import java.util.Arrays;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Pager over a list of ReadCommand.
@@ -46,6 +48,8 @@ import org.apache.cassandra.service.ClientState;
  */
 public class MultiPartitionPager implements QueryPager
 {
+    private static final Logger logger = LoggerFactory.getLogger(MultiPartitionPager.class);
+
     private final SinglePartitionPager[] pagers;
     private final DataLimits limit;
 
@@ -117,6 +121,9 @@ public class MultiPartitionPager implements QueryPager
             return null;
 
         PagingState state = pagers[current].state(inclusive);
+        if (logger.isTraceEnabled())
+            logger.trace("{} - state: {}, current: {}", hashCode(), state, current);
+
         return new PagingState(pagers[current].key(),
                                state == null ? null : state.rowMark,
                                remaining,
@@ -134,111 +141,99 @@ public class MultiPartitionPager implements QueryPager
             if (!pagers[current].isExhausted())
                 return false;
 
+            if (logger.isTraceEnabled())
+                logger.trace("{}, current: {} -> {}", hashCode(), current, current+1);
             current++;
         }
         return true;
     }
 
-    public ReadExecutionController executionController()
-    {
-        // Note that for all pagers, the only difference is the partition key to which it applies, so in practice we
-        // can use any of the sub-pager ReadOrderGroup group to protect the whole pager
-        for (int i = current; i < pagers.length; i++)
-        {
-            if (pagers[i] != null)
-                return pagers[i].executionController();
-        }
-        throw new AssertionError("Shouldn't be called on an exhausted pager");
-    }
-
-    @SuppressWarnings("resource") // iter closed via countingIter
-    public PartitionIterator fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
+    public Flow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
     throws RequestValidationException, RequestExecutionException
     {
         int toQuery = Math.min(remaining, pageSize);
 
-        return new PagersIterator(toQuery, consistency, clientState, null, queryStartNanoTime, forContinuousPaging);
+        return new MultiPartitions(toQuery, consistency, clientState, queryStartNanoTime, forContinuousPaging).partitions();
     }
 
-    @SuppressWarnings("resource") // iter closed via countingIter
-    public PartitionIterator fetchPageInternal(int pageSize, ReadExecutionController executionController)
+    public Flow<FlowablePartition> fetchPageInternal(int pageSize)
     throws RequestValidationException, RequestExecutionException
     {
         int toQuery = Math.min(remaining, pageSize);
 
-        return new PagersIterator(toQuery, null, null, executionController, System.nanoTime(), false);
+        return new MultiPartitions(toQuery, null, null, System.nanoTime(), false).partitions();
     }
 
-    private class PagersIterator extends AbstractIterator<RowIterator> implements PartitionIterator
+    private class MultiPartitions
     {
         private final int pageSize;
-        private PartitionIterator result;
-        private boolean closed;
         private final long queryStartNanoTime;
 
         // For distributed and local queries, will be null for internal queries
         private final ConsistencyLevel consistency;
         // For distributed queries, will be null for internal and local queries
         private final ClientState clientState;
-        // For internal queries, will be null for distributed queries
-        private final ReadExecutionController executionController;
 
         private final boolean forContinuousPaging;
 
         private int pagerMaxRemaining;
         private int counted;
 
-        public PagersIterator(int pageSize,
+        public MultiPartitions(int pageSize,
                               ConsistencyLevel consistency,
                               ClientState clientState,
-                              ReadExecutionController executionController,
                               long queryStartNanoTime,
                               boolean forContinuousPaging)
         {
             this.pageSize = pageSize;
             this.consistency = consistency;
             this.clientState = clientState;
-            this.executionController = executionController;
             this.queryStartNanoTime = queryStartNanoTime;
             this.forContinuousPaging = forContinuousPaging;
+            this.pagerMaxRemaining = pagers[current].maxRemaining();
         }
 
-        protected RowIterator computeNext()
+        Flow<FlowablePartition> partitions()
         {
-            while (result == null || !result.hasNext())
-            {
-                if (result != null)
-                {
-                    result.close();
-                    counted += pagerMaxRemaining - pagers[current].maxRemaining();
-                }
+            return fetchSubPage(pageSize).concatWith(this::moreContents)
+                                         .doOnClose(this::close);
+        }
 
-                // We are done if we have reached the page size or in the case of GROUP BY if the current pager
-                // is not exhausted.
-                boolean isDone = counted >= pageSize
-                        || (result != null && limit.isGroupByLimit() && !pagers[current].isExhausted());
+        protected Flow<FlowablePartition> moreContents()
+        {
+            counted += pagerMaxRemaining - pagers[current].maxRemaining();
 
-                // isExhausted() will sets us on the first non-exhausted pager
-                if (isDone || isExhausted())
-                {
-                    closed = true;
-                    return endOfData();
-                }
+            // We are done if we have reached the page size or in the case of GROUP BY if the current pager
+            // is not exhausted.
+            boolean isDone = counted >= pageSize
+                             || (limit.isGroupByLimit() && !pagers[current].isExhausted());
 
-                pagerMaxRemaining = pagers[current].maxRemaining();
-                int toQuery = pageSize - counted;
-                result = consistency == null
-                       ? pagers[current].fetchPageInternal(toQuery, executionController)
-                       : pagers[current].fetchPage(toQuery, consistency, clientState, queryStartNanoTime, forContinuousPaging);
-            }
-            return result.next();
+            if (logger.isTraceEnabled())
+                logger.trace("{} - moreContents, current: {}, counted: {}, isDone: {}", MultiPartitionPager.this.hashCode(), current, counted, isDone);
+
+            // isExhausted() will sets us on the first non-exhausted pager
+            if (isDone || isExhausted())
+                return null;
+
+            pagerMaxRemaining = pagers[current].maxRemaining();
+            int toQuery = pageSize - counted;
+            return fetchSubPage(toQuery);
+
+        }
+
+        private Flow<FlowablePartition> fetchSubPage(int toQuery)
+        {
+            return consistency == null
+                   ? pagers[current].fetchPageInternal(toQuery)
+                   : pagers[current].fetchPage(toQuery, consistency, clientState, queryStartNanoTime, forContinuousPaging);
         }
 
         public void close()
         {
             remaining -= counted;
-            if (result != null && !closed)
-                result.close();
+
+            if (logger.isTraceEnabled())
+                logger.trace("{} - closed, counted: {}, remaining: {}", MultiPartitionPager.this.hashCode(), counted, remaining);
         }
     }
 

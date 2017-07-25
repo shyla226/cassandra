@@ -67,7 +67,7 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
         SchemaLoader.loadSchema();
         MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(KS_NAME,
                                                                      KeyspaceParams.simpleTransient(1),
-                                                                     Tables.of(SchemaLoader.sasiCFMD(KS_NAME, CF_NAME).build())));
+                                                                     Tables.of(SchemaLoader.sasiCFMD(KS_NAME, CF_NAME).build()))).blockingAwait();
     }
 
     @Test

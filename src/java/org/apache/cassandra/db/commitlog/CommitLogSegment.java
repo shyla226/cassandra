@@ -30,7 +30,8 @@ import java.util.zip.CRC32;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
-import org.apache.cassandra.config.*;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.CommitLog.Configuration;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -84,7 +85,7 @@ public abstract class CommitLogSegment
     static final int SYNC_MARKER_SIZE = 4 + 4;
 
     // The OpOrder used to order appends wrt sync
-    private final OpOrder appendOrder = new OpOrder();
+    private final OpOrder appendOrder = TPC.newOpOrder(this);
 
     private final AtomicInteger allocatePosition = new AtomicInteger();
 
@@ -408,7 +409,7 @@ public abstract class CommitLogSegment
     {
         while (true)
         {
-            WaitQueue.Signal signal = syncComplete.register();
+            WaitQueue.Signal signal = syncComplete.register(Thread.currentThread());
             if (lastSyncedOffset < endOfBuffer)
             {
                 signal.awaitUninterruptibly();
@@ -426,8 +427,8 @@ public abstract class CommitLogSegment
         while (lastSyncedOffset < position)
         {
             WaitQueue.Signal signal = waitingOnCommit != null ?
-                                      syncComplete.register(waitingOnCommit.timer()) :
-                                      syncComplete.register();
+                                      syncComplete.register(Thread.currentThread(), waitingOnCommit.timer()) :
+                                      syncComplete.register(Thread.currentThread());
             if (lastSyncedOffset < position)
                 signal.awaitUninterruptibly();
             else
@@ -589,6 +590,11 @@ public abstract class CommitLogSegment
         return lastSyncedOffset;
     }
 
+    public long availableSize()
+    {
+        return endOfBuffer - allocatePosition.get();
+    }
+
     @Override
     public String toString()
     {
@@ -670,6 +676,12 @@ public abstract class CommitLogSegment
         void awaitDiskSync(org.apache.cassandra.metrics.Timer waitingOnCommit)
         {
             segment.waitForSync(position, waitingOnCommit);
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("Segment id %d, position %d, limit: %d", segment.id, buffer.position(), buffer.limit());
         }
 
         public CommitLogPosition getCommitLogPosition()

@@ -23,14 +23,17 @@ import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Map;
 
+import io.reactivex.Single;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.cql3.BatchQueryOptions;
 import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -103,7 +106,7 @@ public class MessagePayloadTest extends CQLTester
     {
         try
         {
-            QueryProcessor.executeOnceInternal("DROP TABLE " + KEYSPACE + ".atable");
+            QueryProcessor.executeOnceInternal("DROP TABLE " + KEYSPACE + ".atable").blockingGet();
         }
         catch (Throwable t)
         {
@@ -292,74 +295,88 @@ public class MessagePayloadTest extends CQLTester
             return QueryProcessor.instance.getPrepared(id);
         }
 
-        public ResultMessage.Prepared prepare(String query,
-                                              QueryState state,
-                                              Map<String, ByteBuffer> customPayload)
-                                                      throws RequestValidationException
+        public Single<ResultMessage.Prepared> prepare(String query,
+                                                      QueryState state,
+                                                      Map<String, ByteBuffer> customPayload)
+        throws RequestValidationException
         {
             if (customPayload != null)
                 requestPayload = customPayload;
-            ResultMessage.Prepared result = QueryProcessor.instance.prepare(query, state, customPayload);
+            Single<ResultMessage.Prepared> result = QueryProcessor.instance.prepare(query, state, customPayload);
             if (customPayload != null)
             {
-                result.setCustomPayload(responsePayload);
-                responsePayload = null;
+                result = result.map(prepared -> {
+                    prepared.setCustomPayload(responsePayload);
+                    responsePayload = null;
+
+                    return prepared;
+                });
             }
             return result;
         }
 
-        public ResultMessage process(String query,
-                                     QueryState state,
-                                     QueryOptions options,
-                                     Map<String, ByteBuffer> customPayload,
-                                     long queryStartNanoTime)
-                                            throws RequestExecutionException, RequestValidationException
-        {
-            if (customPayload != null)
-                requestPayload = customPayload;
-            ResultMessage result = QueryProcessor.instance.process(query, state, options, customPayload, queryStartNanoTime);
-            if (customPayload != null)
-            {
-                result.setCustomPayload(responsePayload);
-                responsePayload = null;
-            }
-            return result;
-        }
-
-        public ResultMessage processBatch(BatchStatement statement,
-                                          QueryState state,
-                                          BatchQueryOptions options,
-                                          Map<String, ByteBuffer> customPayload,
-                                          long queryStartNanoTime)
-                                                  throws RequestExecutionException, RequestValidationException
-        {
-            if (customPayload != null)
-                requestPayload = customPayload;
-            ResultMessage result = QueryProcessor.instance.processBatch(statement, state, options, customPayload, queryStartNanoTime);
-            if (customPayload != null)
-            {
-                result.setCustomPayload(responsePayload);
-                responsePayload = null;
-            }
-            return result;
-        }
-
-        public ResultMessage processPrepared(CQLStatement statement,
+        public Single<ResultMessage> process(String query,
                                              QueryState state,
                                              QueryOptions options,
                                              Map<String, ByteBuffer> customPayload,
                                              long queryStartNanoTime)
-                                                    throws RequestExecutionException, RequestValidationException
+        throws RequestExecutionException, RequestValidationException
         {
             if (customPayload != null)
                 requestPayload = customPayload;
-            ResultMessage result = QueryProcessor.instance.processPrepared(statement, state, options, customPayload, queryStartNanoTime);
+
+            return QueryProcessor.instance.process(query, state, options, customPayload, queryStartNanoTime)
+                                          .map(result -> {
+                                              if (customPayload != null)
+                                              {
+                                                  result.setCustomPayload(responsePayload);
+                                                  responsePayload = null;
+                                              }
+                                              return result;
+                                          });
+
+        }
+
+        public Single<ResultMessage> processBatch(BatchStatement statement,
+                                                  QueryState state,
+                                                  BatchQueryOptions options,
+                                                  Map<String, ByteBuffer> customPayload,
+                                                  long queryStartNanoTime)
+                throws RequestExecutionException, RequestValidationException
+        {
             if (customPayload != null)
-            {
-                result.setCustomPayload(responsePayload);
-                responsePayload = null;
-            }
-            return result;
+                requestPayload = customPayload;
+
+            return QueryProcessor.instance.processBatch(statement, state, options, customPayload, queryStartNanoTime)
+                                          .map( result -> {
+                                              if (customPayload != null)
+                                              {
+                                                  result.setCustomPayload(responsePayload);
+                                                  responsePayload = null;
+                                              }
+                                              return result;
+                                          });
+        }
+
+        public Single<ResultMessage> processPrepared(CQLStatement statement,
+                                                     QueryState state,
+                                                     QueryOptions options,
+                                                     Map<String, ByteBuffer> customPayload,
+                                                     long queryStartNanoTime)
+        throws RequestExecutionException, RequestValidationException
+        {
+            if (customPayload != null)
+                requestPayload = customPayload;
+
+            return QueryProcessor.instance.processPrepared(statement, state, options, customPayload, queryStartNanoTime)
+                                          .map(result -> {
+                                              if (customPayload != null)
+                                              {
+                                                  result.setCustomPayload(responsePayload);
+                                                  responsePayload = null;
+                                              }
+                                              return result;
+                                          });
         }
     }
 }

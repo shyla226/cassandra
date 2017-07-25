@@ -19,6 +19,10 @@ package org.apache.cassandra.service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+import javax.annotation.Nullable;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.concurrent.ExecutorLocal;
@@ -28,6 +32,15 @@ public class ClientWarn implements ExecutorLocal<ClientWarn.State>
 {
     private static final String TRUNCATED = " [truncated]";
     private static final FastThreadLocal<State> warnLocal = new FastThreadLocal<>();
+
+    /** The client warning states mapped by message id. When a request is sent to
+     * a replica, the current thread client warning state is stored in this map.
+     * When the corresponding response is received, the state is removed from this
+     * map and transferred back into the thread local of the executor that will process
+     * the response.
+     */
+    private static final ConcurrentMap<Integer, State> statesByMessageId = new ConcurrentHashMap();
+
     public static ClientWarn instance = new ClientWarn();
 
     private ClientWarn()
@@ -67,6 +80,29 @@ public class ClientWarn implements ExecutorLocal<ClientWarn.State>
     public void resetWarnings()
     {
         warnLocal.remove();
+    }
+
+    /**
+     * Store the current thread local client warning state for this request
+     * id, if any state is present.
+     * @param id - the request id.
+     */
+    public void storeForRequest(int id)
+    {
+        State state = warnLocal.get();
+        if (state != null)
+            statesByMessageId.put(id, state);
+    }
+
+    /**
+     * Return the state for this message id or null if no state was stored.
+     * @param id the id of the request
+     * @return the client warning state or null
+     */
+    @Nullable
+    public State getForMessage(int id)
+    {
+        return statesByMessageId.remove(id);
     }
 
     public static class State

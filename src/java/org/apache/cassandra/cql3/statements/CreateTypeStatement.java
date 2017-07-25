@@ -20,6 +20,8 @@ package org.apache.cassandra.cql3.statements;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import io.reactivex.Maybe;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -83,7 +85,7 @@ public class CreateTypeStatement extends SchemaAlteringStatement
         }
     }
 
-    public static void checkForDuplicateNames(UserType type) throws InvalidRequestException
+    public static String haveDuplicateName(UserType type) throws InvalidRequestException
     {
         for (int i = 0; i < type.size() - 1; i++)
         {
@@ -91,9 +93,10 @@ public class CreateTypeStatement extends SchemaAlteringStatement
             for (int j = i+1; j < type.size(); j++)
             {
                 if (fieldName.equals(type.fieldName(j)))
-                    throw new InvalidRequestException(String.format("Duplicate field name %s in type %s", fieldName, type.name));
+                    return fieldName.toString();
             }
         }
+        return null;
     }
 
     public void addToRawBuilder(Types.RawBuilder builder) throws InvalidRequestException
@@ -118,18 +121,21 @@ public class CreateTypeStatement extends SchemaAlteringStatement
         return new UserType(name.getKeyspace(), name.getUserTypeName(), columnNames, types, true);
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(name.getKeyspace());
         assert ksm != null; // should haven't validate otherwise
 
         // Can happen with ifNotExists
         if (ksm.types.get(name.getUserTypeName()).isPresent())
-            return null;
+            return Maybe.empty();
 
         UserType type = createType();
-        checkForDuplicateNames(type);
-        MigrationManager.announceNewType(type, isLocalOnly);
-        return new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName());
+        String duplicate = haveDuplicateName(type);
+        if (duplicate != null)
+            return error(String.format("Duplicate field name %s in type %s", duplicate, type.name));
+
+        return MigrationManager.announceNewType(type, isLocalOnly)
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName())));
     }
 }

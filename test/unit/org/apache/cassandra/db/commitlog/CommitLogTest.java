@@ -38,6 +38,7 @@ import org.junit.runners.Parameterized.Parameters;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.commitlog.CommitLogDescriptor.CommitLogVersion;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -236,18 +237,18 @@ public class CommitLogTest
                      .build();
 
         // Adding it 5 times
-        CommitLog.instance.add(m);
-        CommitLog.instance.add(m);
-        CommitLog.instance.add(m);
-        CommitLog.instance.add(m);
-        CommitLog.instance.add(m);
+        CommitLog.instance.add(m).blockingGet();
+        CommitLog.instance.add(m).blockingGet();
+        CommitLog.instance.add(m).blockingGet();
+        CommitLog.instance.add(m).blockingGet();
+        CommitLog.instance.add(m).blockingGet();
 
         // Adding new mutation on another CF
         Mutation m2 = new RowUpdateBuilder(cfs2.metadata(), 0, "k")
                       .clustering("bytes")
                       .add("val", ByteBuffer.allocate(4))
                       .build();
-        CommitLog.instance.add(m2);
+        CommitLog.instance.add(m2).blockingGet();
 
         assertEquals(2, CommitLog.instance.segmentManager.getActiveSegments().size());
 
@@ -272,8 +273,8 @@ public class CommitLogTest
                   .build();
 
         // Adding it twice (won't change segment)
-        CommitLog.instance.add(rm);
-        CommitLog.instance.add(rm);
+        CommitLog.instance.add(rm).blockingGet();
+        CommitLog.instance.add(rm).blockingGet();
 
         assertEquals(1, CommitLog.instance.segmentManager.getActiveSegments().size());
 
@@ -289,10 +290,10 @@ public class CommitLogTest
                        .clustering("bytes")
                        .add("val", ByteBuffer.allocate(DatabaseDescriptor.getMaxMutationSize() - 200))
                        .build();
-        CommitLog.instance.add(rm2);
+        CommitLog.instance.add(rm2).blockingGet();
         // also forces a new segment, since each entry-with-overhead is just under half the CL size
-        CommitLog.instance.add(rm2);
-        CommitLog.instance.add(rm2);
+        CommitLog.instance.add(rm2).blockingGet();
+        CommitLog.instance.add(rm2).blockingGet();
 
         Collection<CommitLogSegment> segments = CommitLog.instance.segmentManager.getActiveSegments();
 
@@ -363,7 +364,7 @@ public class CommitLogTest
                       .clustering("bytes")
                       .add("val", ByteBuffer.allocate(getMaxRecordDataSize()))
                       .build();
-        CommitLog.instance.add(rm);
+        CommitLog.instance.add(rm).blockingGet();
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -375,7 +376,7 @@ public class CommitLogTest
                       .clustering("bytes")
                       .add("val", ByteBuffer.allocate(1 + getMaxRecordDataSize()))
                       .build();
-        CommitLog.instance.add(rm);
+        CommitLog.instance.add(rm).blockingGet();
         throw new AssertionError("mutation larger than limit was accepted");
     }
 
@@ -550,15 +551,17 @@ public class CommitLogTest
                           .build();
 
             for (int i = 0 ; i < 5 ; i++)
-                CommitLog.instance.add(m2);
+                CommitLog.instance.add(m2).blockingGet();
 
             assertEquals(2, CommitLog.instance.segmentManager.getActiveSegments().size());
             CommitLogPosition position = CommitLog.instance.getCurrentPosition();
-            for (Keyspace keyspace : Keyspace.system())
-                for (ColumnFamilyStore syscfs : keyspace.getColumnFamilyStores())
+            for (String keyspace : new String[] {SchemaConstants.SYSTEM_KEYSPACE_NAME, SchemaConstants.SCHEMA_KEYSPACE_NAME})
+                for (ColumnFamilyStore syscfs : Keyspace.open(keyspace).getColumnFamilyStores())
                     CommitLog.instance.discardCompletedSegments(syscfs.metadata().id, CommitLogPosition.NONE, position);
             CommitLog.instance.discardCompletedSegments(cfs2.metadata().id, CommitLogPosition.NONE, position);
-            assertEquals(1, CommitLog.instance.segmentManager.getActiveSegments().size());
+
+            Collection<CommitLogSegment> segments = CommitLog.instance.segmentManager.getActiveSegments();
+            assertEquals(1, segments.size());
         }
         finally
         {
@@ -605,14 +608,14 @@ public class CommitLogTest
                              .add("val", bytes("this is a string"))
                              .build();
         cellCount += 1;
-        CommitLog.instance.add(rm1);
+        CommitLog.instance.add(rm1).blockingGet();
 
         final Mutation rm2 = new RowUpdateBuilder(cfs.metadata(), 0, "k2")
                              .clustering("bytes")
                              .add("val", bytes("this is a string"))
                              .build();
         cellCount += 1;
-        CommitLog.instance.add(rm2);
+        CommitLog.instance.add(rm2).blockingGet();
 
         CommitLog.instance.sync();
 
@@ -641,7 +644,7 @@ public class CommitLogTest
                                  .clustering("bytes")
                                  .add("val", bytes("this is a string"))
                                  .build();
-            CommitLogPosition position = CommitLog.instance.add(rm1);
+            CommitLogPosition position = CommitLog.instance.add(rm1).blockingGet();
 
             if (i == discardPosition)
                 commitLogPosition = position;
@@ -794,10 +797,10 @@ public class CommitLogTest
         catch (Throwable t)
         {
             // expected after makeUnflushable. Cause (after some wrappings) should be a write error
-            while (!(t instanceof FSWriteError))
+            while (!(t instanceof FSWriteError) && (t.getCause() != null))
                 t = t.getCause();
             // Wait for started flushes to complete.
-            cfs.switchMemtableIfCurrent(current);
+            cfs.switchMemtableIfCurrent(current).blockingGet();
         }
     };
 
@@ -809,7 +812,7 @@ public class CommitLogTest
         CommitLog.instance.forceRecycleAllSegments();
 
         // Wait for started flushes to complete.
-        cfs.switchMemtableIfCurrent(current);
+        cfs.switchMemtableIfCurrent(current).blockingGet();
     };
 
     @Test

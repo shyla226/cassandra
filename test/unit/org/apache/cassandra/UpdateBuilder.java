@@ -65,6 +65,13 @@ public class UpdateBuilder
         return this;
     }
 
+    public UpdateBuilder delete()
+    {
+        assert currentRow != null;
+        currentRow.delete();
+        return this;
+    }
+
     public PartitionUpdate build()
     {
         return updateBuilder.build();

@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
+import io.reactivex.*;
 import org.apache.commons.lang3.StringUtils;
 import org.cliffc.high_scale_lib.NonBlockingHashSet;
 import org.slf4j.Logger;
@@ -155,20 +156,20 @@ public class CommitLogReplayer implements CommitLogReadHandler
         futures.clear();
         boolean flushingSystem = false;
 
-        List<Future<?>> futures = new ArrayList<Future<?>>();
+        List<Single<CommitLogPosition>> observables = new ArrayList<>();
         for (Keyspace keyspace : keyspacesReplayed)
         {
             if (keyspace.getName().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
                 flushingSystem = true;
 
-            futures.addAll(keyspace.flush());
+            observables.addAll(keyspace.flush());
         }
 
         // also flush batchlog incase of any MV updates
         if (!flushingSystem)
-            futures.add(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceFlush());
+            observables.add(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceFlush());
 
-        FBUtilities.waitOnFutures(futures);
+        Single.merge(observables).blockingLast();
 
         return replayedCount.get();
     }
@@ -215,14 +216,17 @@ public class CommitLogReplayer implements CommitLogReadHandler
                             if (newMutation == null)
                                 newMutation = new Mutation(mutation.getKeyspaceName(), mutation.key());
                             newMutation.add(update);
+
+                            if (logger.isTraceEnabled())
+                                logger.trace("Replaying {}", update);
                             commitLogReplayer.replayedCount.incrementAndGet();
                         }
                     }
                     if (newMutation != null)
                     {
                         assert !newMutation.isEmpty();
+                        Keyspace.open(newMutation.getKeyspaceName()).apply(newMutation, false, true, false).blockingAwait();
 
-                        Keyspace.open(newMutation.getKeyspaceName()).apply(newMutation, false, true, false);
                         commitLogReplayer.keyspacesReplayed.add(keyspace);
                     }
                 }

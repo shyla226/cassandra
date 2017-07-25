@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.metrics;
 
-import java.util.concurrent.atomic.LongAdder;
-
 import com.codahale.metrics.Counting;
 import com.codahale.metrics.Metric;
 import com.codahale.metrics.MetricRegistry;
@@ -28,25 +26,16 @@ import com.codahale.metrics.ScheduledReporter;
 /**
  * An incrementing and decrementing counter metric.
  *
- * This class is identical to {@link com.codahale.metrics.Counter}, except
- * that uses {@link LongAdder} instead of {@link com.codahale.metrics.LongAdder}
- * for a modest performance improvement.
- *
  * This class needs to extend {@link com.codahale.metrics.Counter} to allow this metric
  * to be retrieved by {@link MetricRegistry#getCounters()} (used by {@link ScheduledReporter}).
  */
-public class Counter extends com.codahale.metrics.Counter implements Metric, Counting
+public abstract class Counter extends com.codahale.metrics.Counter implements Metric, Counting, Composable<Counter>
 {
-    private final LongAdder count;
-
-    public Counter() {
-        this.count = new LongAdder();
-    }
-
     /**
      * Increment the counter by one.
      */
-    public void inc() {
+    public void inc()
+    {
         inc(1);
     }
 
@@ -55,14 +44,13 @@ public class Counter extends com.codahale.metrics.Counter implements Metric, Cou
      *
      * @param n the amount by which the counter will be increased
      */
-    public void inc(long n) {
-        count.add(n);
-    }
+    public abstract void inc(long n);
 
     /**
      * Decrement the counter by one.
      */
-    public void dec() {
+    public void dec()
+    {
         dec(1);
     }
 
@@ -71,17 +59,10 @@ public class Counter extends com.codahale.metrics.Counter implements Metric, Cou
      *
      * @param n the amount by which the counter will be decreased
      */
-    public void dec(long n) {
-        count.add(-n);
-    }
+    public abstract void dec(long n);
 
-    /**
-     * Returns the counter's current value.
-     *
-     * @return the counter's current value
-     */
-    @Override
-    public long getCount() {
-        return count.sum();
+    public static Counter make(boolean isComposite)
+    {
+        return isComposite ? new CompositeCounter() : new SingleCounter();
     }
 }

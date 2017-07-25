@@ -35,6 +35,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import junit.framework.Assert;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Memtable;
@@ -263,17 +264,17 @@ public class TrackerTest
         tracker.subscribe(listener);
 
         Memtable prev1 = tracker.switchMemtable(true, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs));
-        OpOrder.Group write1 = cfs.keyspace.writeOrder.getCurrent();
+        OpOrder.Group write1 = cfs.keyspace.writeOrder.start();
         OpOrder.Barrier barrier1 = cfs.keyspace.writeOrder.newBarrier();
         prev1.setDiscarding(barrier1, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
         barrier1.issue();
         Memtable prev2 = tracker.switchMemtable(false, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs));
-        OpOrder.Group write2 = cfs.keyspace.writeOrder.getCurrent();
+        OpOrder.Group write2 = cfs.keyspace.writeOrder.start();
         OpOrder.Barrier barrier2 = cfs.keyspace.writeOrder.newBarrier();
         prev2.setDiscarding(barrier2, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
         barrier2.issue();
         Memtable cur = tracker.getView().getCurrentMemtable();
-        OpOrder.Group writecur = cfs.keyspace.writeOrder.getCurrent();
+        OpOrder.Group writecur = cfs.keyspace.writeOrder.start();
         Assert.assertEquals(prev1, tracker.getMemtableFor(write1, CommitLogPosition.NONE));
         Assert.assertEquals(prev2, tracker.getMemtableFor(write2, CommitLogPosition.NONE));
         Assert.assertEquals(cur, tracker.getMemtableFor(writecur, CommitLogPosition.NONE));

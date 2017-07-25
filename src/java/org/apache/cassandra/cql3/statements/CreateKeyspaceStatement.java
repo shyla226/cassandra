@@ -19,6 +19,8 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.regex.Pattern;
 
+import io.reactivex.Maybe;
+
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -62,7 +64,7 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
         return name;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException
+    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         state.hasAllKeyspacesAccess(CorePermission.CREATE);
     }
@@ -98,20 +100,17 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
             throw new ConfigurationException("Unable to use given strategy class: LocalStrategy is reserved for internal use.");
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
         KeyspaceMetadata ksm = KeyspaceMetadata.create(name, attrs.asNewKeyspaceParams());
-        try
-        {
-            MigrationManager.announceNewKeyspace(ksm, isLocalOnly);
-            return new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace());
-        }
-        catch (AlreadyExistsException e)
-        {
-            if (ifNotExists)
-                return null;
-            throw e;
-        }
+        return MigrationManager.announceNewKeyspace(ksm, isLocalOnly)
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace())))
+                               .onErrorResumeNext(e -> {
+                                   if (e instanceof AlreadyExistsException && ifNotExists)
+                                       return Maybe.empty();
+
+                                   return Maybe.error(e);
+                               });
     }
 
     protected void grantPermissionsToCreator(QueryState state)

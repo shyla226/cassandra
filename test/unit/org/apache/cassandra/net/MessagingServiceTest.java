@@ -35,21 +35,18 @@ import java.util.regex.Matcher;
 
 import com.google.common.collect.Iterables;
 
+import com.codahale.metrics.Snapshot;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.metrics.Timer;
-import org.apache.cassandra.schema.SchemaMigration;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.gms.GossipDigestAck;
-import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
-import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
 
-import org.caffinitas.ohc.histo.EstimatedHistogram;
-import org.junit.After;
+
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -59,7 +56,6 @@ import static org.junit.Assert.*;
 public class MessagingServiceTest
 {
     private final static long ONE_SECOND = TimeUnit.NANOSECONDS.convert(1, TimeUnit.SECONDS);
-    private final static long[] bucketOffsets = new EstimatedHistogram(160).getBucketOffsets();
     public static final IInternodeAuthenticator ALLOW_NOTHING_AUTHENTICATOR = new IInternodeAuthenticator()
     {
         public boolean authenticate(InetAddress remoteAddress, int remotePort)
@@ -75,6 +71,7 @@ public class MessagingServiceTest
     static final IInternodeAuthenticator originalAuthenticator = DatabaseDescriptor.getInternodeAuthenticator();
 
     private final MessagingService messagingService = MessagingService.test();
+    private static int defaultMetricsHistogramUpdateInterval;
 
     private static Verb<?, ?> withBackPressure;
     private static Verb<?, ?> withoutBackPressure;
@@ -83,11 +80,21 @@ public class MessagingServiceTest
     public static void beforeClass() throws UnknownHostException
     {
         DatabaseDescriptor.daemonInitialization();
+
         DatabaseDescriptor.setBackPressureStrategy(new MockBackPressureStrategy(Collections.emptyMap()));
         DatabaseDescriptor.setBroadcastAddress(InetAddress.getByName("127.0.0.1"));
 
+        defaultMetricsHistogramUpdateInterval = DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis();
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0); // this guarantees metrics histograms are updated on read
+
         withBackPressure = Verbs.WRITES.WRITE;
         withoutBackPressure = Verbs.GOSSIP.ACK; // one-way message, so can't suppor back-pressure;
+    }
+
+    @AfterClass
+    public static void afterClass()
+    {
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateInterval);
     }
 
     private static int metricScopeId = 0;
@@ -150,8 +157,17 @@ public class MessagingServiceTest
         addDCLatency(sentAt, now);
         assertNotNull(dcLatency.get("datacenter1"));
         assertEquals(1, dcLatency.get("datacenter1").getCount());
-        long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, TimeUnit.MILLISECONDS.toNanos(latency))) - 1];
-        assertEquals(expectedBucket, dcLatency.get("datacenter1").getSnapshot().getMax());
+
+        long latencyNanos = TimeUnit.MILLISECONDS.toNanos(latency);
+        Snapshot snapshot = dcLatency.get("datacenter1").getSnapshot();
+        long max = snapshot.getMax();
+        long min = snapshot.getMin();
+        assertTrue(min <= latencyNanos);
+        assertTrue(max >= latencyNanos);
+
+        long[] bucketOffsets = dcLatency.get("datacenter1").getHistogram().getOffsets();
+        long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, latencyNanos)) - 1];
+        assertEquals(expectedBucket, snapshot.getMax() + 1);
     }
 
     @Test
@@ -167,8 +183,17 @@ public class MessagingServiceTest
         MessagingService.instance().metrics.addQueueWaitTime(verb, latency);
         assertNotNull(queueWaitLatency.get(verb));
         assertEquals(1, queueWaitLatency.get(verb).getCount());
-        long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, TimeUnit.MILLISECONDS.toNanos(latency))) - 1];
-        assertEquals(expectedBucket, queueWaitLatency.get(verb).getSnapshot().getMax());
+
+        long latencyNanos = TimeUnit.MILLISECONDS.toNanos(latency);
+        Snapshot snapshot = queueWaitLatency.get(verb).getSnapshot();
+        long max = snapshot.getMax();
+        long min = snapshot.getMin();
+        assertTrue(min <= latencyNanos);
+        assertTrue(max >= latencyNanos);
+
+        long[] bucketOffsets = queueWaitLatency.get(verb).getHistogram().getOffsets();
+        long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, latencyNanos)) - 1];
+        assertEquals(expectedBucket, snapshot.getMax() + 1);
     }
 
     @Test

@@ -29,6 +29,7 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.BytesType;
@@ -36,6 +37,7 @@ import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrderSimple;
 import org.apache.cassandra.utils.memory.HeapAllocator;
 import org.apache.cassandra.utils.memory.NativeAllocator;
 import org.apache.cassandra.utils.memory.NativePool;
@@ -44,8 +46,8 @@ public class NativeCellTest
 {
 
     private static final Logger logger = LoggerFactory.getLogger(NativeCellTest.class);
-    private static final NativeAllocator nativeAllocator = new NativePool(Integer.MAX_VALUE, Integer.MAX_VALUE, 1f, null).newAllocator();
-    private static final OpOrder.Group group = new OpOrder().start();
+    private static  NativeAllocator nativeAllocator;
+    private static  OpOrder.Group group;
     private static Random rand;
 
     @BeforeClass
@@ -54,6 +56,11 @@ public class NativeCellTest
         long seed = System.currentTimeMillis();
         logger.info("Seed : {}", seed);
         rand = new Random(seed);
+
+        SchemaLoader.prepareServer();
+
+        nativeAllocator = new NativePool(Integer.MAX_VALUE, Integer.MAX_VALUE, 1f, null).newAllocator();
+        group =  new OpOrderSimple().start();
     }
 
     @Test

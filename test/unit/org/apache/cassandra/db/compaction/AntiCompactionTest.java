@@ -34,6 +34,7 @@ import org.junit.After;
 import org.junit.Ignore;
 import org.junit.Test;
 
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
@@ -107,7 +108,9 @@ public class AntiCompactionTest
         ColumnFamilyStore store = prepareColumnFamilyStore();
         Collection<SSTableReader> sstables = getUnrepairedSSTables(store);
         assertEquals(store.getLiveSSTables().size(), sstables.size());
-        Range<Token> range = new Range<Token>(new BytesToken("0".getBytes()), new BytesToken("4".getBytes()));
+        Range<Token> range = new Range<Token>(store.getPartitioner().decorateKey(ByteBufferUtil.bytes("0")).getToken(),
+                                              store.getPartitioner().decorateKey(ByteBufferUtil.bytes("4")).getToken());
+
         List<Range<Token>> ranges = Arrays.asList(range);
 
         int repairedKeys = 0;
@@ -151,9 +154,9 @@ public class AntiCompactionTest
             assertEquals(1, sstable.selfRef().globalCount());
         }
         assertEquals(0, store.getTracker().getCompacting().size());
-        assertEquals(repairedKeys, repairedAt != UNREPAIRED_SSTABLE ? 4 : 0);
-        assertEquals(pendingKeys, pendingRepair != NO_PENDING_REPAIR ? 4 : 0);
-        assertEquals(nonRepairedKeys, 6);
+        assertEquals(repairedKeys, repairedAt != UNREPAIRED_SSTABLE ? 7 : 0);
+        assertEquals(pendingKeys, pendingRepair != NO_PENDING_REPAIR ? 7 : 0);
+        assertEquals(nonRepairedKeys, 3);
     }
 
     @Test
@@ -177,7 +180,9 @@ public class AntiCompactionTest
         cfs.disableAutoCompaction();
         SSTableReader s = writeFile(cfs, 1000);
         cfs.addSSTable(s);
-        Range<Token> range = new Range<Token>(new BytesToken(ByteBufferUtil.bytes(0)), new BytesToken(ByteBufferUtil.bytes(500)));
+        Range<Token> range = new Range<Token>(cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes(0)).getToken(),
+                                              cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes(500)).getToken());
+
         Collection<SSTableReader> sstables = cfs.getLiveSSTables();
         UUID parentRepairSession = UUID.randomUUID();
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.ANTICOMPACTION);
@@ -257,7 +262,8 @@ public class AntiCompactionTest
         Collection<SSTableReader> sstables = getUnrepairedSSTables(store);
         assertEquals(store.getLiveSSTables().size(), sstables.size());
 
-        Range<Token> range = new Range<Token>(new BytesToken("0".getBytes()), new BytesToken("4".getBytes()));
+        Range<Token> range = new Range<Token>(store.getPartitioner().decorateKey(ByteBufferUtil.bytes("0")).getToken(),
+                                              store.getPartitioner().decorateKey(ByteBufferUtil.bytes("4")).getToken());
         List<Range<Token>> ranges = Arrays.asList(range);
 
         long repairedAt = 1000;
@@ -299,8 +305,8 @@ public class AntiCompactionTest
                 }
             }
         }
-        assertEquals(repairedKeys, 40);
-        assertEquals(nonRepairedKeys, 60);
+        assertEquals(repairedKeys, 87);
+        assertEquals(nonRepairedKeys, 13);
     }
 
     private void shouldMutate(long repairedAt, UUID pendingRepair) throws InterruptedException, IOException
@@ -308,7 +314,9 @@ public class AntiCompactionTest
         ColumnFamilyStore store = prepareColumnFamilyStore();
         Collection<SSTableReader> sstables = getUnrepairedSSTables(store);
         assertEquals(store.getLiveSSTables().size(), sstables.size());
-        Range<Token> range = new Range<Token>(new BytesToken("0".getBytes()), new BytesToken("9999".getBytes()));
+        Range<Token> range = new Range<Token>(store.getPartitioner().getMaximumToken(),
+                                              store.getPartitioner().getMaximumToken());
+
         List<Range<Token>> ranges = Arrays.asList(range);
         UUID parentRepairSession = pendingRepair == null ? UUID.randomUUID() : pendingRepair;
         registerParentRepairSession(parentRepairSession, ranges, repairedAt, pendingRepair);
@@ -352,7 +360,9 @@ public class AntiCompactionTest
         Collection<SSTableReader> sstables = getUnrepairedSSTables(store);
         assertEquals(store.getLiveSSTables().size(), sstables.size());
 
-        Range<Token> range = new Range<Token>(new BytesToken("-1".getBytes()), new BytesToken("-10".getBytes()));
+        Range<Token> range = new Range<Token>(store.getPartitioner().decorateKey(ByteBufferUtil.bytes("-1")).getToken(),
+                                              store.getPartitioner().decorateKey(ByteBufferUtil.bytes("-10")).getToken());
+
         List<Range<Token>> ranges = Arrays.asList(range);
         UUID parentRepairSession = UUID.randomUUID();
         registerParentRepairSession(parentRepairSession, ranges, UNREPAIRED_SSTABLE, null);

@@ -25,6 +25,7 @@ import java.net.UnknownHostException;
 import java.util.EnumMap;
 import java.util.Map;
 
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;

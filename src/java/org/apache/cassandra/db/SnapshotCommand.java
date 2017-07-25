@@ -75,4 +75,3 @@ public class SnapshotCommand
                ", clearSnapshot=" + clearSnapshot + '}';
     }
 }
-

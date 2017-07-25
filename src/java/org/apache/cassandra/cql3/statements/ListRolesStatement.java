@@ -24,15 +24,22 @@ import java.util.Set;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
-import org.apache.cassandra.auth.*;
+import io.reactivex.Single;
+
 import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.auth.AuthKeyspace;
+import org.apache.cassandra.auth.IRoleManager;
+import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -65,49 +72,51 @@ public class ListRolesStatement extends AuthorizationStatement
 
     public void validate(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
+    }
+
+    public void checkAccess(ClientState state) throws InvalidRequestException
+    {
         state.ensureNotAnonymous();
 
         if ((grantee != null) && !DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
             throw new InvalidRequestException(String.format("%s doesn't exist", grantee));
     }
 
-    public void checkAccess(ClientState state) throws InvalidRequestException
+    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
+        return Single.defer(() -> {
+            // If the executing user has DESCRIBE permission on the root roles resource, let them list any and all roles
+            boolean hasRootLevelSelect = DatabaseDescriptor.getAuthorizer()
+                                                           .authorize(state.getUser(), RoleResource.root())
+                                                           .contains(CorePermission.DESCRIBE);
+            if (hasRootLevelSelect)
+            {
+                if (grantee == null)
+                    return resultMessage(DatabaseDescriptor.getRoleManager().getAllRoles());
+                else
+                    return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(grantee, recursive));
+            }
+            else
+            {
+                RoleResource currentUser = RoleResource.role(state.getUser().getName());
+                if (grantee == null)
+                    return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(currentUser, recursive));
+                if (DatabaseDescriptor.getRoleManager().getRoles(currentUser, true).contains(grantee))
+                    return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(grantee, recursive));
+                else
+                    return Single.error(new UnauthorizedException(String.format("You are not authorized to view roles granted to %s ", grantee.getRoleName())));
+            }
+        });
     }
 
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
-    {
-        // If the executing user has DESCRIBE permission on the root roles resource, let them list any and all roles
-        boolean hasRootLevelSelect = DatabaseDescriptor.getAuthorizer()
-                                                       .authorize(state.getUser(), RoleResource.root())
-                                                       .contains(CorePermission.DESCRIBE);
-        if (hasRootLevelSelect)
-        {
-            if (grantee == null)
-                return resultMessage(DatabaseDescriptor.getRoleManager().getAllRoles());
-            else
-                return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(grantee, recursive));
-        }
-        else
-        {
-            RoleResource currentUser = RoleResource.role(state.getUser().getName());
-            if (grantee == null)
-                return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(currentUser, recursive));
-            if (DatabaseDescriptor.getRoleManager().getRoles(currentUser, true).contains(grantee))
-                return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(grantee, recursive));
-            else
-                throw new UnauthorizedException(String.format("You are not authorized to view roles granted to %s ", grantee.getRoleName()));
-        }
-    }
-
-    private ResultMessage resultMessage(Set<RoleResource> roles)
+    private Single<ResultMessage> resultMessage(Set<RoleResource> roles)
     {
         if (roles.isEmpty())
-            return new ResultMessage.Void();
+            return Single.just(new ResultMessage.Void());
 
         List<RoleResource> sorted = Lists.newArrayList(roles);
         Collections.sort(sorted);
-        return formatResults(sorted);
+        return Single.just(formatResults(sorted));
     }
 
     // overridden in ListUsersStatement to include legacy metadata

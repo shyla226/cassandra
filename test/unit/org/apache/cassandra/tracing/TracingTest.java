@@ -30,6 +30,7 @@ import java.util.UUID;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.progress.ProgressEvent;
 import org.apache.commons.lang3.StringUtils;
@@ -139,7 +140,7 @@ public final class TracingTest
         assert TraceState.Status.IDLE == tracing.get().waitActivity(1);
         tracing.get().trace("test-1");
         assert TraceState.Status.ACTIVE == tracing.get().waitActivity(1);
-        tracing.get().stop();
+        tracing.get().stop().blockingAwait();
         assert TraceState.Status.STOPPED == tracing.get().waitActivity(1);
         tracing.stopSession();
         assert null == tracing.get();
@@ -206,8 +207,9 @@ public final class TracingTest
                     traces.add(string);
                 }
 
-                protected void waitForPendingEvents()
+                protected Completable waitForPendingEvents()
                 {
+                    return Completable.complete();
                 }
             };
         }

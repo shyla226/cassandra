@@ -19,6 +19,7 @@ package org.apache.cassandra.db.rows;
 
 import java.security.MessageDigest;
 
+import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.Clusterable;
 
@@ -32,9 +33,10 @@ import org.apache.cassandra.db.Clusterable;
 public interface Unfiltered extends Clusterable
 {
     public enum Kind { ROW, RANGE_TOMBSTONE_MARKER };
+    // TODO: add sstable lower bound for clearer merging
 
     /**
-     * The kind of the atom: either row or range tombstone marker.
+     * The kind of the atom: either row or range tombstone marker. In flowables, the first Unfiltered is a header.
      */
     public Kind kind();
 
@@ -70,4 +72,15 @@ public interface Unfiltered extends Clusterable
     {
         return kind() == Kind.RANGE_TOMBSTONE_MARKER;
     }
+
+
+    /**
+     * Returns a copy of this row or marker without any deletion info that should be purged according to {@code purger}.
+     *
+     * @param purger the {@code DeletionPurger} to use to decide what can be purged.
+     * @param nowInSec the current time to decide what is deleted and what isn't (in the case of expired cells).
+     * @return this row but without any deletion info purged by {@code purger}. If the purged row is empty, returns
+     * {@code null}.
+     */
+    public Unfiltered purge(DeletionPurger purger, int nowInSec);
 }

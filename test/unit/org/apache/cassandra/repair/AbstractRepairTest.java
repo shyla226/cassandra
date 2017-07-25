@@ -31,6 +31,7 @@ import org.junit.Ignore;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -61,6 +62,7 @@ public abstract class AbstractRepairTest
             throw new AssertionError(e);
         }
 
+        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
         DatabaseDescriptor.daemonInitialization();
     }
 
@@ -68,7 +70,7 @@ public abstract class AbstractRepairTest
 
     protected static Token t(int v)
     {
-        return DatabaseDescriptor.getPartitioner().getToken(ByteBufferUtil.bytes(v));
+        return ByteOrderedPartitioner.instance.getToken(ByteBufferUtil.bytes(v));
     }
 
     protected static final Range<Token> RANGE1 = new Range<>(t(1), t(2));

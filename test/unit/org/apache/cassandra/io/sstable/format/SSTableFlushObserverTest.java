@@ -25,6 +25,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 
+import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -107,13 +109,22 @@ public class SSTableFlushObserverTest
         try
         {
             final long now = System.currentTimeMillis();
+            ByteBuffer key;
 
-            ByteBuffer key = UTF8Type.instance.fromString("key1");
+            key = UTF8Type.instance.fromString("key1");
             expected.putAll(key, Arrays.asList(BufferCell.live(getColumn(cfm, "age"), now, Int32Type.instance.decompose(27)),
                                                BufferCell.live(getColumn(cfm, "first_name"), now,UTF8Type.instance.fromString("jack")),
                                                BufferCell.live(getColumn(cfm, "height"), now, LongType.instance.decompose(183L))));
 
             writer.append(new RowIterator(cfm, key.duplicate(), Collections.singletonList(buildRow(expected.get(key)))));
+
+            key = UTF8Type.instance.fromString("key3");
+            expected.putAll(key, Arrays.asList(BufferCell.live(getColumn(cfm, "age"), now, Int32Type.instance.decompose(30)),
+                                               BufferCell.live(getColumn(cfm, "first_name"), now,UTF8Type.instance.fromString("ken")),
+                                               BufferCell.live(getColumn(cfm, "height"), now, LongType.instance.decompose(178L))));
+
+            writer.append(new RowIterator(cfm, key, Collections.singletonList(buildRow(expected.get(key)))));
+
 
             key = UTF8Type.instance.fromString("key2");
             expected.putAll(key, Arrays.asList(BufferCell.live(getColumn(cfm, "age"), now, Int32Type.instance.decompose(30)),
@@ -122,12 +133,7 @@ public class SSTableFlushObserverTest
 
             writer.append(new RowIterator(cfm, key, Collections.singletonList(buildRow(expected.get(key)))));
 
-            key = UTF8Type.instance.fromString("key3");
-            expected.putAll(key, Arrays.asList(BufferCell.live(getColumn(cfm, "age"), now, Int32Type.instance.decompose(30)),
-                                               BufferCell.live(getColumn(cfm, "first_name"), now,UTF8Type.instance.fromString("ken")),
-                                               BufferCell.live(getColumn(cfm, "height"), now, LongType.instance.decompose(178L))));
 
-            writer.append(new RowIterator(cfm, key, Collections.singletonList(buildRow(expected.get(key)))));
 
             reader = writer.finish(true);
         }
@@ -146,7 +152,7 @@ public class SSTableFlushObserverTest
 
             try
             {
-                ByteBuffer indexKey = reader.keyAt(indexPosition).getKey();
+                ByteBuffer indexKey = reader.keyAt(indexPosition, Rebufferer.ReaderConstraint.NONE).getKey();
                 Assert.assertEquals(0, UTF8Type.instance.compare(key, indexKey));
             }
             catch (IOException ex)

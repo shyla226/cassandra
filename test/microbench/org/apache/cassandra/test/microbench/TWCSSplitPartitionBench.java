@@ -28,6 +28,7 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
+import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -135,8 +136,7 @@ public class TWCSSplitPartitionBench extends CQLTester
                                                                      Optional.empty());
 
 
-        try (ReadExecutionController executionController = rc.executionController();
-             UnfilteredPartitionIterator pi = rc.executeLocally(executionController))
+        try (UnfilteredPartitionIterator pi = rc.executeForTests())
         {
             cachedPartition = new MBROnHeapUnfilteredPartitions(pi);
         }

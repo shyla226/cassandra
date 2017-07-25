@@ -17,11 +17,7 @@
  */
 package org.apache.cassandra.metrics;
 
-import java.util.List;
 import java.util.concurrent.TimeUnit;
-
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
@@ -35,22 +31,32 @@ public class LatencyMetrics
     /** Total latency in micro sec */
     public final Counter totalLatency;
 
-    /** parent metrics to replicate any updates to **/
-    private List<LatencyMetrics> parents = Lists.newArrayList();
-    
     protected final MetricNameFactory factory;
     protected final MetricNameFactory aliasFactory;
     protected final String namePrefix;
+    private final boolean isComposite;
 
     /**
-     * Create LatencyMetrics with given group, type, and scope. Name prefix for each metric will be empty.
+     * Create a non-composite LatencyMetrics with given type, and scope. Name prefix for each metric will be empty.
      *
      * @param type Type name
      * @param scope Scope
      */
     public LatencyMetrics(String type, String scope)
     {
-        this(type, "", scope);
+        this(type, scope, false);
+    }
+
+    /**
+     * Create LatencyMetrics with given type, scope and isComposite. Name prefix for each metric will be empty.
+     *
+     * @param type Type name
+     * @param scope Scope
+     * @param isComposite whether this metrics are composite, see {@link Composable.Type#COMPOSITE}
+     */
+    public LatencyMetrics(String type, String scope, boolean isComposite)
+    {
+        this(type, "", scope, isComposite);
     }
 
     /**
@@ -59,10 +65,11 @@ public class LatencyMetrics
      * @param type Type name
      * @param namePrefix Prefix to append to each metric name
      * @param scope Scope of metrics
+     * @param isComposite whether these latency metrics are composite, see {@link Composable.Type#COMPOSITE}
      */
-    public LatencyMetrics(String type, String namePrefix, String scope)
+    public LatencyMetrics(String type, String namePrefix, String scope, boolean isComposite)
     {
-        this(new DefaultNameFactory(type, scope), namePrefix);
+        this(new DefaultNameFactory(type, scope), namePrefix, isComposite);
     }
 
     /**
@@ -70,42 +77,55 @@ public class LatencyMetrics
      *
      * @param factory MetricName factory to use
      * @param namePrefix Prefix to append to each metric name
+     * @param isComposite whether these latency metrics are composite, see {@link Composable.Type#COMPOSITE}
      */
-    public LatencyMetrics(MetricNameFactory factory, String namePrefix)
+    public LatencyMetrics(MetricNameFactory factory, String namePrefix, boolean isComposite)
     {
-        this(factory, null, namePrefix);
+        this(factory, null, namePrefix, isComposite);
     }
 
-    public LatencyMetrics(MetricNameFactory factory, MetricNameFactory aliasFactory, String namePrefix)
+    public LatencyMetrics(MetricNameFactory factory, MetricNameFactory aliasFactory, String namePrefix, boolean isComposite)
     {
         this.factory = factory;
         this.aliasFactory = aliasFactory;
         this.namePrefix = namePrefix;
+        this.isComposite = isComposite;
 
         if (aliasFactory == null)
         {
-            latency = Metrics.timer(factory.createMetricName(namePrefix + "Latency"));
-            totalLatency = Metrics.counter(factory.createMetricName(namePrefix + "TotalLatency"));
+            latency = Metrics.timer(factory.createMetricName(namePrefix + "Latency"), isComposite);
+            totalLatency = Metrics.counter(factory.createMetricName(namePrefix + "TotalLatency"), isComposite);
         }
         else
         {
-            latency = Metrics.timer(factory.createMetricName(namePrefix + "Latency"), aliasFactory.createMetricName(namePrefix + "Latency"));
-            totalLatency = Metrics.counter(factory.createMetricName(namePrefix + "TotalLatency"), aliasFactory.createMetricName(namePrefix + "TotalLatency"));
+            latency = Metrics.timer(factory.createMetricName(namePrefix + "Latency"), aliasFactory.createMetricName(namePrefix + "Latency"), isComposite);
+            totalLatency = Metrics.counter(factory.createMetricName(namePrefix + "TotalLatency"), aliasFactory.createMetricName(namePrefix + "TotalLatency"), isComposite);
         }
     }
     
     /**
-     * Create LatencyMetrics with given group, type, prefix to append to each metric name, and scope.  Any updates
-     * to this will also run on parent
+     * Create non-composite LatencyMetrics with given group, type, prefix to append to each metric name, and scope.
+     * Compose the new latency metrics into the parent metrics.
      *
      * @param factory MetricName factory to use
      * @param namePrefix Prefix to append to each metric name
      * @param parents any amount of parents to replicate updates to
      */
-    public LatencyMetrics(MetricNameFactory factory, String namePrefix, LatencyMetrics ... parents)
+    public LatencyMetrics(MetricNameFactory factory, MetricNameFactory aliasFactory, String namePrefix, LatencyMetrics ... parents)
     {
-        this(factory, null, namePrefix);
-        this.parents.addAll(ImmutableList.copyOf(parents));
+        this(factory, aliasFactory, namePrefix, false);
+
+        for (LatencyMetrics parent : parents)
+            parent.compose(this);
+    }
+
+    private void compose(LatencyMetrics child)
+    {
+        if (!isComposite)
+            throw new UnsupportedOperationException("Non composite latency metrics cannot be composed with another metric");
+
+        latency.compose(child.latency);
+        totalLatency.compose(child.totalLatency);
     }
 
     /** takes nanoseconds **/
@@ -114,10 +134,6 @@ public class LatencyMetrics
         // convert to microseconds. 1 millionth
         latency.update(nanos, TimeUnit.NANOSECONDS);
         totalLatency.inc(nanos / 1000);
-        for(LatencyMetrics parent : parents)
-        {
-            parent.addNano(nanos);
-        }
     }
 
     public void release()

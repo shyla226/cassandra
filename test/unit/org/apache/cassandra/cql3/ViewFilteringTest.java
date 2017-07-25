@@ -19,7 +19,10 @@
 package org.apache.cassandra.cql3;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
+import com.google.common.util.concurrent.Uninterruptibles;
+import io.reactivex.*;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -28,13 +31,12 @@ import org.junit.Test;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import junit.framework.Assert;
 
-import org.apache.cassandra.concurrent.SEPExecutor;
+import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.FBUtilities;
 
 public class ViewFilteringTest extends CQLTester
 {
@@ -70,11 +72,6 @@ public class ViewFilteringTest extends CQLTester
     private void updateView(String query, Object... params) throws Throwable
     {
         executeNet(protocolVersion, query, params);
-        while (!(((SEPExecutor) StageManager.getStage(Stage.VIEW_MUTATION)).getPendingTasks() == 0
-            && ((SEPExecutor) StageManager.getStage(Stage.VIEW_MUTATION)).getActiveCount() == 0))
-        {
-            Thread.sleep(1);
-        }
     }
 
     private void dropView(String name) throws Throwable
@@ -1558,6 +1555,8 @@ public class ViewFilteringTest extends CQLTester
         while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
             Thread.sleep(10);
 
+        BatchlogManager.instance.forceBatchlogReplay();
+
         assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
             row(0, 0, 1, 0),
             row(0, 1, 1, 0),
@@ -1664,14 +1663,14 @@ public class ViewFilteringTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
 
         //update c's timestamp TS=2
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
 
         //change c's value and TS=3, tombstones c=1 and adds c=0 record
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? and b = ? ", 0, 0, 0);
@@ -1680,7 +1679,7 @@ public class ViewFilteringTest extends CQLTester
         if(flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
         }
 
         //change c's value back to 1 with TS=4, check we can see d
@@ -1688,7 +1687,7 @@ public class ViewFilteringTest extends CQLTester
         if (flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
         }
 
         assertRows(execute("SELECT d, e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, null));
@@ -1699,7 +1698,7 @@ public class ViewFilteringTest extends CQLTester
         assertRows(execute("SELECT d, e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, 1));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
 
 
         //Change d value @ TS=2
@@ -1707,7 +1706,7 @@ public class ViewFilteringTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(2));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            Single.merge(ks.flush()).blockingLast();
 
 
         //Change d value @ TS=3

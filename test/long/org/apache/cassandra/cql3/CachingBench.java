@@ -46,6 +46,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class CachingBench extends CQLTester
@@ -232,7 +233,7 @@ public class CachingBench extends CQLTester
         int startTableCount = cfs.getLiveSSTables().size();
         long startSize = SSTableReader.getTotalBytes(cfs.getLiveSSTables());
         System.out.println("\nCompession: " + cfs.getCompressionParameters().toString());
-        System.out.println("Reader " + cfs.getLiveSSTables().iterator().next().getFileDataInput(0).toString());
+        System.out.println("Reader " + cfs.getLiveSSTables().iterator().next().getFileDataInput(0, Rebufferer.ReaderConstraint.NONE).toString());
         if (cacheEnabled)
             System.out.format("Cache size %s requests %,d hit ratio %f\n",
                 FileUtils.stringifyFileSize(ChunkCache.instance.metrics.size.getValue()),

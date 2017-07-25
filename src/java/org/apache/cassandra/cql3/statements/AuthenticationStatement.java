@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Scheduler;
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -41,18 +44,23 @@ public abstract class AuthenticationStatement extends ParsedStatement implements
         return 0;
     }
 
-    public ResultMessage execute(QueryState state, QueryOptions options, long queryStartNanoTime)
+    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         return execute(state.getClientState());
     }
 
-    public abstract ResultMessage execute(ClientState state) throws RequestExecutionException, RequestValidationException;
+    public abstract Single<ResultMessage> execute(ClientState state) throws RequestExecutionException, RequestValidationException;
 
-    public ResultMessage executeInternal(QueryState state, QueryOptions options)
+    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
         // executeInternal is for local query only, thus altering users doesn't make sense and is not supported
         throw new UnsupportedOperationException();
+    }
+
+    public Scheduler getScheduler()
+    {
+        return Schedulers.io();
     }
 
     public void checkPermission(ClientState state, Permission required, RoleResource resource) throws UnauthorizedException

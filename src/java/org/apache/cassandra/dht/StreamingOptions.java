@@ -19,11 +19,11 @@ import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.Schema;
 
-import static org.apache.cassandra.dht.SourceFilters.*; 
+import static org.apache.cassandra.dht.SourceFilters.*;
 
 /**
  * The options used to specify which sources and keyspaces should be involved during bootstrap or rebuild.
- * 
+ *
  * <p>For bootstrap the options are specified through System properties.For rebuild the options are passed
  *  through the JMX/nodeTool arguments.</p>
  */

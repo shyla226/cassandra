@@ -21,7 +21,6 @@ package org.apache.cassandra.utils;
 import java.util.Arrays;
 import java.util.Iterator;
 
-import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Ordering;
 import org.junit.Before;
@@ -46,7 +45,7 @@ public class MergeIteratorTest
     @Test
     public void testManyToOne() throws Exception
     {
-        MergeIterator.Reducer<String,String> reducer = new MergeIterator.Reducer<String,String>()
+        Reducer<String,String> reducer = new Reducer<String,String>()
         {
             String concatted = "";
 

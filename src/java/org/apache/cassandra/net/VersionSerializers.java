@@ -20,7 +20,7 @@ package org.apache.cassandra.net;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.carrotsearch.hppc.IntObjectOpenHashMap;
+import com.carrotsearch.hppc.IntObjectHashMap;
 import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.versioning.Version;
 
@@ -33,7 +33,7 @@ class VersionSerializers
     private final Version<?> version;
 
     private final List<VerbSerializer> verbSerializers = new ArrayList<>();
-    private final IntObjectOpenHashMap<VerbSerializer> codeToVerb = new IntObjectOpenHashMap<>();
+    private final IntObjectHashMap<VerbSerializer> codeToVerb = new IntObjectHashMap<>();
 
     VersionSerializers(String groupName, Version<?> version)
     {

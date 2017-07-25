@@ -23,8 +23,12 @@ import java.util.concurrent.*;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
 
+import io.reactivex.Completable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import io.reactivex.internal.schedulers.ImmediateThinScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -39,7 +43,6 @@ import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.WrappedRunnable;
 
 public class MigrationManager
 {
@@ -69,9 +72,11 @@ public class MigrationManager
      */
     private static void maybeScheduleSchemaPull(final UUID theirVersion, final InetAddress endpoint)
     {
-        if ((Schema.instance.getVersion() != null && Schema.instance.getVersion().equals(theirVersion)) || !shouldPullSchemaFrom(endpoint))
+        UUID ourVersion = Schema.instance.getVersion();
+        if ((ourVersion != null && Schema.instance.getVersion().equals(theirVersion)) || !shouldPullSchemaFrom(endpoint))
         {
-            logger.debug("Not pulling schema because versions match or shouldPullSchemaFrom returned false");
+            logger.debug("Not pulling schema from {} because versions match ({}/{}), or shouldPullSchemaFrom returned false",
+                         endpoint, ourVersion, theirVersion);
             return;
         }
 
@@ -151,35 +156,38 @@ public class MigrationManager
         }
     }
 
-    public static void announceNewKeyspace(KeyspaceMetadata ksm) throws ConfigurationException
+    public static Completable announceNewKeyspace(KeyspaceMetadata ksm) throws ConfigurationException
     {
-        announceNewKeyspace(ksm, false);
+        return announceNewKeyspace(ksm, false);
     }
 
-    public static void announceNewKeyspace(KeyspaceMetadata ksm, boolean announceLocally) throws ConfigurationException
+    public static Completable announceNewKeyspace(KeyspaceMetadata ksm, boolean announceLocally) throws ConfigurationException
     {
-        announceNewKeyspace(ksm, FBUtilities.timestampMicros(), announceLocally);
+        return announceNewKeyspace(ksm, FBUtilities.timestampMicros(), announceLocally);
     }
 
-    public static void announceNewKeyspace(KeyspaceMetadata ksm, long timestamp, boolean announceLocally) throws ConfigurationException
+    public static Completable announceNewKeyspace(KeyspaceMetadata ksm, long timestamp, boolean announceLocally) throws ConfigurationException
     {
-        ksm.validate();
+        return Completable.defer(() ->
+                                 {
+                                     ksm.validate();
 
-        if (Schema.instance.getKeyspaceMetadata(ksm.name) != null)
-            throw new AlreadyExistsException(ksm.name);
+                                     if (Schema.instance.getKeyspaceMetadata(ksm.name) != null)
+                                         return Completable.error(new AlreadyExistsException(ksm.name));
 
-        logger.info("Create new Keyspace: {}", ksm);
-        announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm, timestamp), announceLocally);
+                                     logger.info("Create new Keyspace: {}", ksm);
+                                     return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm, timestamp), announceLocally);
+                                 });
     }
 
-    public static void announceNewTable(TableMetadata cfm) throws ConfigurationException
+    public static Completable announceNewTable(TableMetadata cfm) throws ConfigurationException
     {
-        announceNewTable(cfm, false);
+        return announceNewTable(cfm, false);
     }
 
-    public static void announceNewTable(TableMetadata cfm, boolean announceLocally)
+    public static Completable announceNewTable(TableMetadata cfm, boolean announceLocally)
     {
-        announceNewTable(cfm, announceLocally, true);
+        return announceNewTable(cfm, announceLocally, true);
     }
 
     /**
@@ -192,197 +200,226 @@ public class MigrationManager
      * Note that this is only safe for system tables where we know the id is fixed and will be the same whatever version
      * of the definition is used.
      */
-    public static void forceAnnounceNewTable(TableMetadata cfm)
+    public static Completable forceAnnounceNewTable(TableMetadata cfm)
     {
-        announceNewTable(cfm, false, false, 0);
+        return announceNewTable(cfm, false, false, 0);
     }
 
-    private static void announceNewTable(TableMetadata cfm, boolean announceLocally, boolean throwOnDuplicate)
+    private static Completable announceNewTable(TableMetadata cfm, boolean announceLocally, boolean throwOnDuplicate)
     {
-        announceNewTable(cfm, announceLocally, throwOnDuplicate, FBUtilities.timestampMicros());
+        return announceNewTable(cfm, announceLocally, throwOnDuplicate, FBUtilities.timestampMicros());
     }
 
-    private static void announceNewTable(TableMetadata cfm, boolean announceLocally, boolean throwOnDuplicate, long timestamp)
+    private static Completable announceNewTable(TableMetadata cfm, boolean announceLocally, boolean throwOnDuplicate, long timestamp)
     {
-        cfm.validate();
+        return Completable.defer(() ->
+                                 {
+                                     cfm.validate();
 
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(cfm.keyspace);
-        if (ksm == null)
-            throw new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", cfm.name, cfm.keyspace));
-        // If we have a table or a view which has the same name, we can't add a new one
-        else if (throwOnDuplicate && ksm.getTableOrViewNullable(cfm.name) != null)
-            throw new AlreadyExistsException(cfm.keyspace, cfm.name);
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(cfm.keyspace);
+                                     if (ksm == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", cfm.name, cfm.keyspace)));
+                                         // If we have a table or a view which has the same name, we can't add a new one
+                                     else if (throwOnDuplicate && ksm.getTableOrViewNullable(cfm.name) != null)
+                                         return Completable.error(new AlreadyExistsException(cfm.keyspace, cfm.name));
 
-        logger.info("Create new table: {}", cfm.toDebugString());
-        announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, timestamp), announceLocally);
+                                     logger.info("Create new table: {}", cfm.toDebugString());
+                                     return announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, timestamp), announceLocally);
+                                 });
     }
 
-    public static void announceNewView(ViewMetadata view, boolean announceLocally) throws ConfigurationException
+    public static Completable announceNewView(ViewMetadata view, boolean announceLocally) throws ConfigurationException
     {
-        view.metadata.validate();
+        return Completable.defer(() ->
+                                 {
+                                     view.metadata.validate();
 
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(view.keyspace);
-        if (ksm == null)
-            throw new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", view.name, view.keyspace));
-        else if (ksm.getTableOrViewNullable(view.name) != null)
-            throw new AlreadyExistsException(view.keyspace, view.name);
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(view.keyspace);
+                                     if (ksm == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", view.name, view.keyspace)));
+                                     else if (ksm.getTableOrViewNullable(view.name) != null)
+                                         return Completable.error(new AlreadyExistsException(view.keyspace, view.name));
 
-        logger.info("Create new view: {}", view);
-        announce(SchemaKeyspace.makeCreateViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
+                                     logger.info("Create new view: {}", view);
+                                     return announce(SchemaKeyspace.makeCreateViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
+                                 });
     }
 
-    public static void announceNewType(UserType newType, boolean announceLocally)
+    public static Completable announceNewType(UserType newType, boolean announceLocally)
     {
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(newType.keyspace);
-        announce(SchemaKeyspace.makeCreateTypeMutation(ksm, newType, FBUtilities.timestampMicros()), announceLocally);
+        return announce(SchemaKeyspace.makeCreateTypeMutation(ksm, newType, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static void announceNewFunction(UDFunction udf, boolean announceLocally)
+    public static Completable announceNewFunction(UDFunction udf, boolean announceLocally)
     {
         logger.info("Create scalar function '{}'", udf.name());
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(udf.name().keyspace);
-        announce(SchemaKeyspace.makeCreateFunctionMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
+        return announce(SchemaKeyspace.makeCreateFunctionMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static void announceNewAggregate(UDAggregate udf, boolean announceLocally)
+    public static Completable announceNewAggregate(UDAggregate udf, boolean announceLocally)
     {
         logger.info("Create aggregate function '{}'", udf.name());
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(udf.name().keyspace);
-        announce(SchemaKeyspace.makeCreateAggregateMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
+        return announce(SchemaKeyspace.makeCreateAggregateMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static void announceKeyspaceUpdate(KeyspaceMetadata ksm) throws ConfigurationException
+    public static Completable announceKeyspaceUpdate(KeyspaceMetadata ksm) throws ConfigurationException
     {
-        announceKeyspaceUpdate(ksm, false);
+        return announceKeyspaceUpdate(ksm, false);
     }
 
-    public static void announceKeyspaceUpdate(KeyspaceMetadata ksm, boolean announceLocally) throws ConfigurationException
+    public static Completable announceKeyspaceUpdate(KeyspaceMetadata ksm, boolean announceLocally) throws ConfigurationException
     {
-        ksm.validate();
+        return Completable.defer(() ->
+                                 {
+                                     ksm.validate();
 
-        KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksm.name);
-        if (oldKsm == null)
-            throw new ConfigurationException(String.format("Cannot update non existing keyspace '%s'.", ksm.name));
+                                     KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksm.name);
+                                     if (oldKsm == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot update non existing keyspace '%s'.", ksm.name)));
 
-        logger.info("Update Keyspace '{}' From {} To {}", ksm.name, oldKsm, ksm);
-        announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm.name, ksm.params, FBUtilities.timestampMicros()), announceLocally);
+                                     logger.info("Update Keyspace '{}' From {} To {}", ksm.name, oldKsm, ksm);
+                                     return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm.name, ksm.params, FBUtilities.timestampMicros()), announceLocally);
+                                 });
     }
 
-    public static void announceTableUpdate(TableMetadata tm) throws ConfigurationException
+    public static Completable announceTableUpdate(TableMetadata tm) throws ConfigurationException
     {
-        announceTableUpdate(tm, false);
+        return announceTableUpdate(tm, false);
     }
 
-    public static void announceTableUpdate(TableMetadata updated, boolean announceLocally) throws ConfigurationException
+    public static Completable announceTableUpdate(TableMetadata updated, boolean announceLocally) throws ConfigurationException
     {
-        updated.validate();
+        return Completable.defer(() ->
+                                 {
+                                     updated.validate();
 
-        TableMetadata current = Schema.instance.getTableMetadata(updated.keyspace, updated.name);
-        if (current == null)
-            throw new ConfigurationException(String.format("Cannot update non existing table '%s' in keyspace '%s'.", updated.name, updated.keyspace));
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(current.keyspace);
+                                     TableMetadata current = Schema.instance.getTableMetadata(updated.keyspace, updated.name);
+                                     if (current == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot update non existing table '%s' in keyspace '%s'.", updated.name, updated.keyspace)));
 
-        current.validateCompatibility(updated);
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(current.keyspace);
 
-        logger.info("Update table '{}/{}' From {} To {}", current.keyspace, current.name, current.toDebugString(), updated.toDebugString());
-        announce(SchemaKeyspace.makeUpdateTableMutation(ksm, current, updated, FBUtilities.timestampMicros()), announceLocally);
+                                     current.validateCompatibility(updated);
+
+                                     logger.info("Update table '{}/{}' From {} To {}", current.keyspace, current.name, current.toDebugString(), updated.toDebugString());
+                                     return announce(SchemaKeyspace.makeUpdateTableMutation(ksm, current, updated, FBUtilities.timestampMicros()), announceLocally);
+                                 });
     }
 
-    public static void announceViewUpdate(ViewMetadata view, boolean announceLocally) throws ConfigurationException
+    public static Completable announceViewUpdate(ViewMetadata view, boolean announceLocally) throws ConfigurationException
     {
-        view.metadata.validate();
+        return Completable.defer(() ->
+                                 {
+                                     view.metadata.validate();
 
-        ViewMetadata oldView = Schema.instance.getView(view.keyspace, view.name);
-        if (oldView == null)
-            throw new ConfigurationException(String.format("Cannot update non existing materialized view '%s' in keyspace '%s'.", view.name, view.keyspace));
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(view.keyspace);
+                                     ViewMetadata oldView = Schema.instance.getView(view.keyspace, view.name);
+                                     if (oldView == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot update non existing materialized view '%s' in keyspace '%s'.", view.name, view.keyspace)));
 
-        oldView.metadata.validateCompatibility(view.metadata);
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(view.keyspace);
 
-        logger.info("Update view '{}/{}' From {} To {}", view.keyspace, view.name, oldView, view);
-        announce(SchemaKeyspace.makeUpdateViewMutation(ksm, oldView, view, FBUtilities.timestampMicros()), announceLocally);
+                                     oldView.metadata.validateCompatibility(view.metadata);
+
+                                     logger.info("Update view '{}/{}' From {} To {}", view.keyspace, view.name, oldView, view);
+                                     return announce(SchemaKeyspace.makeUpdateViewMutation(ksm, oldView, view, FBUtilities.timestampMicros()), announceLocally);
+                                 });
     }
 
-    public static void announceTypeUpdate(UserType updatedType, boolean announceLocally)
+    public static Completable announceTypeUpdate(UserType updatedType, boolean announceLocally)
     {
         logger.info("Update type '{}.{}' to {}", updatedType.keyspace, updatedType.getNameAsString(), updatedType);
-        announceNewType(updatedType, announceLocally);
+        return announceNewType(updatedType, announceLocally);
     }
 
-    public static void announceKeyspaceDrop(String ksName) throws ConfigurationException
+    public static Completable announceKeyspaceDrop(String ksName) throws ConfigurationException
     {
-        announceKeyspaceDrop(ksName, false);
+        return announceKeyspaceDrop(ksName, false);
     }
 
-    public static void announceKeyspaceDrop(String ksName, boolean announceLocally) throws ConfigurationException
+    public static Completable announceKeyspaceDrop(String ksName, boolean announceLocally) throws ConfigurationException
     {
-        KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksName);
-        if (oldKsm == null)
-            throw new ConfigurationException(String.format("Cannot drop non existing keyspace '%s'.", ksName));
+        return Completable.defer(() ->
+                                 {
+                                     KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksName);
+                                     if (oldKsm == null)
+                                        return Completable.error(new ConfigurationException(String.format("Cannot drop non existing keyspace '%s'.", ksName)));
 
-        logger.info("Drop Keyspace '{}'", oldKsm.name);
-        announce(SchemaKeyspace.makeDropKeyspaceMutation(oldKsm, FBUtilities.timestampMicros()), announceLocally);
+                                     logger.info("Drop Keyspace '{}'", oldKsm.name);
+                                     return announce(SchemaKeyspace.makeDropKeyspaceMutation(oldKsm, FBUtilities.timestampMicros()), announceLocally);
+                                 });
     }
 
-    public static void announceTableDrop(String ksName, String cfName) throws ConfigurationException
+    public static Completable announceTableDrop(String ksName, String cfName) throws ConfigurationException
     {
-        announceTableDrop(ksName, cfName, false);
+        return announceTableDrop(ksName, cfName, false);
     }
 
-    public static void announceTableDrop(String ksName, String cfName, boolean announceLocally) throws ConfigurationException
+    public static Completable announceTableDrop(String ksName, String cfName, boolean announceLocally) throws ConfigurationException
     {
-        TableMetadata tm = Schema.instance.getTableMetadata(ksName, cfName);
-        if (tm == null)
-            throw new ConfigurationException(String.format("Cannot drop non existing table '%s' in keyspace '%s'.", cfName, ksName));
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(ksName);
+        return Completable.defer(() ->
+                                 {
+                                     TableMetadata tm = Schema.instance.getTableMetadata(ksName, cfName);
+                                     if (tm == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot drop non existing table '%s' in keyspace '%s'.", cfName, ksName)));
 
-        logger.info("Drop table '{}/{}'", tm.keyspace, tm.name);
-        announce(SchemaKeyspace.makeDropTableMutation(ksm, tm, FBUtilities.timestampMicros()), announceLocally);
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(ksName);
+
+                                     logger.info("Drop table '{}/{}'", tm.keyspace, tm.name);
+                                     return announce(SchemaKeyspace.makeDropTableMutation(ksm, tm, FBUtilities.timestampMicros()), announceLocally);
+                                 });
     }
 
-    public static void announceViewDrop(String ksName, String viewName, boolean announceLocally) throws ConfigurationException
+    public static Completable announceViewDrop(String ksName, String viewName, boolean announceLocally) throws ConfigurationException
     {
-        ViewMetadata view = Schema.instance.getView(ksName, viewName);
-        if (view == null)
-            throw new ConfigurationException(String.format("Cannot drop non existing materialized view '%s' in keyspace '%s'.", viewName, ksName));
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(ksName);
+        return Completable.defer(() ->
+                                 {
+                                     ViewMetadata view = Schema.instance.getView(ksName, viewName);
+                                     if (view == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot drop non existing materialized view '%s' in keyspace '%s'.", viewName, ksName)));
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(ksName);
 
-        logger.info("Drop table '{}/{}'", view.keyspace, view.name);
-        announce(SchemaKeyspace.makeDropViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
+                                     logger.info("Drop table '{}/{}'", view.keyspace, view.name);
+                                     return announce(SchemaKeyspace.makeDropViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
+                                 });
     }
 
-    public static void announceTypeDrop(UserType droppedType, boolean announceLocally)
+    public static Completable announceTypeDrop(UserType droppedType, boolean announceLocally)
     {
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(droppedType.keyspace);
-        announce(SchemaKeyspace.dropTypeFromSchemaMutation(ksm, droppedType, FBUtilities.timestampMicros()), announceLocally);
+        return announce(SchemaKeyspace.dropTypeFromSchemaMutation(ksm, droppedType, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static void announceFunctionDrop(UDFunction udf, boolean announceLocally)
+    public static Completable announceFunctionDrop(UDFunction udf, boolean announceLocally)
     {
         logger.info("Drop scalar function overload '{}' args '{}'", udf.name(), udf.argTypes());
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(udf.name().keyspace);
-        announce(SchemaKeyspace.makeDropFunctionMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
+        return announce(SchemaKeyspace.makeDropFunctionMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static void announceAggregateDrop(UDAggregate udf, boolean announceLocally)
+    public static Completable announceAggregateDrop(UDAggregate udf, boolean announceLocally)
     {
         logger.info("Drop aggregate function overload '{}' args '{}'", udf.name(), udf.argTypes());
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(udf.name().keyspace);
-        announce(SchemaKeyspace.makeDropAggregateMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
+        return announce(SchemaKeyspace.makeDropAggregateMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
     }
 
     /**
      * actively announce a new version to active hosts via rpc
      * @param schema The schema mutation to be applied
      */
-    private static void announce(Mutation.SimpleBuilder schema, boolean announceLocally)
+    private static Completable announce(Mutation.SimpleBuilder schema, boolean announceLocally)
     {
         SchemaMigration migration = new SchemaMigration(Collections.singletonList(schema.build()));
 
         if (announceLocally)
-            Schema.instance.merge(migration);
+            return Completable.fromRunnable(() -> Schema.instance.merge(migration))
+                              .subscribeOn(TPC.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
+                                           ImmediateThinScheduler.INSTANCE);
         else
-            FBUtilities.waitOnFuture(announce(migration));
+            return announce(migration);
     }
 
     private static void pushSchemaMutation(InetAddress endpoint, SchemaMigration schema)
@@ -391,26 +428,22 @@ public class MigrationManager
     }
 
     // Returns a future on the local application of the schema
-    private static Future<?> announce(final SchemaMigration schema)
+    private static Completable announce(final SchemaMigration schema)
     {
-        Future<?> f = StageManager.getStage(Stage.MIGRATION).submit(new WrappedRunnable()
-        {
-            protected void runMayThrow() throws ConfigurationException
-            {
-                Schema.instance.mergeAndAnnounceVersion(schema);
-            }
-        });
+        return Completable.fromRunnable(() ->
+                                        {
+                                            Schema.instance.mergeAndAnnounceVersion(schema);
 
-        for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
-        {
-            // only push schema to nodes with known and equal versions
-            if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
-                    MessagingService.instance().knowsVersion(endpoint) &&
-                    MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
-                pushSchemaMutation(endpoint, schema);
-        }
-
-        return f;
+                                            for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
+                                            {
+                                                // only push schema to nodes with known and equal versions
+                                                if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
+                                                    MessagingService.instance().knowsVersion(endpoint) &&
+                                                    MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
+                                                    pushSchemaMutation(endpoint, schema);
+                                            }
+                                        }).subscribeOn(TPC.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
+                                                       ImmediateThinScheduler.INSTANCE);
     }
 
     /**

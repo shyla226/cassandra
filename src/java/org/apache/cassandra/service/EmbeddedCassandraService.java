@@ -47,6 +47,7 @@ public class EmbeddedCassandraService
     {
         cassandraDaemon = CassandraDaemon.instance;
         cassandraDaemon.applyConfig();
+        cassandraDaemon.initializeTPC();
         cassandraDaemon.init(null);
         cassandraDaemon.start();
     }

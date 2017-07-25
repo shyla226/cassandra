@@ -17,6 +17,10 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Maybe;
+import io.reactivex.Scheduler;
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -84,40 +88,52 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
      *
      * @throws RequestValidationException
      */
-    protected abstract Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException;
+    protected abstract Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException;
 
-    public ResultMessage execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
+    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
     {
         // If an IF [NOT] EXISTS clause was used, this may not result in an actual schema change.  To avoid doing
         // extra work in the drivers to handle schema changes, we return an empty message in this case. (CASSANDRA-7600)
-        Event.SchemaChange ce = announceMigration(state, false);
-        if (ce == null)
-            return new ResultMessage.Void();
+        Maybe<Event.SchemaChange> ce = announceMigration(state, false);
 
         // when a schema alteration results in a new db object being created, we grant permissions on the new
         // object to the user performing the request if:
         // * the user is not anonymous
         // * the configured IAuthorizer supports granting of permissions (not all do, AllowAllAuthorizer doesn't and
         //   custom external implementations may not)
-        AuthenticatedUser user = state.getClientState().getUser();
-        if (user != null && !user.isAnonymous() && ce.change == Event.SchemaChange.Change.CREATED)
-        {
-            try
-            {
-                grantPermissionsToCreator(state);
-            }
-            catch (UnsupportedOperationException e)
-            {
-                // not a problem, grant is an optional method on IAuthorizer
-            }
-        }
-
-        return new ResultMessage.SchemaChange(ce);
+        return ce.map(event ->
+                      {
+                          AuthenticatedUser user = state.getClientState().getUser();
+                          if (user != null && !user.isAnonymous() && event.change == Event.SchemaChange.Change.CREATED)
+                          {
+                              try
+                              {
+                                  grantPermissionsToCreator(state);
+                              }
+                              catch (UnsupportedOperationException e)
+                              {
+                                  // not a problem, grant is an optional method on IAuthorizer
+                              }
+                          }
+                          return new ResultMessage.SchemaChange(event);
+                      }).cast(ResultMessage.class)
+                 .toSingle(new ResultMessage.Void());
     }
 
-    public ResultMessage executeInternal(QueryState state, QueryOptions options)
+    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
-        Event.SchemaChange ce = announceMigration(state, true);
-        return ce == null ? new ResultMessage.Void() : new ResultMessage.SchemaChange(ce);
+        return announceMigration(state, true).map(s -> (ResultMessage) new ResultMessage.SchemaChange(s))
+                                             .toSingle(new ResultMessage.Void());
     }
+
+    public Scheduler getScheduler()
+    {
+        return Schedulers.io();
+    }
+
+    protected Maybe<Event.SchemaChange> error(String msg)
+    {
+        return Maybe.error(new InvalidRequestException(msg));
+    }
+
 }

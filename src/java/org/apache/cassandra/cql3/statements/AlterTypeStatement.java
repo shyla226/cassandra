@@ -19,6 +19,8 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.*;
 
+import io.reactivex.Completable;
+import io.reactivex.Maybe;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.*;
@@ -83,23 +85,34 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
         return name.getKeyspace();
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(name.getKeyspace());
         if (ksm == null)
-            throw new InvalidRequestException(String.format("Cannot alter type in unknown keyspace %s", name.getKeyspace()));
+            return error(String.format("Cannot alter type in unknown keyspace %s", name.getKeyspace()));
 
-        UserType toUpdate =
-            ksm.types.get(name.getUserTypeName())
-                     .orElseThrow(() -> new InvalidRequestException(String.format("No user type named %s exists.", name)));
+        UserType toUpdate = ksm.types.getNullable(name.getUserTypeName());
+        if (toUpdate == null)
+            return error(String.format("No user type named %s exists.", name));
 
-        UserType updated = makeUpdatedType(toUpdate, ksm);
+        UserType updated;
+        try
+        {
+            updated = makeUpdatedType(toUpdate, ksm);
+        }
+        catch (InvalidRequestException exc)
+        {
+            return Maybe.error(exc);
+        }
 
         // Now, we need to announce the type update to basically change it for new tables using this type,
         // but we also need to find all existing user types and CF using it and change them.
-        MigrationManager.announceTypeUpdate(updated, isLocalOnly);
+        List<Completable> migrations = new ArrayList<>();
+        migrations.add(MigrationManager.announceTypeUpdate(updated, isLocalOnly));
 
-        return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName());
+
+        return Completable.merge(migrations)
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName())));
     }
 
     protected void checkTypeNotUsedByAggregate(KeyspaceMetadata ksm)
@@ -172,7 +185,10 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
             }
 
             UserType updated = new UserType(toUpdate.keyspace, toUpdate.name, newNames, newTypes, toUpdate.isMultiCell());
-            CreateTypeStatement.checkForDuplicateNames(updated);
+            String duplicate = CreateTypeStatement.haveDuplicateName(updated);
+            if (duplicate != null)
+                throw new InvalidRequestException(String.format("Duplicate field name %s in type %s", duplicate, updated.name));
+
             return updated;
         }
 

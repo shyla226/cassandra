@@ -17,6 +17,10 @@
  */
 package org.apache.cassandra.db.commitlog;
 
+import io.reactivex.Completable;
+import io.reactivex.Scheduler;
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 class BatchCommitLogService extends AbstractCommitLogService
@@ -26,12 +30,15 @@ class BatchCommitLogService extends AbstractCommitLogService
         super(commitLog, "COMMIT-LOG-WRITER", (int) DatabaseDescriptor.getCommitLogSyncBatchWindow());
     }
 
-    protected void maybeWaitForSync(CommitLogSegment.Allocation alloc)
+    protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc)
     {
         // wait until record has been safely persisted to disk
-        pending.incrementAndGet();
-        requestExtraSync();
-        alloc.awaitDiskSync(commitLog.metrics.waitingOnCommit);
-        pending.decrementAndGet();
+        return Completable.fromAction(() ->
+                                      {
+                                          pending.incrementAndGet();
+                                          requestExtraSync();
+                                          alloc.awaitDiskSync(commitLog.metrics.waitingOnCommit);
+                                          pending.decrementAndGet();
+                                      }).subscribeOn(Schedulers.io());
     }
 }

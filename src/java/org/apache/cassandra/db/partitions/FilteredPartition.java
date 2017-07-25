@@ -19,17 +19,36 @@ package org.apache.cassandra.db.partitions;
 
 import java.util.Iterator;
 
+import org.apache.cassandra.db.EmptyIterators;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class FilteredPartition extends ImmutableBTreePartition
 {
     public FilteredPartition(RowIterator rows)
     {
         super(rows.metadata(), rows.partitionKey(), build(rows, DeletionInfo.LIVE, false, 16));
+    }
+
+    public FilteredPartition(PartitionHeader header, Holder holder)
+    {
+        super(header.metadata, header.partitionKey, holder);
+    }
+
+    /**
+     * Create an empty partition.
+     */
+    public static FilteredPartition empty(SinglePartitionReadCommand command)
+    {
+        // TODO - get rid of empty iterator
+        return create(EmptyIterators.row(command.metadata(),
+                                         command.partitionKey(),
+                                         command.clusteringIndexFilter().isReversed()));
     }
 
     /**
@@ -41,6 +60,15 @@ public class FilteredPartition extends ImmutableBTreePartition
     public static FilteredPartition create(RowIterator iterator)
     {
         return new FilteredPartition(iterator);
+    }
+
+    /**
+     * Create a FilteredPartition holding all the rows of the provided partition.
+     */
+    public static Flow<FilteredPartition> create(FlowablePartition partition)
+    {
+        return build(partition, DeletionInfo.LIVE, false, 16)
+               .map(holder -> new FilteredPartition(partition.header, holder));
     }
 
     public RowIterator rowIterator()

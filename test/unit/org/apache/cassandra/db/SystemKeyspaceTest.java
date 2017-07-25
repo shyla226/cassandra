@@ -26,12 +26,11 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.dht.ByteOrderedPartitioner.BytesToken;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.CassandraVersion;
 
@@ -60,7 +59,7 @@ public class SystemKeyspaceTest
         List<Token> tokens = new ArrayList<Token>()
         {{
             for (int i = 0; i < 9; i++)
-                add(new BytesToken(ByteBufferUtil.bytes(String.format("token%d", i))));
+                add(new Murmur3Partitioner.LongToken(i));
         }};
 
         SystemKeyspace.updateTokens(tokens);
@@ -73,7 +72,7 @@ public class SystemKeyspaceTest
     @Test
     public void testNonLocalToken() throws UnknownHostException
     {
-        BytesToken token = new BytesToken(ByteBufferUtil.bytes("token3"));
+        Murmur3Partitioner.LongToken token = new Murmur3Partitioner.LongToken(3);
         InetAddress address = InetAddress.getByName("127.0.0.2");
         SystemKeyspace.updateTokens(address, Collections.<Token>singletonList(token));
         assert SystemKeyspace.loadTokens().get(address).contains(token);
@@ -84,7 +83,7 @@ public class SystemKeyspaceTest
     @Test
     public void testLocalHostID()
     {
-        UUID firstId = SystemKeyspace.getLocalHostId();
+        UUID firstId = SystemKeyspace.setLocalHostIdBlocking();
         UUID secondId = SystemKeyspace.getLocalHostId();
         assert firstId.equals(secondId) : String.format("%s != %s%n", firstId.toString(), secondId.toString());
     }

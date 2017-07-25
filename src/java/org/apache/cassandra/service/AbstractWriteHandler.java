@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -110,6 +111,33 @@ abstract class AbstractWriteHandler extends WriteHandler
         }
     }
 
+    public Completable toObservable()
+    {
+        return Completable.create(subscriber -> whenComplete((result, error) -> {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - Completed with {}/{}", AbstractWriteHandler.this.hashCode(), result, error == null ? null : error.getClass().getName());
+            if (error != null)
+                subscriber.onError(error);
+            else
+                subscriber.onComplete();
+        })).timeout(currentTimeout(), TimeUnit.NANOSECONDS)
+           .onErrorResumeNext(exc -> {
+               if (exc instanceof TimeoutException)
+               {
+                   int acks = ackCount();
+                   // It's pretty unlikely, but we can race between exiting get() above and here, so
+                   // that we could now have enough acks. In that case, we "lie" on the acks count to
+                   // avoid sending confusing info to the user (see CASSANDRA-6491).
+                   if (acks >= blockFor)
+                       acks = blockFor - 1;
+                   return Completable.error(new WriteTimeoutException(writeType, consistency, acks, blockFor));
+               }
+               if (logger.isTraceEnabled())
+                   logger.trace("{} - Returning error {}", AbstractWriteHandler.this.hashCode(), exc.getClass().getName());
+               return Completable.error(exc);
+          });
+    }
+
     /**
      * @return the minimum number of endpoints that must reply.
      */
@@ -133,7 +161,8 @@ abstract class AbstractWriteHandler extends WriteHandler
     public void onFailure(FailureResponse<EmptyPayload> response)
     {
         InetAddress from = response.from();
-        logger.trace("Got failure from {}", from);
+        if (logger.isTraceEnabled())
+            logger.trace("{} - Got failure from {}: {}", hashCode(), from, response);
 
         int n = waitingFor(from) ? failures.incrementAndGet() : failures.get();
 

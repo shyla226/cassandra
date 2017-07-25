@@ -28,11 +28,16 @@ import java.text.DecimalFormat;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.FBUtilities;
 import sun.nio.ch.DirectBuffer;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -242,6 +247,7 @@ public final class FileUtils
         }
         catch (Exception e)
         {
+            JVMStabilityInspector.inspectThrowable(e);
             logger.warn("Failed closing {}", c, e);
         }
     }
@@ -581,5 +587,118 @@ public final class FileUtils
     public static void setFSErrorHandler(FSErrorHandler handler)
     {
         fsErrorHandler.getAndSet(Optional.ofNullable(handler));
+    }
+
+    /**
+     * Lists the physical disk devices the data directories are on.
+     * This only works on Linux.
+     * @throws IOException
+     */
+    public static Map<Path, String> getDiskPartitions() throws IOException
+    {
+        assert FBUtilities.isLinux;
+
+        Map<Path, String> dirToDisk = new TreeMap<>();
+        try (BufferedReader bufferedReader =  new BufferedReader(new InputStreamReader(new FileInputStream("/proc/mounts"), "UTF-8")))
+        {
+            String line;
+            while ((line = bufferedReader.readLine()) != null)
+            {
+                String parts[] = line.split(" +");
+                assert parts.length > 2;
+
+                //Remove any numbers at the end of the disk since they are just partitions
+                String disk =  parts[0].replaceAll("\\d+$", "");
+                int devOffset = disk.lastIndexOf("/");
+
+                //Ignore stuff like tmpfs
+                if (devOffset < 0)
+                    continue;
+
+                disk = disk.substring(devOffset);
+
+                // /home, /dev/sda
+                dirToDisk.put(Paths.get(parts[1]), disk);
+            }
+        }
+
+        return dirToDisk;
+    }
+
+    /**
+     * Detects if a given device (i.e. sda) is rotational or ssd
+     * @param device the name of the root device "sdb"
+     *
+     * This only works on Linux
+     *
+     * @return true for ssd
+     * @throws IOException
+     */
+    public static boolean isSSD(String device) throws IOException
+    {
+        assert FBUtilities.isLinux;
+
+        try (BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(new FileInputStream(String.format("/sys/block/%s/queue/rotational", device)), "UTF-8")))
+        {
+            String line = bufferedReader.readLine().trim();
+
+            if (line.equals("0"))
+                return true;
+        }
+
+        return false;
+    }
+
+
+    /**
+     * Detects if data directories are all SSDs.
+     * In the case of Linux we check the block device info under /sys
+     *
+     * For non-Linux we use the disk_optimization_strategy in cassandra.yaml
+     *
+     * @return true if data directories are all SSD
+     */
+    public static boolean isSSD()
+    {
+        boolean isSSD = DatabaseDescriptor.getDiskOptimizationStrategy() instanceof SsdDiskOptimizationStrategy;
+
+        if (FBUtilities.isLinux)
+        {
+            try
+            {
+                Map<Path, String> dirToDisk = getDiskPartitions();
+
+                for (String dataDir : DatabaseDescriptor.getAllDataFileLocations())
+                {
+                    Path dataPath = Paths.get(dataDir).toAbsolutePath();
+                    boolean found = false;
+                    for (Map.Entry<Path, String> entry : dirToDisk.entrySet())
+                    {
+                        if (dataPath.startsWith(entry.getKey()))
+                        {
+                            found = true;
+                            if (!isSSD(entry.getValue()))
+                                isSSD = false;
+
+                            break;
+                        }
+                    }
+
+                    if (!found)
+                        throw new IOException("Unable to locate the disk for " + dataDir);
+                }
+            }
+            catch (IOException e)
+            {
+                logger.error("Error determining if disk is SSD", e);
+            }
+        }
+        else
+        {
+            logger.warn("Unable to detect if disks are SSD. Relying on disk_optimization_strategy in cassandra.yaml");
+        }
+
+        logger.info("Data directories are SSD: {}", isSSD);
+        return isSSD;
     }
 }

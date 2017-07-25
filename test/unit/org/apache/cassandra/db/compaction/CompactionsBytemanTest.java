@@ -20,11 +20,14 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.concurrent.TimeUnit;
 
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.schema.Schema;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
@@ -34,6 +37,16 @@ import static org.junit.Assert.assertEquals;
 @RunWith(BMUnitRunner.class)
 public class CompactionsBytemanTest extends CQLTester
 {
+    @Before
+    public void setUp()
+    {
+        for (String ksname : Schema.instance.getKeyspaces())
+        {
+            for (ColumnFamilyStore cfs : Keyspace.open(ksname).getColumnFamilyStores())
+                cfs.disableAutoCompaction();
+        }
+    }
+
     /*
     Return false for the first time hasAvailableDiskSpace is called. i.e first SSTable is too big
     Create 5 SSTables. After compaction, there should be 2 left - 1 as the 9 SStables which were merged,

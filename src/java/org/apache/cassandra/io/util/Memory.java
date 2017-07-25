@@ -35,20 +35,7 @@ import sun.nio.ch.DirectBuffer;
  */
 public class Memory implements AutoCloseable
 {
-    private static final Unsafe unsafe;
-    static
-    {
-        try
-        {
-            Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
-            field.setAccessible(true);
-            unsafe = (sun.misc.Unsafe) field.get(null);
-        }
-        catch (Exception e)
-        {
-            throw new AssertionError(e);
-        }
-    }
+    private static final Unsafe unsafe = MemoryUtil.unsafe;
 
     private static final long BYTE_ARRAY_BASE_OFFSET = unsafe.arrayBaseOffset(byte[].class);
 

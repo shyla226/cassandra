@@ -18,6 +18,7 @@
  */
 package org.apache.cassandra.tools;
 
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
@@ -48,6 +49,7 @@ public class StandaloneVerifier
     {
         Options options = Options.parseArgs(args);
         Util.initDatabaseDescriptor();
+        TPC.ensureInitialized();
 
         try
         {

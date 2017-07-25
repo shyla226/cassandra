@@ -43,9 +43,13 @@ import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SchemaLoader
 {
+    private static final Logger logger = LoggerFactory.getLogger(SchemaLoader.class);
+
     @BeforeClass
     public static void loadSchema() throws ConfigurationException
     {
@@ -251,7 +255,7 @@ public class SchemaLoader
         // if you're messing with low-level sstable stuff, it can be useful to inject the schema directly
         // Schema.instance.load(schemaDefinition());
         for (KeyspaceMetadata ksm : schema)
-            MigrationManager.announceNewKeyspace(ksm, false);
+            MigrationManager.announceNewKeyspace(ksm, false).blockingAwait();
 
         if (Boolean.parseBoolean(System.getProperty("cassandra.test.compression", "false")))
             useCompression(schema);
@@ -259,7 +263,7 @@ public class SchemaLoader
 
     public static void createKeyspace(String name, KeyspaceParams params)
     {
-        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, Tables.of()), true);
+        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, Tables.of()), true).blockingAwait();
     }
 
     public static void createKeyspace(String name, KeyspaceParams params, TableMetadata.Builder... builders)
@@ -268,17 +272,17 @@ public class SchemaLoader
         for (TableMetadata.Builder builder : builders)
             tables.add(builder.build());
 
-        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables.build()), true);
+        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables.build()), true).blockingAwait();
     }
 
     public static void createKeyspace(String name, KeyspaceParams params, TableMetadata... tables)
     {
-        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, Tables.of(tables)), true);
+        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, Tables.of(tables)), true).blockingAwait();
     }
 
     public static void createKeyspace(String name, KeyspaceParams params, Tables tables, Types types)
     {
-        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables, Views.none(), types, Functions.none()), true);
+        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables, Views.none(), types, Functions.none()), true).blockingAwait();
     }
 
     public static ColumnMetadata integerColumn(String ksName, String cfName)
@@ -325,7 +329,7 @@ public class SchemaLoader
     {
         for (KeyspaceMetadata ksm : schema)
             for (TableMetadata cfm : ksm.tablesAndViews())
-                MigrationManager.announceTableUpdate(cfm.unbuild().compression(CompressionParams.snappy()).build(), true);
+                MigrationManager.announceTableUpdate(cfm.unbuild().compression(CompressionParams.snappy()).build(), true).blockingAwait();
     }
 
     public static TableMetadata.Builder counterCFMD(String ksName, String cfName)

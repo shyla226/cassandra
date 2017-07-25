@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.Objects;
 import java.util.List;
 
+import io.reactivex.Maybe;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -215,38 +216,38 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
             throw new InvalidRequestException(String.format("Cannot add aggregate '%s' to non existing keyspace '%s'.", functionName.name, functionName.keyspace));
     }
 
-    public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
         Function old = Schema.instance.findFunction(functionName, argTypes).orElse(null);
         boolean replaced = old != null;
         if (replaced)
         {
             if (ifNotExists)
-                return null;
+                return Maybe.empty();
             if (!orReplace)
-                throw new InvalidRequestException(String.format("Function %s already exists", old));
+                return error(String.format("Function %s already exists", old));
             if (!(old instanceof AggregateFunction))
-                throw new InvalidRequestException(String.format("Aggregate %s can only replace an aggregate", old));
+                return error(String.format("Aggregate %s can only replace an aggregate", old));
 
             // Means we're replacing the function. We still need to validate that 1) it's not a native function and 2) that the return type
             // matches (or that could break existing code badly)
             if (old.isNative())
-                throw new InvalidRequestException(String.format("Cannot replace native aggregate %s", old));
+                return error(String.format("Cannot replace native aggregate %s", old));
             if (!old.returnType().isValueCompatibleWith(returnType))
-                throw new InvalidRequestException(String.format("Cannot replace aggregate %s, the new return type %s is not compatible with the return type %s of existing function",
-                                                                functionName, returnType.asCQL3Type(), old.returnType().asCQL3Type()));
+                return error(String.format("Cannot replace aggregate %s, the new return type %s is not compatible with the return type %s of existing function",
+                                           functionName, returnType.asCQL3Type(), old.returnType().asCQL3Type()));
         }
 
         if (!stateFunction.isCalledOnNullInput() && initcond == null)
-            throw new InvalidRequestException(String.format("Cannot create aggregate %s without INITCOND because state function %s does not accept 'null' arguments", functionName, stateFunc));
+            return error(String.format("Cannot create aggregate %s without INITCOND because state function %s does not accept 'null' arguments", functionName, stateFunc));
 
         UDAggregate udAggregate = new UDAggregate(functionName, argTypes, returnType, stateFunction, finalFunction, initcond);
 
-        MigrationManager.announceNewAggregate(udAggregate, isLocalOnly);
-
-        return new Event.SchemaChange(replaced ? Event.SchemaChange.Change.UPDATED : Event.SchemaChange.Change.CREATED,
-                                      Event.SchemaChange.Target.AGGREGATE,
-                                      udAggregate.name().keyspace, udAggregate.name().name, AbstractType.asCQLTypeStringList(udAggregate.argTypes()));
+        return MigrationManager.announceNewAggregate(udAggregate, isLocalOnly)
+                .andThen(Maybe.just( new Event.SchemaChange(
+                        replaced ? Event.SchemaChange.Change.UPDATED : Event.SchemaChange.Change.CREATED,
+                        Event.SchemaChange.Target.AGGREGATE,
+                        udAggregate.name().keyspace, udAggregate.name().name, AbstractType.asCQLTypeStringList(udAggregate.argTypes()))));
     }
 
     private static String stateFuncSig(FunctionName stateFuncName, CQL3Type.Raw stateTypeRaw, List<CQL3Type.Raw> argRawTypes)

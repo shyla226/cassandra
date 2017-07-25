@@ -55,7 +55,7 @@ public class ExecutorLocals
      *
      * @return an ExecutorLocals object which has the trace state and client warn state captured if either has been set,
      *         or null if both are unset. The null result short-circuits logic in
-     *         {@link AbstractLocalAwareExecutorService#newTaskFor(Runnable, Object, ExecutorLocals)}, preventing
+     *         {@link DebuggableThreadPoolExecutor#newTaskFor(Runnable, Object)}, preventing
      *         unnecessarily calling {@link ExecutorLocals#set(ExecutorLocals)}.
      */
     public static ExecutorLocals create()
@@ -68,9 +68,8 @@ public class ExecutorLocals
             return new ExecutorLocals(traceState, clientWarnState);
     }
 
-    public static ExecutorLocals create(TraceState traceState)
+    public static ExecutorLocals create(TraceState traceState, ClientWarn.State clientWarnState)
     {
-        ClientWarn.State clientWarnState = clientWarn.get();
         return new ExecutorLocals(traceState, clientWarnState);
     }
 
@@ -80,5 +79,28 @@ public class ExecutorLocals
         ClientWarn.State clientWarnState = locals == null ? null : locals.clientWarnState;
         tracing.set(traceState);
         clientWarn.set(clientWarnState);
+    }
+
+    public static class WrappedRunnable implements Runnable
+    {
+        private final Runnable runnable;
+        private final ExecutorLocals locals;
+
+        public WrappedRunnable(Runnable runnable)
+        {
+            this(runnable, create());
+        }
+
+        public WrappedRunnable(Runnable runnable, ExecutorLocals locals)
+        {
+            this.runnable = runnable;
+            this.locals = locals;
+        }
+
+        public void run()
+        {
+            set(locals);
+            runnable.run();
+        }
     }
 }
