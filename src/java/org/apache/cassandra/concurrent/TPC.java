@@ -35,6 +35,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.rx.RxSubscriptionDebugger;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.StorageService;
@@ -62,6 +63,9 @@ public class TPC
      * Set this to true in order to log the caller's thread stack trace in case of exception when running a task on an Rx scheduler.
      */
     private static final boolean LOG_CALLER_STACK_ON_EXCEPTION = System.getProperty("cassandra.log_caller_stack_on_tpc_exception", "false")
+                                                                       .equalsIgnoreCase("true");
+
+    private static final boolean ENABLE_RX_SUBSCRIPTION_DEBUG = System.getProperty("cassandra.enable_rx_subscription_debug", "false")
                                                                        .equalsIgnoreCase("true");
 
     private static final int NUM_CORES = DatabaseDescriptor.getTPCCores();
@@ -154,7 +158,8 @@ public class TPC
             return LOG_CALLER_STACK_ON_EXCEPTION ? new RunnableWithCallerThreadInfo(ret) : ret;
         });
 
-        //RxSubscriptionDebugger.enable();
+        if (ENABLE_RX_SUBSCRIPTION_DEBUG)
+            RxSubscriptionDebugger.enable();
     }
 
     public static void ensureInitialized()
