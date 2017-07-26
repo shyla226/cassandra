@@ -17,36 +17,54 @@
  */
 package org.apache.cassandra.io.sstable.format.trieindex;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.Collections;
+import java.util.List;
+import java.util.Random;
+import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-
 import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringBound;
+import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ClusteringPrefix;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.marshal.UUIDType;
-import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
-import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReverseIterator;
-import org.apache.cassandra.io.sstable.format.trieindex.RowIndexWriter;
-import org.apache.cassandra.io.util.*;
+import org.apache.cassandra.io.util.DataOutputStreamPlus;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.SequentialWriter;
+import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.Pair;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
 public class RowIndexTest
 {
+    static final Random RANDOM;
+
+    static
+    {
+        long seed = System.currentTimeMillis();
+        System.out.println("seed = " + seed);
+        RANDOM = new Random(seed);
+    }
+
     @BeforeClass
     public static void initDD()
     {
@@ -187,14 +205,13 @@ public class RowIndexTest
         // This is not too relevant: due to the way we construct separators we can't be good enough on the left side.
         Pair<List<ClusteringPrefix>, RowIndexReader> random = generateRandomIndexSingletons(COUNT);
         List<ClusteringPrefix> keys = random.left;
-        Random rand = new Random();
         
         for (int i = 0; i < 500; ++i)
         {
-            boolean exactLeft = rand.nextBoolean();
-            boolean exactRight = rand.nextBoolean();
-            ClusteringPrefix left = exactLeft ? keys.get(rand.nextInt(keys.size())) : generateRandomKey();
-            ClusteringPrefix right = exactRight ? keys.get(rand.nextInt(keys.size())) : generateRandomKey();
+            boolean exactLeft = RANDOM.nextBoolean();
+            boolean exactRight = RANDOM.nextBoolean();
+            ClusteringPrefix left = exactLeft ? keys.get(RANDOM.nextInt(keys.size())) : generateRandomKey();
+            ClusteringPrefix right = exactRight ? keys.get(RANDOM.nextInt(keys.size())) : generateRandomKey();
             if (comparator.compare(right, left) < 0)
             {
                 ClusteringPrefix t = left; left = right; right = t;
@@ -219,6 +236,8 @@ public class RowIndexTest
                 }
 
                 int idx = (int) indexInfo.offset;
+                if (indexInfo.offset == END_MARKER)
+                    idx = keys.size();
                 if (idx > 0)
                     assertTrue(comparator.compare(right, keys.get(idx - 1)) > 0);
                 if (idx < keys.size() - 1)
@@ -266,12 +285,11 @@ public class RowIndexTest
     {
         Pair<List<ClusteringPrefix>, RowIndexReader> random = generateRandomIndexSingletons(COUNT);
         List<ClusteringPrefix> keys = random.left;
-        Random rand = new Random();
 
         for (int i = 0; i < 1000; ++i)
         {
-            boolean exactRight = rand.nextBoolean();
-            ClusteringPrefix right = exactRight ? keys.get(rand.nextInt(keys.size())) : generateRandomKey();
+            boolean exactRight = RANDOM.nextBoolean();
+            ClusteringPrefix right = exactRight ? keys.get(RANDOM.nextInt(keys.size())) : generateRandomKey();
 
             try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, ByteSource.empty(), comparator.asByteComparableSource(right), Rebufferer.ReaderConstraint.NONE))
             {
@@ -368,8 +386,14 @@ public class RowIndexTest
 
     ClusteringPrefix generateRandomKey()
     {
-        UUID uuid = UUID.randomUUID();
+        UUID uuid = randomSeededUUID();
         ClusteringPrefix key = comparator.make(uuid);
         return key;
+    }
+
+    private static UUID randomSeededUUID() {
+        byte[] randomBytes = new byte[16];
+        RANDOM.nextBytes(randomBytes);
+        return UUID.nameUUIDFromBytes(randomBytes);
     }
 }

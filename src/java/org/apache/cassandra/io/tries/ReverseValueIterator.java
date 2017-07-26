@@ -176,6 +176,10 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
 
                 stack = new IterationPosition(child, transitionRange(), l, stack);
             }
+            else
+            {
+                stack.childIndex = childIdx;
+            }
         }
     }
 }
