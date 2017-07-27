@@ -571,25 +571,28 @@ public abstract class Message
             final ServerConnection connection;
             long queryStartNanoTime = System.nanoTime();
 
-            assert request.connection() instanceof ServerConnection;
-            connection = (ServerConnection) request.connection();
+            try
+            {
+                assert request.connection() instanceof ServerConnection;
+                connection = (ServerConnection) request.connection();
+                connection.onNewRequest();
 
-            // This resets any Tracing or ClientWarn thread local state
-            ExecutorLocals.set(null);
+                // This resets any Tracing or ClientWarn thread local state
+                ExecutorLocals.set(null);
 
-            if (connection.getVersion().isGreaterOrEqualTo(ProtocolVersion.V4))
-                ClientWarn.instance.captureWarnings();
+                if (connection.getVersion().isGreaterOrEqualTo(ProtocolVersion.V4))
+                    ClientWarn.instance.captureWarnings();
 
-            QueryState qstate = connection.validateNewMessage(request, connection.getVersion());
-            if (logger.isTraceEnabled())
-                logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
+                QueryState qstate = connection.validateNewMessage(request, connection.getVersion());
+                if (logger.isTraceEnabled())
+                    logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
 
-            Single<? extends Response> req = request.execute(qstate, queryStartNanoTime);
-            connection.onNewRequest();
+                Single<? extends Response> req = request.execute(qstate, queryStartNanoTime);
 
-            req.subscribe(
+                req.subscribe(
                 // onSuccess
-                response -> {
+                response ->
+                {
                     try
                     {
                         if (!response.sendToClient)
@@ -597,6 +600,7 @@ public abstract class Message
                             request.getSourceFrame().release();
                             return;
                         }
+
                         response.setStreamId(request.getStreamId());
                         response.setWarnings(ClientWarn.instance.getWarnings());
                         response.attach(connection);
@@ -606,33 +610,58 @@ public abstract class Message
                             logger.trace("Responding: {}, v={} ON {}", response, connection.getVersion(), Thread.currentThread().getName());
 
                         flush(new FlushItem(ctx, response, request.getSourceFrame()));
-                        ClientWarn.instance.resetWarnings();
+
+                    }
+                    catch (Throwable t)
+                    {
+                        request.getSourceFrame().release(); // ok to release since flush was the last call and does not throw after adding the item to the queue
+                        JVMStabilityInspector.inspectThrowable(t);
+                        logger.error("Failed to reply, got another error whilst writing reply: {}", t.getMessage(), t);
+
                     }
                     finally
                     {
                         connection.onRequestCompleted();
+                        ClientWarn.instance.resetWarnings();
                     }
                 },
 
                 // onError
-                t -> {
-                    try
-                    {
-                        if (logger.isTraceEnabled())
-                            logger.trace("Responding with error: {}, v={} ON {}", t.getMessage(), connection.getVersion(), Thread.currentThread().getName());
+                t -> handleError(ctx, request, t)
+                );
+            }
+            catch (Throwable t)
+            { // in case of exception when subscribing
+                handleError(ctx, request, t);
+            }
+        }
 
-                        JVMStabilityInspector.inspectThrowable(t);
-                        UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
-                        Message response = ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId());
-                        flush(new FlushItem(ctx, response, request.getSourceFrame()));
-                        ClientWarn.instance.resetWarnings();
-                    }
-                    finally
-                    {
-                        connection.onRequestCompleted();
-                    }
-                }
-            );
+        private void handleError(ChannelHandlerContext ctx, Request request, Throwable error)
+        {
+            try
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Responding with error: {}, v={} ON {}", error.getMessage(), request.connection().getVersion(), Thread.currentThread().getName());
+
+                JVMStabilityInspector.inspectThrowable(error);
+                UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
+                flush(new FlushItem(ctx, ErrorMessage.fromException(error, handler).setStreamId(request.getStreamId()), request.getSourceFrame()));
+            }
+            catch (Throwable t)
+            {
+                request.getSourceFrame().release(); // ok to release since flush was the last call and does not throw after adding the item to the queue
+                JVMStabilityInspector.inspectThrowable(t);
+                logger.error("Failed to reply with error {}, got error whilst writing error reply: {}", error.getMessage(), t.getMessage(), t);
+            }
+            finally
+            {
+                // if the request connection is a server connection, we know that the assertion at the top of the try block in channelRead0
+                // has passed and hence connection.onNewRequest() was called
+                if (request.connection() instanceof  ServerConnection)
+                    ((ServerConnection)(request.connection())).onRequestCompleted();
+
+                ClientWarn.instance.resetWarnings();
+            }
         }
 
         /**
