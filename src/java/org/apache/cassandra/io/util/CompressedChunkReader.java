@@ -24,6 +24,8 @@ import java.nio.channels.CompletionHandler;
 import java.util.concurrent.CompletableFuture;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Supplier;
+import com.google.common.base.Suppliers;
 import com.google.common.primitives.Ints;
 
 import org.slf4j.Logger;
@@ -96,25 +98,28 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
     public static class Standard extends CompressedChunkReader
     {
-        final int bufferSize;
+        final Supplier<Integer> bufferSize;
 
         public Standard(AsynchronousChannelProxy channel, CompressionMetadata metadata)
         {
             super(channel, metadata);
-            int size = Math.min(maxCompressedLength,
-                                metadata.compressor().initialCompressedBufferLength(metadata.chunkLength()));
 
-            // O_DIRECT requires position and length to be aligned to page size.
+            bufferSize = Suppliers.memoize(() -> {
+                int size = Math.min(maxCompressedLength,
+                                    metadata.compressor().initialCompressedBufferLength(metadata.chunkLength()));
 
-            // This means we could only use the target buffer directly if it is aligned, and even then we would
-            // have to read the checksum separately, which we'd rather avoid.
-            // So make sure we have space for the aligned read.
-            size = Math.max(size, metadata.chunkLength());
-            size += CHECKSUM_BYTES;
+                // O_DIRECT requires position and length to be aligned to page size.
 
-            // Alignment means we need to round the size up (to cover length of request plus extra to fill block)
-            // plus one more for alignment (one part of which sits before wanted data, the rest after it).
-            bufferSize = TPC.roundUpToBlockSize(size) + TPC.AIO_BLOCK_SIZE;
+                // This means we could only use the target buffer directly if it is aligned, and even then we would
+                // have to read the checksum separately, which we'd rather avoid.
+                // So make sure we have space for the aligned read.
+                size = Math.max(size, metadata.chunkLength());
+                size += CHECKSUM_BYTES;
+
+                // Alignment means we need to round the size up (to cover length of request plus extra to fill block)
+                // plus one more for alignment (one part of which sits before wanted data, the rest after it).
+                return TPC.roundUpToBlockSize(size) + TPC.AIO_BLOCK_SIZE;
+            });
         }
 
         @Override
@@ -130,7 +135,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 assert position <= fileLength;
 
                 CompressionMetadata.Chunk chunk = metadata.chunkFor(position);
-                ByteBuffer compressed = bufferHandle.get(bufferSize);
+                ByteBuffer compressed = bufferHandle.get(bufferSize.get());
 
                 // TODO: We need to evaluate what effect alignment has on Java AIO, and whether or not we should
                 // have a CompressedChunkReader subclass that does not apply alignment (and therefore is also
