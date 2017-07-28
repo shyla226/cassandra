@@ -18,6 +18,7 @@
 package org.apache.cassandra.metrics;
 
 import com.codahale.metrics.Counter;
+import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Meter;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
@@ -32,7 +33,10 @@ public class StorageMetrics
     public static final Counter load = Metrics.counter(factory.createMetricName("Load"));
     public static final Counter exceptions = Metrics.counter(factory.createMetricName("Exceptions"));
     public static final Counter totalHintsInProgress  = Metrics.counter(factory.createMetricName("TotalHintsInProgress"));
-    public static final Counter totalHints = Metrics.counter(factory.createMetricName("TotalHints"));
+    /** Total hints replayed in the target node **/
+    public static final Counter totalHintsReplayed = Metrics.counter(factory.createMetricName("TotalHintsReplayed"));
     public static final Meter batchlogReplays = Metrics.meter(factory.createMetricName("BatchlogReplays"));
     public static final Meter hintedBatchlogReplays = Metrics.meter(factory.createMetricName("HintedBatchlogReplays"));
+    public static final Counter totalHints = Metrics.counter(factory.createMetricName("TotalHints"));
+    public static final Counter hintsOnDisk = Metrics.counter(factory.createMetricName("HintsOnDisk"));
 }
