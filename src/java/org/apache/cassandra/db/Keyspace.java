@@ -31,6 +31,7 @@ import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCBoundaries;
 import org.apache.cassandra.config.*;
@@ -720,7 +721,10 @@ public class Keyspace
                     // This view update can't happen right now, so schedule another attempt later.
                     // TODO: 1 microsecond is an arbitrary value that was chosen to avoid spinning the CPU too much, we
                     // should perform some tests to see if there is an impact in changing this value (APOLLO-799)
-                    mutation.getScheduler().scheduleDirect(() -> acquireLocksForView(source, mutation, locks, isDroppable), 1, TimeUnit.MICROSECONDS);
+                    mutation.getScheduler().scheduleDirect(() -> acquireLocksForView(source, mutation, locks, isDroppable),
+                                                           TPCTaskType.VIEW_ACQUIRE_LOCK,
+                                                           1,
+                                                           TimeUnit.MICROSECONDS);
                     return;
                 }
             }

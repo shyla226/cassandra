@@ -30,8 +30,10 @@ import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cache.RowCacheSentinel;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.*;
@@ -409,7 +411,8 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         return Threads.deferOnCore(() -> queryMemtableAndDisk(cfs, executionController)
                                          .doOnClose(() -> updateMetrics(cfs.metric)),
-                                   TPC.getCoreForKey(cfs.keyspace, partitionKey));
+                                   TPC.getCoreForKey(cfs.keyspace, partitionKey),
+                                   TPCTaskType.READ);
     }
 
     private void updateMetrics(TableMetrics metrics)
@@ -1046,6 +1049,11 @@ public class SinglePartitionReadCommand extends ReadCommand
     public TPCScheduler getScheduler()
     {
         return TPC.getForKey(Keyspace.open(metadata().keyspace), partitionKey());
+    }
+
+    public TracingAwareExecutor getOperationExecutor()
+    {
+        return getScheduler().forTaskType(TPCTaskType.READ);
     }
 
     /**

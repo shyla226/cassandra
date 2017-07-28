@@ -32,6 +32,7 @@ import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.cql3.functions.UDAggregate;
 import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.db.*;
@@ -43,6 +44,7 @@ import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 public class MigrationManager
 {
@@ -444,9 +446,13 @@ public class MigrationManager
         SchemaMigration migration = new SchemaMigration(Collections.singletonList(schema.build()));
 
         if (announceLocally)
-            return Completable.fromRunnable(() -> Schema.instance.merge(migration))
-                              .subscribeOn(TPC.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
-                                           ImmediateThinScheduler.INSTANCE);
+        {
+            Completable migrationCompletable =
+                Completable.fromRunnable(() -> Schema.instance.merge(migration));
+            if (TPC.isTPCThread())
+                migrationCompletable = RxThreads.subscribeOn(migrationCompletable, StageManager.getScheduler(Stage.MIGRATION), TPCTaskType.MIGRATION);
+            return migrationCompletable;
+        }
         else
             return announce(migration);
     }
@@ -459,20 +465,23 @@ public class MigrationManager
     // Returns a future on the local application of the schema
     private static Completable announce(final SchemaMigration schema)
     {
-        return Completable.fromRunnable(() ->
-                                        {
-                                            Schema.instance.mergeAndAnnounceVersion(schema);
+        Completable migration =
+            Completable.fromRunnable(() ->
+                                     {
+                                         Schema.instance.mergeAndAnnounceVersion(schema);
 
-                                            for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
-                                            {
-                                                // only push schema to nodes with known and equal versions
-                                                if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
-                                                    MessagingService.instance().knowsVersion(endpoint) &&
-                                                    MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
-                                                    pushSchemaMutation(endpoint, schema);
-                                            }
-                                        }).subscribeOn(TPC.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
-                                                       ImmediateThinScheduler.INSTANCE);
+                                         for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
+                                         {
+                                             // only push schema to nodes with known and equal versions
+                                             if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
+                                                 MessagingService.instance().knowsVersion(endpoint) &&
+                                                 MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
+                                                 pushSchemaMutation(endpoint, schema);
+                                         }
+                                     });
+        if (TPC.isTPCThread())
+            migration = RxThreads.subscribeOn(migration, StageManager.getScheduler(Stage.MIGRATION), TPCTaskType.MIGRATION);
+        return migration;
     }
 
     /**

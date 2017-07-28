@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sasi.plan;
 
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -95,7 +96,7 @@ public class QueryPlan
             operationTree.skipTo((Long) keyRange.left.getToken().getTokenValue());
 
             Flow<DecoratedKey> keys = Flow.fromIterable(() -> operationTree)
-                                          .lift(Threads.requestOnIo())
+                                          .lift(Threads.requestOnIo(TPCTaskType.READ_SECONDARY_INDEX))
                                           .flatMap(Flow::fromIterable);
 
             if (!keyRange.right.isMinimum())

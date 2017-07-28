@@ -19,12 +19,12 @@
 package org.apache.cassandra.io.sstable.format;
 
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.Executor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -110,7 +110,7 @@ class AsyncPartitionReader extends Flow<FlowableUnfilteredPartition>
         FlowSubscriber<T> subscriber;
 
         //Force all disk callbacks through the same thread
-        private final Executor onReadyExecutor = TPC.bestTPCScheduler().getExecutor();
+        private final TPCScheduler onReadyExecutor = TPC.bestTPCScheduler();
 
         abstract void performRead(boolean isRetry) throws Exception;
 
@@ -137,6 +137,7 @@ class AsyncPartitionReader extends Flow<FlowableUnfilteredPartition>
                                  t = t.getCause();
 
                              subscriber.onError(t);
+                             return null;
                          },
                          onReadyExecutor);
             }

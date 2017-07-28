@@ -32,12 +32,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLogSegment.CDCState;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.DirectorySizeCalculator;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
 {
@@ -110,27 +111,32 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
             }
 
             // failed to allocate, so move to a new segment with enough room
-            return Single.fromCallable(() -> {
-                if (logger.isTraceEnabled())
-                    logger.trace("Waiting for segment allocation...");
-                CommitLogSegment.Allocation nalloc;
-                CommitLogSegment nsegment = segment;
-                do
-                {
-                    advanceAllocatingFrom(nsegment);
-                    nsegment = allocatingFrom();
-                    throwIfForbidden(mutation, nsegment);
-                }
-                while ((nalloc = nsegment.allocate(mutation, size)) == null);
+            Single<CommitLogSegment.Allocation> allocationSingle =
+                Single.fromCallable(() -> {
+                    if (logger.isTraceEnabled())
+                        logger.trace("Waiting for segment allocation...");
+                    CommitLogSegment.Allocation nalloc;
+                    CommitLogSegment nsegment = segment;
+                    do
+                    {
+                        advanceAllocatingFrom(nsegment);
+                        nsegment = allocatingFrom();
+                        throwIfForbidden(mutation, nsegment);
+                    }
+                    while ((nalloc = nsegment.allocate(mutation, size)) == null);
 
-                if (logger.isTraceEnabled())
-                    logger.trace("Returning segment allocated {}", nalloc);
+                    if (logger.isTraceEnabled())
+                        logger.trace("Returning segment allocated {}", nalloc);
 
-                if (mutation.trackedByCDC())
-                    nsegment.setCDCState(CDCState.CONTAINS);
-                return nalloc;
-            }).subscribeOn(Schedulers.io()) // Do blocking on IO Sched, continue on TPC thread
-              .observeOn(mutation.getScheduler());
+                    if (mutation.trackedByCDC())
+                        nsegment.setCDCState(CDCState.CONTAINS);
+                    return nalloc;
+                });
+
+            // Do blocking on IO Sched, continue on TPC thread
+            allocationSingle = RxThreads.subscribeOnIo(allocationSingle, TPCTaskType.COMMIT_LOG_ALLOCATE);
+            allocationSingle = RxThreads.observeOn(allocationSingle, mutation.getScheduler(), TPCTaskType.WRITE_POST_COMMIT_LOG);
+            return allocationSingle;
         });
     }
 

@@ -18,9 +18,13 @@
 package org.apache.cassandra.utils;
 
 import java.lang.management.ManagementFactory;
-import java.util.Map;
+import java.util.Arrays;
+import java.util.TreeSet;
 import javax.management.MBeanServer;
 
+import com.google.common.collect.Multimap;
+
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.slf4j.Logger;
@@ -36,6 +40,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.format.big.BigRowIndexEntry;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.CacheService;
+import org.apache.cassandra.tools.nodetool.stats.TpStatsPrinter;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 public class StatusLogger
@@ -48,17 +53,22 @@ public class StatusLogger
         MBeanServer server = ManagementFactory.getPlatformMBeanServer();
 
         // everything from o.a.c.concurrent
-        logger.info(String.format("%-25s%10s%10s%15s%10s%18s", "Pool Name", "Active", "Pending", "Completed", "Blocked", "All Time Blocked"));
+        String headerFormat = "%-" + (TpStatsPrinter.longestStrLength(Arrays.asList(TPCTaskType.values())) + 5) + "s%10s%10s%15s%10s%18s%n";
+        logger.info(String.format(headerFormat, "Pool Name", "Active", "Pending", "Completed", "Blocked", "All Time Blocked"));
 
-        for (Map.Entry<String, String> tpool : ThreadPoolMetrics.getJmxThreadPools(server).entries())
+        Multimap<String, String> jmxThreadPools = ThreadPoolMetrics.getJmxThreadPools(server);
+        for (String poolKey : jmxThreadPools.keySet())
         {
-            logger.info(String.format("%-25s%10s%10s%15s%10s%18s%n",
-                                      tpool.getValue(),
-                                      ThreadPoolMetrics.getJmxMetric(server, tpool.getKey(), tpool.getValue(), "ActiveTasks"),
-                                      ThreadPoolMetrics.getJmxMetric(server, tpool.getKey(), tpool.getValue(), "PendingTasks"),
-                                      ThreadPoolMetrics.getJmxMetric(server, tpool.getKey(), tpool.getValue(), "CompletedTasks"),
-                                      ThreadPoolMetrics.getJmxMetric(server, tpool.getKey(), tpool.getValue(), "CurrentlyBlockedTasks"),
-                                      ThreadPoolMetrics.getJmxMetric(server, tpool.getKey(), tpool.getValue(), "TotalBlockedTasks")));
+            // Sort values
+            TreeSet<String> poolValues = new TreeSet<>(jmxThreadPools.get(poolKey));
+            for (String poolValue : poolValues)
+                logger.info(String.format(headerFormat,
+                                          poolValue,
+                                          ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "ActiveTasks"),
+                                          ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "PendingTasks"),
+                                          ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "CompletedTasks"),
+                                          ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "CurrentlyBlockedTasks"),
+                                          ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "TotalBlockedTasks")));
         }
 
         // one offs

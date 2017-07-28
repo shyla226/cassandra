@@ -32,6 +32,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.exceptions.ReadFailureException;
@@ -158,7 +159,7 @@ public class ReadExecutorTest
             executor.handler.onFailure(request0.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
             Request<ReadCommand, ReadResponse> request1 = Request.fakeTestRequest(targets.get(1), -1, Verbs.READS.READ, command);
             executor.handler.onFailure(request1.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
-        }, cfs.sampleLatencyNanos + 10, TimeUnit.NANOSECONDS); // see comment above
+        }, TPCTaskType.TIMED_SPECULATE, cfs.sampleLatencyNanos + 10, TimeUnit.NANOSECONDS); // see comment above
 
         try
         {

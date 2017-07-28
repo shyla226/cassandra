@@ -151,7 +151,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
     private static <T> ExecutorSupplier<T> maybeGetRequestExecutor(Class<T> requestClass, Stage defaultStage)
     {
         if (Scheduleable.class.isAssignableFrom(requestClass))
-            return (p) -> ((Scheduleable)p).getScheduler();
+            return (p) -> ((Scheduleable)p).getOperationExecutor();
 
         return defaultStage == null ? null : (p) -> StageManager.getStage(defaultStage);
     }

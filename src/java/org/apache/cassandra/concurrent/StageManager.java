@@ -96,10 +96,10 @@ public class StageManager
     }
 
     /**
-     * Retrieve the RX scheduler corresponding to a stage.
+     * Retrieve the TPC scheduler corresponding to a stage.
      *
      * @param stage name of the stage to be retrieved.
-     * @return RX scheduler executing on the stage
+     * @return TPC scheduler executing on the stage
      */
     public static Scheduler getScheduler(Stage stage)
     {

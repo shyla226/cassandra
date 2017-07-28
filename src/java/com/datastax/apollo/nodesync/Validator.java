@@ -23,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -239,7 +240,7 @@ class Validator
         // Can be null on an exception
         if (flow != null)
             flowFuture = flow.flatProcess(p -> p.content.process())
-                         .lift(Threads.requestOn(executor.asScheduler()))
+                         .lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
                          .processToFuture()
                          .thenRun(this::markFinished)
                          .exceptionally(t -> handleError(t, executor));

@@ -18,22 +18,25 @@
 
 package org.apache.cassandra.concurrent;
 
-/**
- * An interface defining the ability to select a Netty TPC scheduler
- * for operations involving the concrete implementations of this interface,
- * see {@link org.apache.cassandra.db.ReadCommand} and {@link org.apache.cassandra.db.Mutation}
- * as examples.
- */
-public interface Scheduleable
-{
-    /**
-     * Returns the executor to use for submitting the runnables of the operation. This will augment them with
-     * information about the type of operation they implement.
-     */
-    TracingAwareExecutor getOperationExecutor();
+import java.util.Map;
 
-    /**
-     * Returns an executor to use when scheduling later stages of the processing.
-     */
-    TPCScheduler getScheduler();
+/**
+ * Interface for recoding TPC thread metrics.
+ */
+public interface TPCMetrics
+{
+    // Task notifications
+
+    // This will be called from the scheduling thread, possibly concurrently.
+    public void scheduled(TPCTaskType stage);
+    // These will be called from within the relevant thread.
+    public void starting(TPCTaskType stage);
+    public void failed(TPCTaskType stage, Throwable t);
+    public void completed(TPCTaskType stage);
+    // This could be called from another thread as well.
+    public void cancelled(TPCTaskType stage);
+
+    // Information extraction for consumption by JMX etc
+    public long scheduledTaskCount(TPCTaskType stage);
+    public long completedTaskCount(TPCTaskType stage);
 }

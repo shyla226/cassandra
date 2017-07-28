@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DigestVersion;
@@ -262,7 +263,10 @@ public abstract class AbstractReadExecutor
 
                                                                    cfs.metric.speculativeInsufficientReplicas.inc();
 
-                                                           }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+                                                           },
+                                                      TPCTaskType.TIMED_SPECULATE,
+                                                      cfs.sampleLatencyNanos,
+                                                      TimeUnit.NANOSECONDS);
 
                 return CompletableObserver::onComplete;
             });
@@ -331,7 +335,7 @@ public abstract class AbstractReadExecutor
                            logger.trace("Speculating read retry on {}", extraReplica);
                            MessagingService.instance().send(Verbs.READS.READ.newRequest(extraReplica, retryCommand), handler);
                        }
-                   }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+                   }, TPCTaskType.TIMED_SPECULATE, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
 
                 return CompletableObserver::onComplete;
             });

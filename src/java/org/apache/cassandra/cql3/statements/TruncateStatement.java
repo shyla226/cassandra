@@ -23,6 +23,7 @@ import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.Schema;
@@ -31,6 +32,7 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 public class TruncateStatement extends CFStatement implements CQLStatement
 {
@@ -66,24 +68,25 @@ public class TruncateStatement extends CFStatement implements CQLStatement
 
     public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
-        return Single.defer(() ->
-                            {
-                                try
-                                {
-                                    TableMetadata metaData = Schema.instance.getTableMetadata(keyspace(), columnFamily());
-                                    if (metaData.isView())
-                                        return Single.error(new InvalidRequestException("Cannot TRUNCATE materialized view directly; must truncate base table instead"));
+        return RxThreads.subscribeOnIo(
+            Single.defer(() ->
+                         {
+                             try
+                             {
+                                 TableMetadata metaData = Schema.instance.getTableMetadata(keyspace(), columnFamily());
+                                 if (metaData.isView())
+                                     return Single.error(new InvalidRequestException("Cannot TRUNCATE materialized view directly; must truncate base table instead"));
 
-                                    StorageProxy.truncateBlocking(keyspace(), columnFamily());
-                                }
-                                catch (UnavailableException | TimeoutException e)
-                                {
-                                    return Single.error(new TruncateException(e));
-                                }
+                                 StorageProxy.truncateBlocking(keyspace(), columnFamily());
+                             }
+                             catch (UnavailableException | TimeoutException e)
+                             {
+                                 return Single.error(new TruncateException(e));
+                             }
 
-                                return Single.just(new ResultMessage.Void());
-                            })
-                     .subscribeOn(Schedulers.io());
+                             return Single.just(new ResultMessage.Void());
+                         }),
+            TPCTaskType.TRUNCATE);
     }
 
     public Scheduler getScheduler()

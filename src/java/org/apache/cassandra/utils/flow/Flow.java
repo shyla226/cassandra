@@ -55,6 +55,8 @@ import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
 
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.LineNumberInference;
 import org.apache.cassandra.utils.Pair;
@@ -2127,12 +2129,13 @@ public abstract class Flow<T>
      * Delays the execution of each onNext by the given time.
      * Used for testing.
      */
-    public Flow<T> delayOnNext(long sleepFor, TimeUnit timeUnit)
+    public Flow<T> delayOnNext(long sleepFor, TimeUnit timeUnit, TPCTaskType taskType)
     {
         return apply(((subscriber, source, next) ->
-                      Schedulers.computation().scheduleDirect(() -> subscriber.onNext(next),
-                                                              sleepFor,
-                                                              timeUnit)));
+                      TPC.bestTPCScheduler().scheduleDirect(() -> subscriber.onNext(next),
+                                                            taskType,
+                                                            sleepFor,
+                                                            timeUnit)));
     }
 
     /**

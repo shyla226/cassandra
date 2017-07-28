@@ -20,36 +20,46 @@ package org.apache.cassandra.tools.nodetool.stats;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.regex.Pattern;
 
 import org.apache.cassandra.tools.NodeProbe;
-import org.apache.cassandra.tools.nodetool.stats.StatsHolder;
 
 public class TpStatsHolder implements StatsHolder
 {
     public final NodeProbe probe;
+    public final boolean includeTPCCores;
 
-    public TpStatsHolder(NodeProbe probe)
+    public TpStatsHolder(NodeProbe probe, boolean includeTPCCores)
     {
         this.probe = probe;
+        this.includeTPCCores = includeTPCCores;
     }
+
+    static Pattern TPCCoreInfo = Pattern.compile("TPC/(other|\\d+).*");
 
     @Override
     public Map<String, Object> convert2Map()
     {
         HashMap<String, Object> result = new HashMap<>();
-        HashMap<String, Map<String, Object>> threadPools = new HashMap<>();
+        TreeMap<String, Map<String, Object>> threadPools = new TreeMap<>();
         HashMap<String, Object> droppedMessage = new HashMap<>();
         HashMap<String, double[]> waitLatencies = new HashMap<>();
 
         for (Map.Entry<String, String> tp : probe.getThreadPools().entries())
         {
+            // Skip core-level detail if not asked for
+            if (!includeTPCCores && TPCCoreInfo.matcher(tp.getValue()).matches())
+                continue;
+
             HashMap<String, Object> threadPool = new HashMap<>();
             threadPool.put("ActiveTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "ActiveTasks"));
             threadPool.put("PendingTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "PendingTasks"));
             threadPool.put("CompletedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "CompletedTasks"));
             threadPool.put("CurrentlyBlockedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "CurrentlyBlockedTasks"));
             threadPool.put("TotalBlockedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "TotalBlockedTasks"));
-            threadPools.put(tp.getValue(), threadPool);
+            if (threadPool.values().stream().mapToLong(x -> x instanceof Number ? ((Number) x).longValue() : 0).sum() > 0)
+                threadPools.put(tp.getValue(), threadPool);
         }
         result.put("ThreadPools", threadPools);
 

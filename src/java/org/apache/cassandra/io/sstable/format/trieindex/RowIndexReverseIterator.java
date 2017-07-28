@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.io.sstable.format.trieindex;
 
+import java.io.PrintStream;
+
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.tries.ReverseValueIterator;
@@ -60,5 +62,13 @@ class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterat
 
         currentNode = -1;
         return info;
+    }
+
+    public void dumpTrie(PrintStream out)
+    {
+        dumpTrie(out, (buf, ppos, bits) -> {
+            IndexInfo ii = RowIndexReader.readPayload(buf, ppos, bits);
+            return String.format("pos %x %s", ii.offset, ii.openDeletion == null ? "" : ii.openDeletion);
+        });
     }
 }

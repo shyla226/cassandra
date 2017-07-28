@@ -19,8 +19,12 @@
 package org.apache.cassandra.tools.nodetool.stats;
 
 import java.io.PrintStream;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
+
+import org.apache.cassandra.concurrent.TPCTaskType;
 
 public class TpStatsPrinter
 {
@@ -45,13 +49,14 @@ public class TpStatsPrinter
         {
             Map<String, Object> convertData = data.convert2Map();
 
-            out.printf("%-30s%10s%10s%15s%10s%18s%n", "Pool Name", "Active", "Pending", "Completed", "Blocked", "All time blocked");
+            String headerFormat = "%-" + (longestStrLength(Arrays.asList(TPCTaskType.values())) + 5) + "s%10s%10s%15s%10s%18s%n";
+            out.printf(headerFormat, "Pool Name", "Active", "Pending", "Completed", "Blocked", "All time blocked");
 
             Map<Object, Object> threadPools = convertData.get("ThreadPools") instanceof Map<?, ?> ? (Map)convertData.get("ThreadPools") : Collections.emptyMap();
             for (Map.Entry<Object, Object> entry : threadPools.entrySet())
             {
                 Map values = entry.getValue() instanceof Map<?, ?> ? (Map)entry.getValue() : Collections.emptyMap();
-                out.printf("%-30s%10s%10s%15s%10s%18s%n",
+                out.printf(headerFormat,
                            entry.getKey(),
                            values.get("ActiveTasks"),
                            values.get("PendingTasks"),
@@ -60,14 +65,15 @@ public class TpStatsPrinter
                            values.get("TotalBlockedTasks"));
             }
 
-            out.printf("%n%-20s%10s%18s%18s%18s%18s%n", "Message type", "Dropped", "", "Latency waiting in queue (micros)", "", "");
-            out.printf("%-20s%10s%18s%18s%18s%18s%n", "", "", "50%", "95%", "99%", "Max");
-
             Map<Object, Object> droppedMessages = convertData.get("DroppedMessage") instanceof Map<?, ?> ? (Map)convertData.get("DroppedMessage") : Collections.emptyMap();
+            int messageTypeIndent = longestStrLength(droppedMessages.keySet()) + 5;
+
+            out.printf("%n%-" + messageTypeIndent + "s%10s%18s%18s%18s%18s%n", "Message type", "Dropped", "", "Latency waiting in queue (micros)", "", "");
+            out.printf("%-" + messageTypeIndent + "s%10s%18s%18s%18s%18s%n", "", "", "50%", "95%", "99%", "Max");
             Map<Object, double[]> waitLatencies = convertData.get("WaitLatencies") instanceof Map<?, ?> ? (Map)convertData.get("WaitLatencies") : Collections.emptyMap();
             for (Map.Entry<Object, Object> entry : droppedMessages.entrySet())
             {
-                out.printf("%-20s%10s", entry.getKey(), entry.getValue());
+                out.printf("%-" + messageTypeIndent + "s%10s", entry.getKey(), entry.getValue());
                 if (waitLatencies.containsKey(entry.getKey()))
                 {
                     double[] latencies = waitLatencies.get(entry.getKey());
@@ -81,5 +87,13 @@ public class TpStatsPrinter
                 out.printf("%n");
             }
         }
+    }
+
+    public static int longestStrLength(Collection<Object> coll)
+    {
+        int maxLength = 0;
+        for (Object o : coll)
+            maxLength = Integer.max(maxLength, o.toString().length());
+        return maxLength;
     }
 }

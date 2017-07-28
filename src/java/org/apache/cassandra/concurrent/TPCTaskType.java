@@ -19,21 +19,37 @@
 package org.apache.cassandra.concurrent;
 
 /**
- * An interface defining the ability to select a Netty TPC scheduler
- * for operations involving the concrete implementations of this interface,
- * see {@link org.apache.cassandra.db.ReadCommand} and {@link org.apache.cassandra.db.Mutation}
- * as examples.
+ * Type of scheduled TPC task. Used mainly by TPC metrics, where we print
+ * out the number of completed and active (scheduled but incomplete) tasks.
  */
-public interface Scheduleable
+public enum TPCTaskType
 {
-    /**
-     * Returns the executor to use for submitting the runnables of the operation. This will augment them with
-     * information about the type of operation they implement.
-     */
-    TracingAwareExecutor getOperationExecutor();
-
-    /**
-     * Returns an executor to use when scheduling later stages of the processing.
-     */
-    TPCScheduler getScheduler();
+    UNKNOWN,
+    READ,
+    READ_RANGE,
+    READ_SWITCH_FOR_MEMTABLE,
+    READ_FROM_ITERATOR,
+    READ_SECONDARY_INDEX,
+    READ_DISK_ASYNC,
+    WRITE,
+    WRITE_SWITCH_FOR_MEMTABLE,
+    WRITE_POST_COMMIT_LOG,
+    COUNTER_ACQUIRE_LOCK,
+    VIEW_ACQUIRE_LOCK,
+    EXECUTE_STATEMENT_INTERNAL,
+    EXECUTE_STATEMENT,
+    CAS,
+    TRUNCATE,
+    COMMIT_LOG_SYNC,
+    COMMIT_LOG_ALLOCATE,
+    ANNOUNCE_TABLE,
+    MIGRATION,
+    VALIDATION,
+    AUTHENTICATION,
+    AWAIT_FLUSH,
+    TIMED_UNKNOWN,
+    TIMED_HISTOGRAM_AGGREGATE,
+    TIMED_METER_TICK,
+    TIMED_SPECULATE,
+    TIMED_TIMEOUT;
 }

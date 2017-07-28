@@ -39,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.MessageFormatter;
 
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -55,6 +56,7 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 
@@ -419,21 +421,23 @@ public class BatchStatement implements CQLStatement
         String ksName = casRequest.metadata.keyspace;
         String tableName = casRequest.metadata.name;
 
-        return Single.defer(() -> ModificationStatement.buildCasResultSet(ksName,
-                                                                          tableName,
-                                                                          StorageProxy.cas(ksName,
-                                                                                           tableName,
-                                                                                           casRequest.key,
-                                                                                           casRequest,
-                                                                                           options.getSerialConsistency(),
-                                                                                           options.getConsistency(),
-                                                                                           state.getClientState(),
-                                                                                           queryStartNanoTime),
-                                                                          columnsWithConditions,
-                                                                          true,
-                                                                          options.forStatement(0)))
-                     .subscribeOn(Schedulers.io())
-                     .map(ResultMessage.Rows::new);
+        Single<ResultMessage> result =
+            Single.defer(() -> ModificationStatement.buildCasResultSet(ksName,
+                                                                       tableName,
+                                                                       StorageProxy.cas(ksName,
+                                                                                        tableName,
+                                                                                        casRequest.key,
+                                                                                        casRequest,
+                                                                                        options.getSerialConsistency(),
+                                                                                        options.getConsistency(),
+                                                                                        state.getClientState(),
+                                                                                        queryStartNanoTime),
+                                                                       columnsWithConditions,
+                                                                       true,
+                                                                       options.forStatement(0)))
+                  .map(ResultMessage.Rows::new);
+
+        return RxThreads.subscribeOnIo(result, TPCTaskType.CAS);
     }
 
     private Pair<CQL3CasRequest,Set<ColumnMetadata>> makeCasRequest(BatchQueryOptions options, QueryState state)

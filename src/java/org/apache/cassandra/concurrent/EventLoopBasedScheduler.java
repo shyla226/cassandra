@@ -41,7 +41,7 @@ import io.reactivex.plugins.RxJavaPlugins;
  * TPC-related convenience, but the reason we have this is testing: it allows us to warp the raw Netty event loops
  * easily so we can bench them against our own loops easily.
  */
-public class EventLoopBasedScheduler<E extends EventLoop> extends Scheduler implements TracingAwareExecutor
+public class EventLoopBasedScheduler<E extends EventLoop> extends Scheduler
 {
     /**
      * The wrapped event loop.
@@ -53,12 +53,6 @@ public class EventLoopBasedScheduler<E extends EventLoop> extends Scheduler impl
     {
         assert eventLoop != null;
         this.eventLoop = eventLoop;
-    }
-
-    @Override // TracingAwareExecutor
-    public void execute(Runnable runnable, ExecutorLocals locals)
-    {
-        scheduleDirect(new ExecutorLocals.WrappedRunnable(runnable, locals));
     }
 
     @Override
@@ -135,7 +129,20 @@ public class EventLoopBasedScheduler<E extends EventLoop> extends Scheduler impl
                 {
                     f = loop.schedule(decoratedRun, delayTime, unit);
                 }
-                return Disposables.fromFuture(f);
+                return new Disposable()
+                {
+                    public void dispose()
+                    {
+                        f.cancel(false);
+                        if (f.isCancelled() && run instanceof TPCRunnable)
+                            ((TPCRunnable) run).cancelled();
+                    }
+
+                    public boolean isDisposed()
+                    {
+                        return f.isCancelled();
+                    }
+                };
             }
             catch (RejectedExecutionException ex)
             {

@@ -18,16 +18,15 @@
 
 package org.apache.cassandra.io.util;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.function.BiConsumer;
-import java.util.function.BiFunction;
-import java.util.function.Consumer;
+import java.util.function.Function;
 
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.TPCRunnable;
+import org.apache.cassandra.concurrent.TPCScheduler;
 
 /**
  * Rebufferer for reading data by a RandomAccessReader.
@@ -86,9 +85,9 @@ public interface Rebufferer extends ReaderFileProxy
          * Handles callbacks for async buffers
          * @param onReady will be run if completable future is ready
          * @param onError will be run if the buffer errored
-         * @param executor the executor to schedule on
+         * @param scheduler the TPC executor to schedule on
          */
-        public void accept(Runnable onReady, Consumer<Throwable> onError, Executor executor)
+        public void accept(Runnable onReady, Function<Throwable, Void> onError, TPCScheduler scheduler)
         {
             //Registers a callback to be issued when the async buffer is ready
             assert asyncBuffer != null;
@@ -100,14 +99,10 @@ public interface Rebufferer extends ReaderFileProxy
             else
             {
                 //Track the ThreadLocals
-                Runnable wrappedOnReady = new ExecutorLocals.WrappedRunnable(onReady);
+                Runnable wrappedOnReady = new TPCRunnable(onReady, ExecutorLocals.create(), TPCTaskType.READ_DISK_ASYNC, scheduler.coreId());
 
-                asyncBuffer.thenRunAsync(() -> wrappedOnReady.run(), executor)
-                            .exceptionally(t ->
-                                           {
-                                               onError.accept(t);
-                                               return null;
-                                           });
+                asyncBuffer.thenRunAsync(wrappedOnReady, scheduler.getExecutor())
+                            .exceptionally(onError);
             }
         }
 

@@ -81,26 +81,5 @@ public class ExecutorLocals
         clientWarn.set(clientWarnState);
     }
 
-    public static class WrappedRunnable implements Runnable
-    {
-        private final Runnable runnable;
-        private final ExecutorLocals locals;
-
-        public WrappedRunnable(Runnable runnable)
-        {
-            this(runnable, create());
-        }
-
-        public WrappedRunnable(Runnable runnable, ExecutorLocals locals)
-        {
-            this.runnable = runnable;
-            this.locals = locals;
-        }
-
-        public void run()
-        {
-            set(locals);
-            runnable.run();
-        }
-    }
+    // TODO: Maybe make runnable an extension of the locals object to reduce number of objects.
 }

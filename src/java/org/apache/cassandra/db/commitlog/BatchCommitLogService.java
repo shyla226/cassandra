@@ -21,7 +21,9 @@ import io.reactivex.Completable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 class BatchCommitLogService extends AbstractCommitLogService
 {
@@ -33,12 +35,15 @@ class BatchCommitLogService extends AbstractCommitLogService
     protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc)
     {
         // wait until record has been safely persisted to disk
-        return Completable.fromAction(() ->
-                                      {
-                                          pending.incrementAndGet();
-                                          requestExtraSync();
-                                          alloc.awaitDiskSync(commitLog.metrics.waitingOnCommit);
-                                          pending.decrementAndGet();
-                                      }).subscribeOn(Schedulers.io());
+        return RxThreads.subscribeOnIo(
+            Completable.fromAction(() ->
+                                   {
+                                       // TODO: This needs to be made async.
+                                       pending.incrementAndGet();
+                                       requestExtraSync();
+                                       alloc.awaitDiskSync(commitLog.metrics.waitingOnCommit);
+                                       pending.decrementAndGet();
+                                   }),
+            TPCTaskType.COMMIT_LOG_SYNC);
     }
 }

@@ -36,6 +36,7 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
@@ -526,9 +527,9 @@ public class MergeTest
     <T> Flow<T> maybeDelayed(Flow<T> flow)
     {
         if (rand.nextInt(DELAY_CHANCE) == 0)
-            return flow.delayOnNext(rand.nextInt(15), TimeUnit.MICROSECONDS);
+            return flow.delayOnNext(rand.nextInt(15), TimeUnit.MICROSECONDS, TPCTaskType.TIMED_UNKNOWN);
         else if (rand.nextInt(SCHEDULE_CHANCE) == 0)
-            return flow.lift(Threads.requestOnIo());
+            return flow.lift(Threads.requestOnIo(TPCTaskType.READ));
         else
             return flow;
     }

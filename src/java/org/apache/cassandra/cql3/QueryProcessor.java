@@ -44,6 +44,7 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.schedulers.Schedulers;
 import org.antlr.runtime.*;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -65,6 +66,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
 
@@ -226,15 +228,19 @@ public class QueryProcessor implements QueryHandler
                 if (logger.isTraceEnabled())
                     logger.trace("Failed to execute blocking operation, retrying on io schedulers");
 
-                return Single.defer(() -> {
-                    statement.checkAccess(clientState);
-                    statement.validate(clientState);
-                    return statement.execute(queryState, options, queryStartNanoTime);
-                }).subscribeOn(Schedulers.io());
+                Single<? extends ResultMessage> single = Single.defer(() ->
+                                                                     {
+                                                                         statement.checkAccess(clientState);
+                                                                         statement.validate(clientState);
+                                                                         return statement.execute(queryState,
+                                                                                                  options,
+                                                                                                  queryStartNanoTime);
+                                                                     });
+                return RxThreads.subscribeOnIo(single, TPCTaskType.EXECUTE_STATEMENT);
             }
         });
 
-        return scheduler == null ? ret : ret.subscribeOn(scheduler);
+        return scheduler == null ? ret : RxThreads.subscribeOn(ret, scheduler, TPCTaskType.EXECUTE_STATEMENT);
     }
 
     public static Single<? extends ResultMessage> process(String queryString, ConsistencyLevel cl, QueryState queryState, long queryStartNanoTime)
@@ -422,7 +428,7 @@ public class QueryProcessor implements QueryHandler
         });
 
         if (scheduler != null)
-            observable = observable.subscribeOn(scheduler);
+            observable = RxThreads.subscribeOn(observable, scheduler, TPCTaskType.EXECUTE_STATEMENT_INTERNAL);
 
         return observable.map(result -> {
             if (result instanceof ResultMessage.Rows)
@@ -585,12 +591,15 @@ public class QueryProcessor implements QueryHandler
             }
             catch (TPCUtils.WouldBlockException ex)
             {
-                return Single.defer(() -> {
-                    batch.checkAccess(clientState);
-                    batch.validate();
-                    batch.validate(clientState);
-                    return batch.execute(queryState, options, queryStartNanoTime);
-                }).subscribeOn(Schedulers.io());
+                return RxThreads.subscribeOnIo(
+                    Single.defer(() -> {
+                        batch.checkAccess(clientState);
+                        batch.validate();
+                        batch.validate(clientState);
+                        return batch.execute(queryState, options, queryStartNanoTime);
+                    }),
+                    TPCTaskType.EXECUTE_STATEMENT
+                );
             }
         });
     }

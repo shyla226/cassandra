@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 import io.reactivex.Completable;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.Scheduleable;
@@ -29,6 +30,7 @@ import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.concurrent.TPCUtils;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -233,6 +235,11 @@ public class Mutation implements IMutation, Scheduleable
     public TPCScheduler getScheduler()
     {
         return TPC.getForKey(Keyspace.open(getKeyspaceName()), key());
+    }
+
+    public TracingAwareExecutor getOperationExecutor()
+    {
+        return getScheduler().forTaskType(TPCTaskType.WRITE);
     }
 
     public Completable applyAsync(boolean durableWrites, boolean isDroppable)

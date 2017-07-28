@@ -35,6 +35,11 @@ public class TpStats extends NodeToolCmd
             description = "Output format (json, yaml)")
     private String outputFormat = "";
 
+    @Option(title = "cores",
+            name = {"-C", "--cores"},
+            description = "Include TPC core data")
+    private boolean includeTPCCores = false;
+
     @Override
     public void execute(NodeProbe probe)
     {
@@ -43,7 +48,7 @@ public class TpStats extends NodeToolCmd
             throw new IllegalArgumentException("arguments for -F are json,yaml only.");
         }
 
-        StatsHolder data = new TpStatsHolder(probe);
+        StatsHolder data = new TpStatsHolder(probe, includeTPCCores);
         StatsPrinter printer = TpStatsPrinter.from(outputFormat);
         printer.print(data, System.out);
     }

@@ -89,6 +89,7 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.TopKSampler.SamplerResult;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.apache.cassandra.utils.flow.RxThreads;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -920,7 +921,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     publisher.onError(exc);
                 }
             });
-            return publisher.first(CommitLogPosition.NONE).observeOn(Schedulers.io());
+            return RxThreads.observeOnIo(publisher.first(CommitLogPosition.NONE),
+                                         TPCTaskType.AWAIT_FLUSH);
         }
     }
 
@@ -1008,7 +1010,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                       // Note: If we issue onComplete or the subscribers will not get the onNext notification.
                                   });
 
-        return publisher.first(CommitLogPosition.NONE).observeOn(Schedulers.io());
+        return RxThreads.observeOnIo(publisher.first(CommitLogPosition.NONE),
+                                     TPCTaskType.AWAIT_FLUSH);
     }
 
     public CommitLogPosition forceBlockingFlush()

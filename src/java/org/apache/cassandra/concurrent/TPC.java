@@ -35,7 +35,9 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.metrics.TPCAggregatedStageMetrics;
 import org.apache.cassandra.rx.RxSubscriptionDebugger;
+import org.apache.cassandra.metrics.TPCTotalMetrics;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.StorageService;
@@ -101,6 +103,8 @@ public class TPC
         }
     };
 
+    private final static TPCMetrics[] perCoreMetrics = new TPCMetrics[NUM_CORES + 1];
+
     // Initialization
     static
     {
@@ -118,6 +122,17 @@ public class TPC
             eventLoopGroup = group;
             logger.info("Created {} NIO event loops (with I/O ratio set to {}).", NUM_CORES, NIO_IO_RATIO);
         }
+
+        for (int i = 0; i < NUM_CORES; ++i)
+        {
+            perCoreMetrics[i] = new TPCCoreMetrics();
+            new TPCTotalMetrics(perCoreMetrics[i], "internal", "TPC/" + i);
+        }
+        perCoreMetrics[NUM_CORES] = new TPCOtherMetrics();
+        new TPCTotalMetrics(perCoreMetrics[NUM_CORES], "internal", "TPC/other");
+        for (TPCTaskType type : TPCTaskType.values())
+            new TPCAggregatedStageMetrics(perCoreMetrics, type, "internal", "TPC/all");
+
 
         // Then create and set the scheduler corresponding to each event loop. Note that the initialization of each
         // scheduler must be done on the thread corresponding to that scheduler/event loop because 1) we need to be able
@@ -151,11 +166,10 @@ public class TPC
          * see APOLLO-488 for more details.
          */
         RxJavaPlugins.setScheduleHandler((runnable) -> {
-            Runnable ret = runnable instanceof ExecutorLocals.WrappedRunnable
-                           ? runnable
-                           : new ExecutorLocals.WrappedRunnable(runnable);
+            runnable = TPCRunnable.wrap(runnable);
+            runnable = LOG_CALLER_STACK_ON_EXCEPTION ? new RunnableWithCallerThreadInfo(runnable) : runnable;
 
-            return LOG_CALLER_STACK_ON_EXCEPTION ? new RunnableWithCallerThreadInfo(ret) : ret;
+            return runnable;
         });
 
         if (ENABLE_RX_SUBSCRIPTION_DEBUG)
@@ -379,6 +393,16 @@ public class TPC
     public static TPCScheduler getForKey(Keyspace keyspace, DecoratedKey key)
     {
         return getForCore(getCoreForKey(keyspace, key));
+    }
+
+    public static TPCMetrics metrics()
+    {
+        return perCoreMetrics[getCoreId()];
+    }
+
+    public static TPCMetrics metrics(int forCore)
+    {
+        return perCoreMetrics[forCore];
     }
 
     /**

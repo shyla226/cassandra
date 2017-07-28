@@ -31,14 +31,15 @@ import com.google.common.collect.PeekingIterator;
 import com.google.common.util.concurrent.Striped;
 
 import io.reactivex.Completable;
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.SingleEmitter;
 import io.reactivex.SingleSource;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.concurrent.TPCUtils;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.rows.*;
@@ -53,6 +54,7 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.btree.BTreeSet;
+import org.apache.cassandra.utils.flow.RxThreads;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -139,14 +141,19 @@ public class CounterMutation implements IMutation, Scheduleable
         return mutation.getScheduler();
     }
 
+    public TracingAwareExecutor getOperationExecutor()
+    {
+        return mutation.getOperationExecutor();
+    }
+
     private Single<Mutation> applyCounterMutation(long startTime)
     {
-        final Scheduler scheduler = getScheduler();
-
-        return acquireLocks(startTime).flatMap(locks -> Single.using(() -> locks,
-                                                                     this::applyCounterMutationInternal,
-                                                                     this::releaseLocks))
-                                      .subscribeOn(scheduler);
+        return RxThreads.subscribeOn(
+        acquireLocks(startTime).flatMap(locks -> Single.using(() -> locks,
+                                                                  this::applyCounterMutationInternal,
+                                                                  this::releaseLocks)),
+        getScheduler(),
+        TPCTaskType.COUNTER_ACQUIRE_LOCK);
     }
 
     /**
@@ -222,7 +229,10 @@ public class CounterMutation implements IMutation, Scheduleable
                     Tracing.trace("Failed to acquire counter locks, scheduling retry");
                     // TODO: 1 microsecond is an arbitrary value that was chosen to avoid spinning the CPU too much, we
                     // should perform some tests to see if there is an impact in changing this value (APOLLO-799)
-                    mutation.getScheduler().scheduleDirect(() -> acquireLocks(source, locks, startTime), 1, TimeUnit.MICROSECONDS);
+                    mutation.getScheduler().scheduleDirect(() -> acquireLocks(source, locks, startTime),
+                                                           TPCTaskType.COUNTER_ACQUIRE_LOCK,
+                                                           1,
+                                                           TimeUnit.MICROSECONDS);
                 }
                 return;
             }

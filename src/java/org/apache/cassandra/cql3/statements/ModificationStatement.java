@@ -38,6 +38,7 @@ import io.reactivex.Completable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,6 +84,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
@@ -472,17 +474,18 @@ public abstract class ModificationStatement implements CQLStatement
     {
         CQL3CasRequest request = makeCasRequest(queryState, options);
 
-        return Single.defer(() -> buildCasResultSet(StorageProxy.cas(keyspace(),
-                                                                     columnFamily(),
-                                                                     request.key,
-                                                                     request,
-                                                                     options.getSerialConsistency(),
-                                                                     options.getConsistency(),
-                                                                     queryState.getClientState(),
-                                                                     queryStartNanoTime),
-                                                    options))
-                     .subscribeOn(Schedulers.io())
-                     .map(ResultMessage.Rows::new);
+        Single<ResultMessage> result =
+            Single.defer(() -> buildCasResultSet(StorageProxy.cas(keyspace(),
+                                                                  columnFamily(),
+                                                                  request.key,
+                                                                  request,
+                                                                  options.getSerialConsistency(),
+                                                                  options.getConsistency(),
+                                                                  queryState.getClientState(),
+                                                                  queryStartNanoTime),
+                                                 options))
+                  .map(ResultMessage.Rows::new);
+        return RxThreads.subscribeOnIo(result, TPCTaskType.CAS);
     }
 
     private CQL3CasRequest makeCasRequest(QueryState queryState, QueryOptions options)

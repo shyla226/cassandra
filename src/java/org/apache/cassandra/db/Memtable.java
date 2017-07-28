@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCBoundaries;
 import org.apache.cassandra.utils.flow.Flow;
@@ -68,6 +69,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.OpOrderSimple;
+import org.apache.cassandra.utils.flow.RxThreads;
 import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.memory.HeapPool;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
@@ -290,42 +292,44 @@ public class Memtable implements Comparable<Memtable>
 
         final int coreId = getCoreFor(key);
         final MemtableSubrange partitionMap = subranges[coreId];
-        return Single.defer(() -> {
+        return RxThreads.subscribeOnCore(
+            Single.defer(() -> {
+                AtomicBTreePartition previous = partitionMap.get(key);
+                assert TPC.getCoreId() == coreId;
+                if (logger.isTraceEnabled())
+                    logger.trace("Adding key {} to memtable", key);
 
-                        AtomicBTreePartition previous = partitionMap.get(key);
-                        assert TPC.getCoreId() == coreId;
-                        if (logger.isTraceEnabled())
-                            logger.trace("Adding key {} to memtable", key);
+                assert writeBarrier == null || writeBarrier.isAfter(opGroup)
+                    : String.format("Put called after write barrier\n%s", FBUtilities.Debug.getStackTrace());
 
-                        assert writeBarrier == null || writeBarrier.isAfter(opGroup)
-                            : String.format("Put called after write barrier\n%s", FBUtilities.Debug.getStackTrace());
+                if (previous == null)
+                {
+                    final DecoratedKey cloneKey = allocator.clone(key, opGroup);
+                    AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
+                    int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
+                    allocator.onHeap().allocate(overhead, opGroup);
+                    partitionMap.updateLiveDataSize(8);
 
-                        if (previous == null)
-                        {
-                            final DecoratedKey cloneKey = allocator.clone(key, opGroup);
-                            AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
-                            int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
-                            allocator.onHeap().allocate(overhead, opGroup);
-                            partitionMap.updateLiveDataSize(8);
+                    // We'll add the columns later.
+                    partitionMap.put(cloneKey, empty);
+                    previous = empty;
+                }
 
-                            // We'll add the columns later.
-                            partitionMap.put(cloneKey, empty);
-                            previous = empty;
-                        }
+                return previous.addAllWithSizeDelta(update, opGroup, indexer);
+           }).map(p -> {
+               partitionMap.updateTimestamp(p.right.stats().minTimestamp);
+               partitionMap.updateLocalDeletionTime(p.right.stats().minLocalDeletionTime);
+               partitionMap.updateLiveDataSize(p.left[0]);
+               partitionMap.updateCurrentOperations(update.operationCount());
 
-                        return previous.addAllWithSizeDelta(update, opGroup, indexer);
-                   }).map(p -> {
-                       partitionMap.updateTimestamp(p.right.stats().minTimestamp);
-                       partitionMap.updateLocalDeletionTime(p.right.stats().minLocalDeletionTime);
-                       partitionMap.updateLiveDataSize(p.left[0]);
-                       partitionMap.updateCurrentOperations(update.operationCount());
+               // TODO: check if stats are furhter optimisable
+               partitionMap.columnsCollector.update(update.columns());
+               partitionMap.statsCollector.update(update.stats());
 
-                       // TODO: check if stats are furhter optimisable
-                       partitionMap.columnsCollector.update(update.columns());
-                       partitionMap.statsCollector.update(update.stats());
-
-                       return p.left[1];
-                   }).subscribeOn(TPC.getForCore(coreId));
+            return p.left[1];
+        }),
+        coreId,
+        TPCTaskType.WRITE_SWITCH_FOR_MEMTABLE);
     }
 
     /**
@@ -421,7 +425,7 @@ public class Memtable implements Comparable<Memtable>
         }
 
         return Flow.fromIterable(all)
-                   .flatMap(pair -> Threads.evaluateOnCore(pair.right, pair.left))
+                   .flatMap(pair -> Threads.evaluateOnCore(pair.right, pair.left, TPCTaskType.READ_SWITCH_FOR_MEMTABLE))
                    .flatMap(list -> Flow.fromIterable(list));
     }
 
@@ -500,7 +504,7 @@ public class Memtable implements Comparable<Memtable>
     public Flow<Partition> getPartition(DecoratedKey key)
     {
         int coreId = getCoreFor(key);
-        return Threads.evaluateOnCore(() -> subranges[coreId].get(key), coreId);
+        return Threads.evaluateOnCore(() -> subranges[coreId].get(key), coreId, TPCTaskType.READ_SWITCH_FOR_MEMTABLE);
     }
 
     /**
@@ -514,7 +518,7 @@ public class Memtable implements Comparable<Memtable>
             Threads.evaluateOnCore(() -> {
                 subranges[0].liveDataSize += 1024L * 1024 * 1024 * 1024 * 1024;
                 return null;
-            }, 0).reduceBlocking(null, (a, b) -> null);
+            }, 0, TPCTaskType.UNKNOWN).reduceBlocking(null, (a, b) -> null);
         }
     }
 
