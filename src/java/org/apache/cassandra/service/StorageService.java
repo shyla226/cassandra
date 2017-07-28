@@ -229,7 +229,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private final AtomicBoolean doneAuthSetup = new AtomicBoolean(false);
 
-    public final NodeSyncService nodeSyncService = new NodeSyncService();
+    final NodeSyncService nodeSyncService = new NodeSyncService();
 
     /** This method updates the local token on disk  */
     public void setTokens(Collection<Token> tokens)
@@ -4340,6 +4340,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             setMode(Mode.DRAINING, "starting drain process", !isFinalShutdown);
 
+            CompletableFuture<Void> nodeSyncStopFuture = nodeSyncService.disable(false);
             BatchlogManager.instance.shutdown();
             HintsService.instance.pauseDispatch();
 
@@ -4358,6 +4359,20 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "flushing column families", false);
+
+
+            // As NodeSync may write into it's own nodesync_status table, wait on it to finish now before flushing
+            // tables since the goal of flushing is to ensure we have nothing to replay.
+            try
+            {
+                nodeSyncStopFuture.get(2, TimeUnit.MINUTES);
+            }
+            catch (TimeoutException e)
+            {
+                logger.warn("Wasn't able to stop NodeSync service within 2 minutes during drain. "
+                            + "While this generally shouldn't happen (and should be reported if it happens constantly), "
+                            + "it should be harmless.");
+            }
 
             // disable autocompaction - we don't want to start any new compactions while we are draining
             for (Keyspace keyspace : Keyspace.all())
@@ -4387,6 +4402,15 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             // Interrupt ongoing compactions and shutdown CM to prevent further compactions.
             CompactionManager.instance.forceShutdown();
+
+            // The hotness reader writes into a system table, so it must be terminated before 1) we flush
+            // the system keyspace and 2) we forbid mutations completely below with stopMutations().
+            if (SSTableReader.readHotnessTrackerExecutor != null)
+            {
+                SSTableReader.readHotnessTrackerExecutor.shutdown();
+                if (!SSTableReader.readHotnessTrackerExecutor.awaitTermination(1, TimeUnit.MINUTES))
+                    logger.warn("Wasn't able to stop the SSTable read hotness tracker with 1 minute.");
+            }
 
             // Flush the system tables after all other tables are flushed, just in case flushing modifies any system state
             // like CASSANDRA-5151. Don't bother with progress tracking since system data is tiny.
