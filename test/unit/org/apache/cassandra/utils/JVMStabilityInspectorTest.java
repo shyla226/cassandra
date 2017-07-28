@@ -55,10 +55,7 @@ public class JVMStabilityInspectorTest
 
             DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.die);
             killerForTests.reset();
-            JVMStabilityInspector.inspectCommitLogThrowable(new Throwable());
-            assertTrue(killerForTests.wasKilled());
 
-            killerForTests.reset();
             JVMStabilityInspector.inspectThrowable(new Exception(new IOException()));
             assertFalse(killerForTests.wasKilled());
         }
@@ -106,10 +103,6 @@ public class JVMStabilityInspectorTest
 
             killerForTests.reset();
             JVMStabilityInspector.inspectThrowable(new SocketException("Too many open files"));
-            assertTrue(killerForTests.wasKilled());
-
-            killerForTests.reset();
-            JVMStabilityInspector.inspectCommitLogThrowable(new FileNotFoundException("Too many open files"));
             assertTrue(killerForTests.wasKilled());
         }
         finally

@@ -25,12 +25,14 @@ public class KillerForTests extends JVMStabilityInspector.Killer
 {
     private boolean killed = false;
     private boolean quiet = false;
+    private Throwable throwable;
 
     @Override
     protected void killCurrentJVM(Throwable t, boolean quiet)
     {
         this.killed = true;
         this.quiet = quiet;
+        this.throwable = t;
     }
 
     public boolean wasKilled()
@@ -41,6 +43,10 @@ public class KillerForTests extends JVMStabilityInspector.Killer
     public boolean wasKilledQuietly()
     {
         return quiet;
+    }
+
+    public Throwable getThrowable() {
+        return throwable;
     }
 
     public void reset()

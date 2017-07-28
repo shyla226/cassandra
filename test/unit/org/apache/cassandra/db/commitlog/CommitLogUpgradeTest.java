@@ -110,16 +110,18 @@ public class CommitLogUpgradeTest
         testRestore(DATA_DIR + "2.2-snappy");
     }
 
+    @Test
     public void test22_truncated() throws Exception
     {
         testRestore(DATA_DIR + "2.2-lz4-truncated");
     }
 
-    @Test(expected = CommitLogReplayException.class)
+    @Test
     public void test22_bitrot() throws Exception
     {
         shouldBeKilled = true;
         testRestore(DATA_DIR + "2.2-lz4-bitrot");
+        Assert.assertTrue(killerForTests.getThrowable().getClass() == CommitLogReplayException.class);
     }
 
     @Test
@@ -133,11 +135,12 @@ public class CommitLogUpgradeTest
         }
     }
 
-    @Test(expected = CommitLogReplayException.class)
+    @Test
     public void test22_bitrot2() throws Exception
     {
         shouldBeKilled = true;
         testRestore(DATA_DIR + "2.2-lz4-bitrot2");
+        Assert.assertTrue(killerForTests.getThrowable().getClass() == CommitLogReplayException.class);
     }
 
     @Test

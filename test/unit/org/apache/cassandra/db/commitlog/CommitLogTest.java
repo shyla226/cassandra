@@ -64,6 +64,8 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
@@ -513,7 +515,7 @@ public class CommitLogTest
         }, CommitLogReplayException.class);
     }
 
-    protected void runExpecting(Callable<Void> r, Class<?> expected)
+    protected void runExpecting(Callable<Void> r, Class<?> expected) throws Exception
     {
         JVMStabilityInspector.Killer originalKiller;
         KillerForTests killerForTests;
@@ -521,21 +523,20 @@ public class CommitLogTest
         killerForTests = new KillerForTests();
         originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
 
-        Throwable caught = null;
-        try
+        r.call();
+        Throwable caught = killerForTests.getThrowable();
+
+        assertEquals(killerForTests.wasKilled(), expected != null);
+
+        if (expected != null)
         {
-            r.call();
+            assertNotNull("Expected exception " + expected + " but call completed successfully." , caught);
+            assertSame(expected, caught.getClass());
         }
-        catch (Throwable t)
-        {
-            if (expected != t.getClass())
-                throw new AssertionError("Expected exception " + expected + ", got " + t, t);
-            caught = t;
-        }
-        if (expected != null && caught == null)
-            Assert.fail("Expected exception " + expected + " but call completed successfully.");
+
 
         JVMStabilityInspector.replaceKiller(originalKiller);
+
         assertEquals("JVM killed", expected != null, killerForTests.wasKilled());
     }
 
