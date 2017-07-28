@@ -443,6 +443,8 @@ public final class SystemDistributedKeyspace
      */
     public static List<NodeSyncRecord> nodeSyncRecords(Segment segment)
     {
+        logger.trace("Requesting NodeSync records for segment {}", segment);
+
         Token.TokenFactory tkf = segment.table.partitioner.getTokenFactory();
 
         Callable<List<NodeSyncRecord>> callable = () ->
@@ -577,6 +579,8 @@ public final class SystemDistributedKeyspace
      */
     public static void lockNodeSyncSegment(Segment segment, long timeout, TimeUnit timeoutUnit)
     {
+        logger.trace("Locking NodeSync segment {}", segment);
+
         Token.TokenFactory tkf = segment.table.partitioner.getTokenFactory();
         String q = "INSERT INTO %s.%s (keyspace_name, table_name, range_group, start_token, end_token, locked_by)"
                    + " VALUES (?, ?, ?, ?, ?, ?)"
@@ -609,6 +613,8 @@ public final class SystemDistributedKeyspace
      */
     public static void forceReleaseNodeSyncSegmentLock(Segment segment)
     {
+        logger.trace("Force releasing NodeSync segment {}", segment);
+
         Token.TokenFactory tkf = segment.table.partitioner.getTokenFactory();
         String q = "DELETE locked_by FROM %s.%s"
                    + " WHERE keyspace_name=? AND table_name=?"
@@ -636,6 +642,8 @@ public final class SystemDistributedKeyspace
      */
     public static void recordNodeSyncValidation(Segment segment, ValidationInfo info)
     {
+        logger.trace("Recording (and unlocking) NodeSync validation of segment {}: {}", segment, info);
+
         Token.TokenFactory tkf = segment.table.partitioner.getTokenFactory();
 
         // Note that we always clean the "lock" when saving a validation

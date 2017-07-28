@@ -6,6 +6,7 @@
 package com.datastax.apollo.nodesync;
 
 import java.util.Collection;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 
@@ -14,6 +15,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.units.Units;
 
 /**
  * Simple helper class for common parts to all/most {@link ValidationProposer}'s implementation.
@@ -79,5 +81,16 @@ abstract class AbstractValidationProposer implements ValidationProposer
     protected Collection<Range<Token>> localRanges()
     {
         return localRangesProvider.apply(table.keyspace);
+    }
+
+    // Function used for debug/trace logging, to display when was the last validation of a particular segment.
+    static String timeSinceStr(long validationTime)
+    {
+        // Negative values for the validation time means we don't have a record for it
+        return validationTime < 0
+               ? "<not recorded>"
+               : String.format("%s ago (%d)",
+                               Units.toString(System.currentTimeMillis() - validationTime, TimeUnit.MILLISECONDS),
+                               validationTime);
     }
 }
