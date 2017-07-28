@@ -688,9 +688,14 @@ public final class FileUtils
                         throw new IOException("Unable to locate the disk for " + dataDir);
                 }
             }
+            catch (FileNotFoundException fnfe)
+            {
+                //probably the disk is behind a virtual volume like lvm - so no need to log the exception
+                logger.warn("Could not determine if disk is SSD - falling back to disk_optimization_strategy in cassandra.yaml.");
+            }
             catch (IOException e)
             {
-                logger.error("Error determining if disk is SSD", e);
+                logger.warn("Could not determine if disk is SSD - falling back to disk_optimization_strategy in cassandra.yaml.", e);
             }
         }
         else
