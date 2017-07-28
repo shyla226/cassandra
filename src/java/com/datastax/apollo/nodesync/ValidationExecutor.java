@@ -447,9 +447,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             }
 
             if (logger.isDebugEnabled())
-                logger.debug("recent/target rate=%s/%s, %d threads and %d in-flight validations: %s",
-                             Units.toString((long)targetRate, RateUnit.B_S),
+                logger.debug("NodeSync executor controller: recent rate={} (configured={}), {} threads and {} in-flight validations: {}",
                              Units.toString((long)recentRate, RateUnit.B_S),
+                             Units.toString((long)targetRate, RateUnit.B_S),
                              validationExecutor.getCorePoolSize(),
                              maxInFlightValidations,
                              action);

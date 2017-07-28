@@ -212,12 +212,25 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
     public ValidationProposer onTableUpdate(TableMetadata table)
     {
         // Drop the proposer if it's the table it is a proposer for and NodeSync just got disabled on it.
-        return table.equals(this.table) && !table.params.nodeSync.isEnabled(table) ? null : this;
+        if (table.equals(this.table) && !table.params.nodeSync.isEnabled(table))
+        {
+            logger.info("Stopping NodeSync validations on table {} following user deactivation", table);
+            return null;
+        }
+        return this;
     }
 
     public ValidationProposer onTableRemoval(String keyspace, String table)
     {
-        return this.table.keyspace.equals(keyspace) && this.table.name.equals(table) ? null : this;
+        if (this.table.keyspace.equals(keyspace) && this.table.name.equals(table))
+        {
+            // Logging at debug because when you explicitly dropped a table, it doesn't feel like you'd care too much
+            // about that confirmation. Further, when a keyspace is dropped, this is called for every table it has
+            // and this would feel like log spamming if the keyspace has very many tables.
+            logger.debug("Stopping NodeSync validations on table {} as the table has been dropped", table);
+            return null;
+        }
+        return this;
     }
 
     /**
@@ -480,8 +493,21 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
             // 2) the record indicates a validation that is newer than the one we used to create the proposal. This
             //    means another node validated that segment since we created the proposal and the proposal is out-of-date.
             if (record != null && (record.lockedBy != null || (record.lastValidation != null && record.lastValidation.startedAt > lastValidationTime)))
+            {
+                if (logger.isTraceEnabled())
+                {
+                    if (record.lockedBy == null)
+                        logger.trace("Skipping validation on {}: has been validated since the proposal was created "
+                                     + "(know last validation: now={}, at proposal={})",
+                                     segment, timeSinceStr(record.lastValidation.startedAt), timeSinceStr(lastValidationTime));
+                    else
+                        logger.trace("Skipping validation on {}: locked by {}", segment, record.lockedBy);
+                }
                 return null;
+            }
 
+            if (logger.isTraceEnabled())
+                logger.trace("Submitting validation of {} for execution: last known validation={}", segment, timeSinceStr(lastValidationTime));
             return Validator.createAndLock(proposer().service(), segment);
         }
 

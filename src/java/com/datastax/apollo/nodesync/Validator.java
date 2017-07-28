@@ -228,6 +228,7 @@ class Validator
             throw new IllegalStateException("Cannot call executeOn multiple times");
         }
 
+        logger.trace("Starting execution of validation on {}", segment);
         Flow<FlowablePartition> flow = moreContents(executor);
         assert flow != null; // A newly created QueryPager shouldn't be exhausted.
 
@@ -287,8 +288,7 @@ class Validator
         else
         {
             logger.error(String.format("Unexpected error during synchronization of table %s on range %s", table(), range()), t);
-            // If we don't know what happens, we can't really assume this left the pager in a functioning state, so
-            // better give up on that segment.
+            // If we don't know what happens, we can't assume anything so marking the whole segment failed.
             recordPage(ValidationOutcome.FAILED, listener);
             markFinished();
         }
@@ -313,11 +313,13 @@ class Validator
         if (previous.isDone())
             return previous == State.CANCELLED;
 
+        logger.trace("Cancelling validation of segment {}", segment);
+
         if (flowFuture != null)
             flowFuture.cancel(true);
 
         // Release the lock
-            SystemDistributedKeyspace.forceReleaseNodeSyncSegmentLock(segment);
+        SystemDistributedKeyspace.forceReleaseNodeSyncSegmentLock(segment);
 
         return completionFuture.cancel(true);
     }
@@ -328,6 +330,9 @@ class Validator
         if (state.getAndUpdate(s -> s.isDone() ? s : State.FINISHED).isDone())
             return;
 
+        if (logger.isTraceEnabled())
+            logger.trace("Finished execution of validation on {}: metrics={}", segment, metrics.toDebugString());
+
         service.updateMetrics(table(), metrics);
         ValidationInfo info = new ValidationInfo(startTime, validationOutcome, missingNodes);
         SystemDistributedKeyspace.recordNodeSyncValidation(segment, info);
@@ -336,7 +341,6 @@ class Validator
 
     private void recordPage(ValidationOutcome outcome, PageProcessingStatsListener listener)
     {
-        logger.trace("[{}] range {}, recording outcome: {}", table(), range(), outcome);
         metrics.addPageOutcome(outcome);
         validationOutcome = validationOutcome.composeWith(outcome);
 

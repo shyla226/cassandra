@@ -30,9 +30,12 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 
+import com.google.common.base.Joiner;
+import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -94,7 +97,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
      * Note that both schema and topology changes are basically very infrequent, and acting on them for NodeSync is not
      * performance critical either, so there is probably no reason to use more than one thread.
      */
-    private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor(new NamedThreadFactory("ValidationSchedulerEventExecutor"));
 
     private final UserValidations userValidations;
 
@@ -113,7 +116,17 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
 
     void createInitialProposers()
     {
-        addAll(ContinuousTableValidationProposer.createAll(service));
+        List<ContinuousTableValidationProposer> initialProposers = ContinuousTableValidationProposer.createAll(service);
+        if (!initialProposers.isEmpty())
+        {
+            logger.debug("Adding NodeSync validation proposer for tables {}", toTableNamesString(initialProposers));
+            addAll(initialProposers);
+        }
+    }
+
+    private static String toTableNamesString(List<? extends AbstractValidationProposer> proposers)
+    {
+        return "{ " + Joiner.on(", ").join(Iterables.transform(proposers, AbstractValidationProposer::table)) + " }";
     }
 
     UserValidations userValidations()
@@ -123,13 +136,16 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
 
     /**
      * Adds a new proposer to this scheduler.
+     *
+     * @param proposer the proposer to add.
+     * @return {@code true} if the proposer was added, {@code false} if it was already present and was thus not added.
      */
-    void add(ValidationProposer proposer)
+    boolean add(ValidationProposer proposer)
     {
         lock.lock();
         try
         {
-            addProposer(proposer);
+            return addProposer(proposer);
         }
         finally
         {
@@ -138,18 +154,25 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     }
 
     /**
-     * Adds new proposers to this scheduler.
+     * Adds new proposers to this scheduler. Any proposer that was already part of the scheduler will be ignored.
+     *
+     * @param proposers the proposers to add.
+     * @return {@code true} if <b>any</b> of the proposers has been added, {@code false} if all the proposers were
+     * already present in the scheduler and thus skipped.
      */
-    void addAll(Collection<? extends ValidationProposer> proposers)
+    boolean addAll(Collection<? extends ValidationProposer> proposers)
     {
         // Don't bother with the lock if we don't have to.
         if (proposers.size() == 0)
-            return;
+            return false;
 
         lock.lock();
         try
         {
-            proposers.forEach(this::addProposer);
+            boolean addedAny = false;
+            for (ValidationProposer proposer : proposers)
+                addedAny |= addProposer(proposer);
+            return addedAny;
         }
         finally
         {
@@ -159,13 +182,16 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
 
     /**
      * Removes a proposer from this scheduler. This is a no-op if the scheduler didn't had the provided proposer.
+     *
+     * @param proposer the proposer to remove.
+     * @return {@code true} if {@code proposer} was removed, {@code false} if the scheduler didn't had that proposer.
      */
-    void remove(ValidationProposer proposer)
+    boolean remove(ValidationProposer proposer)
     {
         lock.lock();
         try
         {
-            removeProposer(proposer, true);
+            return removeProposer(proposer, true);
         }
         finally
         {
@@ -174,26 +200,25 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     }
 
     // *Must* only be called while holding the lock
-    private void addProposer(ValidationProposer proposer)
+    private boolean addProposer(ValidationProposer proposer)
     {
         // Don't initialize a proposer if it was a duplicate for a proposer we already had; this avoid duplicate work.
-        if (proposers.add(proposer))
+        boolean added = proposers.add(proposer);
+        if (added)
         {
-            logger.debug("Adding NodeSync validation proposer: {}", proposer);
             proposer.init();
             requeue(proposer);
         }
+        return added;
     }
 
     // *Must* only be called while holding the lock
-    private void removeProposer(ValidationProposer proposer, boolean checkForQueuedProposals)
+    private boolean removeProposer(ValidationProposer proposer, boolean checkForQueuedProposals)
     {
-        if (proposers.remove(proposer))
-        {
-            logger.debug("Removing NodeSync proposer: {}", proposer);
-            if (checkForQueuedProposals)
-                proposalQueue.removeIf(p -> p.proposer().equals(proposer));
-        }
+        boolean removed = proposers.remove(proposer);
+        if (removed && checkForQueuedProposals)
+            proposalQueue.removeIf(p -> p.proposer().equals(proposer));
+        return removed;
     }
 
     private void mapOnProposers(Function<ValidationProposer, ValidationProposer> fct)
@@ -363,7 +388,15 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         // empty list. And since join events are pretty rare and createAll is pretty cheap particularly in those cases, ...
         if (proposersCount() == 0)
         {
-            eventExecutor.execute(() -> addAll(ContinuousTableValidationProposer.createAll(service)));
+            eventExecutor.execute(() -> {
+                List<ContinuousTableValidationProposer> proposers = ContinuousTableValidationProposer.createAll(service);
+                if (!proposers.isEmpty())
+                {
+                    logger.info("{} has joined the cluster: starting NodeSync validations on tables {} as consequence",
+                                endpoint, toTableNamesString(proposers));
+                    addAll(proposers);
+                }
+            });
         }
         else
         {
@@ -429,9 +462,29 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
 
         eventExecutor.execute(() -> {
             if (ks.getReplicationStrategy().getReplicationFactor() <= 1)
-                ks.getColumnFamilyStores().forEach(s -> removeContinuousProposerFor(s.metadata()));
+            {
+                Set<TableMetadata> removed = new HashSet<>();
+                ks.getColumnFamilyStores().forEach(s -> {
+                    if (removeContinuousProposerFor(s.metadata()))
+                        removed.add(s.metadata());
+                });
+                if (!removed.isEmpty())
+                    logger.info("Stopping NodeSync validations on tables {} because keyspace {} is not replicated anymore",
+                                removed, keyspace);
+            }
             else
-                addAll(ContinuousTableValidationProposer.createForKeyspace(service, ks));
+            {
+                List<ContinuousTableValidationProposer> proposers = ContinuousTableValidationProposer.createForKeyspace(service, ks);
+                if (addAll(proposers))
+                {
+                    // As mentioned above, it's absolutely possible the addition above was a complete no-op, but if it
+                    // wasn't, that (almost surely, we could have raced with another change, but that's sufficiently
+                    // unlikely that we ignore it for the purpose of logging) means the RF of the keyspace has just
+                    // been increased.
+                    logger.info("Starting NodeSync validations on tables {} following increase of the replication factor on {}",
+                                toTableNamesString(proposers), keyspace);
+                }
+            }
         });
     }
 
@@ -442,7 +495,13 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         if (store == null)
             return;
 
-        eventExecutor.execute(() -> ContinuousTableValidationProposer.create(service, store).ifPresent(this::add));
+        eventExecutor.execute(() ->
+                              ContinuousTableValidationProposer.create(service, store)
+                                                               .ifPresent(p -> {
+                                                                   if (add(p))
+                                                                       logger.info("Starting NodeSync validations on newly created table {}",
+                                                                                   store.metadata());
+                                                               }));
     }
 
     public void onAlterTable(String keyspace, String table, boolean affectsStatements)
@@ -463,7 +522,10 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
             // waste the proposer proposer on any other type of alter, which is a shame, but the right way to fix this is to
             // improve the listener interface and in the meantime, schema change are comparatively rare events so a little
             // inefficiently don't matter concretely (outside of hurting our feelings that is)).
-            ContinuousTableValidationProposer.create(service, store).ifPresent(this::add);
+            ContinuousTableValidationProposer.create(service, store).ifPresent(p -> {
+                if (add(p))
+                    logger.info("Starting NodeSync validations on table {} following user activation", store.metadata());
+            });
         });
     }
 
@@ -473,9 +535,9 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         eventExecutor.execute(() -> mapOnProposers(c -> c.onTableRemoval(keyspace, table)));
     }
 
-    private void removeContinuousProposerFor(TableMetadata metadata)
+    private boolean removeContinuousProposerFor(TableMetadata metadata)
     {
-        eventExecutor.execute(() -> remove(ContinuousTableValidationProposer.dummyProposerFor(metadata)));
+        return remove(ContinuousTableValidationProposer.dummyProposerFor(metadata));
     }
 
     /**

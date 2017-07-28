@@ -42,6 +42,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterators;
 import com.google.common.primitives.Longs;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.dht.Range;
@@ -83,6 +86,8 @@ import org.apache.cassandra.utils.units.TimeValue;
  */
 class UserValidationProposer extends AbstractValidationProposer
 {
+    private static final Logger logger = LoggerFactory.getLogger(UserValidationProposer.class);
+
     private final UUID id;
 
     // The list of ranges requested by the user. This contains only local, "normalized" ranges (in the sense of Range#normalize).
@@ -345,6 +350,7 @@ class UserValidationProposer extends AbstractValidationProposer
             if (proposer().startTime < 0)
                 proposer().startTime = System.nanoTime();
 
+            logger.trace("Submitting user validation of {} for execution", segment);
             Validator validator = Validator.createAndLock(proposer().service(), segment);
             validator.completionFuture()
                      .thenAccept(i -> proposer().onValidationDone(i, validator.metrics()))
