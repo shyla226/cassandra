@@ -1174,14 +1174,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     private static final class WriteTimeTransaction implements UpdateTransaction
     {
         private final Index.Indexer[] indexers;
-        private Completable allCompletables;
+        private List<Completable> allCompletables;
 
         private WriteTimeTransaction(Index.Indexer... indexers)
         {
             // don't allow null indexers, if we don't need any use a NullUpdater object
             for (Index.Indexer indexer : indexers) assert indexer != null;
             this.indexers = indexers;
-            this.allCompletables = Completable.complete();
+            this.allCompletables = new ArrayList<>(indexers.length);
         }
 
         public void start()
@@ -1196,11 +1196,13 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             {
                 try
                 {
-                    allCompletables = allCompletables.concatWith(indexer.partitionDelete(deletionTime));
+                    Completable c = indexer.partitionDelete(deletionTime);
+                    if (c != Completable.complete())
+                        allCompletables.add(c);
                 }
                 catch (Exception exc)
                 {
-                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                    allCompletables.add(Completable.error(exc));
                 }
             }
         }
@@ -1211,26 +1213,31 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             {
                 try
                 {
-                    allCompletables = allCompletables.concatWith(indexer.rangeTombstone(tombstone));
+                    Completable c = indexer.rangeTombstone(tombstone);
+                    if (c != Completable.complete())
+                        allCompletables.add(c);
                 }
                 catch (Exception exc)
                 {
-                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                    allCompletables.add(Completable.error(exc));
                 }
             }
         }
 
         public void onInserted(Row row)
         {
+
             for (Index.Indexer indexer : indexers)
             {
                 try
                 {
-                    allCompletables = allCompletables.concatWith(indexer.insertRow(row));
+                    Completable c = indexer.insertRow(row);
+                    if (c != Completable.complete())
+                        allCompletables.add(c);
                 }
                 catch (Exception exc)
                 {
-                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                    allCompletables.add(Completable.error(exc));
                 }
             }
         }
@@ -1277,11 +1284,13 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             {
                 try
                 {
-                    allCompletables = allCompletables.concatWith(indexer.updateRow(oldRow, newRow));
+                    Completable c = indexer.updateRow(oldRow, newRow);
+                    if (c != Completable.complete())
+                        allCompletables.add(c);
                 }
                 catch (Exception exc)
                 {
-                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                    allCompletables.add(Completable.error(exc));
                 }
             }
         }
@@ -1292,15 +1301,17 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             {
                 try
                 {
-                    allCompletables = allCompletables.concatWith(indexer.finish());
+                    Completable c = indexer.finish();
+                    if (c != Completable.complete())
+                        allCompletables.add(c);
                 }
                 catch (Exception exc)
                 {
-                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                    allCompletables.add(Completable.error(exc));
                 }
             }
 
-            return allCompletables;
+            return Completable.concat(allCompletables);
         }
 
         private boolean shouldCleanupOldValue(Cell oldCell, Cell newCell)
