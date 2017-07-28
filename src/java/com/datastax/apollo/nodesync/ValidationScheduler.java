@@ -273,23 +273,31 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     /**
      * Returns the next validation to be ran.
      * <p>
-     * This method <b>may</b> block if there is no validation to be done at the current time (including the case where
-     * no table have NodeSync currently activated and so the scheduler has no proposers set) and this until a validation
-     * has to be done (there is no timeout).
+     * This method <b>may</b> block if {@code blockUntilAvailable == true} and there is no validation to be done at the
+     * current time (including the case where no table have NodeSync currently activated and so the scheduler has no
+     * proposers set) and this until a validation has to be done (there is no timeout).
      *
-     * @return a {@link Validator} corresponding to the next validation to be ran, blocking if necessary until a
-     * validation has to be run.
+     * @param blockUntilAvailable if {@code true} and there is no currently available validation to run, the call will
+     *                            block until a validation is available. In that case, the method is guaranteed to
+     *                            return a non-null value. If {@code false}, this call will not block and will instead
+     *                            return {@code null} if no validation is currently available.
+     * @return a {@link Validator} corresponding to the next validation to be ran or {@code null} if
+     * {@code blockUntilAvailable == false} and there is no validation to run at the current time.
      *
      * @throws ShutdownException if the scheduler has been shutdown.
      */
-    Validator getNextValidation()
+    Validator getNextValidation(boolean blockUntilAvailable)
     {
         if (isShutdown)
             throw new ShutdownException();
 
         while (true)
         {
-            ValidationProposal proposal = getProposal();
+            ValidationProposal proposal = getProposal(blockUntilAvailable);
+            // We only get null if !blockUntilAvailable
+            if (proposal == null)
+                return null;
+
             // Note: activating a proposal is potentially costly so having that done outside the lock is very much
             // on purpose.
             Validator validator = proposal.activate();
@@ -299,8 +307,8 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     }
 
     /**
-     * Shutdown this scheduler. The main effect of this call is to make any ongoing and future calls to
-     * {@link #getNextValidation()} to throw a {@link ShutdownException}.
+     * Shutdown this scheduler. The main effect of this call is to make any ongoing and future blocking calls to
+     * {@link #getNextValidation} to throw a {@link ShutdownException}.
      */
     void shutdown()
     {
@@ -321,7 +329,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
 
     }
 
-    private ValidationProposal getProposal()
+    private ValidationProposal getProposal(boolean blockUntilAvailable)
     {
         ValidationProposal proposal;
         lock.lock();
@@ -329,6 +337,8 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         {
             while ((proposal = proposalQueue.poll()) == null)
             {
+                if (!blockUntilAvailable)
+                    return null;
                 if (isShutdown)
                     throw new ShutdownException();
 
@@ -541,7 +551,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     }
 
     /**
-     * Thrown by {@link #getNextValidation()} when the scheduler has been shutdown.
+     * Thrown by {@link #getNextValidation} when the scheduler has been shutdown.
      */
     static class ShutdownException extends RuntimeException {}
 }
