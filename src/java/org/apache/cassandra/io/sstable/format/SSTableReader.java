@@ -148,7 +148,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableReader.class);
 
-    private static final ScheduledThreadPoolExecutor syncExecutor = initSyncExecutor();
+    public static final ScheduledThreadPoolExecutor readHotnessTrackerExecutor = initSyncExecutor();
     private static ScheduledThreadPoolExecutor initSyncExecutor()
     {
         if (DatabaseDescriptor.isClientOrToolInitialized())
@@ -1756,17 +1756,27 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
             readMeter = SystemKeyspace.getSSTableReadMeter(desc.ksname, desc.cfname, desc.generation);
             // sync the average read rate to system.sstable_activity every five minutes, starting one minute from now
-            readMeterSyncFuture = new WeakReference<>(syncExecutor.scheduleAtFixedRate(new Runnable()
+            try
             {
-                public void run()
+                readMeterSyncFuture = new WeakReference<>(readHotnessTrackerExecutor.scheduleAtFixedRate(new Runnable()
                 {
-                    if (obsoletion == null)
+                    public void run()
                     {
-                        meterSyncThrottle.acquire();
-                        SystemKeyspace.persistSSTableReadMeter(desc.ksname, desc.cfname, desc.generation, readMeter);
+                        if (obsoletion == null)
+                        {
+                            meterSyncThrottle.acquire();
+                            SystemKeyspace.persistSSTableReadMeter(desc.ksname, desc.cfname, desc.generation, readMeter);
+                        }
                     }
-                }
-            }, 1, 5, TimeUnit.MINUTES));
+                }, 1, 5, TimeUnit.MINUTES));
+            }
+            catch (RejectedExecutionException e)
+            {
+                // That's ok, that just mean we're shutting down the node and the read meter executor has been shut down.
+                // Note that while we shutdown that executor relatively late, we also do it _before_ we flush the
+                // system keyspace so as to ensure it doesn't re-add new mutations that wouldn't be flushed, so
+                // new sstables created by those last flushes could trigger this.
+            }
         }
 
         private void stopReadMeterPersistence()
