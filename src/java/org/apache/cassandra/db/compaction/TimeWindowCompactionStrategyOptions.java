@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 public final class TimeWindowCompactionStrategyOptions
@@ -41,11 +42,15 @@ public final class TimeWindowCompactionStrategyOptions
     protected static final String COMPACTION_WINDOW_UNIT_KEY = "compaction_window_unit";
     protected static final String COMPACTION_WINDOW_SIZE_KEY = "compaction_window_size";
     protected static final String EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY = "expired_sstable_check_frequency_seconds";
+    protected static final String ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_TABLE_OPTION = "unsafe_aggressive_sstable_expiration";
+    protected static final String ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_PROPERTY = Config.PROPERTY_PREFIX + "allow_unsafe_aggressive_sstable_expiration";
+    protected static final boolean ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION = Boolean.getBoolean(ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_PROPERTY);
 
     protected final int sstableWindowSize;
     protected final TimeUnit sstableWindowUnit;
     protected final TimeUnit timestampResolution;
     protected final long expiredSSTableCheckFrequency;
+    protected final boolean ignoreOverlaps;
 
     SizeTieredCompactionStrategyOptions stcsOptions;
 
@@ -68,6 +73,15 @@ public final class TimeWindowCompactionStrategyOptions
         optionValue = options.get(EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY);
         expiredSSTableCheckFrequency = TimeUnit.MILLISECONDS.convert(optionValue == null ? DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS : Long.parseLong(optionValue), TimeUnit.SECONDS);
 
+        optionValue = options.get(ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_TABLE_OPTION);
+        boolean aggressiveExpirationTableOption = Boolean.parseBoolean(optionValue);
+        if (aggressiveExpirationTableOption && !ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION)
+        {
+            logger.warn("Not enabling agressive SSTable expiration, as the system property '" + ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_PROPERTY + "' is set to 'false'. " +
+                        "Set it to 'true' to enable aggressive SSTable expiration.");
+        }
+        ignoreOverlaps = ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION && aggressiveExpirationTableOption;
+
         stcsOptions = new SizeTieredCompactionStrategyOptions(options);
     }
 
@@ -77,6 +91,7 @@ public final class TimeWindowCompactionStrategyOptions
         timestampResolution = DEFAULT_TIMESTAMP_RESOLUTION;
         sstableWindowSize = DEFAULT_COMPACTION_WINDOW_SIZE;
         expiredSSTableCheckFrequency = TimeUnit.MILLISECONDS.convert(DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS, TimeUnit.SECONDS);
+        ignoreOverlaps = false;
         stcsOptions = new SizeTieredCompactionStrategyOptions();
     }
 
@@ -136,10 +151,18 @@ public final class TimeWindowCompactionStrategyOptions
             throw new ConfigurationException(String.format("%s is not a parsable int (base10) for %s", optionValue, EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY), e);
         }
 
+        optionValue = options.get(ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_TABLE_OPTION);
+        if (optionValue != null)
+        {
+            if (!(optionValue.equalsIgnoreCase("true") || optionValue.equalsIgnoreCase("false")))
+                throw new ConfigurationException(String.format("%s is not 'true' or 'false' (%s)", ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_TABLE_OPTION, optionValue));
+        }
+
         uncheckedOptions.remove(COMPACTION_WINDOW_SIZE_KEY);
         uncheckedOptions.remove(COMPACTION_WINDOW_UNIT_KEY);
         uncheckedOptions.remove(TIMESTAMP_RESOLUTION_KEY);
         uncheckedOptions.remove(EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY);
+        uncheckedOptions.remove(ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_TABLE_OPTION);
 
         uncheckedOptions = SizeTieredCompactionStrategyOptions.validateOptions(options, uncheckedOptions);
 
