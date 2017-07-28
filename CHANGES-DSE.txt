@@ -104,5 +104,6 @@ Merged from dse5.0:
  * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
  * Exponential backoff when hint delivery fails (APOLLO-17)
 Merged from DSE 4.8.14:
-* Integrate top threads command in nodetool (APOLLO-652)
+ * Allow aggressive expiration of fully expired sstables without timestamp/key overlap checks (APOLLO-902)
+ * Integrate top threads command in nodetool (APOLLO-652)
 
