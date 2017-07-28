@@ -25,6 +25,7 @@ import io.reactivex.Scheduler;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.NodeSyncConfig;
 import org.apache.cassandra.utils.collection.History;
 import org.apache.cassandra.utils.units.RateUnit;
@@ -236,7 +237,37 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             validationExecutor.submit(() -> {
                 try
                 {
-                    submit(scheduler.getNextValidation());
+                    // We want to block on the acquisition of a new validation if we have nothing else to do (otherwise
+                    // we shouldn't block as, given that we can have more threads than segments, we could end up
+                    // starving the processing of an ongoing segment otherwise). And we have nothing else to do if
+                    // there is no other in-flight validations (keeping in mind we do have a permit ourselves).
+                    Validator validator = scheduler.getNextValidation(inFlightValidations.get() <= 1);
+                    if (validator != null)
+                    {
+                        submit(validator);
+                    }
+                    else
+                    {
+                        // It means there was not currently available validation and we have other ones in flight. So
+                        // release the permit and re-schedule the new validation creation.
+                        returnValidationPermit();
+                        // We could just call submitNewValidation again, which would basically push the task at the end
+                        // of the validationExecutor queue, but in the current implementation, a validation can generate a
+                        // lot of new tasks (due to Threads.requestOn() in Validator.executeOn creating a task for each
+                        // request() call (so at least each partition), even when we're already on the executor and
+                        // request() is not blocking), so if say we have one other in-flight validation and just this one
+                        // thread, we'd end up alternative between very short tasks for the validation and calls to
+                        // submitNewValidation, which feels unnecessary. Anyway, point is that we get here if we have no
+                        // validation to currently do, so potentially waiting 100ms before checking again is totally fine
+                        // while it limit the risk of busy spinning.
+                        // TODO(Sylvain): obviously not ideal (as indicated by the length of the comment). Probably should
+                        // improve Threads.requestOn() so it's able to execute request() calls directly (without re-scheduling)
+                        // if it's already on the executor and know the next call won't block (maybe a new method in
+                        // FlowSubscription that tells if the next call to request() is guaranteed to not block), as this
+                        // is an improvement that goes beyond NodeSync (and in fact, there is already a TODO in Threads.RequestOn
+                        // for that).
+                        ScheduledExecutors.scheduledTasks.schedule(this::submitNewValidation, 100, TimeUnit.MILLISECONDS);
+                    }
                 }
                 catch (ValidationScheduler.ShutdownException e)
                 {
