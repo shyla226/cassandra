@@ -30,7 +30,7 @@ import io.airlift.airline.*;
 
 import org.apache.cassandra.locator.EndpointSnitchInfoMBean;
 import org.apache.cassandra.tools.nodetool.*;
-import org.apache.cassandra.tools.nodetool.nodesync.*;
+import org.apache.cassandra.tools.nodetool.nodesync.Disable;
 import org.apache.cassandra.tools.nodetool.nodesync.Enable;
 import org.apache.cassandra.tools.nodetool.nodesync.GetRate;
 import org.apache.cassandra.tools.nodetool.nodesync.SetRate;
@@ -152,7 +152,7 @@ public class NodeTool
                 SetMaxHintWindow.class,
                 Snapshot.class,
                 ListSnapshots.class,
-                org.apache.cassandra.tools.nodetool.Status.class,
+                Status.class,
                 StatusBinary.class,
                 StatusGossip.class,
                 StatusBackup.class,

@@ -16,7 +16,7 @@ import org.apache.cassandra.schema.TableMetadata;
  * long as asked to. The generation of a validation proposal is done by calling the {@link #supplyNextProposal(Consumer)},
  * passing a consumer of that generated proposal.
  */
-// TODO(sylvain): it might be that, once merged with TPC, making this be a CsFlow<ValidationProposal> could be a slightly
+// TODO(sylvain): it might be that, once merged with TPC, making this be a Flow<ValidationProposal> could be a slightly
 // cleaner approach conceptually (mostly because it'd reuse an existing concept). Assuming CsFlow request() isn't
 // blocking, which I believe it's not. Not really worth bothering short term though.
 interface ValidationProposer

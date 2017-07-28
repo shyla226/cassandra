@@ -94,7 +94,7 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
 
     /**
      * Creates a dummy continuous table proposer that is only suitable for use of its {@link #equals(Object)} and
-     * {@link #hashCode()} methods. Calling any other method on the returned object has undefinted behavior (most likely,
+     * {@link #hashCode()} methods. Calling any other method on the returned object has undefined behavior (most likely,
      * will throw an exception). This exists because we use proposers in a set in {@link ValidationScheduler} and we use
      * this to remove continuous table proposers without iterating over the whole set. * * @param table the table for the proposer.
      * @return a dummy proposer that is only usable in rare situations, see above.
@@ -161,8 +161,8 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
 
     /**
      * Creates a continuous table proposer for the provided table, assuming it has NodeSync enabled (contrarily to
-     * the previous ones, this method does <b>not</b> check the replication factor for the table, so this should be
-     * checked externally).
+     * the other create methods of this class ({@link #createAll}, {@link #createForKeyspace}, ...), this method does
+     * <b>not</b> check the replication factor for the table, so this should be checked externally).
      *
      * @param service the NodeSync service for which we create the proposers.
      * @param store   the {@link ColumnFamilyStore} of the table for which to create the proposer.
@@ -370,7 +370,7 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
                     logger.error("Unexpected error reloading NodeSync validation proposals for {};"
                                  + " this is a bug and should be reported to DataStax support as such;"
                                  + " this _will_ prevent proper validation and repair of table {} by NodeSync;"
-                                 + " this will be retried in 1 minute but if this continue failing and you want to stop"
+                                 + " this will be retried in 1 minute but if this continues failing and you want to stop"
                                  + " this message from being logged, you should disable NodeSync on {}",
                                  table, table, table, e);
                     ScheduledExecutors.optionalTasks.schedule(this::doReload, 1, TimeUnit.MINUTES);
@@ -410,7 +410,7 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
         /**
          * The last known time at which the segment for which this is a proposal was validated.
          * <p>
-         * Can be negative is we have not record of said last validation.
+         * Can be negative if we have not record of said last validation.
          */
         private final long lastValidationTime;
         /**

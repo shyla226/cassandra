@@ -157,8 +157,12 @@ class ValidationMetrics implements Serializable
         sb.append("range tombstones={ validated: ").append(rangeTombstoneMarkersValidated)
           .append(", repaired: ").append(rangeTombstoneMarkersRepaired).append("}, ");
 
-        sb.append("validated=").append(Units.toLogString(dataValidated, SizeUnit.BYTES)).append(", ");
-        sb.append("repaired data sent=").append(Units.toLogString(repairDataSent, SizeUnit.BYTES));
+        sb.append("data={ validated: ").append(Units.toLogString(dataValidated, SizeUnit.BYTES))
+          .append(", repaired: ").append(dataRepaired).append("}, ");
+
+        sb.append("repair sent={ data: ").append(Units.toLogString(repairDataSent, SizeUnit.BYTES))
+          .append(", objects: ").append(repairObjectsSent).append('}');
+
 
         return sb.toString();
     }

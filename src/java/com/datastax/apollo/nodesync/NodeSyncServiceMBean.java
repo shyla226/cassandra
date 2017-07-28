@@ -18,7 +18,6 @@
 package com.datastax.apollo.nodesync;
 
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -93,7 +92,8 @@ public interface NodeSyncServiceMBean
      * {@code nodesync} option is not enabled) or for extreme cases where one wants to manually force the validation
      * of some segments independently of NodeSync automatic segment prioritization.
      *
-     * @param options the options for the validation (at least the table and ranges on which to force validation). Those
+     * @param options the options for the validation (at least the keyspace, table; optionally the ranges on which to
+     *                force validation (all local ranges are validated if no specific ranges are provided)). Those
      *                are passed in a string map for JMX sakes but see the comment {@link UserValidationOptions#fromMap}
      *                for details on valid (and mandatory) values for this argument.
      * @return a string uniquely identifying this user validation. Among other things, this identifier can later be used
@@ -110,7 +110,7 @@ public interface NodeSyncServiceMBean
      *     Map<String, String> m = new HashMap();
      *     m.put("keyspace", keyspace);
      *     m.put("table", table);
-     *     if (ranges != null)
+     *     if (ranges != null && !ranges.isEmpty())
      *         m.put("ranges", ranges);
      *     startUserValidation(m);
      * </pre>

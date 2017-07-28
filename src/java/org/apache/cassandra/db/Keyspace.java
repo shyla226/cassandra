@@ -222,7 +222,7 @@ public class Keyspace
     {
         ColumnFamilyStore cfs = columnFamilyStores.get(id);
         if (cfs == null)
-            throw new UnknownTableException("Cannot find table, it may have been dropped",id);
+            throw new UnknownTableException("Cannot find table, it may have been dropped", id);
         return cfs;
     }
 

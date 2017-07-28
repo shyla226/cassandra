@@ -75,7 +75,9 @@ abstract class Segments
 
     /**
      * Computes the depth at which each local ranges should be split for a given table so that each segment covers data
-     * no bigger than the provided size.
+     * that is (assuming perfect distribution) no bigger than the provided size (of course, in practice, distribution
+     * is never perfect so there is no guarantee that no segment will ever cover more data than
+     * {@code maxSegmentsSizeInBytes}, but this is good enough for NodeSync).
      *
      * @param estimatedTableSizeInBytes the (estimated) size of the table for which to compute the depth.
      * @param localRangesCount the number of local ranges to consider for the computation.

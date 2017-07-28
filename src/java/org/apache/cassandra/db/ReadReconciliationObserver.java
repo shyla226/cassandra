@@ -19,8 +19,6 @@ package org.apache.cassandra.db;
 
 import java.net.InetAddress;
 import java.util.Collection;
-import java.util.List;
-import java.util.Set;
 
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
