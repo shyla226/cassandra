@@ -1,6 +1,8 @@
 DSE 5.0.10
  * fix completed rebuild logging always says 0 bytes (APOLLO-810)
  * nodetool rebuild & bootstrap improvements (APOLLO-581)
+Merged from DSE 4.8.14:
+  * Allow aggressive expiration of fully expired sstables without timestamp/key overlap checks (APOLLO-902)
 
 
 DSE 5.0.9

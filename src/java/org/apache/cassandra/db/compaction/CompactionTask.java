@@ -62,6 +62,7 @@ public class CompactionTask extends AbstractCompactionTask
     protected final int gcBefore;
     protected final boolean offline;
     protected final boolean keepOriginals;
+    protected final boolean ignoreOverlaps;
     protected static long totalBytesCompacted = 0;
     private CompactionExecutorStatsCollector collector;
 
@@ -72,10 +73,19 @@ public class CompactionTask extends AbstractCompactionTask
 
     public CompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, boolean offline, boolean keepOriginals)
     {
+        this(cfs, txn, gcBefore, offline, keepOriginals, false);
+    }
+
+    /**
+     * {@param ignoreOverlaps} is only used by the {@code TimeWindowCompactionStrategy}, so it defaults to {@code false}
+     */
+    public CompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, boolean offline, boolean keepOriginals, boolean ignoreOverlaps)
+    {
         super(cfs, txn);
         this.gcBefore = gcBefore;
         this.offline = offline;
         this.keepOriginals = keepOriginals;
+        this.ignoreOverlaps = ignoreOverlaps;
     }
 
     public static synchronized long addToTotalBytesCompacted(long bytesCompacted)
@@ -327,7 +337,7 @@ public class CompactionTask extends AbstractCompactionTask
 
     protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
     {
-        return new CompactionController(cfs, toCompact, gcBefore);
+        return new CompactionController(cfs, toCompact, gcBefore, ignoreOverlaps);
     }
 
     protected boolean partialCompactionsAcceptable()
