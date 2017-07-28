@@ -16,7 +16,6 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Sets;
-import com.google.common.primitives.Longs;
 
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;

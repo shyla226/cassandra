@@ -179,9 +179,6 @@ public class TableMetrics
     /** Dropped Mutations Count */
     public final Counter droppedMutations;
 
-    /** Failed Replication Count */
-    public final Counter failedReplicationCount;
-
     /** NodeSync metrics */
     public final NodeSyncMetrics nodeSyncMetrics;
 
@@ -733,7 +730,6 @@ public class TableMetrics
         rowCacheHit = createTableCounter("RowCacheHit");
         rowCacheMiss = createTableCounter("RowCacheMiss");
         droppedMutations = createTableCounter("DroppedMutations");
-        failedReplicationCount = createTableCounter("FailedReplicationCount");
 
         casPrepare = new LatencyMetrics(factory, aliasFactory, "CasPrepare", cfs.keyspace.metric.casPrepare);
         casPropose = new LatencyMetrics(factory, aliasFactory, "CasPropose", cfs.keyspace.metric.casPropose);

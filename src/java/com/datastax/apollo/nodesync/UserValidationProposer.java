@@ -60,7 +60,7 @@ import org.apache.cassandra.utils.units.TimeValue;
  * A {@link ValidationProposer} that forces the validation of particular range(s) of a particular table.
  * <p>
  * This proposer is not automatically created, it is only created by users (through JMX). It takes as parameter on
- * creation the table on which to operate and a list of (locally own) ranges to validate. It will then general proposals
+ * creation the table on which to operate and a list of (locally own) ranges to validate. It will then generate proposals
  * to validate <b>once</b> the requested ranges (or more specifically, of all segments necessary to fully cover the
  * requested ranges).
  * <p>
@@ -233,16 +233,16 @@ class UserValidationProposer extends AbstractValidationProposer
             // of requested.
             while (!local.right.isMinimum() && requested.left.compareTo(local.right) >= 0)
             {
-                if (++i >= requestedRanges.size())
+                if (++i >= localRanges.size())
                     throw new IllegalArgumentException(String.format("Can only validate local ranges: range %s is not local to this node (%s)",
                                                                      requested, FBUtilities.getBroadcastAddress()));
                 local = localRanges.get(i);
             }
 
             // requested starts before the end of the current local range (requested.left < local.right).
-            // If if also starts strictly before that same local range start, it's not fully local, otherwise, it's
-            // fully included in that local range and we move to the next requested range.
-            if (requested.left.compareTo(local.left) < 0)
+            // If if also starts strictly before that same local range start, or stops strictly after that local range
+            // end, it's not fully local, otherwise, it's fully included and we move to the next requested range.
+            if (requested.left.compareTo(local.left) < 0 || requested.right.compareTo(local.right) > 0)
                 throw new IllegalArgumentException(String.format("Can only validate local ranges: range %s is not (entirely) local to this node (%s) ()", requested, FBUtilities.getBroadcastAddress()));
         }
     }
@@ -313,11 +313,9 @@ class UserValidationProposer extends AbstractValidationProposer
 
     private void onValidationError(Throwable error)
     {
-        // We really shouldn't get unknown errors since Validator never calls completeExceptionally on its future,
-        // but if that changes this should be done for serious reasons and stopping the proposer doesn't like a idea.
-        // We can however get in this method if the validator itself is cancelled: this can happen if NodeSync is
-        // stopped before the user validation is finished, in which case cancelling the proposer (which is what we
-        // do by simply passing the CancellationException).
+        // The only validation "error" we get can is a CancellationException as Validator never explicitly call
+        // completeExceptionally on its completion future (it logs and mark the segment failed instead). But even
+        // if this changes, the right thing to do is to pass the error back to this proposer future.
         completionFuture.completeExceptionally(error);
     }
 

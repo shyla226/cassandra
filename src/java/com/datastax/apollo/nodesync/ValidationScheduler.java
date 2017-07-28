@@ -1,19 +1,7 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Please see the included license file for details.
  */
 package com.datastax.apollo.nodesync;
 
@@ -254,7 +242,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     /**
      * How many proposers are currently active.
      */
-    int proposersCount()
+    int proposerCount()
     {
         return proposers.size();
     }
@@ -265,7 +253,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
      * The main use of this value is that if it don't increase for a given period of time, it means nothing has been
      * done by the scheduler.
      */
-    long queuedProposals()
+    long queuedProposalCount()
     {
         return queuedProposals;
     }
@@ -396,7 +384,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         // where we could have 0 proposers, this could also be due to no table being NodeSync-enabled/no keyspace having RF>1.
         // Calling ContinuousTableValidationProposer.createAll() is harmless in those case however, it will simply return an
         // empty list. And since join events are pretty rare and createAll is pretty cheap particularly in those cases, ...
-        if (proposersCount() == 0)
+        if (proposerCount() == 0)
         {
             eventExecutor.execute(() -> {
                 List<ContinuousTableValidationProposer> proposers = ContinuousTableValidationProposer.createAll(service);
@@ -411,7 +399,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         else
         {
             // TODO: that mean some tokens will have changed/be added which might impact our local ranges and thus the
-            // segment we should generate. So we could re-general our "cached" proposals to take new range into account,
+            // segment we should generate. So we could re-generate our "cached" proposals to take new range into account,
             // but I'm not 100% sure if we "could" or truly "should": that is, while we still use the "old" segments,
             // the node might end up querying ranges that are not strict subsets of the range it owns, which should be
             // harmless-ish (slightly inefficient but as it's very temporary), but need to double-check.
@@ -459,7 +447,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     public void onAlterKeyspace(String keyspace)
     {
         // We should handle RF changes from and to 1. Namely, if the RF is increased from 1, we should consider any
-        // table from the table for inclusion, while if it's decreased to 1, we should remove all tables.
+        // table from the keyspace for inclusion, while if it's decreased to 1, we should remove all tables.
         // Note that we actually cannot know what was the RF before the ALTER, only what it is now (something we should
         // change, but that's another story), so we simply blindly add/remove tables depending on the current RF and
         // rely on the fact that ContinuousTableValidationProposer equality is solely based on the table (by design), and so

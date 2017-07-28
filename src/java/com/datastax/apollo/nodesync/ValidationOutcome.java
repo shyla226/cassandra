@@ -35,7 +35,7 @@ public enum ValidationOutcome
 
     private final byte code;
 
-    // Map from code to their respective value. Currently assumes we don't wast any code, which we have no reason to.
+    // Map from code to their respective value. Currently assumes we don't waste any code, which we have no reason to.
     private static final ValidationOutcome[] codeToValue = new ValidationOutcome[ValidationOutcome.values().length];
     static
     {

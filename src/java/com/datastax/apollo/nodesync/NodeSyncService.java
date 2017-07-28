@@ -139,7 +139,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
         else
         {
             scheduler.createInitialProposers();
-            int proposers = scheduler.proposersCount();
+            int proposers = scheduler.proposerCount();
             details = proposers == 0
                       ? "currently inactive as no replicated table has NodeSync enabled; will activate automatically once this change"
                       : proposers + " tables have NodeSync enabled";
@@ -340,7 +340,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
         private final ValidationScheduler scheduler;
 
         private int lastProposerCount;
-        private long lastQueuedProposal;
+        private long lastQueuedProposalCount;
         private long lastValidatedBytes = 0;
         private long lastRepairedBytes = 0;
         private long lastProcessedPages = 0;
@@ -353,14 +353,14 @@ public class NodeSyncService implements NodeSyncServiceMBean
             this.metrics = metrics;
             this.scheduler = scheduler;
 
-            this.lastProposerCount = scheduler.proposersCount();
-            this.lastQueuedProposal = scheduler.queuedProposals();
+            this.lastProposerCount = scheduler.proposerCount();
+            this.lastQueuedProposalCount = scheduler.queuedProposalCount();
         }
 
         public void run()
         {
-            int currentProposerCount = scheduler.proposersCount();
-            long currentQueuedProposals = scheduler.queuedProposals();
+            int currentProposerCount = scheduler.proposerCount();
+            long currentQueuedProposalCount = scheduler.queuedProposalCount();
             long currentValidatedBytes = metrics.dataValidated.getCount();
             long currentRepairedBytes = metrics.dataRepaired.getCount();
             long currentProcessedPages = metrics.processedPages.getCount();
@@ -370,7 +370,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
 
             // If we have no table eligible for NodeSync (we're a single node cluster, no keyspace has RF > 1, no table
             // has NodeSync enabled, ...), don't bother logging a message, it's useless and thus confusing.
-            if (currentQueuedProposals == lastQueuedProposal && lastProposerCount == 0 && currentProposerCount == 0)
+            if (currentQueuedProposalCount == lastQueuedProposalCount && lastProposerCount == 0 && currentProposerCount == 0)
                 return;
 
             long validatedDiff = currentValidatedBytes - lastValidatedBytes;
@@ -399,7 +399,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
                         detailStr);
 
             this.lastProposerCount = currentProposerCount;
-            this.lastQueuedProposal = currentQueuedProposals;
+            this.lastQueuedProposalCount = currentQueuedProposalCount;
             this.lastValidatedBytes = currentValidatedBytes;
             this.lastRepairedBytes = currentRepairedBytes;
             this.lastProcessedPages = currentProcessedPages;

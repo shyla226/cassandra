@@ -63,7 +63,7 @@ public final class NodeSyncParams
     @Nullable
     private final Boolean isEnabled; // null if unset
     @Nullable
-    private final Integer deadlineTargetSec; // null if unset, in which case it default to min(gc_grace, 4 days)
+    private final Integer deadlineTargetSec; // null if unset, in which case it default to max(gc_grace, 4 days)
 
     // When dealing with the schema, we could have unknown parameters in mixed-version clusters where never nodes have
     // new options and we don't want to throw those away.
