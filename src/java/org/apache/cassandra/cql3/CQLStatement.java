@@ -28,7 +28,6 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -52,7 +51,7 @@ public interface CQLStatement
      *
      * @param state the current client state
      */
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException;
+    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException;
 
     /**
      * Perform additional validation required by the statement.
@@ -63,7 +62,7 @@ public interface CQLStatement
      *
      * @param state the current client state
      */
-    public void validate(ClientState state) throws RequestValidationException;
+    public void validate(QueryState state) throws RequestValidationException;
 
     /**
      * Execute the statement and return the resulting result or null if there is no result.
@@ -89,14 +88,14 @@ public interface CQLStatement
 
     /**
      * Return the scheduler that should be used to execute this statement, this includes
-     * {@link CQLStatement#checkAccess(ClientState)} and {@link CQLStatement#execute(QueryState, QueryOptions, long)}.
+     * {@link CQLStatement#checkAccess(QueryState)} and {@link CQLStatement#execute(QueryState, QueryOptions, long)}.
      *
      * If no specific scheduler is required, then return null. If returning null then it must be guaranteed that
      * {@link CQLStatement#execute(QueryState, QueryOptions, long)} doesn't block.
-     * {@link CQLStatement#checkAccess(ClientState)} may block only in rare cases, such as security cache misses, but in that
+     * {@link CQLStatement#checkAccess(QueryState)} may block only in rare cases, such as security cache misses, but in that
      * case {@link WouldBlockException} must be thrown so that {@link QueryProcessor}
      * may retry the operation on a different scheduler.
-     * {@link CQLStatement#validate(ClientState)} should never block as it is not necessarily executed on this scheduler.
+     * {@link CQLStatement#validate(QueryState)} should never block as it is not necessarily executed on this scheduler.
      *
      * @return the scheduler for this statement, or null, if no specific scheduler is required because the operations are non blocking.
      */

@@ -19,6 +19,7 @@ package org.apache.cassandra.net;
 
 import java.util.EnumMap;
 
+import org.apache.cassandra.auth.AuthVerbs.AuthVersion;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.gms.GossipVerbs.GossipVersion;
@@ -39,10 +40,10 @@ import static org.apache.cassandra.net.ProtocolVersion.oss;
  */
 public enum MessagingVersion
 {
-    OSS_30   (oss(10), ReadVersion.OSS_30, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30),
-    OSS_3014 (oss(11), ReadVersion.OSS_3014, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30),
-    OSS_40   (oss(12), ReadVersion.OSS_40, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30),
-    DSE_60   (dse(1), ReadVersion.DSE_60, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.DSE_60, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30);
+    OSS_30   (oss(10), ReadVersion.OSS_30, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30, null),
+    OSS_3014 (oss(11), ReadVersion.OSS_3014, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30, null),
+    OSS_40   (oss(12), ReadVersion.OSS_40, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30, null),
+    DSE_60   (dse(1), ReadVersion.DSE_60, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.DSE_60, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30, AuthVersion.DSE_60);
 
     private final ProtocolVersion protocolVersion;
     private final EnumMap<Verbs.Group, Version<?>> groupVersions;
@@ -55,7 +56,8 @@ public enum MessagingVersion
                      OperationsVersion operationsVersion,
                      GossipVersion gossipVersion,
                      RepairVersion repairVersion,
-                     SchemaVersion schemaVersion)
+                     SchemaVersion schemaVersion,
+                     AuthVersion authVersion)
     {
         this.protocolVersion = version;
         this.groupVersions = new EnumMap<>(Verbs.Group.class);
@@ -68,6 +70,7 @@ public enum MessagingVersion
         groupVersions.put(Verbs.Group.GOSSIP, gossipVersion);
         groupVersions.put(Verbs.Group.REPAIR, repairVersion);
         groupVersions.put(Verbs.Group.SCHEMA, schemaVersion);
+        groupVersions.put(Verbs.Group.AUTH, authVersion);
     }
 
     public boolean isDSE()
@@ -132,7 +135,9 @@ public enum MessagingVersion
     public <P, Q, V extends Enum<V> & Version<V>> VerbSerializer<P, Q> serializer(Verb<P, Q> verb)
     {
         VerbGroup<V> group = verb.group();
-        V version = groupVersion(verb.group().id());
+        V version = groupVersion(group.id());
+        if (group.forVersion(version) == null)
+            throw new NullPointerException(String.format("No group for version %s for verb %s in group %s", version, verb, group));
         return group.forVersion(version).getByVerb(verb);
     }
 

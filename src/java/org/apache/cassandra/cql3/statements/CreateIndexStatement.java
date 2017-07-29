@@ -42,7 +42,6 @@ import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
@@ -73,12 +72,12 @@ public class CreateIndexStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
     {
         state.hasColumnFamilyAccess(keyspace(), columnFamily(), CorePermission.ALTER);
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
         TableMetadata table = Schema.instance.validateTable(keyspace(), columnFamily());
 

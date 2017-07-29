@@ -17,8 +17,10 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Future;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -169,11 +171,12 @@ public interface IRoleManager
     boolean canLogin(RoleResource role);
 
     /**
-     * Returns true if a user can login (usually if their primary role can log in)
+     * Flag whether a user can login is determined just from the user's role ({@code false})
+     * or all transitively assigned roles ({@code true}).
      */
-    default boolean canLogin(AuthenticatedUser user)
+    default boolean transitiveRoleLogin()
     {
-        return canLogin(user.getPrimaryRole());
+        return false;
     }
 
     /**
@@ -197,6 +200,18 @@ public interface IRoleManager
     boolean isExistingRole(RoleResource role);
 
     /**
+     * Return {@link RoleResource}s for role names that actually exist.
+     * @param roleNames
+     */
+    Set<RoleResource> filterExistingRoleNames(List<String> roleNames);
+
+    /**
+     * Retrieve a composite of role information about <em>direct</em> memberships, superuser status,
+     * can-login flag and custom options.
+     */
+    Role getRoleData(RoleResource role);
+
+    /**
      * Set of resources that should be made inaccessible to users and only accessible internally.
      *
      * @return Keyspaces and column families that will be unmodifiable by users; other resources.
@@ -215,5 +230,5 @@ public interface IRoleManager
      *
      * For example, use this method to create any required keyspaces/column families.
      */
-    void setup();
+    Future<?> setup();
 }

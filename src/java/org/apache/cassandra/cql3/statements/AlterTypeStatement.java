@@ -69,12 +69,12 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
         return new Renames(name, renames);
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
     {
         state.hasKeyspaceAccess(keyspace(), CorePermission.ALTER);
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
         // We definitively don't want to let user modify types in system keyspaces but we can't fully rely on
         // authorization for that because ALTER TYPE only require ALTER permission on the keyspace, and we do allow

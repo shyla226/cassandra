@@ -27,7 +27,6 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -47,10 +46,10 @@ public abstract class AuthenticationStatement extends ParsedStatement implements
     public Single<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        return execute(state.getClientState());
+        return execute(state);
     }
 
-    public abstract Single<ResultMessage> execute(ClientState state) throws RequestExecutionException, RequestValidationException;
+    public abstract Single<ResultMessage> execute(QueryState state) throws RequestExecutionException, RequestValidationException;
 
     public Single<ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
@@ -63,7 +62,7 @@ public abstract class AuthenticationStatement extends ParsedStatement implements
         return Schedulers.io();
     }
 
-    public void checkPermission(ClientState state, Permission required, RoleResource resource) throws UnauthorizedException
+    public void checkPermission(QueryState state, Permission required, RoleResource resource) throws UnauthorizedException
     {
         try
         {

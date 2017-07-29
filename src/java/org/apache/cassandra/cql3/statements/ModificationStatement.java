@@ -73,7 +73,6 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ViewMetadata;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.paxos.Commit;
@@ -249,7 +248,7 @@ public abstract class ModificationStatement implements CQLStatement
         return attrs.getTimeToLive(options, metadata().params.defaultTimeToLive);
     }
 
-    public void checkAccess(ClientState state) throws InvalidRequestException, UnauthorizedException
+    public void checkAccess(QueryState state) throws InvalidRequestException, UnauthorizedException
     {
         state.hasColumnFamilyAccess(metadata, CorePermission.MODIFY);
 
@@ -273,7 +272,7 @@ public abstract class ModificationStatement implements CQLStatement
             state.ensureHasPermission(CorePermission.EXECUTE, function);
     }
 
-    public void validate(ClientState state) throws InvalidRequestException
+    public void validate(QueryState state) throws InvalidRequestException
     {
         checkFalse(hasConditions() && attrs.isTimestampSet(), "Cannot provide custom timestamp for conditional updates");
         checkFalse(isCounter() && attrs.isTimestampSet(), "Cannot provide custom timestamp for counter updates");

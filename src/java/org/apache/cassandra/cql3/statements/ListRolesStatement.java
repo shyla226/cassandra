@@ -26,11 +26,8 @@ import com.google.common.collect.Lists;
 
 import io.reactivex.Single;
 
-import org.apache.cassandra.auth.PermissionSets;
+import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.auth.AuthKeyspace;
-import org.apache.cassandra.auth.IRoleManager;
-import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.*;
@@ -41,7 +38,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 public class ListRolesStatement extends AuthorizationStatement
@@ -71,11 +68,11 @@ public class ListRolesStatement extends AuthorizationStatement
         this.recursive = recursive;
     }
 
-    public void validate(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void validate(QueryState state) throws UnauthorizedException, InvalidRequestException
     {
     }
 
-    public void checkAccess(ClientState state) throws InvalidRequestException
+    public void checkAccess(QueryState state) throws InvalidRequestException
     {
         state.ensureNotAnonymous();
 
@@ -83,15 +80,11 @@ public class ListRolesStatement extends AuthorizationStatement
             throw new InvalidRequestException(String.format("%s doesn't exist", grantee));
     }
 
-    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(QueryState state) throws RequestValidationException, RequestExecutionException
     {
         return Single.defer(() -> {
             // If the executing user has DESCRIBE permission on the root roles resource, let them list any and all roles
-            PermissionSets rootLevelPerms = DatabaseDescriptor.getAuthorizer()
-                                                              .allPermissionSets(state.getUser(), RoleResource.root());
-            boolean hasRootLevelSelect = rootLevelPerms != null &&
-                                         rootLevelPerms.granted.contains(CorePermission.DESCRIBE) &&
-                                         !rootLevelPerms.restricted.contains(CorePermission.DESCRIBE);
+            boolean hasRootLevelSelect = state.authorize(RoleResource.root(), CorePermission.DESCRIBE);
             if (hasRootLevelSelect)
             {
                 if (grantee == null)
@@ -130,10 +123,11 @@ public class ListRolesStatement extends AuthorizationStatement
         IRoleManager roleManager = DatabaseDescriptor.getRoleManager();
         for (RoleResource role : sortedRoles)
         {
+            Role data = roleManager.getRoleData(role);
             result.addColumnValue(UTF8Type.instance.decompose(role.getRoleName()));
-            result.addColumnValue(BooleanType.instance.decompose(roleManager.isSuper(role)));
-            result.addColumnValue(BooleanType.instance.decompose(roleManager.canLogin(role)));
-            result.addColumnValue(optionsType.decompose(roleManager.getCustomOptions(role)));
+            result.addColumnValue(BooleanType.instance.decompose(data.isSuper));
+            result.addColumnValue(BooleanType.instance.decompose(data.canLogin));
+            result.addColumnValue(optionsType.decompose(data.options));
         }
         return new ResultMessage.Rows(result);
     }

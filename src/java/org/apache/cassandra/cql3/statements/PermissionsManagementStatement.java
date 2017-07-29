@@ -28,7 +28,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 
 public abstract class PermissionsManagementStatement extends AuthorizationStatement
 {
@@ -45,11 +45,11 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
         this.grantMode = grantMode;
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException
+    public void checkAccess(QueryState state) throws UnauthorizedException
     {
         // validate login here before checkAccess to avoid leaking user existence to anonymous users.
         state.ensureNotAnonymous();
@@ -58,7 +58,7 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
             throw new InvalidRequestException(String.format("Role %s doesn't exist", grantee.getRoleName()));
 
         // if a keyspace is omitted when GRANT/REVOKE ON TABLE <table>, we need to correct the resource.
-        resource = maybeCorrectResource(resource, state);
+        resource = maybeCorrectResource(resource, state.getClientState());
 
         // altering permissions on builtin functions is not supported
         if (resource instanceof FunctionResource
@@ -70,8 +70,12 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
         if (!resource.exists())
             throw new InvalidRequestException(String.format("Resource %s doesn't exist", resource));
 
+        if (state.isSuper())
+            // Nobody can stop superman
+            return;
+
         if (grantMode == GrantMode.RESTRICT)
-            state.ensureIsSuper("Only superusers are allowed to RESTRICT/UNRESTRICT");
+            throw new UnauthorizedException("Only superusers are allowed to RESTRICT/UNRESTRICT");
 
         Set<Permission> missingPermissions = Permissions.setOf();
         try
@@ -126,7 +130,7 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
             // to any of the roles the user belongs to. This check
             // assumes that getRoles() returns a role for the user himself
             // (i.e. like "RoleResource(username)" as for AuthenticatedUser.role).
-            if (state.getUser().getRoles().contains(grantee))
+            if (state.getRoles().contains(grantee))
                 throw new UnauthorizedException(String.format("User %s has grant privilege for %s permission(s) on %s but must not grant/revoke for him/herself",
                                                               state.getUser().getName(),
                                                               StringUtils.join(permissions, ", "),

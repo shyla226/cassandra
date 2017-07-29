@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.auth;
 
+import java.io.IOException;
 import java.util.Set;
 
 import com.google.common.base.Objects;
@@ -25,6 +26,13 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.permission.Permissions;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.rows.SerializationHelper;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * IResource implementation representing database roles.
@@ -36,6 +44,19 @@ import org.apache.cassandra.config.DatabaseDescriptor;
  */
 public class RoleResource implements IResource, Comparable<RoleResource>
 {
+    /**
+     * The raw serializer is used for local serialization (commit log, hints, schema), we need to expose
+     * MutationSerializer because some callers need to specify the serialization flag, {@link SerializationHelper.Flag}
+     * when calling deserialize().
+     */
+    public static final Versioned<EncodingVersion, RoleResource.RoleResourceSerializer> rawSerializers = EncodingVersion.versioned(RoleResource.RoleResourceSerializer::new);
+
+    /**
+     * The serializer returns a raw serializer for callers that prefer to retrieve it by WriteVersion
+     * and do not need to specify the serialization flag, {@link SerializationHelper.Flag} when calling deserialize().
+     */
+    public static final Versioned<AuthVerbs.AuthVersion, Serializer<RoleResource>> serializers = AuthVerbs.AuthVersion.versioned(v -> rawSerializers.get(v.encodingVersion));
+
     enum Level
     {
         ROOT, ROLE
@@ -181,5 +202,29 @@ public class RoleResource implements IResource, Comparable<RoleResource>
     public int hashCode()
     {
         return Objects.hashCode(level, name);
+    }
+
+    public static final class RoleResourceSerializer extends VersionDependent<EncodingVersion> implements Serializer<RoleResource>
+    {
+        public RoleResourceSerializer(EncodingVersion encodingVersion)
+        {
+            super(encodingVersion);
+        }
+
+        public void serialize(RoleResource roleResource, DataOutputPlus out) throws IOException
+        {
+            out.writeUTF(roleResource.getName());
+        }
+
+        public RoleResource deserialize(DataInputPlus in) throws IOException
+        {
+            String roleName = in.readUTF();
+            return RoleResource.fromName(roleName);
+        }
+
+        public long serializedSize(RoleResource roleResource)
+        {
+            return TypeSizes.sizeof(roleResource.getName());
+        }
     }
 }

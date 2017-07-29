@@ -24,7 +24,6 @@ import java.util.List;
 import org.junit.Before;
 import org.junit.Test;
 
-import junit.framework.Assert;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -57,41 +56,41 @@ public class PstmtPersistenceTest extends CQLTester
         execute("CREATE KEYSPACE IF NOT EXISTS foo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}");
         execute("CREATE TABLE foo.bar (key text PRIMARY KEY, val int)");
 
-        ClientState clientState = ClientState.forInternalCalls();
+        QueryState state = QueryState.forInternalCalls();
+        ClientState clientState = state.getClientState();
 
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, val text)");
 
         List<MD5Digest> stmtIds = new ArrayList<>();
         // #0
-        stmtIds.add(prepareStatement("SELECT * FROM %s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.TABLES, clientState));
+        stmtIds.add(prepareStatement("SELECT * FROM %s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.TABLES, state));
         // #1
-        stmtIds.add(prepareStatement("SELECT * FROM %s WHERE pk = ?", clientState));
+        stmtIds.add(prepareStatement("SELECT * FROM %s WHERE pk = ?", state));
         // #2
-        stmtIds.add(prepareStatement("SELECT * FROM %s WHERE key = ?", "foo", "bar", clientState));
+        stmtIds.add(prepareStatement("SELECT * FROM %s WHERE key = ?", "foo", "bar", state));
         clientState.setKeyspace("foo");
         // #3
-        stmtIds.add(prepareStatement("SELECT * FROM %s WHERE pk = ?", clientState));
+        stmtIds.add(prepareStatement("SELECT * FROM %s WHERE pk = ?", state));
         // #4
-        stmtIds.add(prepareStatement("SELECT * FROM %S WHERE key = ?", "foo", "bar", clientState));
+        stmtIds.add(prepareStatement("SELECT * FROM %S WHERE key = ?", "foo", "bar", state));
 
         assertEquals(5, stmtIds.size());
         assertEquals(5, QueryProcessor.preparedStatementsCount());
 
-        Assert.assertEquals(5, numberOfStatementsOnDisk());
+        assertEquals(5, numberOfStatementsOnDisk());
 
         QueryHandler handler = ClientState.getCQLQueryHandler();
         validatePstmts(stmtIds, handler);
 
         // clear prepared statements cache
         QueryProcessor.clearPreparedStatements(true);
-        Assert.assertEquals(0, QueryProcessor.preparedStatementsCount());
+        assertEquals(0, QueryProcessor.preparedStatementsCount());
         for (MD5Digest stmtId : stmtIds)
-            Assert.assertNull(handler.getPrepared(stmtId));
+            assertNull(handler.getPrepared(stmtId));
 
         // load prepared statements and validate that these still execute fine
         QueryProcessor.preloadPreparedStatementBlocking();
         validatePstmts(stmtIds, handler);
-
 
         // validate that the prepared statements are in the system table
         String queryAll = "SELECT * FROM " + SchemaConstants.SYSTEM_KEYSPACE_NAME + '.' + SystemKeyspace.PREPARED_STATEMENTS;
@@ -99,11 +98,11 @@ public class PstmtPersistenceTest extends CQLTester
         {
             MD5Digest digest = MD5Digest.wrap(ByteBufferUtil.getArray(row.getBytes("prepared_id")));
             ParsedStatement.Prepared prepared = QueryProcessor.instance.getPrepared(digest);
-            Assert.assertNotNull(prepared);
+            assertNotNull(prepared);
         }
 
         // add anther prepared statement and sync it to table
-        prepareStatement("SELECT * FROM %s WHERE key = ?", "foo", "bar", clientState);
+        prepareStatement("SELECT * FROM %s WHERE key = ?", "foo", "bar", state);
         assertEquals(6, numberOfStatementsInMemory());
         assertEquals(6, numberOfStatementsOnDisk());
 
@@ -135,13 +134,13 @@ public class PstmtPersistenceTest extends CQLTester
     @Test
     public void testPstmtInvalidation() throws Throwable
     {
-        ClientState clientState = ClientState.forInternalCalls();
+        QueryState state = QueryState.forInternalCalls();
 
         createTable("CREATE TABLE %s (key int primary key, val int)");
 
         for (int cnt = 1; cnt < 10000; cnt++)
         {
-            prepareStatement("INSERT INTO %s (key, val) VALUES (?, ?) USING TIMESTAMP " + cnt, clientState);
+            prepareStatement("INSERT INTO %s (key, val) VALUES (?, ?) USING TIMESTAMP " + cnt, state);
 
             if (numberOfEvictedStatements() > 0)
             {
@@ -149,7 +148,7 @@ public class PstmtPersistenceTest extends CQLTester
 
                 // prepare a more statements to trigger more evictions
                 for (int cnt2 = 1; cnt2 < 10; cnt2++)
-                    prepareStatement("INSERT INTO %s (key, val) VALUES (?, ?) USING TIMESTAMP " + cnt2, clientState);
+                    prepareStatement("INSERT INTO %s (key, val) VALUES (?, ?) USING TIMESTAMP " + cnt2, state);
 
                 // each new prepared statement should have caused an eviction
                 assertEquals("eviction count didn't increase by the expected number", numberOfEvictedStatements(), 10);
@@ -178,13 +177,13 @@ public class PstmtPersistenceTest extends CQLTester
         return QueryProcessor.metrics.preparedStatementsEvicted.getCount();
     }
 
-    private MD5Digest prepareStatement(String stmt, ClientState clientState)
+    private MD5Digest prepareStatement(String stmt, QueryState state)
     {
-        return prepareStatement(stmt, keyspace(), currentTable(), clientState);
+        return prepareStatement(stmt, keyspace(), currentTable(), state);
     }
 
-    private MD5Digest prepareStatement(String stmt, String keyspace, String table, ClientState clientState)
+    private MD5Digest prepareStatement(String stmt, String keyspace, String table, QueryState state)
     {
-        return QueryProcessor.prepare(String.format(stmt, keyspace + "." + table), clientState).blockingGet().statementId;
+        return QueryProcessor.prepare(String.format(stmt, keyspace + '.' + table), state).blockingGet().statementId;
     }
 }

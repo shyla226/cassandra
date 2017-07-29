@@ -31,7 +31,6 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -54,7 +53,7 @@ public class DropIndexStatement extends SchemaAlteringStatement
         return metadata == null ? null : metadata.name;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
     {
         TableMetadata metadata = lookupIndexedTable();
         if (metadata == null)
@@ -63,7 +62,7 @@ public class DropIndexStatement extends SchemaAlteringStatement
         state.hasColumnFamilyAccess(metadata.keyspace, metadata.name, CorePermission.ALTER);
     }
 
-    public void validate(ClientState state)
+    public void validate(QueryState state)
     {
         // validated in lookupIndexedTable()
     }

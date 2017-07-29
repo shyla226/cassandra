@@ -97,7 +97,7 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
         Schema.validateKeyspaceNotSystem(functionName.keyspace);
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
     {
         Function function = findFunction();
         if (function == null)
@@ -116,7 +116,7 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
         }
     }
 
-    public void validate(ClientState state)
+    public void validate(QueryState state)
     {
         Collection<Function> olds = Schema.instance.getFunctions(functionName);
 

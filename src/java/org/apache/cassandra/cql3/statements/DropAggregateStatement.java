@@ -67,12 +67,12 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
         Schema.validateKeyspaceNotSystem(functionName.keyspace);
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
     {
         state.hasKeyspaceAccess(functionName.keyspace, CorePermission.DROP);
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
     }
 

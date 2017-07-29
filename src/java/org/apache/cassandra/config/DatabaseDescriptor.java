@@ -1235,38 +1235,6 @@ public class DatabaseDescriptor
         return conf.roles_cache_max_entries = maxEntries;
     }
 
-    public static int getCredentialsValidity()
-    {
-        return conf.credentials_validity_in_ms;
-    }
-
-    public static void setCredentialsValidity(int timeout)
-    {
-        conf.credentials_validity_in_ms = timeout;
-    }
-
-    public static int getCredentialsUpdateInterval()
-    {
-        return conf.credentials_update_interval_in_ms == -1
-               ? conf.credentials_validity_in_ms
-               : conf.credentials_update_interval_in_ms;
-    }
-
-    public static void setCredentialsUpdateInterval(int updateInterval)
-    {
-        conf.credentials_update_interval_in_ms = updateInterval;
-    }
-
-    public static int getCredentialsCacheMaxEntries()
-    {
-        return conf.credentials_cache_max_entries;
-    }
-
-    public static int setCredentialsCacheMaxEntries(int maxEntries)
-    {
-        return conf.credentials_cache_max_entries = maxEntries;
-    }
-
     public static int getMaxValueSize()
     {
         return conf.max_value_size_in_mb * 1024 * 1024;

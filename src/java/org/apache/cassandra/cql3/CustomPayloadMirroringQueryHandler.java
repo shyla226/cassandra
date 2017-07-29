@@ -23,7 +23,6 @@ import java.util.Map;
 import io.reactivex.Single;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.MD5Digest;
@@ -50,9 +49,9 @@ public class CustomPayloadMirroringQueryHandler implements QueryHandler
                              });
     }
 
-    public Single<ResultMessage.Prepared> prepare(String query, ClientState clientState, Map<String, ByteBuffer> customPayload)
+    public Single<ResultMessage.Prepared> prepare(String query, QueryState queryState, Map<String, ByteBuffer> customPayload)
     {
-        Single<ResultMessage.Prepared> observable = queryProcessor.prepare(query, clientState, customPayload);
+        Single<ResultMessage.Prepared> observable = queryProcessor.prepare(query, queryState, customPayload);
         return observable.map(prepared -> {
             prepared.setCustomPayload(customPayload);
             return prepared;

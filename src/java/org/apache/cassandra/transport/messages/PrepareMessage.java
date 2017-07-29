@@ -100,7 +100,7 @@ public class PrepareMessage extends Message.Request
             }
 
             return ClientState.getCQLQueryHandler().prepare(query,
-                                                            state.getClientState().cloneWithKeyspaceIfSet(keyspace),
+                                                            state.cloneWithKeyspaceIfSet(keyspace),
                                                             getCustomPayload())
                               .map(response ->
                                   {

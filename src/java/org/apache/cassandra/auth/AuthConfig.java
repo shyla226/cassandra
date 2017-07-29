@@ -15,11 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.auth;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -32,8 +28,6 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public final class AuthConfig
 {
-    private static final Logger logger = LoggerFactory.getLogger(AuthConfig.class);
-
     private static boolean initialized;
 
     public static void applyAuth()
@@ -51,19 +45,6 @@ public final class AuthConfig
         /* Authentication, authorization and role management backend, implementing IAuthenticator, IAuthorizer & IRoleMapper*/
         if (conf.authenticator != null)
             authenticator = FBUtilities.newAuthenticator(conf.authenticator);
-
-        // the configuration options regarding credentials caching are only guaranteed to
-        // work with PasswordAuthenticator, so log a message if some other authenticator
-        // is in use and non-default values are detected
-        if (!(authenticator instanceof PasswordAuthenticator)
-            && (conf.credentials_update_interval_in_ms != -1
-                || conf.credentials_validity_in_ms != 2000
-                || conf.credentials_cache_max_entries != 1000))
-        {
-            logger.info("Configuration options credentials_update_interval_in_ms, credentials_validity_in_ms and " +
-                        "credentials_cache_max_entries may not be applicable for the configured authenticator ({})",
-                        authenticator.getClass().getName());
-        }
 
         DatabaseDescriptor.setAuthenticator(authenticator);
 

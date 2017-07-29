@@ -47,7 +47,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.metrics.BatchMetrics;
 import org.apache.cassandra.service.*;
@@ -149,7 +148,7 @@ public class BatchStatement implements CQLStatement
         return boundTerms;
     }
 
-    public void checkAccess(ClientState state) throws InvalidRequestException, UnauthorizedException
+    public void checkAccess(QueryState state) throws InvalidRequestException, UnauthorizedException
     {
         for (ModificationStatement statement : statements)
             statement.checkAccess(state);
@@ -228,7 +227,7 @@ public class BatchStatement implements CQLStatement
 
     // The batch itself will be validated in either Parsed#prepare() - for regular CQL3 batches,
     //   or in QueryProcessor.processBatch() - for native protocol batches.
-    public void validate(ClientState state) throws InvalidRequestException
+    public void validate(QueryState state) throws InvalidRequestException
     {
         for (ModificationStatement statement : statements)
             statement.validate(state);

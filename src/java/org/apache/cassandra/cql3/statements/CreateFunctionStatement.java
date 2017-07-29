@@ -108,11 +108,13 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
         {
             IResource resource = FunctionResource.function(functionName.keyspace, functionName.name, argTypes);
             IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+            RoleResource role = RoleResource.role(state.getClientState().getUser().getName());
             authorizer.grant(AuthenticatedUser.SYSTEM_USER,
                              authorizer.applicablePermissions(resource),
                              resource,
-                             RoleResource.role(state.getClientState().getUser().getName()),
+                             role,
                              GrantMode.GRANT);
+            Auth.invalidateRolesForPermissionsChange(role).blockingAwait();
         }
         catch (RequestExecutionException e)
         {
@@ -120,7 +122,7 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
         }
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
     {
         if (Schema.instance.findFunction(functionName, argTypes).isPresent() && orReplace)
             state.ensureHasPermission(CorePermission.ALTER, FunctionResource.function(functionName.keyspace,
@@ -130,7 +132,7 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
             state.ensureHasPermission(CorePermission.CREATE, FunctionResource.keyspace(functionName.keyspace));
     }
 
-    public void validate(ClientState state) throws InvalidRequestException
+    public void validate(QueryState state) throws InvalidRequestException
     {
         UDFunction.assertUdfsEnabled(language);
 

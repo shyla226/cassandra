@@ -26,27 +26,13 @@ import java.util.function.BiFunction;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCUtils;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.mindrot.jbcrypt.BCrypt;
-
-import static org.apache.cassandra.auth.CassandraRoleManager.consistencyForRole;
 
 /**
  * PasswordAuthenticator is an IAuthenticator implementation
@@ -61,17 +47,11 @@ public class PasswordAuthenticator implements IAuthenticator
 {
     private static final Logger logger = LoggerFactory.getLogger(PasswordAuthenticator.class);
 
-    // name of the hash column.
-    private static final String SALTED_HASH = "salted_hash";
-
     // really this is a rolename now, but as it only matters for Thrift, we leave it for backwards compatibility
     public static final String USERNAME_KEY = "username";
     public static final String PASSWORD_KEY = "password";
 
     private static final byte NUL = 0;
-    private SelectStatement authenticateStatement;
-
-    private CredentialsCache cache;
 
     // No anonymous access.
     public boolean requireAuthentication()
@@ -95,31 +75,11 @@ public class PasswordAuthenticator implements IAuthenticator
 
     private AuthenticatedUser authenticate(String username, String password) throws AuthenticationException
     {
-        String hash = cache.getCredentials(username);
-        if (!checkpw(password, hash))
+        String hash = Auth.getCredentials(RoleResource.role(username));
+        if (hash == null || hash.isEmpty() || !checkpw(password, hash))
             throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
 
         return new AuthenticatedUser(username);
-    }
-
-    private String queryHashedPassword(String username)
-    {
-        ResultMessage.Rows rows = authenticateStatement.execute(QueryState.forInternalCalls(),
-                                                                QueryOptions.forInternalCalls(consistencyForRole(username),
-                                                                                              Lists.newArrayList(ByteBufferUtil.bytes(username))),
-                                                                System.nanoTime()).blockingGet();
-
-        // If either a non-existent role name was supplied, or no credentials
-        // were found for that role we don't want to cache the result so we throw
-        // a specific, but unchecked, exception to keep LoadingCache happy.
-        if (rows.result.isEmpty())
-            throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
-
-        UntypedResultSet result = UntypedResultSet.create(rows.result);
-        if (!result.one().has(SALTED_HASH))
-            throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
-
-        return result.one().getString(SALTED_HASH);
     }
 
     public Set<DataResource> protectedResources()
@@ -134,13 +94,6 @@ public class PasswordAuthenticator implements IAuthenticator
 
     public void setup()
     {
-        String query = String.format("SELECT %s FROM %s.%s WHERE role = ?",
-                                     SALTED_HASH,
-                                     SchemaConstants.AUTH_KEYSPACE_NAME,
-                                     AuthKeyspace.ROLES);
-        authenticateStatement = prepare(query);
-
-        cache = new CredentialsCache(this);
     }
 
     static void checkValidCredentials(Map<String, String> credentials) throws AuthenticationException
@@ -163,11 +116,6 @@ public class PasswordAuthenticator implements IAuthenticator
     public SaslNegotiator newSaslNegotiator(InetAddress clientAddress)
     {
         return new PlainTextSaslAuthenticator(this::authenticate);
-    }
-
-    private SelectStatement prepare(String query)
-    {
-        return (SelectStatement) QueryProcessor.getStatement(query, ClientState.forInternalCalls()).statement;
     }
 
     @VisibleForTesting
@@ -240,45 +188,5 @@ public class PasswordAuthenticator implements IAuthenticator
             username = new String(user, StandardCharsets.UTF_8);
             password = new String(pass, StandardCharsets.UTF_8);
         }
-    }
-
-    private static class CredentialsCache extends AuthCache<String, String> implements CredentialsCacheMBean
-    {
-        private CredentialsCache(PasswordAuthenticator authenticator)
-        {
-            super("CredentialsCache",
-                  DatabaseDescriptor::setCredentialsValidity,
-                  DatabaseDescriptor::getCredentialsValidity,
-                  DatabaseDescriptor::setCredentialsUpdateInterval,
-                  DatabaseDescriptor::getCredentialsUpdateInterval,
-                  DatabaseDescriptor::setCredentialsCacheMaxEntries,
-                  DatabaseDescriptor::getCredentialsCacheMaxEntries,
-                  authenticator::queryHashedPassword,
-                  () -> true);
-        }
-
-        public void invalidateCredentials(String roleName)
-        {
-            invalidate(roleName);
-        }
-
-        public String getCredentials(String roleName)
-        {
-            // we know PasswordAuthenticator.queryHashedPassword() will block, so we might as well
-            // prevent the cache from attempting to load missing entries on the TPC threads,
-            // since attempting to load only to get a WouldBlockException from the authenticator
-            // would result in the cache logging errors and incrementing error statistics and
-            // there also seems to be a problem somewhere in caffeine in that it will not attempt
-            // to reload after an exception
-            String ret = get(roleName, !TPC.isTPCThread());
-            if (ret == null)
-                throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve credentials for %s, would block TPC thread", roleName));
-            return ret;
-        }
-    }
-
-    public static interface CredentialsCacheMBean extends AuthCacheMBean
-    {
-        public void invalidateCredentials(String roleName);
     }
 }

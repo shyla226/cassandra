@@ -19,8 +19,11 @@ package org.apache.cassandra.auth;
 
 import java.lang.reflect.Field;
 import java.util.*;
+import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.util.concurrent.Futures;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -202,9 +205,19 @@ public class RoleOptionsTest
                 return Collections.EMPTY_MAP;
             }
 
+            public Set<RoleResource> filterExistingRoleNames(List<String> roleNames)
+            {
+                return roleNames.stream().map(RoleResource::role).collect(Collectors.toSet());
+            }
+
             public boolean isExistingRole(RoleResource role)
             {
                 return false;
+            }
+
+            public Role getRoleData(RoleResource role)
+            {
+                return null;
             }
 
             public Set<? extends IResource> protectedResources()
@@ -217,9 +230,9 @@ public class RoleOptionsTest
 
             }
 
-            public void setup()
+            public Future<?> setup()
             {
-
+                return Futures.immediateFuture(null);
             }
         };
     }

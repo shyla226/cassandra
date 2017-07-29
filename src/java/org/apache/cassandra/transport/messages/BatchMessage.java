@@ -163,7 +163,7 @@ public class BatchMessage extends Message.Request
                 if (query instanceof String)
                 {
                     p = QueryProcessor.parseStatement((String)query,
-                                                      state.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace()));
+                                                      state.cloneWithKeyspaceIfSet(options.getKeyspace()));
                 }
                 else
                 {

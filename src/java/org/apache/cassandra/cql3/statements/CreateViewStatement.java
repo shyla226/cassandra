@@ -77,14 +77,14 @@ public class CreateViewStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
     {
         if (!baseName.hasKeyspace())
             baseName.setKeyspace(keyspace(), true);
         state.hasColumnFamilyAccess(keyspace(), baseName.getColumnFamily(), CorePermission.ALTER);
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
         // We do validation in announceMigration to reduce doubling up of work
     }

@@ -19,21 +19,20 @@
 package org.apache.cassandra.auth;
 
 import java.lang.management.ManagementFactory;
-import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
-import javax.management.MBeanServer;
-import javax.management.MalformedObjectNameException;
-import javax.management.ObjectName;
+import javax.management.*;
 
 import com.google.common.util.concurrent.MoreExecutors;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +42,23 @@ public class AuthCache<K, V> implements AuthCacheMBean
     private static final Logger logger = LoggerFactory.getLogger(AuthCache.class);
 
     private static final String MBEAN_NAME_BASE = "org.apache.cassandra.auth:type=";
+
+    private static final Object negative = new Object() {
+        public String toString()
+        {
+            return "AuthCache-NEGATIVE-CACHE-ENTRY";
+        }
+
+        public int hashCode()
+        {
+            return 0;
+        }
+
+        public boolean equals(Object obj)
+        {
+            return false;
+        }
+    };
 
     private volatile LoadingCache<K, V> cache;
 
@@ -84,7 +100,14 @@ public class AuthCache<K, V> implements AuthCacheMBean
         try
         {
             MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
-            mbs.registerMBean(this, getObjectName());
+            ObjectName objectName = getObjectName();
+            try
+            {
+                mbs.unregisterMBean(objectName);
+            }
+            catch (InstanceNotFoundException ignore)
+            {}
+            mbs.registerMBean(this, objectName);
         }
         catch (Exception e)
         {
@@ -108,41 +131,27 @@ public class AuthCache<K, V> implements AuthCacheMBean
      * on TPC threads.
      *
      * @param k - the key of the entry to retrieve
-     * @param retrieveIfMissing - if true retrieve missing entries by invoking the load function
-     *
      * @return the entry or null if retrieveIfMissing is false and the entry is missing
      */
     @Nullable
-    protected V get(K k, boolean retrieveIfMissing)
+    protected V get(K k, String kind)
     {
-        V ret = cache == null ? null : cache.getIfPresent(k);
-        if (ret != null)
-            return ret;
-
-        if (!retrieveIfMissing)
-            return null;
-
         if (cache == null)
             return loadFunction.apply(k);
 
-        return cache.get(k);
-    }
+        V ret = cache.getIfPresent(k);
+        if (ret == negative)
+            return null;
+        if (ret != null)
+            return ret;
 
-    public Map<K, V> getAll(Collection<K> keys, boolean retrieveIfMissing)
-    {
-        if (cache == null)
-        {
-            Map<K, V> r = new HashMap<>();
-            if (retrieveIfMissing)
-                keys.forEach(key -> r.put(key, loadFunction.apply(key)));
-            return r;
-        }
+        if (TPC.isTPCThread())
+            throw new TPCUtils.WouldBlockException("Cannot retrieve " + kind + " for " + k + ", would block TPC thread");
 
-        Map<K, V> result = cache.getAllPresent(keys);
-        if (!retrieveIfMissing && result.size() != keys.size())
-            return result;
-
-        return cache.getAll(keys);
+        ret = cache.get(k);
+        if (ret == null)
+            cache.put(k, (V) negative);
+        return ret;
     }
 
     public void invalidate()

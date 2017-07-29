@@ -23,6 +23,7 @@ import java.util.List;
 
 import com.carrotsearch.hppc.IntObjectHashMap;
 
+import org.apache.cassandra.auth.AuthVerbs;
 import org.apache.cassandra.db.ReadVerbs;
 import org.apache.cassandra.db.WriteVerbs;
 import org.apache.cassandra.gms.GossipVerbs;
@@ -53,7 +54,8 @@ public abstract class Verbs
         OPERATIONS(4),
         GOSSIP    (5),
         REPAIR    (6),
-        SCHEMA    (7);
+        SCHEMA    (7),
+        AUTH      (8);
 
         private final int code;
 
@@ -79,6 +81,7 @@ public abstract class Verbs
     public static final GossipVerbs GOSSIP         = register(new GossipVerbs(Group.GOSSIP));
     public static final RepairVerbs REPAIR         = register(new RepairVerbs(Group.REPAIR));
     public static final SchemaVerbs SCHEMA         = register(new SchemaVerbs(Group.SCHEMA));
+    public static final AuthVerbs AUTH             = register(new AuthVerbs(Group.AUTH));
 
     private static <G extends VerbGroup> G register(G group)
     {

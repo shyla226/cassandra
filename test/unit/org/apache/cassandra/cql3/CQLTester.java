@@ -33,7 +33,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import javax.management.*;
+import javax.management.JMX;
+import javax.management.ObjectName;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
@@ -51,6 +52,7 @@ import com.datastax.driver.core.exceptions.UnauthorizedException;
 import io.reactivex.Single;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TPCUtils;
@@ -119,7 +121,7 @@ public abstract class CQLTester
         PENDING,
         INITIALIZED,
         FAILED
-    };
+    }
 
     private static AtomicReference<ServerStatus> serverStatus = new AtomicReference<>(ServerStatus.NONE);
     private static CountDownLatch serverReady = new CountDownLatch(1);
@@ -941,8 +943,8 @@ public abstract class CQLTester
             state.setKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME);
             QueryState queryState = new QueryState(state);
 
-            ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(query, queryState.getClientState());
-            prepared.statement.validate(state);
+            ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(query, queryState);
+            prepared.statement.validate(queryState);
 
             QueryOptions options = QueryOptions.forInternalCalls(Collections.<ByteBuffer>emptyList());
 
@@ -1042,7 +1044,6 @@ public abstract class CQLTester
     {
         invalidate("PermissionsCache");
         invalidate("RolesCache");
-        invalidate("CredentialsCache");
     }
 
     private static void invalidate(String authCacheName)
@@ -1072,7 +1073,7 @@ public abstract class CQLTester
 
     protected ResultMessage.Prepared prepare(String query) throws Throwable
     {
-        return QueryProcessor.prepare(formatQuery(query), ClientState.forInternalCalls()).blockingGet();
+        return QueryProcessor.prepare(formatQuery(query), QueryState.forInternalCalls()).blockingGet();
     }
 
     public UntypedResultSet execute(String query, Object... values) throws Throwable

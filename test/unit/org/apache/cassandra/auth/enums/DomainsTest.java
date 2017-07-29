@@ -74,24 +74,6 @@ public class DomainsTest
     }
 
     @Test
-    public void getElementByDomainOrdinal()
-    {
-        assertSame(PartOne.ELEMENT_0, registry.get("PART_1", 0));
-        assertSame(PartOne.ELEMENT_1, registry.get("PART_1", 1));
-        assertSame(PartOne.ELEMENT_2, registry.get("PART_1", 2));
-
-        try
-        {
-            registry.get("PART_1", 99);
-            fail("Expected an exception");
-        }
-        catch (ArrayIndexOutOfBoundsException e)
-        {
-            // expected
-        }
-    }
-
-    @Test
     public void cannotRegisterDuplicateDomains()
     {
         // Attempt to register 2 distinct enums with the same domain

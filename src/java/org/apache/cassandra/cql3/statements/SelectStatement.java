@@ -273,7 +273,7 @@ public class SelectStatement implements CQLStatement
         return boundTerms;
     }
 
-    public void checkAccess(ClientState state) throws InvalidRequestException, UnauthorizedException
+    public void checkAccess(QueryState state) throws InvalidRequestException, UnauthorizedException
     {
         if (table.isView())
         {
@@ -290,7 +290,7 @@ public class SelectStatement implements CQLStatement
             state.ensureHasPermission(CorePermission.EXECUTE, function);
     }
 
-    public void validate(ClientState state) throws InvalidRequestException
+    public void validate(QueryState state) throws InvalidRequestException
     {
         // Nothing to do, all validation has been done by RawStatement.prepare()
     }

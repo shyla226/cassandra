@@ -25,7 +25,6 @@ import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.MD5Digest;
@@ -39,7 +38,7 @@ public interface QueryHandler
                                             long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
 
     Single<ResultMessage.Prepared> prepare(String query,
-                                           ClientState clientState,
+                                           QueryState queryState,
                                            Map<String, ByteBuffer> customPayload) throws RequestValidationException;
 
     ParsedStatement.Prepared getPrepared(MD5Digest id);

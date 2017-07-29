@@ -18,13 +18,19 @@
 
 package org.apache.cassandra.auth;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.net.InetAddress;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.util.concurrent.Futures;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.AuthenticationException;
@@ -44,6 +50,20 @@ public class TestAuthenticator implements IAuthenticator
         TestAuthenticator authenticator = new TestAuthenticator(credentials);
         DatabaseDescriptor.setAuthenticator(authenticator);
         DatabaseDescriptor.setRoleManager(authenticator.getRoleManager());
+
+        try
+        {
+            Field fField = Field.class.getDeclaredField("modifiers");
+            fField.setAccessible(true);
+            Field fRolesCache = Auth.class.getDeclaredField("rolesCache");
+            fField.setInt(fRolesCache, fField.getInt(fRolesCache) &~ Modifier.FINAL);
+            fRolesCache.setAccessible(true);
+            fRolesCache.set(null, new RolesCache(authenticator.getRoleManager()));
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     private TestAuthenticator(Map<String, String> credentials)
@@ -140,7 +160,7 @@ public class TestAuthenticator implements IAuthenticator
             public Set<RoleResource> getRoles(RoleResource grantee,
                                               boolean includeInherited) throws RequestValidationException, RequestExecutionException
             {
-                return null;
+                return Collections.singleton(grantee);
             }
 
             public Set<RoleResource> getAllRoles() throws RequestValidationException, RequestExecutionException
@@ -163,9 +183,24 @@ public class TestAuthenticator implements IAuthenticator
                 return Collections.emptyMap();
             }
 
+            public Set<RoleResource> filterExistingRoleNames(List<String> roleNames)
+            {
+                return roleNames.stream().map(RoleResource::role).collect(Collectors.toSet());
+            }
+
             public boolean isExistingRole(RoleResource role)
             {
                 return false;
+            }
+
+            public Role getRoleData(RoleResource role)
+            {
+                return new Role(role.getRoleName(),
+                                Collections.singleton(role),
+                                false,
+                                true,
+                                Collections.emptyMap(),
+                                "");
             }
 
             public Set<? extends IResource> protectedResources()
@@ -178,9 +213,9 @@ public class TestAuthenticator implements IAuthenticator
 
             }
 
-            public void setup()
+            public Future<?> setup()
             {
-
+                return Futures.immediateFuture(null);
             }
         };
     }

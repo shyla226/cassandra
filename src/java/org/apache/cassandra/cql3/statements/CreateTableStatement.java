@@ -35,7 +35,6 @@ import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.*;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
@@ -73,12 +72,12 @@ public class CreateTableStatement extends SchemaAlteringStatement
         this.id = id;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
     {
         state.hasKeyspaceAccess(keyspace(), CorePermission.CREATE);
     }
 
-    public void validate(ClientState state)
+    public void validate(QueryState state)
     {
         // validated in announceMigration()
     }
@@ -105,11 +104,13 @@ public class CreateTableStatement extends SchemaAlteringStatement
         {
             IResource resource = DataResource.table(keyspace(), columnFamily());
             IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+            RoleResource role = RoleResource.role(state.getClientState().getUser().getName());
             authorizer.grant(AuthenticatedUser.SYSTEM_USER,
                              authorizer.applicablePermissions(resource),
                              resource,
-                             RoleResource.role(state.getClientState().getUser().getName()),
+                             role,
                              GrantMode.GRANT);
+            Auth.invalidateRolesForPermissionsChange(role).blockingAwait();
         }
         catch (RequestExecutionException e)
         {

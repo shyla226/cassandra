@@ -26,11 +26,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.*;
-import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -38,8 +36,6 @@ import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaKeyspace;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.transport.Connection;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
@@ -53,9 +49,9 @@ public class ClientState
     private static final Logger logger = LoggerFactory.getLogger(ClientState.class);
     public static final CassandraVersion DEFAULT_CQL_VERSION = org.apache.cassandra.cql3.QueryProcessor.CQL_VERSION;
 
-    private static final Set<IResource> READABLE_SYSTEM_RESOURCES = new HashSet<>();
-    private static final Set<IResource> PROTECTED_AUTH_RESOURCES = new HashSet<>();
-    private static final Set<IResource> DROPPABLE_SYSTEM_TABLES = new HashSet<>();
+    static final Set<IResource> READABLE_SYSTEM_RESOURCES = new HashSet<>();
+    static final Set<IResource> PROTECTED_AUTH_RESOURCES = new HashSet<>();
+    static final Set<IResource> DROPPABLE_SYSTEM_TABLES = new HashSet<>();
     static
     {
         // We want these system cfs to be always readable to authenticated users since many tools rely on them
@@ -155,6 +151,14 @@ public class ClientState
         this.connection = null;
     }
 
+    private ClientState(AuthenticatedUser user)
+    {
+        this.isInternal = false;
+        this.remoteAddress = null;
+        this.connection = null;
+        this.user = user;
+    }
+
     protected ClientState(InetSocketAddress remoteAddress, Connection connection)
     {
         this.isInternal = false;
@@ -183,6 +187,14 @@ public class ClientState
     }
 
     /**
+     * @return a ClientState object for internal calls with the given user logged in (not limited by any kind of auth).
+     */
+    public static ClientState forExternalCalls(AuthenticatedUser user)
+    {
+        return new ClientState(user);
+    }
+
+    /**
      * @return a ClientState object for external clients (native protocol users).
      */
     public static ClientState forExternalCalls(SocketAddress remoteAddress, Connection connection)
@@ -199,7 +211,7 @@ public class ClientState
      */
     public ClientState cloneWithKeyspaceIfSet(String keyspace)
     {
-        if (keyspace == null)
+        if (keyspace == null || keyspace.equals(this.keyspace))
             return this;
         ClientState clientState = new ClientState(this);
         clientState.setKeyspace(keyspace);
@@ -369,157 +381,16 @@ public class ClientState
         // Login privilege is not inherited via granted roles, so just
         // verify that the role with the credentials that were actually
         // supplied has it
-        if (user.isAnonymous() || DatabaseDescriptor.getRoleManager().canLogin(user))
+        if (user.isAnonymous() || Auth.canLogin(user.getLoginRole()))
             this.user = user;
         else
             throw new AuthenticationException(String.format("%s is not permitted to log in", user.getName()));
-    }
-
-    public void hasAllKeyspacesAccess(Permission perm) throws UnauthorizedException
-    {
-        if (isInternal)
-            return;
-        validateLogin();
-        ensureHasPermission(perm, DataResource.root());
-    }
-
-    public void hasKeyspaceAccess(String keyspace, Permission perm) throws UnauthorizedException, InvalidRequestException
-    {
-        hasAccess(keyspace, perm, DataResource.keyspace(keyspace));
-    }
-
-    public void hasColumnFamilyAccess(String keyspace, String columnFamily, Permission perm)
-    throws UnauthorizedException, InvalidRequestException
-    {
-        Schema.instance.validateTable(keyspace, columnFamily);
-        hasAccess(keyspace, perm, DataResource.table(keyspace, columnFamily));
-    }
-
-    public void hasColumnFamilyAccess(TableMetadataRef tableRef, Permission perm)
-    throws UnauthorizedException, InvalidRequestException
-    {
-        hasColumnFamilyAccess(tableRef.get(), perm);
-    }
-
-    public void hasColumnFamilyAccess(TableMetadata table, Permission perm)
-    throws UnauthorizedException, InvalidRequestException
-    {
-        hasAccess(table.keyspace, perm, table.resource);
-    }
-
-    private void hasAccess(String keyspace, Permission perm, DataResource resource)
-    throws UnauthorizedException, InvalidRequestException
-    {
-        validateKeyspace(keyspace);
-        if (isInternal)
-            return;
-        validateLogin();
-        preventSystemKSSchemaModification(keyspace, resource, perm);
-        if ((perm == CorePermission.SELECT) && READABLE_SYSTEM_RESOURCES.contains(resource))
-            return;
-        if (PROTECTED_AUTH_RESOURCES.contains(resource))
-            if ((perm == CorePermission.CREATE) || (perm == CorePermission.ALTER) || (perm == CorePermission.DROP))
-                throw new UnauthorizedException(String.format("%s schema is protected", resource));
-        ensureHasPermission(perm, resource);
-    }
-
-    public void ensureHasPermission(Permission perm, IResource resource) throws UnauthorizedException
-    {
-        if (!DatabaseDescriptor.getAuthorizer().requireAuthorization())
-            return;
-
-        // Access to built in functions is unrestricted
-        if(resource instanceof FunctionResource && resource.hasParent())
-            if (((FunctionResource)resource).getKeyspace().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
-                return;
-
-        checkPermissionOnResourceChain(perm, resource);
-    }
-
-    // Convenience method called from checkAccess method of CQLStatement
-    // Also avoids needlessly creating lots of FunctionResource objects
-    public void ensureHasPermission(Permission permission, Function function)
-    {
-        // Save creating a FunctionResource is we don't need to
-        if (!DatabaseDescriptor.getAuthorizer().requireAuthorization())
-            return;
-
-        // built in functions are always available to all
-        if (function.isNative())
-            return;
-
-        checkPermissionOnResourceChain(permission, FunctionResource.function(function.name().keyspace,
-                                                                             function.name().name,
-                                                                             function.argTypes()));
-    }
-
-    private void checkPermissionOnResourceChain(Permission perm, IResource resource)
-    {
-        PermissionSets chainPermissions = resourceChainPermissions(resource);
-        if (!chainPermissions.granted.contains(perm))
-            throw new UnauthorizedException(String.format("User %s has no %s permission on %s or any of its parents",
-                                                          user.getName(),
-                                                          perm,
-                                                          resource));
-
-        if (chainPermissions.restricted.contains(perm))
-            throw new UnauthorizedException(String.format("Access for user %s on %s or any of its parents with %s permission is restricted",
-                                                          user.getName(),
-                                                          resource,
-                                                          perm));
-    }
-
-    public boolean hasGrantOption(Permission perm, IResource resource)
-    {
-        return resourceChainPermissions(resource).grantables.contains(perm);
-    }
-
-    private void preventSystemKSSchemaModification(String keyspace, DataResource resource, Permission perm) throws UnauthorizedException
-    {
-        // we only care about schema modification.
-        if (!((perm == CorePermission.ALTER) || (perm == CorePermission.DROP) || (perm == CorePermission.CREATE)))
-            return;
-
-        // prevent system keyspace modification (not only because this could be dangerous, but also because this just
-        // wouldn't work with the way the schema of those system keyspace/table schema is hard-coded)
-        if (SchemaConstants.isSystemKeyspace(keyspace))
-            throw new UnauthorizedException(keyspace + " keyspace is not user-modifiable.");
-
-        // Allow users with sufficient privileges to alter options on certain distributed system keyspaces/tables.
-        // We only allow ALTER, not CREATE nor DROP, outside of a few specific tables that can be dropped  because they
-        // are not used anymore but we prefer leaving user the responsibility to drop them. Note that even when altering
-        // is allowed, only the table options can be altered but any change to the table schema (adding/removing columns
-        // typically) is forbidden by AlterTableStatement.
-        if (SchemaConstants.isReplicatedSystemKeyspace(keyspace))
-        {
-            if (perm != CorePermission.ALTER && !(perm == CorePermission.DROP && DROPPABLE_SYSTEM_TABLES.contains(resource)))
-                throw new UnauthorizedException(String.format("Cannot %s %s", perm, resource));
-        }
     }
 
     public void validateLogin() throws UnauthorizedException
     {
         if (user == null)
             throw new UnauthorizedException("You have not logged in");
-    }
-
-    public void ensureNotAnonymous() throws UnauthorizedException
-    {
-        validateLogin();
-        if (user.isAnonymous())
-            throw new UnauthorizedException("You have to be logged in and not anonymous to perform this request");
-    }
-
-    public void ensureIsSuper(String message) throws UnauthorizedException
-    {
-        if (DatabaseDescriptor.getAuthenticator().requireAuthentication() && (user == null || !user.isSuper()))
-            throw new UnauthorizedException(message);
-    }
-
-    private static void validateKeyspace(String keyspace) throws InvalidRequestException
-    {
-        if (keyspace == null)
-            throw new InvalidRequestException("You have not set a keyspace for this session");
     }
 
     public AuthenticatedUser getUser()
@@ -530,11 +401,6 @@ public class ClientState
     public static CassandraVersion[] getCQLSupportedVersion()
     {
         return new CassandraVersion[]{ QueryProcessor.CQL_VERSION };
-    }
-
-    private PermissionSets resourceChainPermissions(IResource resource)
-    {
-        return user.resourceChainPermissions(resource);
     }
 
     public boolean isSASIWarningIssued()

@@ -18,12 +18,12 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.auth.Auth;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 public class RevokeRoleStatement extends RoleManagementStatement
@@ -33,10 +33,14 @@ public class RevokeRoleStatement extends RoleManagementStatement
         super(name, grantee);
     }
 
-    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(QueryState state) throws RequestValidationException, RequestExecutionException
     {
         return Single.fromCallable(() -> {
             DatabaseDescriptor.getRoleManager().revokeRole(state.getUser(), role, grantee);
+
+            // TODO the blockingAwait it not really nice
+            Auth.invalidateRolesForPermissionsChange(role, grantee).blockingAwait();
+
             return new ResultMessage.Void();
         });
     }

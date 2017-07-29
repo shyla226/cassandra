@@ -52,7 +52,7 @@ public class ListUsersStatement extends ListRolesStatement
             if (!roleManager.canLogin(role))
                 continue;
             result.addColumnValue(UTF8Type.instance.decompose(role.getRoleName()));
-            result.addColumnValue(BooleanType.instance.decompose(Roles.hasSuperuserStatus(role)));
+            result.addColumnValue(BooleanType.instance.decompose(Auth.hasSuperuserStatusUncached(role)));
         }
         return new ResultMessage.Rows(result);
     }

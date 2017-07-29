@@ -20,10 +20,9 @@ package org.apache.cassandra.auth.jmx;
 
 import java.lang.reflect.*;
 import java.security.*;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import javax.management.*;
 import javax.security.auth.Subject;
 
@@ -100,27 +99,26 @@ public class AuthorizationProxy implements InvocationHandler
                                                                         "registerMBean",
                                                                         "unregisterMBean");
 
-    private static final JMXPermissionsCache permissionsCache = new JMXPermissionsCache();
     private MBeanServer mbs;
 
     /*
      Used to check whether the Role associated with the authenticated Subject has superuser
      status. By default, just delegates to Roles::hasSuperuserStatus, but can be overridden for testing.
      */
-    protected Function<RoleResource, Boolean> isSuperuser = Roles::hasSuperuserStatus;
+    protected Function<RoleResource, Boolean> isSuperuser = Auth::hasSuperuserStatus;
 
     /*
      Used to retrieve the set of all permissions granted to a given role. By default, this fetches
      the permissions from the local cache, which in turn loads them from the configured IAuthorizer
      but can be overridden for testing.
      */
-    protected Function<RoleResource, Set<PermissionDetails>> getPermissions = permissionsCache::getPermissions;
+    protected Function<RoleResource, Map<IResource, PermissionSets>> getPermissions = Auth::getPermissions;
 
     /*
      Used to decide whether authorization is enabled or not, usually this depends on the configured
      IAuthorizer, but can be overridden for testing.
      */
-    protected Supplier<Boolean> isAuthzRequired = () -> DatabaseDescriptor.getAuthorizer().requireAuthorization();
+    protected Supplier<Boolean> isAuthzRequired = DatabaseDescriptor.getAuthorizer()::requireAuthorization;
 
     /*
      Used to find matching MBeans when the invocation target is a pattern type ObjectName.
@@ -132,7 +130,7 @@ public class AuthorizationProxy implements InvocationHandler
      Used to determine whether auth setup has completed so we know whether the expect the IAuthorizer
      to be ready. Can be overridden for testing.
      */
-    protected Supplier<Boolean> isAuthSetupComplete = () -> StorageService.instance.isAuthSetupComplete();
+    protected Supplier<Boolean> isAuthSetupComplete = StorageService.instance::isAuthSetupComplete;
 
     @Override
     public Object invoke(Object proxy, Method method, Object[] args)
@@ -255,14 +253,14 @@ public class AuthorizationProxy implements InvocationHandler
      * wildcards) as their first argument. They both of those methods also accept null arguments,
      * in which case they will be handled by authorizedMBeanServerMethod
      *
-     * @param role
+     * @param subject
      * @param methodName
      * @param args
      * @return the result of the method invocation, if authorized
      * @throws Throwable
      * @throws SecurityException if authorization fails
      */
-    private boolean authorizeMBeanMethod(RoleResource role, String methodName, Object[] args)
+    private boolean authorizeMBeanMethod(RoleResource subject, String methodName, Object[] args)
     {
         ObjectName targetBean = (ObjectName)args[0];
 
@@ -273,9 +271,56 @@ public class AuthorizationProxy implements InvocationHandler
 
         logger.trace("JMX invocation of {} on {} requires permission {}", methodName, targetBean, requiredPermission);
 
-        // find any JMXResources upon which the authenticated subject has been granted the
-        // reqired permission. We'll do ObjectName-specific filtering & matching of resources later
-        Set<JMXResource> permittedResources = getPermittedResources(role, requiredPermission);
+        Set<RoleResource> roles = Auth.getRoles(subject);
+
+        PermissionSets.Builder permissions = PermissionSets.builder();
+
+        // Check whether 'subject' is restricted (or granted) the 'requiredPermission' on the JMX resource root.
+        // If there is a match, there is no need to check permissions on individual resources.
+
+        for (RoleResource role : roles)
+        {
+            Map<IResource, PermissionSets> rolePermissions = getPermissions.apply(role);
+            PermissionSets rootPerms = rolePermissions.get(JMXResource.root());
+            if (rootPerms != null)
+            {
+                if (rootPerms.restricted.contains(requiredPermission))
+                {
+                    // this role is _restricted_ the required permission on the JMX root resource
+                    // I.e. restricted 'permission' on _any_ JMX resource.
+                    return false;
+                }
+                if (rootPerms.granted.contains(requiredPermission))
+                {
+                    // This role is _granted_ (and not restricted) the required permission on the JMX resource root.
+                    // I.e. granted 'permission' on _any_ JMX resource.
+                    return true;
+                }
+            }
+        }
+
+        // Check for individual JMX resources.
+        //
+        // Collecting the (permitted) JMXResource instances before checking the bean names feels
+        // cheaper than vice versa - especially for 'checkPattern', which performs a call to
+        // javax.management.MBeanServer.queryNames().
+
+        Set<JMXResource> permittedResources = new HashSet<>();
+        for (RoleResource role : roles)
+        {
+            Map<IResource, PermissionSets> rolePermissions = getPermissions.apply(role);
+            for (Map.Entry<IResource, PermissionSets> resourcePermissionSets : rolePermissions.entrySet())
+            {
+                if (!(resourcePermissionSets.getKey() instanceof JMXResource))
+                    continue;
+
+                {
+                    JMXResource res = (JMXResource) resourcePermissionSets.getKey();
+                    if (resourcePermissionSets.getValue().hasEffectivePermission(requiredPermission))
+                        permittedResources.add(res);
+                }
+            }
+        }
 
         if (permittedResources.isEmpty())
             return false;
@@ -289,23 +334,6 @@ public class AuthorizationProxy implements InvocationHandler
     }
 
     /**
-     * Get any grants of the required permission for the authenticated subject, regardless
-     * of the resource the permission applies to as we'll do the filtering & matching in
-     * the calling method
-     * @param subject
-     * @param required
-     * @return the set of JMXResources upon which the subject has been granted the required permission
-     */
-    private Set<JMXResource> getPermittedResources(RoleResource subject, Permission required)
-    {
-        return getPermissions.apply(subject)
-               .stream()
-               .filter(details -> details.permission == required)
-               .map(details -> (JMXResource)details.resource)
-               .collect(Collectors.toSet());
-    }
-
-    /**
      * Check whether a required permission has been granted to the authenticated subject on a specific resource
      * @param subject
      * @param permission
@@ -314,9 +342,11 @@ public class AuthorizationProxy implements InvocationHandler
      */
     private boolean hasPermission(RoleResource subject, Permission permission, JMXResource resource)
     {
-        return getPermissions.apply(subject)
-               .stream()
-               .anyMatch(details -> details.permission == permission && details.resource.equals(resource));
+        PermissionSets.Builder permissions = PermissionSets.builder();
+        List<? extends IResource> chain = Resources.chain(resource);
+        for (RoleResource role : Auth.getRoles(subject))
+            permissions.addChainPermissions(chain, getPermissions.apply(role));
+        return permissions.build().hasEffectivePermission(permission);
     }
 
     /**
@@ -452,50 +482,6 @@ public class AuthorizationProxy implements InvocationHandler
         {
             Throwable t = e.getCause(); //Throw the exception that nodetool etc expects
             throw t;
-        }
-    }
-
-    /**
-     * Query the configured IAuthorizer for the set of all permissions granted on JMXResources to a specific subject
-     * @param subject
-     * @return All permissions granted to the specfied subject (including those transitively inherited from
-     *         any roles the subject has been granted), filtered to include only permissions granted on
-     *         JMXResources
-     */
-    private static Set<PermissionDetails> loadPermissions(RoleResource subject)
-    {
-        // get all permissions for the specified subject. We'll cache them as it's likely
-        // we'll receive multiple lookups for the same subject (but for different resources
-        // and permissions) in quick succession
-        return DatabaseDescriptor.getAuthorizer()
-                                 .list(DatabaseDescriptor.getAuthorizer().applicablePermissions(JMXResource.root()),
-                                       null,
-                                       subject)
-                                 .stream()
-                                 .filter(details -> details.resource instanceof JMXResource)
-                                 .collect(Collectors.toSet());
-    }
-
-    private static final class JMXPermissionsCache extends AuthCache<RoleResource, Set<PermissionDetails>>
-    {
-        protected JMXPermissionsCache()
-        {
-            super("JMXPermissionsCache",
-                  DatabaseDescriptor::setPermissionsValidity,
-                  DatabaseDescriptor::getPermissionsValidity,
-                  DatabaseDescriptor::setPermissionsUpdateInterval,
-                  DatabaseDescriptor::getPermissionsUpdateInterval,
-                  DatabaseDescriptor::setPermissionsCacheMaxEntries,
-                  DatabaseDescriptor::getPermissionsCacheMaxEntries,
-                  AuthorizationProxy::loadPermissions,
-                  () -> true);
-        }
-
-        public Set<PermissionDetails> getPermissions(RoleResource roleResource)
-        {
-            // as far as I can see AuthorizationProxy::loadPermissions should not block and so
-            // we can retrieve missing entries regardless of thread type
-            return get(roleResource, true);
         }
     }
 }

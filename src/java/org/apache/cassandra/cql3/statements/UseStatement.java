@@ -24,7 +24,6 @@ import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -47,12 +46,12 @@ public class UseStatement extends ParsedStatement implements CQLStatement
         return new Prepared(this);
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException
+    public void checkAccess(QueryState state) throws UnauthorizedException
     {
-        state.validateLogin();
+        state.getClientState().validateLogin();
     }
 
-    public void validate(ClientState state) throws InvalidRequestException
+    public void validate(QueryState state) throws InvalidRequestException
     {
     }
 

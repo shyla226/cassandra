@@ -18,18 +18,13 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
-import org.apache.cassandra.auth.AuthenticatedUser;
+import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.IRoleManager.Option;
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.auth.RoleOptions;
-import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.RequestExecutionException;
-import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 public class AlterRoleStatement extends AuthenticationStatement
@@ -43,7 +38,7 @@ public class AlterRoleStatement extends AuthenticationStatement
         this.opts = opts;
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
         opts.validate();
 
@@ -52,17 +47,16 @@ public class AlterRoleStatement extends AuthenticationStatement
 
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException
+    public void checkAccess(QueryState state) throws UnauthorizedException
     {
         // validate login first to avoid leaking user existence to anonymous users.
         state.ensureNotAnonymous();
         if (!DatabaseDescriptor.getRoleManager().isExistingRole(role))
             throw new InvalidRequestException(String.format("%s doesn't exist", role.getRoleName()));
 
-        AuthenticatedUser user = state.getUser();
-        boolean isSuper = user.isSuper();
+        boolean isSuper = state.isSuper();
 
-        if (opts.getSuperuser().isPresent() && user.getRoles().contains(role))
+        if (opts.getSuperuser().isPresent() && state.getRoles().contains(role))
             throw new UnauthorizedException("You aren't allowed to alter your own superuser " +
                                             "status or that of a role granted to you");
 
@@ -74,7 +68,7 @@ public class AlterRoleStatement extends AuthenticationStatement
             return;
 
         // a role may only modify the subset of its own attributes as determined by IRoleManager#alterableOptions
-        if (user.getName().equals(role.getRoleName()))
+        if (state.getUser().getName().equals(role.getRoleName()))
         {
             for (Option option : opts.getOptions().keySet())
             {
@@ -89,12 +83,17 @@ public class AlterRoleStatement extends AuthenticationStatement
         }
     }
 
-    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(QueryState state) throws RequestValidationException, RequestExecutionException
     {
         return Single.fromCallable(() -> {
-           if (!opts.isEmpty())
-               DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
-           return (ResultMessage)(new ResultMessage.Void());
-       });
+            if (!opts.isEmpty())
+            {
+                DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
+
+                // TODO the blockingAwait it not really nice
+                Auth.invalidateRolesForPermissionsChange(role).blockingAwait();
+            }
+            return (ResultMessage) (new ResultMessage.Void());
+        });
     }
 }

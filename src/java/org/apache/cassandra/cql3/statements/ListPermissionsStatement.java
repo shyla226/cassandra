@@ -29,7 +29,7 @@ import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 public class ListPermissionsStatement extends AuthorizationStatement
@@ -60,19 +60,19 @@ public class ListPermissionsStatement extends AuthorizationStatement
         this.grantee = grantee.hasName() ? RoleResource.role(grantee.getName()) : null;
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
 
     }
 
-    public void checkAccess(ClientState state)
+    public void checkAccess(QueryState state)
     {
         // a check to ensure the existence of the user isn't being leaked by user existence check.
         state.ensureNotAnonymous();
 
         if (resource != null)
         {
-            resource = maybeCorrectResource(resource, state);
+            resource = maybeCorrectResource(resource, state.getClientState());
             if (!resource.exists())
                 throw new InvalidRequestException(String.format("%s doesn't exist", resource));
         }
@@ -83,13 +83,13 @@ public class ListPermissionsStatement extends AuthorizationStatement
         // If the user requesting 'LIST PERMISSIONS' is not a superuser OR their username doesn't match 'grantee', we
         // throw UnauthorizedException. So only a superuser can view everybody's permissions. Regular users are only
         // allowed to see their own permissions.
-        if (!(state.getUser().isSuper() || state.getUser().isSystem()) && !state.getUser().getRoles().contains(grantee))
+        if (!(state.isSuper() || state.getUser().isSystem()) && !state.getRoles().contains(grantee))
             throw new UnauthorizedException(String.format("You are not authorized to view %s's permissions",
                                                           grantee == null ? "everyone" : grantee.getRoleName()));
     }
 
     // TODO: Create a new ResultMessage type (?). Rows will do for now.
-    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(QueryState state) throws RequestValidationException, RequestExecutionException
     {
         return Single.fromCallable(() -> {
             List<PermissionDetails> details = new ArrayList<>();

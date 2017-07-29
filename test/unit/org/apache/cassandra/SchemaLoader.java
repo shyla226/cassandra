@@ -285,13 +285,13 @@ public class SchemaLoader
 
     public static void createKeyspace(String name, KeyspaceParams params, Tables tables, Types types)
     {
-        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables, Views.none(), types, Functions.none()), true).blockingGet();
+        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables, Views.none(), types, Functions.none()), true).blockingAwait();
     }
 
     public static void createKeyspace(String name, KeyspaceParams params, TableMetadata[] tables, Iterable<ViewMetadata> views)
     {
         MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, Tables.of(tables), Views.builder().add(views).build(), Types.none(),
-                                                                     Functions.none()), true);
+                                                                     Functions.none()), true).blockingAwait();
     }
 
     public static void createView(String ks, String baseTableName, String mvName)

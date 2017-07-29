@@ -17,13 +17,11 @@
  */
 package org.apache.cassandra.auth;
 
-import java.util.Set;
+import java.util.*;
 
-import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
-public class RolesCache extends AuthCache<RoleResource, Set<RoleResource>> implements RolesCacheMBean
+public class RolesCache extends AuthCache<RoleResource, Role> implements RolesCacheMBean
 {
     public RolesCache(IRoleManager roleManager)
     {
@@ -34,21 +32,62 @@ public class RolesCache extends AuthCache<RoleResource, Set<RoleResource>> imple
               DatabaseDescriptor::getRolesUpdateInterval,
               DatabaseDescriptor::setRolesCacheMaxEntries,
               DatabaseDescriptor::getRolesCacheMaxEntries,
-              (r) -> roleManager.getRoles(r, true),
+              roleManager::getRoleData,
               () -> DatabaseDescriptor.getAuthenticator().requireAuthentication());
     }
 
+    /**
+     * Retrieve the roles <em>directly</em> assigned to a role.
+     * Calls from a TPC thread should be prevented.
+     */
     public Set<RoleResource> getRoles(RoleResource role)
     {
-        // we know CassandraRoleManager.getRoles() will block, so we might as well
-        // prevent the cache from attempting to load missing entries on the TPC threads,
-        // since attempting to load only to get a WouldBlockException from the role manager
-        // would result in the cache logging errors and incrementing error statistics and
-        // there also seems to be a problem somewhere in caffeine in that it will not attempt
-        // to reload after an exception
-        Set<RoleResource> ret = get(role, !TPC.isTPCThread());
-        if (ret == null)
-            throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve resources for %s, would block TPC thread", role));
-        return ret;
+        Role ret = getInternal(role);
+        return ret != null ? ret.memberOf : null;
+    }
+
+    /**
+     * Retrieve the superuser status of a role.
+     * Calls from a TPC thread should be prevented.
+     */
+    public boolean isSuperuser(RoleResource role)
+    {
+        Role ret = getInternal(role);
+        return ret != null && ret.isSuper;
+    }
+
+    /**
+     * Retrieve the superuser status of a role.
+     * Calls from a TPC thread should be prevented.
+     */
+    public boolean canLogin(RoleResource role)
+    {
+        Role ret = getInternal(role);
+        return ret != null && ret.canLogin;
+    }
+
+    /**
+     * Retrieve the roles assigned to a role.
+     * Calls from a TPC thread should be prevented.
+     */
+    public Map<String, String> getCustomOptions(RoleResource role)
+    {
+        Role ret = getInternal(role);
+        return ret != null ? ret.options : null;
+    }
+
+    /**
+     * Retrieve the credentials for a role.
+     * Calls from a TPC thread should be prevented.
+     */
+    String getCredentials(RoleResource role)
+    {
+        Role ret = getInternal(role);
+        return ret != null ? ret.hashedPassword : null;
+    }
+
+    private Role getInternal(RoleResource role)
+    {
+        return get(role, "roles");
     }
 }

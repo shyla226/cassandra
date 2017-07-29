@@ -24,7 +24,7 @@ import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 
 public abstract class RoleManagementStatement extends AuthenticationStatement
 {
@@ -37,7 +37,7 @@ public abstract class RoleManagementStatement extends AuthenticationStatement
         this.grantee = RoleResource.role(grantee.getName());
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException
+    public void checkAccess(QueryState state) throws UnauthorizedException
     {
         try
         {
@@ -50,7 +50,7 @@ public abstract class RoleManagementStatement extends AuthenticationStatement
         }
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
         state.ensureNotAnonymous();
 

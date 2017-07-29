@@ -43,7 +43,6 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.ViewMetadata;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
@@ -75,12 +74,12 @@ public class AlterTableStatement extends SchemaAlteringStatement
         this.deleteTimestamp = deleteTimestamp;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
     {
         state.hasColumnFamilyAccess(keyspace(), columnFamily(), CorePermission.ALTER);
     }
 
-    public void validate(ClientState state)
+    public void validate(QueryState state)
     {
         // validated in announceMigration()
     }

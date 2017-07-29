@@ -64,6 +64,8 @@ public class JMXAuthTest extends CQLTester
     @BeforeClass
     public static void setupClass() throws Exception
     {
+        System.setProperty("cassandra.superuser_setup_delay_ms", "1");
+
         setupAuthorizer();
         setupJMXServer();
     }
@@ -105,6 +107,10 @@ public class JMXAuthTest extends CQLTester
     public void setup() throws Throwable
     {
         role = RoleResource.role("test_role");
+        DatabaseDescriptor.getRoleManager().setup().get();
+        DatabaseDescriptor.getRoleManager().createRole(null,
+                                                       role,
+                                                       new RoleOptions());
         clearAllPermissions();
         tableName = createTable("CREATE TABLE %s (k int, v int, PRIMARY KEY (k))");
         tableMBean = JMXResource.mbean(String.format("org.apache.cassandra.db:type=Tables,keyspace=%s,table=%s",
@@ -206,6 +212,7 @@ public class JMXAuthTest extends CQLTester
                                                  resource,
                                                  role,
                                                  GrantMode.GRANT);
+        Auth.invalidateRolesForPermissionsChange(role).blockingAwait();
     }
 
     private void assertAuthorized(MBeanAction action)
