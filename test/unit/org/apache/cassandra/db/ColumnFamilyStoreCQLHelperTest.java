@@ -321,6 +321,7 @@ public class ColumnFamilyStoreCQLHelperTest extends CQLTester
                .memtableFlushPeriod(8)
                .readRepairChance(0.9)
                .speculativeRetry(SpeculativeRetryParam.always())
+               .nodesync(new NodeSyncParams(true, null, Collections.emptyMap()))
                .extensions(ImmutableMap.of("ext1", ByteBuffer.wrap("val1".getBytes())))
                .recordColumnDrop(ColumnMetadata.regularColumn(keyspace, table, "reg1", AsciiType.instance),
                                  FBUtilities.timestampMicros());

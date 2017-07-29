@@ -558,7 +558,6 @@ public final class SchemaKeyspace
                .add("max_index_interval", params.maxIndexInterval)
                .add("memtable_flush_period_in_ms", params.memtableFlushPeriodInMs)
                .add("min_index_interval", params.minIndexInterval)
-               .add("nodesync", params.nodeSync.asMap())
                .add("read_repair_chance", params.readRepairChance)
                .add("speculative_retry", params.speculativeRetry.toString());
 
@@ -566,6 +565,14 @@ public final class SchemaKeyspace
         // node sends table schema to a < 3.8 versioned node with an unknown column.
         if (DatabaseDescriptor.isCDCEnabled())
             builder.add("cdc", params.cdc);
+
+        // If a user leave all defaults for NodeSync, the resulting map will be empty, so it feels logical to no bother
+        // pushing anything in that case. But doing so also solves the same problem than for the cdc issue above: it
+        // makes sure we don't send an unknown column to pre-NodeSync nodes (as long as the user didn't try to do
+        // anything NodeSync related before all his node are upgraded, which is something users should not do).
+        Map<String, String> nodeSyncParams = params.nodeSync.asMap();
+        if (!nodeSyncParams.isEmpty())
+            builder.add("nodesync", nodeSyncParams);
     }
 
     static Mutation.SimpleBuilder makeUpdateTableMutation(KeyspaceMetadata keyspace,

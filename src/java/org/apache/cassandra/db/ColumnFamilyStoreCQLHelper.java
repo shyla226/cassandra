@@ -323,7 +323,9 @@ public class ColumnFamilyStoreCQLHelper
         builder.append("\n\tAND max_index_interval = ").append(tableParams.maxIndexInterval);
         builder.append("\n\tAND memtable_flush_period_in_ms = ").append(tableParams.memtableFlushPeriodInMs);
         builder.append("\n\tAND min_index_interval = ").append(tableParams.minIndexInterval);
-        builder.append("\n\tAND nodesync = ").append(toCQL(tableParams.nodeSync.asMap()));
+        Map<String, String> nodeSyncParams = tableParams.nodeSync.asMap();
+        if (!nodeSyncParams.isEmpty())
+            builder.append("\n\tAND nodesync = ").append(toCQL(nodeSyncParams));
         builder.append("\n\tAND read_repair_chance = ").append(tableParams.readRepairChance);
         builder.append("\n\tAND speculative_retry = '").append(tableParams.speculativeRetry).append("'");
 
@@ -332,6 +334,9 @@ public class ColumnFamilyStoreCQLHelper
 
     private static String toCQL(Map<?, ?> map)
     {
+        if (map.isEmpty())
+            return "{}";
+
         StringBuilder builder = new StringBuilder("{ ");
 
         boolean isFirst = true;

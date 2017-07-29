@@ -28,6 +28,7 @@ import java.util.function.Function;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -69,9 +70,10 @@ public final class NodeSyncParams
     // new options and we don't want to throw those away.
     private final Map<String, String> unknownParameters;
 
-    private NodeSyncParams(Boolean isEnabled,
-                           Integer deadlineTargetSec,
-                           Map<String, String> unknownParameters)
+    @VisibleForTesting
+    public NodeSyncParams(Boolean isEnabled,
+                          Integer deadlineTargetSec,
+                          Map<String, String> unknownParameters)
     {
         this.isEnabled = isEnabled;
         this.deadlineTargetSec = deadlineTargetSec;
@@ -86,7 +88,7 @@ public final class NodeSyncParams
      * option.
      *
      * @param map the map of user provided parameters.
-     * @return the {@link NodeSyncParams} corresponding to {@code map} if it contains valid NodeSync paramters.
+     * @return the {@link NodeSyncParams} corresponding to {@code map} if it contains valid NodeSync parameters.
      *
      * @throws InvalidRequestException if {@code map} doesn't correspond to valid NodeSync per-table options.
      */
