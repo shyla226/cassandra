@@ -10,7 +10,6 @@ package com.datastax.dse.framework;
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -85,13 +84,7 @@ import com.datastax.driver.core.policies.RoundRobinPolicy;
 import com.datastax.driver.core.policies.WhiteListPolicy;
 import com.googlecode.junittoolbox.PollingWait;
 import com.googlecode.junittoolbox.RunnableAssert;
-import org.apache.cassandra.auth.AllowAllAuthenticator;
-import org.apache.cassandra.auth.AllowAllAuthorizer;
-import org.apache.cassandra.auth.AuthConfig;
-import org.apache.cassandra.auth.AuthenticatedUser;
-import org.apache.cassandra.auth.CassandraAuthorizer;
-import org.apache.cassandra.auth.PasswordAuthenticator;
-import org.apache.cassandra.auth.PermissionsCache;
+import org.apache.cassandra.auth.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -1583,12 +1576,8 @@ public abstract class DseTestRunner
                 DatabaseDescriptor.getAuthenticator().setup();
                 DatabaseDescriptor.getAuthorizer().setup();
 
-                Field permissionsCacheField = AuthenticatedUser.class.getDeclaredField("permissionsCache");
-                permissionsCacheField.setAccessible(true);
-                Field modifiersField = Field.class.getDeclaredField("modifiers");
-                modifiersField.setAccessible(true);
-                modifiersField.setInt(permissionsCacheField, permissionsCacheField.getModifiers() & ~Modifier.FINAL);
-                permissionsCacheField.set(null, new PermissionsCache(DatabaseDescriptor.getAuthorizer()));
+                DatabaseDescriptor.getAuthManager().invalidateCaches();
+
                 return "SUCCEEDED";
             }
             catch (Throwable t)

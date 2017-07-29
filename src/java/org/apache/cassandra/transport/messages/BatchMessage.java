@@ -20,12 +20,15 @@ package org.apache.cassandra.transport.messages;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Single;
 
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
@@ -38,6 +41,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 public class BatchMessage extends Message.Request
 {
@@ -147,64 +151,78 @@ public class BatchMessage extends Message.Request
         this.options = options;
     }
 
-    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(Single<QueryState> state, long queryStartNanoTime)
     {
         try
         {
-            if (state.shouldTraceRequest(isTracingRequested()))
-                setUpTracing(state);
+            final UUID tracingID = setUpTracing();
 
             QueryHandler handler = ClientState.getCQLQueryHandler();
-            List<ParsedStatement.Prepared> prepared = new ArrayList<>(queryOrIdList.size());
-            for (int i = 0; i < queryOrIdList.size(); i++)
+
+            return state.flatMap( s ->
             {
-                Object query = queryOrIdList.get(i);
-                ParsedStatement.Prepared p;
-                if (query instanceof String)
+                Single<ResultMessage> resp = Single.defer(() ->
                 {
-                    p = QueryProcessor.parseStatement((String)query,
-                                                      state.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace()));
-                }
-                else
-                {
-                    p = handler.getPrepared((MD5Digest)query);
-                    if (p == null)
-                        throw new PreparedQueryNotFoundException((MD5Digest)query);
-                }
+                    checkIsLoggedIn(s);
 
-                List<ByteBuffer> queryValues = values.get(i);
-                if (queryValues.size() != p.statement.getBoundTerms())
-                    throw new InvalidRequestException(String.format("There were %d markers(?) in CQL but %d bound variables",
-                                                                    p.statement.getBoundTerms(),
-                                                                    queryValues.size()));
+                    List<ParsedStatement.Prepared> prepared = new ArrayList<>(queryOrIdList.size());
+                    for (int i = 0; i < queryOrIdList.size(); i++)
+                    {
+                        Object query = queryOrIdList.get(i);
+                        ParsedStatement.Prepared p;
+                        if (query instanceof String)
+                        {
+                            p = QueryProcessor.parseStatement((String)query, s.cloneWithKeyspaceIfSet(options.getKeyspace()));
+                        }
+                        else
+                        {
+                            p = handler.getPrepared((MD5Digest)query);
+                            if (p == null)
+                                throw new PreparedQueryNotFoundException((MD5Digest)query);
+                        }
 
-                prepared.add(p);
-            }
+                        List<ByteBuffer> queryValues = values.get(i);
+                        if (queryValues.size() != p.statement.getBoundTerms())
+                            throw new InvalidRequestException(String.format("There were %d markers(?) in CQL but %d bound variables",
+                                                                            p.statement.getBoundTerms(),
+                                                                            queryValues.size()));
 
-            BatchQueryOptions batchOptions = BatchQueryOptions.withPerStatementVariables(options, values, queryOrIdList);
-            List<ModificationStatement> statements = new ArrayList<>(prepared.size());
-            for (int i = 0; i < prepared.size(); i++)
-            {
-                ParsedStatement.Prepared p = prepared.get(i);
-                batchOptions.prepareStatement(i, p.boundNames);
+                        prepared.add(p);
+                    }
 
-                if (!(p.statement instanceof ModificationStatement))
-                    throw new InvalidRequestException("Invalid statement in batch: only UPDATE, INSERT and DELETE statements are allowed.");
+                    BatchQueryOptions batchOptions = BatchQueryOptions.withPerStatementVariables(options, values, queryOrIdList);
+                    List<ModificationStatement> statements = new ArrayList<>(prepared.size());
+                    for (int i = 0; i < prepared.size(); i++)
+                    {
+                        ParsedStatement.Prepared p = prepared.get(i);
+                        batchOptions.prepareStatement(i, p.boundNames);
 
-                statements.add((ModificationStatement)p.statement);
-            }
+                        if (!(p.statement instanceof ModificationStatement))
+                            throw new InvalidRequestException("Invalid statement in batch: only UPDATE, INSERT and DELETE statements are allowed.");
 
-            // Note: It's ok at this point to pass a bogus value for the number of bound terms in the BatchState ctor
-            // (and no value would be really correct, so we prefer passing a clearly wrong one).
-            BatchStatement batch = new BatchStatement(-1, batchType, statements, Attributes.none());
+                        statements.add((ModificationStatement)p.statement);
+                    }
 
-            return handler.processBatch(batch, state, batchOptions, getCustomPayload(), queryStartNanoTime)
-                          .map(response -> {
-                              response.setTracingId(state.getPreparedTracingSession());
+                    // Note: It's ok at this point to pass a bogus value for the number of bound terms in the BatchState ctor
+                    // (and no value would be really correct, so we prefer passing a clearly wrong one).
+                    BatchStatement batch = new BatchStatement(-1, batchType, statements, Attributes.none());
 
-                              return response;
-                          })
-                          .flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
+                    return handler.processBatch(batch, s, batchOptions, getCustomPayload(), queryStartNanoTime)
+                            .map(response -> {
+                                response.setTracingId(tracingID);
+
+                                return response;
+                            })
+                            .flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
+                });
+
+               // If some Auth data was not in the caches we might be on an IO thread. In which case we need to switch
+               // back to the TPC thread.
+               if (!TPC.isTPCThread())
+                   return RxThreads.subscribeOn(resp, TPC.bestTPCScheduler(), TPCTaskType.EXECUTE_STATEMENT);
+
+               return resp;
+           });
         }
         catch (Exception e)
         {
@@ -214,9 +232,12 @@ public class BatchMessage extends Message.Request
         }
     }
 
-    private void setUpTracing(QueryState state)
+    private UUID setUpTracing()
     {
-        state.createTracingSession(getCustomPayload());
+        if(!shouldTraceRequest())
+            return null;
+
+        final UUID sessionId = Tracing.instance.newSession(getCustomPayload());
 
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
         if (options.getConsistency() != null)
@@ -225,7 +246,8 @@ public class BatchMessage extends Message.Request
             builder.put("serial_consistency_level", options.getSerialConsistency().name());
 
         // TODO we don't have [typed] access to CQL bind variables here.  CASSANDRA-4560 is open to add support.
-        Tracing.instance.begin("Execute batch of CQL3 queries", state.getClientAddress(), builder.build());
+        Tracing.instance.begin("Execute batch of CQL3 queries", getClientAddress(), builder.build());
+        return sessionId;
     }
 
     @Override

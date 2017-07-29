@@ -22,6 +22,7 @@ import io.reactivex.Maybe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -31,7 +32,6 @@ import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Triggers;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
@@ -50,12 +50,14 @@ public class DropTriggerStatement extends SchemaAlteringStatement
         this.ifExists = ifExists;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.ensureIsSuper("Only superusers are allowed to perfrom DROP TRIGGER queries");
+        if (DatabaseDescriptor.getAuthenticator().requireAuthentication() && !state.isSuper())
+            throw new UnauthorizedException("Only superusers are allowed to perform DROP TRIGGER queries");
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
         Schema.instance.validateTable(keyspace(), columnFamily());
     }

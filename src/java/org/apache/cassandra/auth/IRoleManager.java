@@ -17,8 +17,10 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Future;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -41,6 +43,16 @@ public interface IRoleManager
     public enum Option
     {
         SUPERUSER, PASSWORD, LOGIN, OPTIONS
+    }
+
+    default <T extends IRoleManager> T implementation()
+    {
+        return (T) this;
+    }
+
+    default <T extends IRoleManager> boolean isImplementationOf(Class<T> implClass)
+    {
+        return implClass.isAssignableFrom(implementation().getClass());
     }
 
     /**
@@ -169,11 +181,12 @@ public interface IRoleManager
     boolean canLogin(RoleResource role);
 
     /**
-     * Returns true if a user can login (usually if their primary role can log in)
+     * Flag whether a user can login is determined just from the user's role ({@code false})
+     * or all transitively assigned roles ({@code true}).
      */
-    default boolean canLogin(AuthenticatedUser user)
+    default boolean transitiveRoleLogin()
     {
-        return canLogin(user.getPrimaryRole());
+        return false;
     }
 
     /**
@@ -197,6 +210,20 @@ public interface IRoleManager
     boolean isExistingRole(RoleResource role);
 
     /**
+     * Return {@link RoleResource}s for role names that actually exist.
+     * @param roleNames
+     */
+    Set<RoleResource> filterExistingRoleNames(List<String> roleNames);
+
+    /**
+     * Retrieve a composite of role information about <em>direct</em> memberships, superuser status,
+     * can-login flag and custom options.
+     * <p>The implementation must never returns null. If the  name cannot be found they must return
+     * {@code Role.NULL_ROLL}.</p>
+     */
+    Role getRoleData(RoleResource role);
+
+    /**
      * Set of resources that should be made inaccessible to users and only accessible internally.
      *
      * @return Keyspaces and column families that will be unmodifiable by users; other resources.
@@ -215,5 +242,20 @@ public interface IRoleManager
      *
      * For example, use this method to create any required keyspaces/column families.
      */
-    void setup();
+    Future<?> setup();
+
+   /**
+    * Returns true if the supplied role or any other role granted to it
+    * (directly or indirectly) has superuser status.
+    *
+    * @param role the primary role
+    * @return {@code true} if the role has superuser status, {@code false} otherwise
+    */
+    default boolean hasSuperuserStatus(RoleResource role)
+    {
+        for (RoleResource r : this.getRoles(role, true))
+            if (isSuper(r))
+                return true;
+        return false;
+    }
 }

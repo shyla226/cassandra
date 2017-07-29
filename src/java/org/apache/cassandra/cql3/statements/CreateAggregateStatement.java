@@ -18,10 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Objects;
-import java.util.List;
+import java.util.*;
 
 import io.reactivex.Maybe;
 import org.apache.cassandra.auth.*;
@@ -181,10 +178,11 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         {
             IResource resource = FunctionResource.function(functionName.keyspace, functionName.name, argTypes);
             IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+            RoleResource role = RoleResource.role(state.getClientState().getUser().getName());
             authorizer.grant(AuthenticatedUser.SYSTEM_USER,
                              authorizer.applicablePermissions(resource),
                              resource,
-                             RoleResource.role(state.getClientState().getUser().getName()),
+                             role,
                              GrantMode.GRANT);
         }
         catch (RequestExecutionException e)
@@ -193,22 +191,21 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         }
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state)
     {
-        if (Schema.instance.findFunction(functionName, argTypes).isPresent() && orReplace)
-            state.ensureHasPermission(CorePermission.ALTER, FunctionResource.function(functionName.keyspace,
-                                                                                  functionName.name,
-                                                                                  argTypes));
+        final Optional<Function> existing = Schema.instance.findFunction(functionName, argTypes);
+        if (existing.isPresent() && orReplace)
+            state.checkFunctionPermission(existing.get(), CorePermission.ALTER);
         else
-            state.ensureHasPermission(CorePermission.CREATE, FunctionResource.keyspace(functionName.keyspace));
+            state.checkFunctionPermission(FunctionResource.keyspace(functionName.keyspace), CorePermission.CREATE);
 
-        state.ensureHasPermission(CorePermission.EXECUTE, stateFunction);
+        state.checkFunctionPermission(stateFunction, CorePermission.EXECUTE);
 
         if (finalFunction != null)
-            state.ensureHasPermission(CorePermission.EXECUTE, finalFunction);
+            state.checkFunctionPermission(finalFunction, CorePermission.EXECUTE);
     }
 
-    public void validate(ClientState state) throws InvalidRequestException
+    public void validate(QueryState state) throws InvalidRequestException
     {
         if (ifNotExists && orReplace)
             throw new InvalidRequestException("Cannot use both 'OR REPLACE' and 'IF NOT EXISTS' directives");

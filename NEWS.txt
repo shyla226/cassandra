@@ -54,6 +54,18 @@ Upgrading
      after all nodes are on 6.0.
    - Incremental repairs are no longer supported on tables with materialized views or CDC until
      its limitations are addressed. See CASSANDRA-12888 for details.
+   - Changes to permissions (CassandraAuthorizer, DseAuthorizer), roles (CassandraRoleManager,
+     DseRoleManager) and credentials (PasswordAuthenticator) are broadcasted throughout the cluster.
+     This eliminates the need to have short-ish validity (permissions_validity_in_ms,
+     roles_validity_in_ms, credentials_validity_in_ms) and update-interval
+     (permissions_update_interval_in_ms, roles_update_interval_in_ms,
+     credentials_update_interval_in_ms) settings in cassandra.yaml. Consider raising the values
+     for *_validity_in_ms and *_update_interval_in_ms, if configured.
+     Please note, that only "reachable" nodes will receive the invalidation messages and
+     unreachable nodes may still hold outdated information after DCL command.
+   - The caches for JMX permissions and credentials no longer exist and therefore the JMX beans
+     for these caches have been removed, too. Also the configuration options for the credentials
+     cache need to be removed from the cassandra.yaml file.
 
 Deprecation
 -----------

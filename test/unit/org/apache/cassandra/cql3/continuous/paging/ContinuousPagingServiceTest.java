@@ -11,7 +11,10 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.reactivex.Scheduler;
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPCUtils;
+
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.config.ContinuousPagingConfig;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
@@ -50,7 +53,7 @@ public class ContinuousPagingServiceTest
     {
         // Always set the direct event loop, so that the cancellation can be processed:
         test.channel.setEventLoop(new ContinuousPagingTestStubs.DirectEventLoop());
-        TPCUtils.blockingGet(ContinuousPagingService.cancel(test.queryState, test.streamId));
+        TPCUtils.blockingGet(ContinuousPagingService.cancel(Single.just(test.queryState), test.streamId));
     }
 
     @Test(expected = ContinuousBackPressureException.class)
@@ -111,10 +114,14 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        boolean ret = ContinuousPagingService.updateBackpressure(test.queryState, test.streamId, 2);
+        boolean ret = TPCUtils.blockingGet(ContinuousPagingService.updateBackpressure(Single.just(QueryState.forInternalCalls()),
+                                                                                      test.streamId,
+                                                                                      2));
         assertTrue(ret); // correct stream id
 
-        ret = ContinuousPagingService.updateBackpressure(test.queryState, test.streamId + 1, 2);
+        ret = TPCUtils.blockingGet(ContinuousPagingService.updateBackpressure(Single.just(QueryState.forInternalCalls()),
+                                                                              test.streamId + 1,
+                                                                              2));
         assertFalse(ret); // wrong stream id
     }
 
@@ -125,9 +132,9 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        ContinuousPagingService.updateBackpressure(test.queryState,
+        TPCUtils.blockingGet(ContinuousPagingService.updateBackpressure(Single.just(QueryState.forInternalCalls()),
                                                    test.streamId,
-                                                   0); // numPagesReceived should be positive
+                                                   0)); // numPagesReceived should be positive
     }
 
     @Test(expected = InvalidRequestException.class)
@@ -137,9 +144,9 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        ContinuousPagingService.updateBackpressure(test.queryState,
+        TPCUtils.blockingGet(ContinuousPagingService.updateBackpressure(Single.just(QueryState.forInternalCalls()),
                                                    test.streamId,
-                                                   -1); // numPagesReceived should be positive
+                                                   -1)); // numPagesReceived should be positive
     }
 
     @Test
@@ -149,9 +156,9 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        boolean ret = ContinuousPagingService.updateBackpressure(test.queryState,
+        boolean ret = TPCUtils.blockingGet(ContinuousPagingService.updateBackpressure(Single.just(QueryState.forInternalCalls()),
                                                                  test.streamId,
-                                                                 Integer.MAX_VALUE);
+                                                                 Integer.MAX_VALUE));
 
         assertFalse("Increasing with max should have resulted in overflow", ret);
     }
@@ -163,9 +170,9 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        boolean ret = ContinuousPagingService.updateBackpressure(test.queryState,
+        boolean ret = TPCUtils.blockingGet(ContinuousPagingService.updateBackpressure(Single.just(QueryState.forInternalCalls()),
                                                                  test.streamId,
-                                                                 1);
+                                                                 1));
 
         assertFalse("Increasing from max should have resulted in overflow", ret);
     }
@@ -177,9 +184,9 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        boolean ret = ContinuousPagingService.updateBackpressure(test.queryState,
+        boolean ret = TPCUtils.blockingGet(ContinuousPagingService.updateBackpressure(Single.just(QueryState.forInternalCalls()),
                                                                  test.streamId,
-                                                                 1);
+                                                                 1));
 
         assertFalse("Increasing from zero should have ignored request", ret);
     }
@@ -240,9 +247,9 @@ public class ContinuousPagingServiceTest
 
         test.executor.onSchedule = (state, bldr) -> builder.set(bldr);
 
-        ContinuousPagingService.updateBackpressure(test.queryState,
+        TPCUtils.blockingGet(ContinuousPagingService.updateBackpressure(Single.just(QueryState.forInternalCalls()),
                                                    test.streamId,
-                                                   3);
+                                                   3));
 
         // at this point updateBackpressure should have scheduled maybePause, which in turn will call executor schedule and
         // therefore onSchedule set above
@@ -423,7 +430,7 @@ public class ContinuousPagingServiceTest
         ResultBuilder build()
         {
             this.timeSource = new TestTimeSource();
-            this.queryState = new QueryState(ClientState.forInternalCalls(), streamId);
+            this.queryState = new QueryState(ClientState.forInternalCalls(), streamId, UserRolesAndPermissions.SYSTEM);
             this.queryOptions = QueryOptions.create(ConsistencyLevel.ONE,
                                                     Arrays.asList(ByteBufferUtil.bytes("testColumn")),
                                                     false,

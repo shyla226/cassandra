@@ -67,13 +67,11 @@ import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.ColumnMetadata.Raw;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ViewMetadata;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.paxos.Commit;
@@ -249,31 +247,32 @@ public abstract class ModificationStatement implements CQLStatement
         return attrs.getTimeToLive(options, metadata().params.defaultTimeToLive);
     }
 
-    public void checkAccess(ClientState state) throws InvalidRequestException, UnauthorizedException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.hasColumnFamilyAccess(metadata, CorePermission.MODIFY);
+        state.checkTablePermission(metadata, CorePermission.MODIFY);
 
         // CAS updates can be used to simulate a SELECT query, so should require Permission.SELECT as well.
         if (hasConditions())
-            state.hasColumnFamilyAccess(metadata, CorePermission.SELECT);
+            state.checkTablePermission(metadata, CorePermission.SELECT);
 
         // MV updates need to get the current state from the table, and might update the views
         // Require Permission.SELECT on the base table, and Permission.MODIFY on the views
         Iterator<ViewMetadata> views = View.findAll(keyspace(), columnFamily()).iterator();
         if (views.hasNext())
         {
-            state.hasColumnFamilyAccess(metadata, CorePermission.SELECT);
+            state.checkTablePermission(metadata, CorePermission.SELECT);
             do
             {
-                state.hasColumnFamilyAccess(views.next().metadata, CorePermission.MODIFY);
+                state.checkTablePermission(views.next().metadata, CorePermission.MODIFY);
             } while (views.hasNext());
         }
 
         for (Function function : getFunctions())
-            state.ensureHasPermission(CorePermission.EXECUTE, function);
+            state.checkFunctionPermission(function, CorePermission.EXECUTE);
     }
 
-    public void validate(ClientState state) throws InvalidRequestException
+    public void validate(QueryState state) throws InvalidRequestException
     {
         checkFalse(hasConditions() && attrs.isTimestampSet(), "Cannot provide custom timestamp for conditional updates");
         checkFalse(isCounter() && attrs.isTimestampSet(), "Cannot provide custom timestamp for counter updates");

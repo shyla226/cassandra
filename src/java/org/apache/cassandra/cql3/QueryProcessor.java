@@ -23,29 +23,26 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 
-import io.reactivex.Scheduler;
-import io.reactivex.Single;
+import io.reactivex.*;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Predicate;
-import com.google.common.collect.*;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Iterators;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.MoreExecutors;
+import org.antlr.runtime.RecognitionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.schedulers.Schedulers;
-import org.antlr.runtime.*;
-import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.concurrent.TPCTaskType;
-import org.apache.cassandra.concurrent.TPCUtils;
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
+import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
@@ -139,21 +136,20 @@ public class QueryProcessor implements QueryHandler
         {
             ClientState state = ClientState.forInternalCalls();
             state.setKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME);
-            this.queryState = new QueryState(state);
+            this.queryState = new QueryState(state, UserRolesAndPermissions.SYSTEM);
         }
     }
 
     public static void preloadPreparedStatementBlocking()
     {
-        final ClientState clientState = ClientState.forInternalCalls();
+        QueryState state = QueryState.forInternalCalls();
         TPCUtils.blockingAwait(SystemKeyspace.loadPreparedStatements().thenAccept(results -> {
             int count = 0;
             for (Pair<String, String> useKeyspaceAndCQL : results)
             {
                 try
                 {
-                    clientState.setKeyspace(useKeyspaceAndCQL.left);
-                    prepare(useKeyspaceAndCQL.right, clientState);
+                    prepare(useKeyspaceAndCQL.right, state.cloneWithKeyspaceIfSet(useKeyspaceAndCQL.left));
                     count++;
                 }
                 catch (RequestValidationException e)
@@ -215,14 +211,13 @@ public class QueryProcessor implements QueryHandler
         if (logger.isTraceEnabled())
             logger.trace("Process {} @CL.{}", statement, options.getConsistency());
 
-        final ClientState clientState = queryState.getClientState();
         final Scheduler scheduler = statement.getScheduler();
 
         Single<ResultMessage> ret = Single.defer(() -> {
             try
             {
-                statement.checkAccess(clientState);
-                statement.validate(clientState);
+                statement.checkAccess(queryState);
+                statement.validate(queryState);
                 return statement.execute(queryState, options, queryStartNanoTime);
             }
             catch (RuntimeException ex)
@@ -235,8 +230,8 @@ public class QueryProcessor implements QueryHandler
 
                 Single<ResultMessage> single = Single.defer(() ->
                                                                      {
-                                                                         statement.checkAccess(clientState);
-                                                                         statement.validate(clientState);
+                                                                         statement.checkAccess(queryState);
+                                                                         statement.validate(queryState);
                                                                          return statement.execute(queryState,
                                                                                                   options,
                                                                                                   queryStartNanoTime);
@@ -251,7 +246,7 @@ public class QueryProcessor implements QueryHandler
     public static Single<ResultMessage> process(String queryString, ConsistencyLevel cl, QueryState queryState, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        return instance.process(queryString, queryState, QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()),  queryStartNanoTime);
+        return instance.process(queryString, queryState, QueryOptions.forInternalCalls(cl, Collections.emptyList()),  queryStartNanoTime);
     }
 
     public Single<ResultMessage> process(String query,
@@ -266,7 +261,7 @@ public class QueryProcessor implements QueryHandler
     public Single<ResultMessage> process(String queryString, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        ParsedStatement.Prepared p = getStatement(queryString, queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace()));
+        ParsedStatement.Prepared p = getStatement(queryString, queryState.cloneWithKeyspaceIfSet(options.getKeyspace()));
         options.prepare(p.boundNames);
         CQLStatement prepared = p.statement;
         if (prepared.getBoundTerms() != options.getValues().size())
@@ -278,9 +273,9 @@ public class QueryProcessor implements QueryHandler
         return processStatement(prepared, queryState, options, queryStartNanoTime);
     }
 
-    public static ParsedStatement.Prepared parseStatement(String queryStr, ClientState clientState) throws RequestValidationException
+    public static ParsedStatement.Prepared parseStatement(String queryStr, QueryState queryState) throws RequestValidationException
     {
-        return getStatement(queryStr, clientState);
+        return getStatement(queryStr, queryState);
     }
 
     public static UntypedResultSet processBlocking(String query, ConsistencyLevel cl) throws RequestExecutionException
@@ -290,7 +285,7 @@ public class QueryProcessor implements QueryHandler
 
     private static Single<UntypedResultSet> process(String query, ConsistencyLevel cl) throws RequestExecutionException
     {
-        return process(query, cl, Collections.<ByteBuffer>emptyList());
+        return process(query, cl, Collections.emptyList());
     }
 
     public static Single<UntypedResultSet> process(String query, ConsistencyLevel cl, List<ByteBuffer> values) throws RequestExecutionException
@@ -325,8 +320,8 @@ public class QueryProcessor implements QueryHandler
         if (existing != null)
             return existing;
 
-        ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState().getClientState());
-        prepared.statement.validate(internalQueryState().getClientState());
+        ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
+        prepared.statement.validate(internalQueryState());
         internalStatements.putIfAbsent(query, prepared);
         return prepared;
     }
@@ -351,7 +346,7 @@ public class QueryProcessor implements QueryHandler
      * @param values - the query values
      *
      * @return the query result
-     * @throws org.apache.cassandra.concurrent.TPCUtils.WouldBlockException when called from a core thread
+     * @throws TPCUtils.WouldBlockException when called from a core thread
      */
     public static UntypedResultSet executeInternal(String query, Object... values)
     {
@@ -375,7 +370,7 @@ public class QueryProcessor implements QueryHandler
      * @return the query result
      *
      * @throws RequestExecutionException
-     * @throws org.apache.cassandra.concurrent.TPCUtils.WouldBlockException when called from a core thread
+     * @throws TPCUtils.WouldBlockException when called from a core thread
      */
     public static UntypedResultSet execute(String query, ConsistencyLevel cl, QueryState state, Object... values)
     throws RequestExecutionException
@@ -424,11 +419,11 @@ public class QueryProcessor implements QueryHandler
      */
     public static Single<UntypedResultSet> executeOnceInternal(String query, Object... values)
     {
-        final ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState().getClientState());
+        final ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
         final Scheduler scheduler = prepared.statement.getScheduler();
 
         Single<? extends ResultMessage> observable = Single.defer(() -> {
-            prepared.statement.validate(internalQueryState().getClientState());
+            prepared.statement.validate(internalQueryState());
             return prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
         });
 
@@ -465,35 +460,37 @@ public class QueryProcessor implements QueryHandler
 
     public static UntypedResultSet resultify(String query, PartitionIterator partitions)
     {
-        SelectStatement ss = (SelectStatement) getStatement(query, null).statement;
+        SelectStatement ss = (SelectStatement) getStatement(query, QueryState.forInternalCalls()).statement;
         ResultSet cqlRows = ss.process(partitions, FBUtilities.nowInSeconds()); // iterator will be closed by ss.process
         return UntypedResultSet.create(cqlRows);
     }
 
     public Single<ResultMessage.Prepared> prepare(String query,
-                                                  ClientState clientState,
+                                                  QueryState queryState,
                                                   Map<String, ByteBuffer> customPayload) throws RequestValidationException
     {
-        return prepare(query, clientState);
+        return prepare(query, queryState);
     }
 
-    public Single<ResultMessage.Prepared> prepare(String queryString, QueryState queryState)
+    public static Single<ResultMessage.Prepared> prepare(String queryString, QueryState state)
     {
-        ClientState cState = queryState.getClientState();
-        return prepare(queryString, cState);
+        return prepare(queryString, state, true);
     }
 
-    public static Single<ResultMessage.Prepared> prepare(String queryString, ClientState clientState)
+    public static Single<ResultMessage.Prepared> prepare(String queryString,
+                                                         QueryState state,
+                                                         boolean storeStatementOnDisk)
     {
-        ResultMessage.Prepared existing = getStoredPreparedStatement(queryString, clientState.getRawKeyspace());
+        final String rawKeyspace = state.getClientState().getRawKeyspace();
+        ResultMessage.Prepared existing = getStoredPreparedStatement(queryString, rawKeyspace);
         if (existing != null)
             return Single.just(existing);
 
-        ParsedStatement.Prepared prepared = getStatement(queryString, clientState);
+        ParsedStatement.Prepared prepared = getStatement(queryString, state);
         prepared.rawCQLStatement = queryString;
         validateBindingMarkers(prepared);
 
-        return storePreparedStatement(queryString, clientState.getRawKeyspace(), prepared);
+        return storePreparedStatement(queryString, rawKeyspace, prepared, storeStatementOnDisk);
     }
 
     public static void validateBindingMarkers(ParsedStatement.Prepared prepared)
@@ -524,8 +521,10 @@ public class QueryProcessor implements QueryHandler
         return new ResultMessage.Prepared(statementId, existing.resultMetadataId, existing);
     }
 
-    public static Single<ResultMessage.Prepared> storePreparedStatement(String queryString, String keyspace, ParsedStatement.Prepared prepared)
-    throws InvalidRequestException
+    public static Single<ResultMessage.Prepared> storePreparedStatement(String queryString,
+                                                                         String keyspace,
+                                                                         ParsedStatement.Prepared prepared,
+                                                                         boolean storeStatementOnDisk)
     {
         // Concatenate the current keyspace so we don't mix prepared statements between keyspace (#5352).
         // (if the keyspace is null, queryString has to have a fully-qualified keyspace so it's fine.
@@ -540,6 +539,10 @@ public class QueryProcessor implements QueryHandler
         preparedStatements.put(statementId, prepared);
 
         ResultSet.ResultMetadata resultMetadata = ResultSet.ResultMetadata.fromPrepared(prepared);
+
+        if (!storeStatementOnDisk)
+            return Single.just(new ResultMessage.Prepared(statementId, resultMetadata.getResultMetadataId(), prepared));
+
         Single<UntypedResultSet> observable = SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
         return observable.map(resultSet -> new ResultMessage.Prepared(statementId, resultMetadata.getResultMetadataId(), prepared));
     }
@@ -588,14 +591,14 @@ public class QueryProcessor implements QueryHandler
 
     public Single<ResultMessage> processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
     {
-        final ClientState clientState = queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace());
+        QueryState state = queryState.cloneWithKeyspaceIfSet(options.getKeyspace());
         return Single.defer(() -> {
             try
             {
-                batch.checkAccess(clientState);
+                batch.checkAccess(state);
                 batch.validate();
-                batch.validate(clientState);
-                return batch.execute(queryState, options, queryStartNanoTime);
+                batch.validate(state);
+                return batch.execute(state, options, queryStartNanoTime);
             }
             catch (RuntimeException ex)
             {
@@ -604,10 +607,10 @@ public class QueryProcessor implements QueryHandler
 
                 return RxThreads.subscribeOnIo(
                     Single.defer(() -> {
-                        batch.checkAccess(clientState);
+                        batch.checkAccess(state);
                         batch.validate();
-                        batch.validate(clientState);
-                        return batch.execute(queryState, options, queryStartNanoTime);
+                        batch.validate(state);
+                        return batch.execute(state, options, queryStartNanoTime);
                     }),
                     TPCTaskType.EXECUTE_STATEMENT
                 );
@@ -615,7 +618,7 @@ public class QueryProcessor implements QueryHandler
         });
     }
 
-    public static ParsedStatement.Prepared getStatement(String queryStr, ClientState clientState)
+    public static ParsedStatement.Prepared getStatement(String queryStr, QueryState state)
     throws RequestValidationException
     {
         Tracing.trace("Parsing {}", queryStr);
@@ -623,7 +626,7 @@ public class QueryProcessor implements QueryHandler
 
         // Set keyspace for statement that require login
         if (statement instanceof CFStatement)
-            ((CFStatement) statement).prepareKeyspace(clientState);
+            ((CFStatement) statement).prepareKeyspace(state.getClientState());
 
         Tracing.trace("Preparing statement");
         return statement.prepare();
@@ -704,7 +707,7 @@ public class QueryProcessor implements QueryHandler
                  iter.hasNext();)
             {
                 Map.Entry<MD5Digest, ParsedStatement.Prepared> pstmt = iter.next();
-                if (Iterables.any(pstmt.getValue().statement.getFunctions(), matchesFunction))
+                if (Iterables.any(pstmt.getValue().statement.getFunctions(), matchesFunction::test))
                 {
                     removePreparedStatementBlocking(pstmt.getKey());
                     iter.remove();
@@ -713,7 +716,7 @@ public class QueryProcessor implements QueryHandler
 
 
             Iterators.removeIf(internalStatements.values().iterator(),
-                               statement -> Iterables.any(statement.statement.getFunctions(), matchesFunction));
+                               statement -> Iterables.any(statement.statement.getFunctions(), matchesFunction::test));
         }
 
         private static void removeInvalidPersistentPreparedStatements(Iterator<Map.Entry<MD5Digest, ParsedStatement.Prepared>> iterator,

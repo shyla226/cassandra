@@ -18,12 +18,16 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
-import java.nio.ByteBuffer;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
-import org.apache.cassandra.tracing.Tracing;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
+import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.transport.Connection;
 
 /**
@@ -31,19 +35,30 @@ import org.apache.cassandra.transport.Connection;
  */
 public class QueryState
 {
+    private static final Logger logger = LoggerFactory.getLogger(CassandraRoleManager.class);
+
     private final ClientState clientState;
     private final int streamId;
-    private volatile UUID preparedTracingSession;
 
-    public QueryState(ClientState clientState)
+    private UserRolesAndPermissions userRolesAndPermissions;
+
+    private QueryState(QueryState queryState,
+                       ClientState clientState,
+                       UserRolesAndPermissions userRolesAndPermissions)
     {
-        this(clientState, 0);
+        this(clientState, queryState.streamId, userRolesAndPermissions);
     }
 
-    public QueryState(ClientState clientState, int streamId)
+    public QueryState(ClientState clientState, UserRolesAndPermissions userRolesAndPermissions)
+    {
+        this(clientState, 0, userRolesAndPermissions);
+    }
+
+    public QueryState(ClientState clientState, int streamId, UserRolesAndPermissions userRolesAndPermissions)
     {
         this.clientState = clientState;
         this.streamId = streamId;
+        this.userRolesAndPermissions = userRolesAndPermissions;
     }
 
     /**
@@ -51,12 +66,31 @@ public class QueryState
      */
     public static QueryState forInternalCalls()
     {
-        return new QueryState(ClientState.forInternalCalls());
+        return new QueryState(ClientState.forInternalCalls(), UserRolesAndPermissions.SYSTEM);
     }
 
     public ClientState getClientState()
     {
         return clientState;
+    }
+
+    public String getUserName()
+    {
+        return userRolesAndPermissions.getName();
+    }
+
+    public AuthenticatedUser getUser()
+    {
+        return clientState.getUser();
+    }
+
+    public QueryState cloneWithKeyspaceIfSet(String keyspace)
+    {
+        ClientState clState = clientState.cloneWithKeyspaceIfSet(keyspace);
+        if (clState == clientState)
+            // this will be trie, if either 'keyspace' is null or 'keyspace' is equals to the current keyspace
+            return this;
+        return new QueryState(this, clState, userRolesAndPermissions);
     }
 
     /**
@@ -66,26 +100,6 @@ public class QueryState
     public long getTimestamp()
     {
         return clientState.getTimestamp();
-    }
-
-    public boolean shouldTraceRequest(boolean tracingRequested)
-    {
-        if (tracingRequested)
-            return true;
-
-        // If no tracing is explicitly requested in the message, eventually trace the query according to configured trace probability.
-        double traceProbability = StorageService.instance.getTraceProbability();
-        return traceProbability != 0 && ThreadLocalRandom.current().nextDouble() < traceProbability;
-    }
-
-    public void prepareTracingSession(UUID sessionId)
-    {
-        this.preparedTracingSession = sessionId;
-    }
-
-    public void createTracingSession(Map<String,ByteBuffer> customPayload)
-    {
-        preparedTracingSession = Tracing.instance.newSession(customPayload);
     }
 
     public InetAddress getClientAddress()
@@ -105,8 +119,188 @@ public class QueryState
         return clientState.connection;
     }
 
-    public UUID getPreparedTracingSession()
+    /**
+     * Checks if this user is a super user.
+     * <p>Only a superuser is allowed to perform CREATE USER and DROP USER queries.
+     * Im most cased, though not necessarily, a superuser will have Permission.ALL on every resource
+     * (depends on IAuthorizer implementation).</p>
+     */
+    public boolean isSuper()
     {
-        return preparedTracingSession;
+        return userRolesAndPermissions.isSuper();
+    }
+
+    /**
+     * Checks if this user is the system user (Apollo).
+     * @return {@code true} if this user is the system user, {@code flase} otherwise.
+     */
+    public boolean isSystem()
+    {
+        return userRolesAndPermissions.isSystem();
+    }
+
+    /**
+     * Validates that this user is not an anonymous one.
+     */
+    public void checkNotAnonymous()
+    {
+        userRolesAndPermissions.checkNotAnonymous();
+    }
+
+    /**
+     * Checks if the user has the specified permission on the data resource.
+     * @param resource the resource
+     * @param perm the permission
+     * @return {@code true} if the user has the permission on the data resource,
+     * {@code false} otherwise.
+     */
+    public boolean hasDataPermission(DataResource resource, Permission perm)
+    {
+        return userRolesAndPermissions.hasDataPermission(resource, perm);
+    }
+
+    /**
+     * Checks if the user has the specified permission on the function resource.
+     * @param resource the resource
+     * @param perm the permission
+     * @return {@code true} if the user has the permission on the function resource,
+     * {@code false} otherwise.
+     */
+    public final boolean hasFunctionPermission(FunctionResource resource, Permission perm)
+    {
+        return userRolesAndPermissions.hasFunctionPermission(resource, perm);
+    }
+
+    /**
+     * Checks if the user has the specified permission on the resource.
+     * @param resource the resource
+     * @param perm the permission
+     * @return {@code true} if the user has the permission on the resource,
+     * {@code false} otherwise.
+     */
+    public final boolean hasPermission(IResource resource, Permission perm)
+    {
+        return userRolesAndPermissions.hasPermission(resource, perm);
+    }
+
+    /**
+     * Checks if the user has the right to grant the permission on the resource.
+     * @param resource the resource
+     * @param perm the permission
+     * @return {@code true} if the user has the right to grant the permission on the resource,
+     * {@code false} otherwise.
+     */
+    public boolean hasGrantPermission(IResource resource, Permission perm)
+    {
+        return userRolesAndPermissions.hasGrantPermission(resource, perm);
+    }
+
+    /**
+     * Validates that the user has the permission on all the keyspaces.
+     * @param perm the permission
+     * @throws UnauthorizedException if the user does not have the permission on all the keyspaces
+     */
+    public final void checkAllKeyspacesPermission(Permission perm)
+    {
+        userRolesAndPermissions.checkAllKeyspacesPermission(perm);
+    }
+
+    /**
+     * Validates that the user has the permission on the keyspace.
+     * @param keyspace the keyspace
+     * @param perm the permission
+     * @throws UnauthorizedException if the user does not have the permission on the keyspace
+     */
+    public final void checkKeyspacePermission(String keyspace, Permission perm)
+    {
+        userRolesAndPermissions.checkKeyspacePermission(keyspace, perm);
+    }
+
+    /**
+     * Validates that the user has the permission on the table.
+     * @param keyspace the table keyspace
+     * @param table the table
+     * @param perm the permission
+     * @throws UnauthorizedException if the user does not have the permission on the table.
+     */
+    public final void checkTablePermission(String keyspace, String table, Permission perm)
+    {
+        userRolesAndPermissions.checkTablePermission(keyspace, table, perm);
+    }
+
+    /**
+     * Validates that the user has the permission on the table.
+     * @param tableRef the table
+     * @param perm the permission
+     * @throws UnauthorizedException if the user does not have the permission on the table.
+     */
+    public final void checkTablePermission(TableMetadataRef tableRef, Permission perm)
+    {
+        userRolesAndPermissions.checkTablePermission(tableRef, perm);
+    }
+
+    /**
+     * Validates that the user has the permission on the table.
+     * @param table the table metadata
+     * @param perm the permission
+     * @throws UnauthorizedException if the user does not have the permission on the table.
+     */
+    public final void checkTablePermission(TableMetadata table, Permission perm)
+    {
+        userRolesAndPermissions.checkTablePermission(table, perm);
+    }
+
+    /**
+     * Validates that the user has the permission on the function.
+     * @param function the function
+     * @param perm the permission
+     * @throws UnauthorizedException if the user does not have the permission on the function.
+     */
+    public final void checkFunctionPermission(Function function, Permission permission)
+    {
+        userRolesAndPermissions.checkFunctionPermission(function, permission);
+    }
+
+    /**
+     * Validates that the user has the permission on the function.
+     * @param perm the permission
+     * @param function the function resource
+     * @throws UnauthorizedException if the user does not have the permission on the function.
+     */
+    public final void checkFunctionPermission(FunctionResource resource, Permission perm)
+    {
+        userRolesAndPermissions.checkFunctionPermission(resource, perm);
+    }
+
+    public final void checkPermission(IResource resource, Permission perm)
+    {
+        userRolesAndPermissions.checkPermission(resource, perm);
+    }
+
+    /**
+     * Checks that this user has the specified role.
+     * @param role the role
+     * @return {@code true} if the user has the specified role, {@code false} otherwise.
+     */
+    public final boolean hasRole(RoleResource role)
+    {
+        return userRolesAndPermissions.hasRole(role);
+    }
+
+    /**
+     * Checks if the user has the specified permission on the role resource.
+     * @param resource the resource
+     * @param perm the permission
+     * @return {@code true} if the user has the permission on the role resource,
+     * {@code false} otherwise.
+     */
+    public boolean hasRolePermission(RoleResource role, Permission perm)
+    {
+        return userRolesAndPermissions.hasRolePermission(role, perm);
+    }
+
+    public UserRolesAndPermissions getUserRolesAndPermissions()
+    {
+        return userRolesAndPermissions;
     }
 }

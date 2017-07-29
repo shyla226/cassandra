@@ -17,11 +17,16 @@
  */
 package org.apache.cassandra.transport.messages;
 
+import java.util.UUID;
+
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
-import io.reactivex.Observable;
 import io.reactivex.Single;
+
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -32,6 +37,7 @@ import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 /**
  * A CQL query
@@ -81,24 +87,39 @@ public class QueryMessage extends Message.Request
         this.options = options;
     }
 
-    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(Single<QueryState> state, long queryStartNanoTime)
     {
         try
         {
-            if (state.shouldTraceRequest(isTracingRequested()))
-                setUpTracing(state);
+            final UUID tracingID = setUpTracing();
+            QueryHandler handler = ClientState.getCQLQueryHandler();
 
-            return ClientState.getCQLQueryHandler()
-                              .process(query, state, options, getCustomPayload(), queryStartNanoTime)
-                              .map(response -> {
-                                  if (options.skipMetadata() && response instanceof ResultMessage.Rows)
-                                      ((ResultMessage.Rows) response).result.metadata.setSkipMetadata();
+            return state.flatMap( s ->
+            {
+                checkIsLoggedIn(s);
 
-                                  response.setTracingId(state.getPreparedTracingSession());
+                Single<ResultMessage> resp = Single.defer(() ->
+                {
+                    return handler.process(query, s, options, getCustomPayload(), queryStartNanoTime)
+                                      .map(response -> 
+                                      {
+                                          if (options.skipMetadata() && response instanceof ResultMessage.Rows)
+                                              ((ResultMessage.Rows) response).result.metadata.setSkipMetadata();
 
-                                  return response;
-                              })
-                              .flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
+                                          response.setTracingId(tracingID);
+
+                                          return response;
+                                      })
+                                      .flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
+                });
+
+            // If some Auth data was not in the caches we might be on an IO thread. In which case we need to switch
+            // back to the TPC thread.
+            if (!TPC.isTPCThread())
+                return RxThreads.subscribeOn(resp, TPC.bestTPCScheduler(), TPCTaskType.EXECUTE_STATEMENT);
+
+            return resp;
+        });
 
         }
         catch (Exception e)
@@ -111,9 +132,12 @@ public class QueryMessage extends Message.Request
         }
     }
 
-    private void setUpTracing(QueryState state)
+    private UUID setUpTracing()
     {
-        state.createTracingSession(getCustomPayload());
+        if(!shouldTraceRequest())
+            return null;
+
+        final UUID sessionId = Tracing.instance.newSession(getCustomPayload());
 
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
         builder.put("query", query);
@@ -124,7 +148,8 @@ public class QueryMessage extends Message.Request
         if (options.getSerialConsistency() != null)
             builder.put("serial_consistency_level", options.getSerialConsistency().name());
 
-        Tracing.instance.begin("Execute CQL3 query", state.getClientAddress(), builder.build());
+        Tracing.instance.begin("Execute CQL3 query", getClientAddress(), builder.build());
+        return sessionId;
     }
 
     @Override

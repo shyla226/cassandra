@@ -5551,4 +5551,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         return marked;
     }
+
+    public boolean shouldTraceRequest()
+    {
+        double traceProbability = getTraceProbability();
+        return traceProbability != 0 && ThreadLocalRandom.current().nextDouble() < traceProbability;
+    }
 }

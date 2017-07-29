@@ -4,8 +4,7 @@
 
 package org.apache.cassandra.auth.enums;
 
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
@@ -72,7 +71,33 @@ public class Domains<E extends PartitionedEnum>
 
     private static final char DELIM = '.';
     private final Class<E> type;
-    private final Map<String, Class<? extends Enum>> domains = Maps.newConcurrentMap();
+
+    Collection<Domain> domains()
+    {
+        return domains.values();
+    }
+
+    Domain domain(String domain)
+    {
+        return domains.get(domain);
+    }
+
+    static final class Domain
+    {
+        final int ordinal;
+        final int bitOffset;
+        final Class<? extends Enum> enumType;
+
+        private Domain(int ordinal, int bitOffset, Class<? extends Enum> enumType)
+        {
+            this.ordinal = ordinal;
+            this.bitOffset = bitOffset;
+            this.enumType = enumType;
+        }
+    }
+
+    private volatile Map<String, Domain> domains = new HashMap<>();
+    private int bitOffset;
 
     private Domains(Class<E> type)
     {
@@ -125,10 +150,21 @@ public class Domains<E extends PartitionedEnum>
 
         }
 
-        Class<? extends Enum> existing = domains.putIfAbsent(domain, enumType);
-        if (existing != null)
-            throw new IllegalArgumentException(String.format("Domain %s was already registered for type %s",
-                                                             domain, type.getName()));
+        synchronized (this)
+        {
+            if (domains.containsKey(domain))
+                throw new IllegalArgumentException(String.format("Domain %s was already registered for type %s",
+                                                                 domain, type.getName()));
+
+            Map<String, Domain> domainsUpdate = new HashMap<>(domains);
+
+            D[] enumConstants = enumType.getEnumConstants();
+            Domain d = new Domain(domainsUpdate.size(), bitOffset, enumType);
+            bitOffset += enumConstants.length;
+
+            domainsUpdate.put(domain, d);
+            this.domains = domainsUpdate;
+        }
     }
 
     /**
@@ -138,23 +174,6 @@ public class Domains<E extends PartitionedEnum>
     public Class<E> getType()
     {
         return type;
-    }
-
-    /**
-     * Retrieve a specific enum element given a domain and its ordinal
-     * value in the corresponding enum.
-     * @param domain name of the domain
-     * @param ordinal ordinal value of the target element
-     * @return Enum element
-     */
-    E get(String domain, int ordinal)
-    {
-        Class<? extends Enum> enumType = domains.get(domain);
-        if (enumType == null)
-            throw new IllegalArgumentException(String.format("Unknown domain %s", domain));
-
-        // in the case of an AIOOBE, let it propagate
-        return (E)enumType.getEnumConstants()[ordinal];
     }
 
     /**
@@ -168,11 +187,11 @@ public class Domains<E extends PartitionedEnum>
     {
         domain = domain.toUpperCase(Locale.US);
         name = name.toUpperCase(Locale.US);
-        Class<? extends Enum> enumType = domains.get(domain);
-        if (enumType == null)
+        Domain d = domains.get(domain);
+        if (d == null)
             throw new IllegalArgumentException(String.format("Unknown domain %s", domain));
 
-        return (E)Enum.valueOf(enumType, name);
+        return (E)Enum.valueOf(d.enumType, name);
     }
 
     /**
@@ -195,7 +214,7 @@ public class Domains<E extends PartitionedEnum>
     {
         ImmutableSet.Builder<E> builder = ImmutableSet.builder();
         domains.values()
-               .forEach(enumType -> builder.add((E[]) enumType.getEnumConstants()));
+               .forEach(d -> builder.add((E[]) d.enumType.getEnumConstants()));
         return builder.build();
     }
 

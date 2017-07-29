@@ -64,9 +64,9 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
         return name;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state)
     {
-        state.hasAllKeyspacesAccess(CorePermission.CREATE);
+        state.checkAllKeyspacesPermission(CorePermission.CREATE);
     }
 
     /**
@@ -76,7 +76,7 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
      *
      * @throws InvalidRequestException if arguments are missing or unacceptable
      */
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
         Schema.validateKeyspaceNotSystem(name);
 

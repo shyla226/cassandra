@@ -17,13 +17,12 @@
  */
 package org.apache.cassandra.auth;
 
-import java.util.Set;
+import java.util.*;
+import java.util.Map.Entry;
 
-import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
-public class RolesCache extends AuthCache<RoleResource, Set<RoleResource>> implements RolesCacheMBean
+public class RolesCache extends AuthCache<RoleResource, Role> implements RolesCacheMBean
 {
     public RolesCache(IRoleManager roleManager)
     {
@@ -34,22 +33,71 @@ public class RolesCache extends AuthCache<RoleResource, Set<RoleResource>> imple
               DatabaseDescriptor::getRolesUpdateInterval,
               DatabaseDescriptor::setRolesCacheMaxEntries,
               DatabaseDescriptor::getRolesCacheMaxEntries,
-              (r) -> roleManager.getRoles(r, true),
+              roleManager::getRoleData,
               () -> DatabaseDescriptor.getAuthenticator().requireAuthentication());
     }
 
-    public Set<RoleResource> getRoles(RoleResource role)
+    public Map<RoleResource, Role> getRolesIfPresent(RoleResource primaryRole)
     {
-        // we know CassandraRoleManager.getRoles() will block, so we might as well
-        // prevent the cache from attempting to load missing entries on the TPC threads,
-        // since attempting to load only to get a WouldBlockException from the role manager
-        // would result in the cache logging errors and incrementing error statistics and
-        // there also seems to be a problem somewhere in caffeine in that it will not attempt
-        // to reload after an exception
-        Set<RoleResource> ret = get(role, !TPC.isTPCThread());
-        if (ret == null)
-            throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve resources for %s, would block TPC thread %s",
-                                                                 role, Thread.currentThread().getName()));
-        return ret;
+        Role primary = getIfPresent(primaryRole);
+
+        if (primary == null)
+            return null;
+
+        if (primary.memberOf.isEmpty())
+            return Collections.singletonMap(primaryRole, primary);
+
+        Map<RoleResource, Role> map = new HashMap<>();
+        map.put(primaryRole, primary);
+        return collectRolesIfPresent(primary.memberOf, map);
+    }
+
+    public Map<RoleResource, Role> collectRolesIfPresent(Set<RoleResource> roleResources, Map<RoleResource, Role> map)
+    {
+        if (!roleResources.isEmpty())
+        {
+            Map<RoleResource, Role> roles = getAllPresent(roleResources);
+            if (roles.size() != roleResources.size())
+                return null;
+
+            for (Entry<RoleResource, Role> entry : roles.entrySet())
+            {
+                if (map.put(entry.getKey(), entry.getValue()) == null) // Prevent recursive roles
+                {
+                    map = collectRolesIfPresent(entry.getValue().memberOf, map);
+                    if (map == null)
+                        return null;
+                }
+            }
+        }
+        return map;
+    }
+
+    public Map<RoleResource, Role> getRoles(RoleResource primaryRole)
+    {
+        Role primary = get(primaryRole);
+
+        if (primary.memberOf.isEmpty())
+            return Collections.singletonMap(primaryRole, primary);
+
+        Map<RoleResource, Role> map = new HashMap<>();
+        map.put(primaryRole, primary);
+        return collectRoles(primary.memberOf, map);
+    }
+
+    private Map<RoleResource, Role> collectRoles(Set<RoleResource> roleResources, Map<RoleResource, Role> map)
+    {
+        if (!roleResources.isEmpty())
+        {
+            Map<RoleResource, Role> roles = getAll(roleResources);
+
+            for (Entry<RoleResource, Role> entry : roles.entrySet())
+            {
+                Role role = entry.getValue();
+                if (map.put(entry.getKey(), role) == null) // Prevent recursive roles
+                    collectRoles(role.memberOf, map);
+            }
+        }
+        return map;
     }
 }

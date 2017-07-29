@@ -64,7 +64,8 @@ public enum TPCTaskType
     COUNTER_CACHE_LOAD,
     EVENTLOOP_SPIN,
     EVENTLOOP_YIELD,
-    EVENTLOOP_PARK;
+    EVENTLOOP_PARK,
+    AUTHORIZATION;
 
     public final boolean pendable;
     public final boolean counted;
