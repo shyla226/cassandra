@@ -55,43 +55,32 @@ public class DebuggableScheduledThreadPoolExecutorTest
         final AtomicInteger value = new AtomicInteger(0);
 
         //Normal scheduled task
-        ScheduledFuture future = testPool.schedule(new Runnable()
-        {
-            public void run()
-            {
-                value.incrementAndGet();
-            }
-        }, 1, TimeUnit.SECONDS);
+        ScheduledFuture future = testPool.schedule(value::incrementAndGet, 1, TimeUnit.SECONDS);
 
         future.get();
         assert value.get() == 1;
 
-
         //Shut down before schedule
-        future = testPool.schedule(new Runnable()
-        {
-            public void run()
-            {
-                value.incrementAndGet();
-            }
-        }, 10, TimeUnit.SECONDS);
-
+        future = testPool.schedule(value::incrementAndGet, 10, TimeUnit.SECONDS);
 
         StorageService.instance.drain();
         testPool.shutdown();
 
-        future.get();
-        assert value.get() == 2;
+        try
+        {
+            future.get();
+            Assert.fail("Task should be cancelled");
+        }
+        catch (CancellationException e)
+        {
+            // ok
+        }
 
+        assert future.isCancelled();
+        assert value.get() == 1;
 
         //Now shut down verify task isn't just swallowed
-        future = testPool.schedule(new Runnable()
-        {
-            public void run()
-            {
-                value.incrementAndGet();
-            }
-        }, 1, TimeUnit.SECONDS);
+        future = testPool.schedule(value::incrementAndGet, 1, TimeUnit.SECONDS);
 
 
         try
@@ -101,7 +90,7 @@ public class DebuggableScheduledThreadPoolExecutorTest
         }
         catch (CancellationException e)
         {
-
+            // ok
         }
         catch (TimeoutException e)
         {
@@ -109,6 +98,6 @@ public class DebuggableScheduledThreadPoolExecutorTest
         }
 
         assert future.isCancelled();
-        assert value.get() == 2;
+        assert value.get() == 1;
     }
 }

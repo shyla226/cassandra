@@ -28,7 +28,7 @@ import org.apache.cassandra.schema.TableMetadata;
 
 import static com.datastax.apollo.nodesync.NodeSyncTestTools.*;
 
-class AbstractValidationProposerTest extends CQLTester
+public class AbstractValidationProposerTest extends CQLTester
 {
     static Function<String, Collection<Range<Token>>> TEST_RANGES = k -> Arrays.asList(range(0, 100),
                                                                                        range(200, 300),
