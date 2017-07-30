@@ -589,9 +589,10 @@ class ContinuousPagingTestUtils
             this.cancelAfter = builder.cancelAfter;
             this.failAfter = builder.failAfter;
             this.exception = builder.exception;
-            this.cluster = clusterBuilder(protocolVersion).withClusterName(String.format("Test cluster %d", clusterNo.incrementAndGet()))
-                                                          .withNettyOptions(new CustomNettyOptions(numClientThreads))
-                                                          .build();
+            this.cluster = CQLTester.createClientCluster(protocolVersion,
+                                                         String.format("Test cluster %d", clusterNo.incrementAndGet()),
+                                                         new CustomNettyOptions(numClientThreads),
+                                                         null, null);
             this.session = cluster.connect();
         }
 

@@ -55,6 +55,7 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
         this.ifExists = ifExists;
     }
 
+    @Override
     public void prepareKeyspace(ClientState state) throws InvalidRequestException
     {
         if (!functionName.hasKeyspace() && state.getRawKeyspace() != null)

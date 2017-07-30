@@ -35,8 +35,12 @@ public final class Resources
     static
     {
         // We want these system cfs to be always readable to authenticated users since many tools rely on them
-        // (nodetool, cqlsh, bulkloader, etc.)
-        for (String cf : Arrays.asList(SystemKeyspace.LOCAL, SystemKeyspace.PEERS))
+        // (nodetool, cqlsh, bulkloader, etc.).
+        // Also expose prepared statements and size+range information for drivers.
+        for (String cf : Arrays.asList(SystemKeyspace.LOCAL,
+                                       SystemKeyspace.PEERS,
+                                       SystemKeyspace.SIZE_ESTIMATES,
+                                       SystemKeyspace.AVAILABLE_RANGES))
             READABLE_SYSTEM_RESOURCES.add(DataResource.table(SchemaConstants.SYSTEM_KEYSPACE_NAME, cf));
 
         SchemaKeyspace.ALL.forEach(table -> READABLE_SYSTEM_RESOURCES.add(DataResource.table(SchemaConstants.SCHEMA_KEYSPACE_NAME, table)));
@@ -50,6 +54,11 @@ public final class Resources
         }
 
         DROPPABLE_SYSTEM_TABLES.add(DataResource.table(SchemaConstants.AUTH_KEYSPACE_NAME, "resource_role_permissons_index"));
+    }
+
+    public static void addReadableSystemResource(IResource resource)
+    {
+        READABLE_SYSTEM_RESOURCES.add(resource);
     }
 
     // Responsible for constructing IResource instances from a resource name.

@@ -23,6 +23,7 @@ import io.reactivex.schedulers.Schedulers;
 
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.SystemKeyspacesFilteringRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -49,6 +50,7 @@ public class UseStatement extends ParsedStatement implements CQLStatement
     @Override
     public void checkAccess(QueryState state)
     {
+        SystemKeyspacesFilteringRestrictions.hasMandatoryPermissions(keyspace, state);
     }
 
     public void validate(QueryState state) throws InvalidRequestException

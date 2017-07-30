@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -852,6 +853,7 @@ public class SelectStatement implements CQLStatement
                        getAggregationSpec(QueryOptions.DEFAULT));
     }
 
+    @Override
     public String keyspace()
     {
         return table.keyspace;
@@ -1323,6 +1325,12 @@ public class SelectStatement implements CQLStatement
             this.whereClause = whereClause;
             this.limit = limit;
             this.perPartitionLimit = perPartitionLimit;
+        }
+
+        @Override
+        public void prepareKeyspace(ClientState state) throws InvalidRequestException
+        {
+            super.prepareKeyspace(state);
         }
 
         public ParsedStatement.Prepared prepare() throws InvalidRequestException

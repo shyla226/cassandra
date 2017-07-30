@@ -58,6 +58,7 @@ public class Config
     public volatile int roles_validity_in_ms = 2000;
     public volatile int roles_cache_max_entries = 1000;
     public volatile int roles_update_interval_in_ms = -1;
+    public boolean system_keyspaces_filtering;
 
     // encryption options
     public String system_key_directory;

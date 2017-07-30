@@ -18,10 +18,10 @@
 package org.apache.cassandra.auth;
 
 import java.util.*;
+import java.util.Optional;
 
-import com.google.common.base.Joiner;
+import com.google.common.base.*;
 import com.google.common.base.Objects;
-import com.google.common.base.Splitter;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -171,11 +171,17 @@ public class FunctionResource implements IResource
         if (parts.length == 1)
             return root();
 
+        String ks = parts[1];
+
         if (parts.length == 2)
-            return keyspace(parts[1]);
+            return keyspace(ks);
 
         String[] nameAndArgs = StringUtils.split(parts[2], "[|]");
-        return function(parts[1], nameAndArgs[0], argsListFromString(nameAndArgs[1]));
+        String fName = nameAndArgs[0];
+        List<AbstractType<?>> argTypeList = nameAndArgs.length > 1
+                                            ? argsListFromString(nameAndArgs[1])
+                                            : Collections.emptyList();
+        return function(ks, fName, argTypeList);
     }
 
     /**

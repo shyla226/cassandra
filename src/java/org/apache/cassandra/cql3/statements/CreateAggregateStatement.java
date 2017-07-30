@@ -157,6 +157,7 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         return type;
     }
 
+    @Override
     public void prepareKeyspace(ClientState state) throws InvalidRequestException
     {
         if (!functionName.hasKeyspace() && state.getRawKeyspace() != null)
@@ -172,6 +173,7 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
             finalFunc = new FunctionName(functionName.keyspace, finalFunc.name);
     }
 
+    @Override
     protected void grantPermissionsToCreator(QueryState state)
     {
         try

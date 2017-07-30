@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import java.util.Optional;
+
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -57,6 +59,13 @@ public abstract class CFStatement extends ParsedStatement
     {
         assert cfName.hasKeyspace() : "The statement hasn't be prepared correctly";
         return cfName.getKeyspace();
+    }
+
+    public Optional<String> keyspaceOptional()
+    {
+        if (cfName == null)
+            return Optional.empty();
+        return cfName.hasKeyspace() ? Optional.of(cfName.getKeyspace()) : Optional.empty();
     }
 
     public String columnFamily()

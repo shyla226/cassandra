@@ -1163,6 +1163,11 @@ public class DatabaseDescriptor
         return authManager.getRoleManager();
     }
 
+    public static boolean isSystemKeyspaceFilteringEnabled()
+    {
+        return conf.system_keyspaces_filtering;
+    }
+
     public static int getPermissionsValidity()
     {
         return conf.permissions_validity_in_ms;

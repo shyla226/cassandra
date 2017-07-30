@@ -84,6 +84,11 @@ public class QueryState
         return clientState.getUser();
     }
 
+    public boolean hasUser()
+    {
+        return clientState.hasUser();
+    }
+
     public QueryState cloneWithKeyspaceIfSet(String keyspace)
     {
         ClientState clState = clientState.cloneWithKeyspaceIfSet(keyspace);
