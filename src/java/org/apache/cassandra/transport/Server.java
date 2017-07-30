@@ -27,6 +27,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 
+import io.reactivex.Maybe;
+import io.reactivex.Observable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,11 +37,11 @@ import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 import io.netty.channel.epoll.EpollServerSocketChannel;
-import io.netty.channel.group.ChannelGroup;
-import io.netty.channel.group.DefaultChannelGroup;
+import io.netty.channel.group.*;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.ssl.SslHandler;
+import io.netty.util.AttributeKey;
 import io.netty.util.Version;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.internal.logging.InternalLoggerFactory;
@@ -46,6 +49,7 @@ import io.netty.util.internal.logging.Slf4JLoggerFactory;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
+import org.apache.cassandra.cql3.SystemKeyspacesFilteringRestrictions;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
@@ -62,6 +66,8 @@ public class Server implements CassandraDaemon.Server
     }
 
     private static final Logger logger = LoggerFactory.getLogger(Server.class);
+
+    public static final AttributeKey<ClientState> ATTR_KEY_CLIENT_STATE = AttributeKey.newInstance("clientState");
 
     private final ConnectionTracker connectionTracker = new ConnectionTracker();
 
@@ -255,9 +261,19 @@ public class Server implements CassandraDaemon.Server
             groups.get(type).add(ch);
         }
 
-        public void send(Event event)
+        public void send(Event event, ChannelFilter filter)
         {
-            groups.get(event.type).writeAndFlush(new EventMessage(event));
+            // Optimization if we know that the event must be send to all channels
+            if (ChannelFilter.NOOP_FILTER.equals(filter))
+            {
+                groups.get(event.type).writeAndFlush(new EventMessage(event));
+            }
+            else
+            {
+                Observable.fromIterable(groups.get(event.type))
+                          .flatMapMaybe(filter::accept)
+                          .subscribe(channel -> channel.writeAndFlush(new EventMessage(event)));
+            }
         }
 
         public CompletableFuture closeAll()
@@ -530,12 +546,12 @@ public class Server implements CassandraDaemon.Server
                 event.nodeAddress().equals(FBUtilities.getNativeTransportBroadcastAddress()))
                 return;
 
-            send(event);
+            send(event, ChannelFilter.NOOP_FILTER);
         }
 
-        private void send(Event event)
+        private void send(Event event, ChannelFilter filter)
         {
-            server.connectionTracker.send(event);
+            server.connectionTracker.send(event, filter);
         }
 
         public void onJoinCluster(InetAddress endpoint)
@@ -599,83 +615,139 @@ public class Server implements CassandraDaemon.Server
 
         public void onCreateKeyspace(String ksName)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, ksName));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, ksName));
         }
 
         public void onCreateTable(String ksName, String cfName)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, ksName, cfName));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.CREATED,
+                                                    Event.SchemaChange.Target.TABLE,
+                                                    ksName,
+                                                    cfName));
         }
 
         public void onCreateType(String ksName, String typeName)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TYPE, ksName, typeName));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.CREATED,
+                                                    Event.SchemaChange.Target.TYPE,
+                                                    ksName,
+                                                    typeName));
         }
 
         public void onCreateFunction(String ksName, String functionName, List<AbstractType<?>> argTypes)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.FUNCTION,
-                                        ksName, functionName, AbstractType.asCQLTypeStringList(argTypes)));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.CREATED,
+                                                    Event.SchemaChange.Target.FUNCTION,
+                                                    ksName,
+                                                    functionName,
+                                                    AbstractType.asCQLTypeStringList(argTypes)));
         }
 
         public void onCreateAggregate(String ksName, String aggregateName, List<AbstractType<?>> argTypes)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.AGGREGATE,
-                                        ksName, aggregateName, AbstractType.asCQLTypeStringList(argTypes)));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.CREATED,
+                                                    Event.SchemaChange.Target.AGGREGATE,
+                                                    ksName,
+                                                    aggregateName,
+                                                    AbstractType.asCQLTypeStringList(argTypes)));
         }
 
         public void onAlterKeyspace(String ksName)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, ksName));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, ksName));
         }
 
         public void onAlterTable(String ksName, String cfName, boolean affectsStatements)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, ksName, cfName));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED,
+                                                    Event.SchemaChange.Target.TABLE,
+                                                    ksName,
+                                                    cfName));
         }
 
         public void onAlterType(String ksName, String typeName)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, ksName, typeName));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED,
+                                                    Event.SchemaChange.Target.TYPE,
+                                                    ksName,
+                                                    typeName));
         }
 
         public void onAlterFunction(String ksName, String functionName, List<AbstractType<?>> argTypes)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.FUNCTION,
-                                        ksName, functionName, AbstractType.asCQLTypeStringList(argTypes)));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED,
+                                                    Event.SchemaChange.Target.FUNCTION,
+                                                    ksName,
+                                                    functionName,
+                                                    AbstractType.asCQLTypeStringList(argTypes)));
         }
 
         public void onAlterAggregate(String ksName, String aggregateName, List<AbstractType<?>> argTypes)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.AGGREGATE,
-                                        ksName, aggregateName, AbstractType.asCQLTypeStringList(argTypes)));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED,
+                                                    Event.SchemaChange.Target.AGGREGATE,
+                                                    ksName,
+                                                    aggregateName,
+                                                    AbstractType.asCQLTypeStringList(argTypes)));
         }
 
         public void onDropKeyspace(String ksName)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, ksName));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, ksName));
         }
 
         public void onDropTable(String ksName, String cfName)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, ksName, cfName));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED,
+                                                    Event.SchemaChange.Target.TABLE,
+                                                    ksName,
+                                                    cfName));
         }
 
         public void onDropType(String ksName, String typeName)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TYPE, ksName, typeName));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED,
+                                                    Event.SchemaChange.Target.TYPE,
+                                                    ksName,
+                                                    typeName));
         }
 
         public void onDropFunction(String ksName, String functionName, List<AbstractType<?>> argTypes)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.FUNCTION,
-                                        ksName, functionName, AbstractType.asCQLTypeStringList(argTypes)));
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED,
+                                                    Event.SchemaChange.Target.FUNCTION,
+                                                    ksName,
+                                                    functionName,
+                                                    AbstractType.asCQLTypeStringList(argTypes)));
         }
 
         public void onDropAggregate(String ksName, String aggregateName, List<AbstractType<?>> argTypes)
         {
-            send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.AGGREGATE,
+            sendSchemaChange(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.AGGREGATE,
                                         ksName, aggregateName, AbstractType.asCQLTypeStringList(argTypes)));
         }
+
+        private void sendSchemaChange(Event.SchemaChange event)
+        {
+            send(event, SystemKeyspacesFilteringRestrictions.getChannelFilter(event));
+        }
+    }
+
+    /**
+     * Filter used to control to which channel the events must be sent.
+     */
+    public static interface ChannelFilter
+    {
+        /**
+         * A filter that accept all channels.
+         */
+        public static final ChannelFilter NOOP_FILTER = Maybe::just;
+
+        /**
+         * Checks if an event must be sent on the specified Channel.
+         * @param channel the channel to check
+         * @return a {@code Maybe} that will return the channel if an event sent on that channel.
+         */
+        Maybe<Channel> accept(Channel channel);
     }
 }

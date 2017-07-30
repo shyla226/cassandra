@@ -54,7 +54,8 @@ public class DataResource implements IResource
                                                                                                  CorePermission.DROP,
                                                                                                  CorePermission.SELECT,
                                                                                                  CorePermission.MODIFY,
-                                                                                                 CorePermission.AUTHORIZE);
+                                                                                                 CorePermission.AUTHORIZE,
+                                                                                                 CorePermission.DESCRIBE);
     private static final String ROOT_NAME = "data";
     private static final DataResource ROOT_RESOURCE = new DataResource(Level.ROOT, null, null);
 

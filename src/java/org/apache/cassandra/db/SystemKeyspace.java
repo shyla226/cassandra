@@ -86,8 +86,8 @@ public final class SystemKeyspace
     public static final String BATCHES = "batches";
     public static final String PAXOS = "paxos";
     public static final String BUILT_INDEXES = "IndexInfo";
-    private static final String LOCAL = "local";
-    private static final String PEERS = "peers";
+    public static final String LOCAL = "local";
+    public static final String PEERS = "peers";
     public static final String PEER_EVENTS = "peer_events";
     public static final String RANGE_XFERS = "range_xfers";
     public static final String COMPACTION_HISTORY = "compaction_history";
@@ -420,7 +420,8 @@ public final class SystemKeyspace
      */
     public static List<String> readableSystemResources()
     {
-        return Arrays.asList(SystemKeyspace.LOCAL, SystemKeyspace.PEERS);
+        return Arrays.asList(SystemKeyspace.LOCAL, SystemKeyspace.PEERS,
+                             SystemKeyspace.SIZE_ESTIMATES, SystemKeyspace.AVAILABLE_RANGES);
     }
 
     /**

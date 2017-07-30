@@ -52,6 +52,7 @@ public class ServerConnection extends Connection
         this.clientState = ClientState.forExternalCalls(channel.remoteAddress(), this);
         this.state = State.UNINITIALIZED;
         this.inFlightRequests = new AtomicLong(0L);
+        channel.attr(Server.ATTR_KEY_CLIENT_STATE).set(clientState);
     }
 
     public Single<QueryState> validateNewMessage(Message.Request request, ProtocolVersion version)

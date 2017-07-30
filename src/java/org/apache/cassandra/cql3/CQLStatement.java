@@ -32,6 +32,11 @@ import io.reactivex.Single;
 
 public interface CQLStatement
 {
+    public default String keyspace()
+    {
+        return null;
+    }
+
     /**
      * Returns the number of bound terms in this statement.
      */

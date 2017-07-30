@@ -19,9 +19,6 @@ package org.apache.cassandra.service;
 
 import java.net.InetAddress;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.cql3.functions.Function;
@@ -35,12 +32,10 @@ import org.apache.cassandra.transport.Connection;
  */
 public class QueryState
 {
-    private static final Logger logger = LoggerFactory.getLogger(CassandraRoleManager.class);
-
     private final ClientState clientState;
     private final int streamId;
 
-    private UserRolesAndPermissions userRolesAndPermissions;
+    private final UserRolesAndPermissions userRolesAndPermissions;
 
     private QueryState(QueryState queryState,
                        ClientState clientState,
@@ -84,6 +79,11 @@ public class QueryState
         return clientState.getUser();
     }
 
+    public boolean hasUser()
+    {
+        return clientState.hasUser();
+    }
+
     public QueryState cloneWithKeyspaceIfSet(String keyspace)
     {
         ClientState clState = clientState.cloneWithKeyspaceIfSet(keyspace);
@@ -117,6 +117,15 @@ public class QueryState
     public Connection getConnection()
     {
         return clientState.connection;
+    }
+
+    /**
+     * Checks if this user is an ordinary user (not a super or system user).
+     * @return {@code true} if this user is an ordinary user, {@code flase} otherwise.
+     */
+    public boolean isOrdinaryUser()
+    {
+        return !userRolesAndPermissions.isSuper() && !userRolesAndPermissions.isSystem();
     }
 
     /**
@@ -253,7 +262,7 @@ public class QueryState
     /**
      * Validates that the user has the permission on the function.
      * @param function the function
-     * @param perm the permission
+     * @param permission the permission
      * @throws UnauthorizedException if the user does not have the permission on the function.
      */
     public final void checkFunctionPermission(Function function, Permission permission)
@@ -263,8 +272,8 @@ public class QueryState
 
     /**
      * Validates that the user has the permission on the function.
+     * @param resource the function resource
      * @param perm the permission
-     * @param function the function resource
      * @throws UnauthorizedException if the user does not have the permission on the function.
      */
     public final void checkFunctionPermission(FunctionResource resource, Permission perm)
@@ -289,7 +298,7 @@ public class QueryState
 
     /**
      * Checks if the user has the specified permission on the role resource.
-     * @param resource the resource
+     * @param role the resource
      * @param perm the permission
      * @return {@code true} if the user has the permission on the role resource,
      * {@code false} otherwise.

@@ -72,8 +72,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ViewMetadata;
-import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.*;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.triggers.TriggerExecutor;
@@ -212,6 +211,7 @@ public abstract class ModificationStatement implements CQLStatement
         return boundTerms;
     }
 
+    @Override
     public String keyspace()
     {
         return metadata.keyspace;
@@ -858,6 +858,12 @@ public abstract class ModificationStatement implements CQLStatement
             this.conditions = conditions == null ? Collections.<Pair<ColumnMetadata.Raw, ColumnCondition.Raw>>emptyList() : conditions;
             this.ifNotExists = ifNotExists;
             this.ifExists = ifExists;
+        }
+
+        @Override
+        public void prepareKeyspace(ClientState state) throws InvalidRequestException
+        {
+            super.prepareKeyspace(state);
         }
 
         public ParsedStatement.Prepared prepare()

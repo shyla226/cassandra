@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.auth;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -28,6 +31,8 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public final class AuthConfig
 {
+    private static final Logger logger = LoggerFactory.getLogger(AuthConfig.class);
+
     private static boolean initialized;
 
     public static void applyAuth()
@@ -87,5 +92,25 @@ public final class AuthConfig
                                              "configurations so they are compatible.");
 
         DatabaseDescriptor.setAuthManager(new AuthManager(roleManager, authorizer));
+
+        if (DatabaseDescriptor.isSystemKeyspaceFilteringEnabled())
+        {
+            if (!DatabaseDescriptor.getAuthorizer().requireAuthorization())
+            {
+                logger.error("In order to use system keyspace filtering, an authorizer that requires authorization must be configured.");
+                throw new ConfigurationException("In order to use system keyspace filtering, an authorizer that requires authorization must be configured.");
+            }
+            if (!DatabaseDescriptor.getAuthenticator().requireAuthentication())
+            {
+                logger.error("In order to use system keyspace filtering, an authenticator that requires authentication must be configured.");
+                throw new ConfigurationException("In order to use system keyspace filtering, an authenticator that requires authentication must be configured.");
+            }
+
+            logger.info("System keyspaces filtering enabled.");
+        }
+        else
+        {
+            logger.info("System keyspaces filtering not enabled.");
+        }
     }
 }
