@@ -29,12 +29,8 @@ import org.apache.cassandra.utils.Throwables;
 /**
  * Merges sorted input flows which individually contain unique items.
  */
-public class Merge<In, Out> extends Flow<Out>
+public class Merge
 {
-    protected final Reducer<In,Out> reducer;
-    protected final List<? extends Flow<In>> iterators;
-    protected final Comparator<? super In> comparator;
-
     public static <In, Out> Flow<Out> get(
                                            List<? extends Flow<In>> sources,
                                            Comparator<? super In> comparator,
@@ -54,24 +50,7 @@ public class Merge<In, Out> extends Flow<Out>
             Flow<Out> converted = (Flow<Out>) sources.get(0);
             return converted;
         }
-        return new Merge<>(sources, comparator, reducer);
-    }
-
-    public Merge(List<? extends Flow<In>> iters,
-                 Comparator<? super In> comparator,
-                 Reducer<In, Out> reducer)
-    {
-        this.iterators = iters;
-        this.reducer = reducer;
-        this.comparator = comparator;
-    }
-
-    @Override
-    public FlowSubscription subscribe(FlowSubscriber<Out> subscriber) throws Exception
-    {
-        ManyToOne<In, Out> merger = new ManyToOne<>(subscriber, reducer);
-        merger.subscribe(iterators, comparator);
-        return merger;
+        return new ManyToOne<>(reducer, sources, comparator);
     }
 
     /**
@@ -123,7 +102,7 @@ public class Merge<In, Out> extends Flow<Out>
     // the candidates are stashed back onto the heap and closed when close() is called,
     // Eclipse Warnings cannot work it out and complains in several places
     @SuppressWarnings("resource")
-    static final class ManyToOne<In, Out> extends RequestLoop implements FlowSubscription
+    static final class ManyToOne<In, Out> extends Flow.RequestLoopFlow<Out> implements FlowSubscription
     {
         protected Candidate<In>[] heap;
         private final Reducer<In, Out> reducer;
@@ -146,25 +125,29 @@ public class Merge<In, Out> extends Flow<Out>
          */
         static final int SORTED_SECTION_SIZE = 4;
 
-        public ManyToOne(FlowSubscriber<Out> subscriber, Reducer<In, Out> reducer)
+        public ManyToOne(Reducer<In, Out> reducer, List<? extends Flow<In>> iterators, Comparator<? super In> comparator)
         {
-            this.subscriber = subscriber;
             this.reducer = reducer;
-        }
 
-        void subscribe(List<? extends Flow<In>> iters, Comparator<? super In> comp) throws Exception
-        {
             @SuppressWarnings("unchecked")
-            Candidate<In>[] heap = new Candidate[iters.size()];
+            Candidate<In>[] heap = new Candidate[iterators.size()];
             this.heap = heap;
             size = 0;
 
-            for (int i = 0; i < iters.size(); i++)
+            for (int i = 0; i < iterators.size(); i++)
             {
-                Candidate<In> candidate = new Candidate<In>(this, i, iters.get(i), comp);
+                Candidate<In> candidate = new Candidate<In>(this, i, iterators.get(i), comparator);
                 heap[size++] = candidate;
             }
             needingAdvance = size;
+
+        }
+
+        public FlowSubscription subscribe(FlowSubscriber<Out> subscriber)
+        {
+            assert this.subscriber == null : "Flow are single-use.";
+            this.subscriber = subscriber;
+            return this;
         }
 
         @Override
@@ -448,11 +431,11 @@ public class Merge<In, Out> extends Flow<Out>
             PROCESSED
             // eventually SMALLER_SIBLING, EQUAL_PARENT (imply PROCESSED)
         };
-        private AtomicReference<State> state = new AtomicReference<>(State.NEEDS_REQUEST);
+        private final AtomicReference<State> state = new AtomicReference<>(State.NEEDS_REQUEST);
 
         boolean equalParent;
 
-        public Candidate(final ManyToOne<In, ?> merger, int idx, Flow<In> iter, Comparator<? super In> comp) throws Exception
+        public Candidate(final ManyToOne<In, ?> merger, int idx, Flow<In> iter, Comparator<? super In> comp)
         {
             this.merger = merger;
             this.comp = comp;

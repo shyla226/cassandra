@@ -35,52 +35,49 @@ public interface GroupOp<I, O>
     /**
      * Should return true if l and r are to be grouped together.
      */
-    boolean inSameGroup(I l, I r);
+    boolean inSameGroup(I l, I r) throws Exception;
 
     /**
      * Transform the group. May return null, meaning skip.
      */
-    O map(List<I> inputs);
+    O map(List<I> inputs) throws Exception;
 
     public static <I, O> Flow<O> group(Flow<I> source, GroupOp<I, O> op)
     {
-        class GroupFlow extends Flow<O>
-        {
-            public FlowSubscription subscribe(FlowSubscriber<O> subscriber) throws Exception
-            {
-                return new Subscription<>(subscriber, op, source);
-            }
-        }
-        return new GroupFlow();
+        return new GroupFlow<>(op, source);
     }
 
-    static class Subscription<I, O> extends Flow.RequestLoop
-    implements FlowSubscriber<I>, FlowSubscription
+    static class GroupFlow<I, O> extends FlowTransform<I, O>
     {
-        final FlowSubscriber<O> subscriber;
         final GroupOp<I, O> mapper;
-        final FlowSubscription source;
         volatile boolean completeOnNextRequest;
         I first;
         List<I> entries;
 
-        public Subscription(FlowSubscriber<O> subscriber, GroupOp<I, O> mapper, Flow<I> source) throws Exception
+        public GroupFlow(GroupOp<I, O> mapper, Flow<I> source)
         {
-            this.subscriber = subscriber;
+            super(source);
             this.mapper = mapper;
-            this.source = source.subscribe(this);
         }
 
         public void onNext(I entry)
         {
             O out = null;
-            if (first == null || !mapper.inSameGroup(first, entry))
+            try
             {
-                if (first != null)
-                    out = mapper.map(entries);
+                if (first == null || !mapper.inSameGroup(first, entry))
+                {
+                    if (first != null)
+                        out = mapper.map(entries);
 
-                entries = new ArrayList<>();
-                first = entry;
+                    entries = new ArrayList<>();
+                    first = entry;
+                }
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
             }
 
             entries.add(entry);
@@ -90,20 +87,22 @@ public interface GroupOp<I, O>
                 requestInLoop(this);
         }
 
-        public void onError(Throwable throwable)
-        {
-            subscriber.onError(throwable);
-        }
-
         public void onComplete()
         {
             O out = null;
 
-            if (first != null)
+            try
             {
-                out = mapper.map(entries);
-                first = null;   // don't hold on to references
-                entries = null;
+                if (first != null)
+                {
+                    out = mapper.map(entries);
+                    first = null;   // don't hold on to references
+                    entries = null;
+                }
+            } catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
             }
 
             if (out != null)
@@ -121,16 +120,6 @@ public interface GroupOp<I, O>
                 source.request();
             else
                 subscriber.onComplete();
-        }
-
-        public void close() throws Exception
-        {
-            source.close();
-        }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return source.addSubscriberChainFromSource(throwable);
         }
 
         public String toString()

@@ -19,6 +19,7 @@ package org.apache.cassandra.db.rows;
 
 import com.google.common.base.Throwables;
 
+import io.reactivex.functions.Function;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RegularAndStaticColumns;
@@ -83,7 +84,7 @@ public abstract class FlowablePartitionBase<T> implements PartitionTrait
      *
      * @return a new identical partition with the content mapped
      */
-    public abstract FlowablePartitionBase<T> mapContent(Flow.MappingOp<T, T> mappingOp);
+    public abstract FlowablePartitionBase<T> mapContent(Function<T, T> mappingOp);
 
     /**
      * Only to be called on requested but unused partitions (e.g. when aborting).

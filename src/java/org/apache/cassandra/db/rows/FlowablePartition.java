@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.rows;
 
+import io.reactivex.functions.Function;
 import org.apache.cassandra.utils.flow.Flow;
 
 /**
@@ -53,7 +54,7 @@ public class FlowablePartition extends FlowablePartitionBase<Row>
     }
 
     @Override
-    public FlowablePartition mapContent(Flow.MappingOp<Row, Row> mappingOp)
+    public FlowablePartition mapContent(Function<Row, Row> mappingOp)
     {
         return withContent(content.map(mappingOp));
     }

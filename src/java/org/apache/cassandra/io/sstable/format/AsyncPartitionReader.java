@@ -37,6 +37,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.Rebufferer.NotInCacheException;
 import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSource;
 import org.apache.cassandra.utils.flow.FlowSubscriber;
 import org.apache.cassandra.utils.flow.FlowSubscription;
 
@@ -59,7 +60,7 @@ import org.apache.cassandra.utils.flow.FlowSubscription;
  *
  * We only need to track if we are waiting for data since we need to reset the reader state in that case.
  */
-class AsyncPartitionReader extends Flow<FlowableUnfilteredPartition>
+class AsyncPartitionReader
 {
     private static final Logger logger = LoggerFactory.getLogger(AsyncPartitionReader.class);
 
@@ -96,28 +97,21 @@ class AsyncPartitionReader extends Flow<FlowableUnfilteredPartition>
      */
     public static Flow<FlowableUnfilteredPartition> create(SSTableReader table, SSTableReadsListener listener, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse)
     {
-        return new AsyncPartitionReader(table, listener, key, slices, selectedColumns, reverse);
+        return new AsyncPartitionReader(table, listener, key, slices, selectedColumns, reverse).partitions();
     }
 
-    public FlowSubscription subscribe(FlowSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
+    public Flow<FlowableUnfilteredPartition> partitions()
     {
         assert indexEntry == null;
-        return new PartitionReader(subscriber);
+        return new PartitionReader();
     }
 
-    abstract class Base<T> implements FlowSubscription
+    abstract class Base<T> extends FlowSource<T>
     {
-        FlowSubscriber<T> subscriber;
-
         //Force all disk callbacks through the same thread
         private final TPCScheduler onReadyExecutor = TPC.bestTPCScheduler();
 
         abstract void performRead(boolean isRetry) throws Exception;
-
-        Base(FlowSubscriber<T> s)
-        {
-            this.subscriber = s;
-        }
 
         private void readWithRetry(boolean isRetry)
         {
@@ -151,21 +145,11 @@ class AsyncPartitionReader extends Flow<FlowableUnfilteredPartition>
         {
             readWithRetry(false);
         }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return Flow.wrapException(throwable, this);
-        }
     }
 
     class PartitionReader extends Base<FlowableUnfilteredPartition>
     {
         boolean issued = false;
-
-        PartitionReader(FlowSubscriber<FlowableUnfilteredPartition> subscriber)
-        {
-            super(subscriber);
-        }
 
         /**
          * This method must be async-read-safe.
@@ -209,13 +193,7 @@ class AsyncPartitionReader extends Flow<FlowableUnfilteredPartition>
                                                          ssTableIterator.isReverseOrder(),
                                                          ssTableIterator.stats());
 
-            Flow<Unfiltered> content = new Flow<Unfiltered>()
-            {
-                public FlowSubscription subscribe(FlowSubscriber<Unfiltered> subscriber) throws Exception
-                {
-                    return new PartitionSubscription(subscriber);
-                }
-            };
+            Flow<Unfiltered> content = new PartitionSubscription();
             issued = true;
             subscriber.onNext(new FlowableUnfilteredPartition(header, ssTableIterator.staticRow(), content));
         }
@@ -249,11 +227,6 @@ class AsyncPartitionReader extends Flow<FlowableUnfilteredPartition>
         //Used to track the work done iterating (hasNext vs next)
         //Since we could have an async break in either place
         volatile boolean needsHasNextCheck = true;
-
-        PartitionSubscription(FlowSubscriber<Unfiltered> s)
-        {
-            super(s);
-        }
 
         /**
          * This method must be async-read-safe.

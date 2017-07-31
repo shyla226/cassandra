@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.monitoring;
 
+import io.reactivex.functions.Function;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Unfiltered;
@@ -234,7 +235,7 @@ public class Monitor
 
     public Flow<FlowableUnfilteredPartition> withMonitoring(Flow<FlowableUnfilteredPartition> partitions)
     {
-        Flow.MappingOp<Unfiltered, Unfiltered> checkForAbort = unfiltered ->
+        Function<Unfiltered, Unfiltered> checkForAbort = unfiltered ->
         {
             if (isTesting()) // delay for testing
                 FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);

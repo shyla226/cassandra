@@ -103,7 +103,7 @@ public class TPC
         }
     };
 
-    private final static TPCMetrics[] perCoreMetrics = new TPCMetrics[NUM_CORES + 1];
+    public final static TPCMetrics[] perCoreMetrics = new TPCMetrics[NUM_CORES + 1];
 
     // Initialization
     static

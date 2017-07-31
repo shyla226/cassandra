@@ -23,8 +23,6 @@ import java.util.function.Supplier;
 
 import org.apache.cassandra.utils.Throwables;
 
-import static org.apache.cassandra.utils.flow.Flow.formatTrace;
-
 /**
  * Implementation of methods relating to the concatenation of flows.
  */
@@ -52,26 +50,26 @@ class Concat
         // be a little be lighter than having to create an iterable and a subsequent flat-map. It also
         // helps a bit in reading stack traces in JFR or flame graphs, since flatMap is used ubiquitously.
 
-        return new Flow<T>()
-        {
-            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
-            {
-                return new ConcatWithSubscription<>(source, supplier, subscriber);
-            }
-        };
+        return new ConcatWithFlow<>(source, supplier);
     }
 
-    private static class ConcatWithSubscription<T> extends Flow.RequestLoop implements FlowSubscription, FlowSubscriber<T>
+    private static class ConcatWithFlow<T> extends Flow.RequestLoopFlow<T> implements FlowSubscription, FlowSubscriber<T>
     {
         private final Supplier<Flow<T>> supplier;
-        private final FlowSubscriber<T> subscriber;
+        private FlowSubscriber<T> subscriber;
         private FlowSubscription subscription;
 
-        ConcatWithSubscription(Flow<T> source, Supplier<Flow<T>> supplier, FlowSubscriber<T> subscriber) throws Exception
+        ConcatWithFlow(Flow<T> source, Supplier<Flow<T>> supplier)
         {
             this.supplier = supplier;
-            this.subscriber = subscriber;
             this.subscription = source.subscribe(this);
+        }
+
+        public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
+        {
+            assert this.subscriber == null : "Flow are single-use.";
+            this.subscriber = subscriber;
+            return this;
         }
 
         public void request()

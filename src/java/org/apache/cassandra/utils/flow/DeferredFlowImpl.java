@@ -79,7 +79,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
         this.timeoutSupplier = timeoutSupplier;
     }
 
-    public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
+    public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
     {
         assert this.subscriber == null : "Only one subscriber is supported";
         this.subscriber = subscriber;

@@ -256,7 +256,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
             return new Flow<Row>()
             {
-                public FlowSubscription subscribe(FlowSubscriber<Row> subscriber) throws Exception
+                public FlowSubscription subscribe(FlowSubscriber<Row> subscriber)
                 {
                    return new Subscription(subscriber);
                 }

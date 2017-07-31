@@ -33,6 +33,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSource;
 import org.apache.cassandra.utils.flow.FlowSubscriber;
 import org.apache.cassandra.utils.flow.FlowSubscription;
 
@@ -166,6 +167,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         };
     }
 
+    @SuppressWarnings("resource")   // flow will be closed with partition.
     public FlowableUnfilteredPartition getFlowableUnfilteredPartition(ColumnFilter columnFilter, Partition partition)
     {
         final SearchIterator<Clustering, Row> searcher = partition.searchIterator(columnFilter, reversed);
@@ -176,37 +178,27 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
                                                                    reversed,
                                                                    partition.stats()),
                                                searcher.next(Clustering.STATIC_CLUSTERING),
-                                               new Flow<Unfiltered>() {
+                                               new FlowSource<Unfiltered>() {
                                                    final Iterator<Clustering> clusteringIter = clusteringsInQueryOrder.iterator();
-                                                   public FlowSubscription subscribe(FlowSubscriber<Unfiltered> subscriber) throws Exception
+
+                                                   public void request()
                                                    {
-                                                       return new FlowSubscription()
+                                                       while (clusteringIter.hasNext())
                                                        {
-                                                           public void request()
+                                                           Row row = searcher.next(clusteringIter.next());
+                                                           if (row != null)
                                                            {
-                                                               while (clusteringIter.hasNext())
-                                                               {
-                                                                   Row row = searcher.next(clusteringIter.next());
-                                                                   if (row != null)
-                                                                   {
-                                                                       subscriber.onNext(row);
-                                                                       return;
-                                                                   }
-                                                               }
-
-                                                               subscriber.onComplete();
+                                                               subscriber.onNext(row);
+                                                               return;
                                                            }
+                                                       }
 
-                                                           public void close() throws Exception
-                                                           {
+                                                       subscriber.onComplete();
+                                                   }
 
-                                                           }
+                                                   public void close() throws Exception
+                                                   {
 
-                                                           public Throwable addSubscriberChainFromSource(Throwable throwable)
-                                                           {
-                                                               return Flow.wrapException(throwable, this);
-                                                           }
-                                                       };
                                                    }
                                                });
     }

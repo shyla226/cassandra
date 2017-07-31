@@ -861,54 +861,42 @@ public class MergeTest
         assertFalse(failed);
     }
 
-    class BadFlow extends Flow<String>
+    class BadFlow extends FlowSource<String>
     {
         Object[] inputs;
+        int pos = 0;
 
         public BadFlow(Object... inputs)
         {
             this.inputs = inputs;
         }
 
-
-        public FlowSubscription subscribe(FlowSubscriber<String> subscriber) throws Exception
+        public void request()
         {
-            return new FlowSubscription()
-            {
-                int pos = 0;
-                public void request()
-                {
-                    Object o = inputs[pos++];
-                    process(o);
-                }
+            Object o = inputs[pos++];
+            process(o);
+        }
 
-                public void close() throws Exception
-                {
-                }
+        public void close() throws Exception
+        {
+        }
 
-                public Throwable addSubscriberChainFromSource(Throwable throwable)
-                {
-                    return Flow.wrapException(throwable, this);
-                }
+        public String toString()
+        {
+            return Flow.formatTrace("BadFlow " + Arrays.toString(inputs), subscriber);
+        }
 
-                public String toString()
-                {
-                    return "\tBadFlow " + Arrays.toString(inputs) + "\n" + subscriber;
-                }
-
-                private void process(Object o)
-                {
-                    if (o instanceof String)
-                        subscriber.onNext((String) o);
-                    else if (o instanceof Throwable)
-                        subscriber.onError((Throwable) o);
-                    else if (o == null)
-                        subscriber.onComplete();
-                    else
-                        for (Object oo : (Object[]) o)
-                            process(oo);
-                }
-            };
+        private void process(Object o)
+        {
+            if (o instanceof String)
+                subscriber.onNext((String) o);
+            else if (o instanceof Throwable)
+                subscriber.onError((Throwable) o);
+            else if (o == null)
+                subscriber.onComplete();
+            else
+                for (Object oo : (Object[]) o)
+                    process(oo);
         }
     }
 

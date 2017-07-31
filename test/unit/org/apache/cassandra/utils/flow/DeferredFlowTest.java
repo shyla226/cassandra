@@ -76,10 +76,10 @@ public class DeferredFlowTest
     {
         final int attempts = 100;
         final int size = 100000;
-        final Flow<Integer> source = Flow.fromIterable(() -> IntStream.range(0, size).iterator());
 
         for (int i = 0; i < attempts; i++)
         {
+            final Flow<Integer> source = Flow.fromIterable(() -> IntStream.range(0, size).iterator());
             final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1));
 
             CyclicBarrier semaphore = new CyclicBarrier(2);
@@ -125,10 +125,10 @@ public class DeferredFlowTest
     {
         final int attempts = 100;
         final int size = 100000;
-        final Flow<Integer> source = Flow.fromIterable(() -> IntStream.range(0, size).iterator());
 
         for (int i = 0; i < attempts; i++)
         {
+            final Flow<Integer> source = Flow.fromIterable(() -> IntStream.range(0, size).iterator());
             final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1));
 
             CyclicBarrier semaphore = new CyclicBarrier(2);

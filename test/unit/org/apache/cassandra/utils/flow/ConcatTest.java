@@ -44,9 +44,14 @@ public class ConcatTest
         long res = Flow.concat(flow1, flow2, flow3).countBlocking();
         assertEquals(30, res);
 
+        // Reset flows.
+        flow1 = Flow.fromIterable(() -> IntStream.range(0, 10).iterator());
+        Flow<Integer> flow4 = Flow.fromIterable(() -> IntStream.range(10, 20).iterator());
+        Flow<Integer> flow5 = Flow.fromIterable(() -> IntStream.range(20, 30).iterator());
+
         class MoreContents implements Supplier<Flow<Integer>>
         {
-            List<Flow<Integer>> flows = new ArrayList<>(Arrays.asList(flow2, flow3));
+            List<Flow<Integer>> flows = new ArrayList<>(Arrays.asList(flow4, flow5));
 
             public Flow<Integer> get()
             {
@@ -70,6 +75,7 @@ public class ConcatTest
         assertTrue(completed.get());
 
         completed.set(false);
+        flow1 = Flow.fromIterable(() -> IntStream.range(0, 10).iterator());
         res = Flow.concat(flow1, completable).countBlocking();
         assertEquals(10, res);
         assertTrue(completed.get());

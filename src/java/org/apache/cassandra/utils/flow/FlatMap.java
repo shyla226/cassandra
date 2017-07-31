@@ -27,24 +27,17 @@ import org.apache.cassandra.utils.Throwables;
  * This is done in depth-first fashion, i.e. one item is requested from the flow, and the result of the conversion
  * is issued to the downstream subscriber completely before requesting the next item.
  */
-public class FlatMap<I, O> extends Flow.RequestLoop implements FlowSubscription, FlowSubscriber<I>
+public class FlatMap<I, O> extends Flow.RequestLoopFlow<O> implements FlowSubscription, FlowSubscriber<I>
 {
     public static <I, O> Flow<O> flatMap(Flow<I> source, FlatMapper<I, O> op)
     {
-        class FlatMapFlow extends Flow<O>
-        {
-            public FlowSubscription subscribe(FlowSubscriber<O> subscriber) throws Exception
-            {
-                return new FlatMap<I, O>(subscriber, op, source);
-            }
-        }
-        return new FlatMapFlow();
+        return new FlatMap(op, source);
     }
 
     /**
      * The downstream subscriber which will receive the flow using the onXXXX() methods.
      */
-    private final FlowSubscriber<O> subscriber;
+    private FlowSubscriber<O> subscriber;
 
 
     /**
@@ -60,13 +53,19 @@ public class FlatMap<I, O> extends Flow.RequestLoop implements FlowSubscription,
     /**
      * If an item is active, this holds our subscription to the resulting flow.
      */
-    volatile FlatMapChild current;
+    private volatile FlatMapChild current;
 
-    FlatMap(FlowSubscriber<O> subscriber, FlatMapper<I, O> mapper, Flow<I> source) throws Exception
+    FlatMap(FlatMapper<I, O> mapper, Flow<I> source)
     {
-        this.subscriber = subscriber;
         this.mapper = mapper;
         this.source = source.subscribe(this);
+    }
+
+    public FlowSubscription subscribe(FlowSubscriber<O> subscriber)
+    {
+        assert this.subscriber == null : "Flow are single-use.";
+        this.subscriber = subscriber;
+        return this;
     }
 
     public void request()

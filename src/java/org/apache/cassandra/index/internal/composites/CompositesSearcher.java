@@ -44,6 +44,7 @@ import org.apache.cassandra.index.internal.IndexEntry;
 import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowTransformNext;
 import org.apache.cassandra.utils.flow.GroupOp;
 
 
@@ -134,23 +135,46 @@ public class CompositesSearcher extends CassandraIndexSearcher
         }
 
         ClusteringComparator comparator = dataIter.header.metadata.comparator;
-        class Transform implements Flow.SkippingOp<Unfiltered, Unfiltered>
+        class Transform extends FlowTransformNext<Unfiltered, Unfiltered>
         {
             private int entriesIdx;
 
-            @Override
-            public Unfiltered apply(Unfiltered unfiltered)
+            public Transform(Flow<Unfiltered> source)
+            {
+                super(source);
+            }
+
+            public void onNext(Unfiltered next)
+            {
+                boolean pass;
+                try
+                {
+                    pass = test(next);
+                }
+                catch (Throwable t)
+                {
+                    subscriber.onError(t);
+                    return;
+                }
+
+                if (pass)
+                    subscriber.onNext(next);
+                else
+                    requestInLoop(source);
+            }
+
+            public boolean test(Unfiltered unfiltered)
             {
                 if (!unfiltered.isRow())
-                    return unfiltered;
+                    return true;
 
                 Row row = (Row) unfiltered;
                 IndexEntry entry = findEntry(row.clustering());
                 if (!index.isStale(row, indexValue, nowInSec))
-                    return row;
+                    return true;
 
                 staleEntries.add(entry);
-                return null;
+                return false;
             }
 
             private IndexEntry findEntry(Clustering clustering)
@@ -176,15 +200,17 @@ public class CompositesSearcher extends CassandraIndexSearcher
                 throw new AssertionError();
             }
 
-            public void close()
+            @Override
+            public void onComplete()
             {
+                super.onComplete();
                 //This is purely a optimization
                 // if it fails we don't really care
                 deleteAllEntries(staleEntries, writeOp, nowInSec).subscribe();
             }
         }
 
-        Flow<Unfiltered> content = dataIter.content.skippingMap(new Transform());
+        Flow<Unfiltered> content = new Transform(dataIter.content);
         return new FlowableUnfilteredPartition(dataIter.header,
                                                dataIter.staticRow,
                                                content);

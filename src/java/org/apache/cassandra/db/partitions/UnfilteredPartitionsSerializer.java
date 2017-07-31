@@ -30,6 +30,7 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSource;
 import org.apache.cassandra.utils.flow.FlowSubscriber;
 import org.apache.cassandra.utils.flow.FlowSubscription;
 import org.apache.cassandra.utils.versioning.VersionDependent;
@@ -83,31 +84,29 @@ public class UnfilteredPartitionsSerializer
                                   });
         }
 
-        private class DeserializePartitionsSubscription implements FlowSubscription
+        private class DeserializePartitionsFlow extends FlowSource<FlowableUnfilteredPartition>
         {
             private final DataInputBuffer in;
             private final TableMetadata metadata;
             private final ColumnFilter selection;
             private final SerializationHelper.Flag flag;
-            private final FlowSubscriber<FlowableUnfilteredPartition> subscriber;
 
             private volatile FlowableUnfilteredPartition current;
 
 
-            private DeserializePartitionsSubscription(ByteBuffer buffer,
-                                                      TableMetadata metadata,
-                                                      ColumnFilter selection,
-                                                      SerializationHelper.Flag flag,
-                                                      FlowSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
+            private DeserializePartitionsFlow(ByteBuffer buffer,
+                                              TableMetadata metadata,
+                                              ColumnFilter selection,
+                                              SerializationHelper.Flag flag)
             {
-                this.in = new DataInputBuffer(buffer, true);
+                // Skip now unused isForThrift boolean
+                ByteBuffer buf = buffer.duplicate();
+                buf.get();
+
+                this.in = new DataInputBuffer(buf, false);
                 this.metadata = metadata;
                 this.selection = selection;
                 this.flag = flag;
-                this.subscriber = subscriber;
-
-                // Skip now unused isForThrift boolean
-                in.readBoolean();
             }
 
             public void request()
@@ -141,11 +140,6 @@ public class UnfilteredPartitionsSerializer
                 in.close();
             }
 
-            public Throwable addSubscriberChainFromSource(Throwable throwable)
-            {
-                return Flow.wrapException(throwable, this);
-            }
-
             @Override
             public String toString()
             {
@@ -158,13 +152,7 @@ public class UnfilteredPartitionsSerializer
                                                              final ColumnFilter selection,
                                                              final SerializationHelper.Flag flag)
         {
-            return new Flow<FlowableUnfilteredPartition>()
-            {
-                public FlowSubscription subscribe(FlowSubscriber subscriber) throws Exception
-                {
-                    return new DeserializePartitionsSubscription(buffer, metadata, selection, flag, subscriber);
-                }
-            };
+            return new DeserializePartitionsFlow(buffer, metadata, selection, flag);
         }
     }
 }

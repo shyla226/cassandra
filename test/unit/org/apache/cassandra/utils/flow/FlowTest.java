@@ -27,6 +27,7 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.reactivex.functions.Function;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.LineNumberInference;
 import org.apache.cassandra.utils.Pair;
@@ -42,10 +43,10 @@ public class FlowTest
         DatabaseDescriptor.daemonInitialization();
     }
 
-    Flow.MappingOp<Integer, Integer> inc = (i) -> i + 1;
-    Flow.MappingOp<Integer, Integer> multiplyByTwo = (i) -> i * 2;
-    Flow.MappingOp<Integer, Integer> multiplyByThree = (i) -> i * 3;
-    Flow.MappingOp<Integer, Integer> divideByZero = (i) -> i / 0;
+    Function<Integer, Integer> inc = (i) -> i + 1;
+    Function<Integer, Integer> multiplyByTwo = (i) -> i * 2;
+    Function<Integer, Integer> multiplyByThree = (i) -> i * 3;
+    Function<Integer, Integer> divideByZero = (i) -> i / 0;
     Flow.ReduceFunction<Integer, Integer> reduceToSum = (l, r) -> l + r;
 
     @Test
@@ -83,44 +84,6 @@ public class FlowTest
         {
             assertStacktraceMessage(e.getCause().getSuppressed()[0].getMessage(),
                                     new Object[]{ inc, multiplyByTwo, divideByZero, reduceToSum });
-        }
-    }
-
-    @Test
-    public void divergingTopologiesErrorHandlingTest() throws Exception
-    {
-        // Test that diverging topologies do not pollute the stack
-        Flow<Integer> intFlow = Flow.fromIterable(Arrays.asList(1, 2, 3, 4, 5))
-                                    .map(inc);
-
-        Flow<Integer> intFlow2 =  intFlow.map(multiplyByTwo)
-                                         .map(divideByZero);
-
-        Flow<Integer> intFlow3 =  intFlow.map(multiplyByThree)
-                                         .map(divideByZero);
-
-        try
-        {
-            intFlow2.reduceBlocking(0, reduceToSum);
-            fail("Failing operation should have resulted into the topology failure");
-        }
-        catch (Exception e)
-        {
-            String msg = e.getSuppressed()[0].getMessage();
-            assertStacktraceMessage(msg, new Object[]{ inc, multiplyByTwo, divideByZero, reduceToSum});
-            Assert.assertFalse(msg.contains(multiplyByThree.toString()));
-        }
-
-        try
-        {
-            intFlow3.reduceBlocking(0, reduceToSum);
-            fail("Failing operation should have resulted into the topology failure");
-        }
-        catch (Exception e)
-        {
-            String msg = e.getSuppressed()[0].getMessage();
-            assertStacktraceMessage(msg, new Object[]{ inc, multiplyByThree, divideByZero, reduceToSum });
-            Assert.assertFalse(msg.contains(multiplyByTwo.toString()));
         }
     }
 

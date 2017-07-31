@@ -32,6 +32,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSource;
 import org.apache.cassandra.utils.flow.FlowSubscriber;
 import org.apache.cassandra.utils.flow.FlowSubscription;
 import org.apache.cassandra.utils.versioning.Versioned;
@@ -176,38 +177,28 @@ public abstract class ReadResponse
 
         public Flow<FlowableUnfilteredPartition> data(ReadCommand command)
         {
-            return new Flow<FlowableUnfilteredPartition>()
+            return new FlowSource<FlowableUnfilteredPartition>()
             {
                 private int idx = 0;
-                public FlowSubscription subscribe(FlowSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
+
+                public void request()
                 {
-                    return new FlowSubscription()
-                    {
-                        public void request()
-                        {
-                            if (idx < partitions.size())
-                                subscriber.onNext(partitions.get(idx++).unfilteredPartition(command.columnFilter(),
-                                                                                            Slices.ALL,
-                                                                                            command.isReversed()));
-                            else
-                                subscriber.onComplete();
-                        }
+                    if (idx < partitions.size())
+                        subscriber.onNext(partitions.get(idx++).unfilteredPartition(command.columnFilter(),
+                                                                                    Slices.ALL,
+                                                                                    command.isReversed()));
+                    else
+                        subscriber.onComplete();
+                }
 
-                        public void close() throws Exception
-                        {
-                            // no op
-                        }
+                public void close() throws Exception
+                {
+                    // no op
+                }
 
-                        public Throwable addSubscriberChainFromSource(Throwable throwable)
-                        {
-                            return Flow.wrapException(throwable, this);
-                        }
-
-                        public String toString()
-                        {
-                            return Flow.formatTrace("LocalResponse", subscriber);
-                        }
-                    };
+                public String toString()
+                {
+                    return Flow.formatTrace("LocalResponse", subscriber);
                 }
             };
         }

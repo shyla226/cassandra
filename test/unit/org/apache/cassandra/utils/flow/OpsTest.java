@@ -358,23 +358,35 @@ public class OpsTest
         final AtomicBoolean completed = new AtomicBoolean(false);
 
         final FlowSubscription subscription = Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
-                                                  .onErrorResumeNext(e -> Flow.error(ex2)).subscribe(new FlowSubscriber<Integer>()
-        {
-            public void onNext(Integer item)
-            {
-                throw ex1;
-            }
+                                                  .map(x ->
+                                                       {
+                                                           try
+                                                           {
+                                                               return x;
+                                                           }
+                                                           finally
+                                                           {
+                                                               throw ex1;
+                                                           }
+                                                       })
+                                                  .onErrorResumeNext(e -> Flow.error(ex2))
+                                                  .subscribe(new FlowSubscriber<Integer>()
+                                                  {
+                                                      public void onNext(Integer item)
+                                                      {
+                                                          // nothing to do
+                                                      }
 
-            public void onComplete()
-            {
-                completed.set(true);
-            }
+                                                      public void onComplete()
+                                                      {
+                                                          completed.set(true);
+                                                      }
 
-            public void onError(Throwable t)
-            {
-                error.set(t);
-            }
-        });
+                                                      public void onError(Throwable t)
+                                                      {
+                                                          error.set(t);
+                                                      }
+                                                  });
 
         subscription.request();
 
@@ -383,5 +395,53 @@ public class OpsTest
         assertEquals(ex2.getMessage(), error.get().getMessage());
     }
 
+
+    // Test that we can replace the first exception with the second one by using onErrorResumeNext
+    @Test
+    public void testMapError() throws Exception
+    {
+        final RuntimeException ex1 = new RuntimeException("Initial error");
+        final RuntimeException ex2 = new RuntimeException("On error resumed");
+
+        final AtomicReference<Throwable> error = new AtomicReference<>(null);
+        final AtomicBoolean completed = new AtomicBoolean(false);
+
+        final FlowSubscription subscription = Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                                  .map(x ->
+                                                       {
+                                                           try
+                                                           {
+                                                               return x;
+                                                           }
+                                                           finally
+                                                           {
+                                                               throw ex1;
+                                                           }
+                                                       })
+                                                  .mapError(e -> ex2)
+                                                  .subscribe(new FlowSubscriber<Integer>()
+                                                  {
+                                                      public void onNext(Integer item)
+                                                      {
+                                                          // nothing to do
+                                                      }
+
+                                                      public void onComplete()
+                                                      {
+                                                          completed.set(true);
+                                                      }
+
+                                                      public void onError(Throwable t)
+                                                      {
+                                                          error.set(t);
+                                                      }
+                                                  });
+
+        subscription.request();
+
+        assertFalse(completed.get());
+        assertNotNull(error.get());
+        assertEquals(ex2.getMessage(), error.get().getMessage());
+    }
 
 }

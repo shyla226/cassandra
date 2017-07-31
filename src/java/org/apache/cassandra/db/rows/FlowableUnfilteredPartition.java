@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.rows;
 
+import io.reactivex.functions.Function;
 import org.apache.cassandra.utils.flow.Flow;
 
 /**
@@ -59,7 +60,7 @@ public class FlowableUnfilteredPartition extends FlowablePartitionBase<Unfiltere
     }
 
     @Override
-    public FlowableUnfilteredPartition mapContent(Flow.MappingOp<Unfiltered, Unfiltered> mappingOp)
+    public FlowableUnfilteredPartition mapContent(Function<Unfiltered, Unfiltered> mappingOp)
     {
         return withContent(content.map(mappingOp));
     }

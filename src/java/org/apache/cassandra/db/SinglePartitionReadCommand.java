@@ -499,15 +499,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                 return iter.flatMap(partition -> {
 
-                    Flow.Tee<Unfiltered> tee;
-                    try
-                    {
-                        tee = partition.content.tee();
-                    }
-                    catch (Throwable t)
-                    {
-                        return Flow.error(t);
-                    }
+                    Flow.Tee<Unfiltered> tee = partition.content.tee();
                     FlowableUnfilteredPartition toCache = partition.withContent(tee.child(0));
                     FlowableUnfilteredPartition toReturn = partition.withContent(tee.child(1));
 

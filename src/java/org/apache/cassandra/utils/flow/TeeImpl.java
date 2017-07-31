@@ -48,20 +48,19 @@ import java.util.stream.Collectors;
  */
 public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
 {
-    private final Flow<T> sourceFlow;
-    private FlowSubscription source;
+    private final FlowSubscription source;
     private final TeeSubscription[] children;
 
     private final AtomicInteger requests = new AtomicInteger();
     private final AtomicInteger closed = new AtomicInteger();
-    private final AtomicInteger subscribed = new AtomicInteger();
 
-    TeeImpl(Flow<T> source, int count) throws Exception
+    @SuppressWarnings("resource") // tee children are closed by the downstream flows
+    TeeImpl(Flow<T> source, int count)
     {
-        this.sourceFlow = source;
+        this.source = source.subscribe(this);
         children = new TeeImpl.TeeSubscription[count];
         for (int i = 0; i < count; ++i)
-            children[i] = new TeeSubscription(i);
+            children[i] = new TeeSubscription();
     }
 
     public Flow<T> child(int i)
@@ -113,14 +112,6 @@ public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
             source.close();
     }
 
-    void subscribeOne() throws Exception
-    {
-        if (subscribed.incrementAndGet() < children.length)
-            return;
-
-        source = sourceFlow.subscribe(this);
-    }
-
     public String toString()
     {
         return Flow.formatTrace("tee " + children.length + " ways") +
@@ -129,16 +120,9 @@ public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
                      .collect(Collectors.joining("\n"));
     }
 
-    class TeeSubscription extends Flow<T> implements FlowSubscription
+    class TeeSubscription extends FlowSource<T>
     {
-        final int index;
-        FlowSubscriber<T> subscriber = null;
         volatile boolean closed = false;
-
-        TeeSubscription(int index)
-        {
-            this.index = index;
-        }
 
         public void request()
         {
@@ -149,19 +133,6 @@ public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
         {
             closed = true;
             closeOne();
-        }
-
-        public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
-        {
-            assert this.subscriber == null : "Tee is single-use.";
-            subscribeOne();
-            this.subscriber = subscriber;
-            return this;
-        }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return source.addSubscriberChainFromSource(throwable);
         }
     }
 }

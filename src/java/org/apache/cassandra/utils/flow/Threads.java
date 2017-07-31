@@ -35,7 +35,7 @@ public class Threads
         final FlowSubscription source;
         final TPCTaskType stage;
 
-        <T> RequestOnCore(FlowSubscriber<T> subscriber, int coreId, TPCTaskType stage, Flow<T> source) throws Exception
+        <T> RequestOnCore(FlowSubscriber<T> subscriber, int coreId, TPCTaskType stage, Flow<T> source)
         {
             this.coreId = coreId;
             this.source = source.subscribe(subscriber);
@@ -107,7 +107,7 @@ public class Threads
         final FlowSubscription source;
         final TPCTaskType stage;
 
-        <T> RequestOn(FlowSubscriber<T> subscriber, Scheduler scheduler, TPCTaskType stage, Flow<T> source) throws Exception
+        <T> RequestOn(FlowSubscriber<T> subscriber, Scheduler scheduler, TPCTaskType stage, Flow<T> source)
         {
             this.scheduler = scheduler;
             this.source = source.subscribe(subscriber);
@@ -184,17 +184,15 @@ public class Threads
         }
     }
 
-    static class EvaluateOn<T> implements FlowSubscription, TaggedRunnable
+    static class EvaluateOn<T> extends FlowSource<T> implements TaggedRunnable
     {
-        final FlowSubscriber<T> subscriber;
         final Callable<T> source;
         final TPCTaskType stage;
         final int coreId;
 
         private volatile int requested = 0;
-        EvaluateOn(FlowSubscriber<T> subscriber, Callable<T> source, int coreId, TPCTaskType stage)
+        EvaluateOn(Callable<T> source, int coreId, TPCTaskType stage)
         {
-            this.subscriber = subscriber;
             this.source = source;
             this.coreId = coreId;
             this.stage = stage;
@@ -233,14 +231,89 @@ public class Threads
         {
         }
 
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        public String toString()
         {
-            return Flow.wrapException(throwable, this);
+            return Flow.formatTrace("evaluateOn " + coreId + " stage " + stage, source, subscriber);
+        }
+
+        public TPCTaskType getStage()
+        {
+            return stage;
+        }
+
+        public int scheduledOnCore()
+        {
+            return coreId;
+        }
+    }
+
+    static class DeferOn<T> extends FlowSource<T> implements FlowSubscriber<T>, TaggedRunnable
+    {
+        FlowSubscription source;
+        final Callable<Flow<T>> deferred;
+        final TPCTaskType stage;
+        final int coreId;
+
+        DeferOn(Callable<Flow<T>> source, int coreId, TPCTaskType stage)
+        {
+            this.deferred = source;
+            this.coreId = coreId;
+            this.stage = stage;
+        }
+
+        public void request()
+        {
+            if (source == null)
+            {
+                if (TPC.isOnCore(coreId))
+                    run();
+                else
+                    TPC.getForCore(coreId).scheduleDirect(this);
+            }
+            else
+                source.request();
+        }
+
+        public void run()
+        {
+            try
+            {
+                Flow<T> v = deferred.call();
+                source = v.subscribe(this);
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
+            }
+
+            source.request();
+        }
+
+        public void close() throws Exception
+        {
+            if (source != null)     // we can be closed without being requested
+                source.close();
+        }
+
+        public void onNext(T item)
+        {
+            subscriber.onNext(item);
+        }
+
+        public void onComplete()
+        {
+            subscriber.onComplete();
+        }
+
+        public void onError(Throwable t)
+        {
+            subscriber.onError(t);
         }
 
         public String toString()
         {
-            return Flow.formatTrace("evaluateOn " + coreId + " stage " + stage, source, subscriber);
+            return Flow.formatTrace("deferOn " + coreId + " stage " + stage, deferred, subscriber);
         }
 
         public TPCTaskType getStage()
@@ -261,17 +334,11 @@ public class Threads
      */
     public static <T> Flow<T> evaluateOnCore(Callable<T> callable, int coreId, TPCTaskType stage)
     {
-        return new Flow<T>()
-        {
-            public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
-            {
-                return new EvaluateOn<T>(subscriber, callable, coreId, stage);
-            }
-        };
+        return new EvaluateOn<T>(callable, coreId, stage);
     }
 
     public static <T> Flow<T> deferOnCore(Callable<Flow<T>> source, int coreId, TPCTaskType stage)
     {
-        return evaluateOnCore(source, coreId, stage).flatMap(x -> x);
+        return new DeferOn<>(source, coreId, stage);
     }
 }

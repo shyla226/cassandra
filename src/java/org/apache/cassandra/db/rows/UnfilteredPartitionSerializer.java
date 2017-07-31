@@ -30,6 +30,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSource;
 import org.apache.cassandra.utils.flow.FlowSubscriber;
 import org.apache.cassandra.utils.flow.FlowSubscription;
 import org.apache.cassandra.utils.versioning.VersionDependent;
@@ -289,20 +290,18 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
         };
     }
 
-    private class DeserializePartitionSubscription implements FlowSubscription
+    private class DeserializePartitionFlow extends FlowSource<Unfiltered>
     {
         private final Row.Builder builder;
         private final SerializationHelper helper;
         private final SerializationHeader sHeader;
         private final DataInputPlus in;
-        private final FlowSubscriber<Unfiltered> subscriber;
         private volatile boolean completed;
 
-        private DeserializePartitionSubscription(DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header, FlowSubscriber<Unfiltered> subscriber)
+        private DeserializePartitionFlow(DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header)
         {
             this.builder = BTreeRow.sortedBuilder();
             this.in = in;
-            this.subscriber = subscriber;
             this.helper = new SerializationHelper(metadata, version, flag);
             this.sHeader = header.sHeader;
         }
@@ -349,37 +348,15 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
 
             completed = true;
         }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return Flow.wrapException(throwable, this);
-        }
-
-        @Override
-        public String toString()
-        {
-            return Flow.formatTrace("deserialize-partition", subscriber);
-        }
     }
 
+    @SuppressWarnings("resource")
     private FlowableUnfilteredPartition deserializeToFlow(DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header)
     {
         if (header.isEmpty)
             return FlowablePartitions.empty(metadata, header.key, header.isReversed);
 
-        Flow<Unfiltered> content = new Flow<Unfiltered>()
-        {
-            private FlowSubscriber<Unfiltered> subscriber;
-
-            public FlowSubscription subscribe(FlowSubscriber<Unfiltered> subscriber) throws Exception
-            {
-                // we don't own the buffer behind DataInputPlus and so we must enforce a single subscriber
-                assert this.subscriber == null : "Expected only one subscriber";
-                this.subscriber = subscriber;
-
-                return new DeserializePartitionSubscription(in, metadata, flag, header, subscriber);
-            }
-        };
+        Flow<Unfiltered> content = new DeserializePartitionFlow(in, metadata, flag, header);
 
         return new FlowableUnfilteredPartition(new PartitionHeader(metadata,
                                                                    header.key,

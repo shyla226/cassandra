@@ -38,7 +38,6 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.google.common.util.concurrent.Runnables;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
@@ -52,7 +51,6 @@ import io.reactivex.SingleObserver;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
-import io.reactivex.schedulers.Schedulers;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
@@ -80,377 +78,151 @@ public abstract class Flow<T>
      * When done with the content (regardless of whether onComplete or onError was received), the subscriber must
      * close the subscription. Closing cannot be done concurrently with any requests.
      */
-    abstract public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception;
+    abstract public FlowSubscription subscribe(FlowSubscriber<T> subscriber);
 
     // Flow manipulation methods and implementations follow
 
     public static final boolean DEBUG_ENABLED = Boolean.getBoolean("cassandra.debugflow");
 
     /**
-     * Interface for abstracting away the gory details of operations with flowables. Used with {@link #apply}.
-     */
-    public interface FlowableOp<I, O>
-    {
-        /**
-         * Called on next item. Normally calls subscriber.onNext, but could instead finish the stream by calling
-         * complete, throw an error using error, or decide to ignore input and request another.
-         * For some usage ideas, see {@link SkippingOp} and {@link StoppingOp} below.
-         */
-        abstract void onNext(FlowSubscriber<O> subscriber, ApplyOpSubscription source, I next);
-
-        /**
-         * Called on error
-         * */
-        default void onError(Throwable error) throws Exception
-        {
-        }
-
-        /**
-         * Called on complete
-         * */
-        default void onComplete() throws Exception
-        {
-        }
-
-        /**
-         * Called on close.
-         */
-        default void close() throws Exception
-        {
-        }
-    }
-
-    public <O> Flow<O> apply(FlowableOp<T, O> op)
-    {
-        return apply(this, "apply", op);
-    }
-
-    public <O> Flow<O> apply(FlowableOp<T, O> op, String prefix)
-    {
-        return apply(this, prefix, op);
-    }
-
-    public static <I, O> Flow<O> apply(Flow<I> source, String prefix, FlowableOp<I, O> op)
-    {
-        class ApplyFlow extends Flow<O>
-        {
-            public FlowSubscription subscribe(FlowSubscriber<O> subscriber) throws Exception
-            {
-                return !DEBUG_ENABLED
-                       ? new ApplyOpSubscriptionImpl(prefix, subscriber, op, source)
-                       : new ApplyOpSubscriptionCheckedImpl(prefix, subscriber, op, source);
-            }
-        }
-        return new ApplyFlow();
-    }
-
-    /**
-     * Extends {@link FlowSubscription} with the ability to request an item in a loop, which
-     * is required by {@link FilterOp} and {@link SkippingOp}.
-     *
-     * This is implemented by the "apply" concreate subscriptions, see {@link ApplyOpSubscriptionImpl}
-     * and {@link ApplyOpSubscriptionCheckedImpl}.
-     */
-    private interface ApplyOpSubscription extends FlowSubscription
-    {
-        public void requestInLoop();
-    }
-
-    /**
-     * Apply implementation.
-     */
-    private static class ApplyOpSubscriptionImpl<I, O> extends RequestLoop implements ApplyOpSubscription, FlowSubscriber<I>
-    {
-        final FlowSubscriber<O> subscriber;
-        final FlowSubscription source;
-        final FlowableOp<I, O> mapper;
-        final String prefix;
-
-        private ApplyOpSubscriptionImpl(String prefix,
-                                        FlowSubscriber<O> subscriber,
-                                        FlowableOp<I, O> mapper,
-                                        Flow<I> source) throws Exception
-        {
-            this.subscriber = subscriber;
-            this.mapper = mapper;
-            this.prefix = prefix;
-            this.source = source.subscribe(this);
-        }
-
-        public void onNext(I item)
-        {
-            mapper.onNext(subscriber, this, item);
-        }
-
-        public void onError(Throwable throwable)
-        {
-            try
-            {
-                mapper.onError(throwable);
-            }
-            catch (Throwable t)
-            {
-                throwable = Throwables.merge(throwable, t);
-            }
-
-            subscriber.onError(throwable);
-        }
-
-        public void onComplete()
-        {
-            try
-            {
-                mapper.onComplete();
-            }
-            catch (Throwable t)
-            {
-                subscriber.onError(t);
-                return;
-            }
-
-            subscriber.onComplete();
-        }
-
-        public void request()
-        {
-            source.request();
-        }
-
-        public void requestInLoop()
-        {
-            requestInLoop(source);
-        }
-
-        public void close() throws Exception
-        {
-            try
-            {
-                source.close();
-            }
-            finally
-            {
-                mapper.close();
-            }
-        }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return source.addSubscriberChainFromSource(throwable);
-        }
-
-        public String toString()
-        {
-            return formatTrace(prefix, mapper, subscriber);
-        }
-    }
-
-    /**
-     * Apply implementation that checks the subscriptions are used correctly (e.g. without concurrent requests).
-     */
-    private static class ApplyOpSubscriptionCheckedImpl<I, O> extends DebugRequestLoop implements ApplyOpSubscription, FlowSubscriber<I>
-    {
-        final FlowSubscriber<O> subscriber;
-        final FlowableOp<I, O> mapper;
-        final FlowSubscription source;
-        final String prefix;
-
-        enum State
-        {
-            INITIALIZING,
-            READY,
-            REQUESTED,
-            COMPLETED,
-            CLOSED;
-        }
-
-        private volatile State state = State.INITIALIZING;
-        private static final AtomicReferenceFieldUpdater<ApplyOpSubscriptionCheckedImpl, State> stateUpdater =
-            AtomicReferenceFieldUpdater.newUpdater(ApplyOpSubscriptionCheckedImpl.class, State.class, "state");
-
-        boolean verifyStateTransition(Throwable existingError, State from, State to)
-        {
-            if (!stateUpdater.compareAndSet(this, from, to))
-            {
-                subscriber.onError(Throwables.merge(existingError,
-                        new AssertionError(String.format("Unexpected state %s, required %s to transition to %s\n\t%s",
-                                                         state,
-                                                         from,
-                                                         to,
-                                                         this))));
-                return false;
-            }
-            return true;
-        }
-
-        void verifyStateTransition(State from, State to) throws Exception
-        {
-            if (!stateUpdater.compareAndSet(this, from, to))
-                throw new AssertionError(String.format("Unexpected state %s, required %s to transition to %s\n\t%s",
-                                                       state,
-                                                       from,
-                                                       to,
-                                                       this));
-        }
-
-        private ApplyOpSubscriptionCheckedImpl(String prefix, FlowSubscriber<O> subscriber, FlowableOp<I, O> mapper, Flow<I> source) throws Exception
-        {
-            super(subscriber);
-            this.subscriber = subscriber;
-            this.mapper = mapper;
-            this.source = source.subscribe(this);
-            this.prefix = prefix;
-            verifyStateTransition(State.INITIALIZING, State.READY);
-        }
-
-        public void onNext(I item)
-        {
-            if (verifyStateTransition(null, State.REQUESTED, State.READY))
-                mapper.onNext(subscriber, this, item);
-
-        }
-
-        public void onError(Throwable throwable)
-        {
-            if (verifyStateTransition(throwable, State.REQUESTED, State.COMPLETED))
-            {
-                try
-                {
-                    mapper.onError(throwable);
-                }
-                catch (Throwable t)
-                {
-                    throwable = Throwables.merge(throwable, t);
-                }
-
-                subscriber.onError(throwable);
-            }
-        }
-
-        public void onComplete()
-        {
-            if (verifyStateTransition(null, State.REQUESTED, State.COMPLETED))
-                return;
-
-            try
-            {
-                mapper.onComplete();
-            }
-            catch (Throwable t)
-            {
-                subscriber.onError(t);
-                return;
-            }
-
-            subscriber.onComplete();
-        }
-
-        public void request()
-        {
-            if (verifyStateTransition(null, State.READY, State.REQUESTED))
-                source.request();
-        }
-
-        public void requestInLoop()
-        {
-            if (verifyStateTransition(null, State.READY, State.REQUESTED))
-                requestInLoop(source);
-        }
-
-        public void close() throws Exception
-        {
-            try
-            {
-                State s = state;
-                assert s == State.READY || s == State.COMPLETED : "Unexpected state " + s + " at close.\n\t" + this;
-                verifyStateTransition(s, State.CLOSED);
-                source.close();
-            }
-            finally
-            {
-                mapper.close();
-            }
-        }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return source.addSubscriberChainFromSource(throwable);
-        }
-
-        @Override
-        public void finalize()
-        {
-            if (state != State.CLOSED)
-                logger.error("Unclosed flow in state {}\n\t{}", state, this);
-        }
-
-        public String toString()
-        {
-            return formatTrace(prefix, mapper, subscriber);
-        }
-    }
-
-    /**
      * Op for element-wise transformation.
      *
      * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
      */
-    public interface MappingOp<I, O> extends Function<I, O>, FlowableOp<I, O>
+    static class Map<I, O> extends FlowTransformNext<I, O>
     {
-        default void onNext(FlowSubscriber<O> subscriber, ApplyOpSubscription source, I next)
+        final Function<I, O> mapper;
+
+        public Map(Flow<I> source, Function<I, O> mapper)
         {
+            super(source);
+            this.mapper = mapper;
+        }
+
+        public void onNext(I next)
+        {
+            O out;
             try
             {
-                O out = apply(next);
-                // Calls below should not fail.
-                subscriber.onNext(out);
+                out = mapper.apply(next);
             }
             catch (Throwable t)
             {
                 subscriber.onError(t);
+                return;
             }
+
+            subscriber.onNext(out);
+        }
+
+        public String toString()
+        {
+            return formatTrace(getClass().getSimpleName(), mapper, subscriber);
         }
     }
 
     /**
      * Tranforms each item in the flow using the specified mapper.
      */
-    public <O> Flow<O> map(MappingOp<T, O> mapper)
+    public <O> Flow<O> map(Function<T, O> mapper)
     {
-        return apply(mapper, "map");
+        return new Map(this, mapper);
     }
-
 
     /**
      * Op for element-wise transformation which return null, treated as an indication to skip the item.
      *
      * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
      */
-    public interface SkippingOp<I, O> extends Function<I, O>, FlowableOp<I, O>
+    public static class SkippingMap<I, O> extends FlowTransformNext<I, O>
     {
-        default void onNext(FlowSubscriber<O> subscriber, ApplyOpSubscription source, I next)
+        final Function<I, O> mapper;
+
+        public SkippingMap(Flow<I> source, Function<I, O> mapper)
         {
+            super(source);
+            this.mapper = mapper;
+        }
+
+        public void onNext(I next)
+        {
+            O out;
             try
             {
-                O out = apply(next);
-                // Calls below should not fail.
-                if (out != null)
-                    subscriber.onNext(out);
-                else
-                    source.requestInLoop();
+                out = mapper.apply(next);
             }
             catch (Throwable t)
             {
                 subscriber.onError(t);
+                return;
             }
+
+            if (out != null)
+                subscriber.onNext(out);
+            else
+                requestInLoop(source);
+        }
+
+        public String toString()
+        {
+            return formatTrace(getClass().getSimpleName(), mapper, subscriber);
         }
     }
 
     /**
      * Like map, but permits mapper to return null, which is treated as an intention to skip the item.
      */
-    public <O> Flow<O> skippingMap(SkippingOp<T, O> mapper)
+    public <O> Flow<O> skippingMap(Function<T, O> mapper)
     {
-        return apply(mapper);
+        return new SkippingMap(this, mapper);
+    }
+
+    /**
+     * Op for filtering out items.
+     *
+     * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
+     */
+    static class Filter<I> extends FlowTransformNext<I, I>
+    {
+        final Predicate<I> tester;
+
+        public Filter(Flow<I> source, Predicate<I> tester)
+        {
+            super(source);
+            this.tester = tester;
+        }
+
+        public void onNext(I next)
+        {
+            boolean pass;
+            try
+            {
+                pass = tester.test(next);
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
+            }
+
+            if (pass)
+                subscriber.onNext(next);
+            else
+                requestInLoop(source);
+        }
+
+        public String toString()
+        {
+            return formatTrace(getClass().getSimpleName(), tester, subscriber);
+        }
+    }
+
+    /**
+     * Take only the items from from the flow that pass the supplied tester.
+     */
+    public Flow<T> filter(Predicate<T> tester)
+    {
+        return new Filter<>(this, tester);
     }
 
     /**
@@ -458,32 +230,47 @@ public abstract class Flow<T>
      *
      * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
      */
-    public interface StoppingOp<I, O> extends Function<I, O>, FlowableOp<I, O>
+    static class StoppingMap<I, O> extends FlowTransformNext<I, O>
     {
-        default void onNext(FlowSubscriber<O> subscriber, ApplyOpSubscription source, I next)
+        final Function<I, O> mapper;
+
+        public StoppingMap(Flow<I> source, Function<I, O> mapper)
         {
+            super(source);
+            this.mapper = mapper;
+        }
+
+        public void onNext(I next)
+        {
+            O out;
             try
             {
-                O out = apply(next);
-                // Calls below should not fail.
-                if (out != null)
-                    subscriber.onNext(out);
-                else
-                    subscriber.onComplete();
+                out = mapper.apply(next);
             }
             catch (Throwable t)
             {
                 subscriber.onError(t);
+                return;
             }
+
+            if (out != null)
+                subscriber.onNext(out);
+            else
+                subscriber.onComplete();
+        }
+
+        public String toString()
+        {
+            return formatTrace(getClass().getSimpleName(), mapper, subscriber);
         }
     }
 
     /**
      * Like map, but permits mapper to return null, which is treated as indication that the flow should stop.
      */
-    public <O> Flow<O> stoppingMap(StoppingOp<T, O> mapper)
+    public <O> Flow<O> stoppingMap(Function<T, O> mapper)
     {
-        return apply(mapper);
+        return new StoppingMap<>(this, mapper);
     }
 
     /**
@@ -491,22 +278,38 @@ public abstract class Flow<T>
      *
      * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
      */
-    public interface TakeWhileOp<I> extends Predicate<I>, FlowableOp<I, I>
+    static class TakeWhile<I> extends FlowTransformNext<I, I>
     {
-        default void onNext(FlowSubscriber<I> subscriber, ApplyOpSubscription source, I next)
+        final Predicate<I> tester;
+
+        public TakeWhile(Flow<I> source, Predicate<I> tester)
         {
+            super(source);
+            this.tester = tester;
+        }
+
+        public void onNext(I next)
+        {
+            boolean pass;
             try
             {
-                // Calls below should not fail.
-                if (test(next))
-                    subscriber.onNext(next);
-                else
-                    subscriber.onComplete();
+                pass = tester.test(next);
             }
             catch (Throwable t)
             {
                 subscriber.onError(t);
+                return;
             }
+
+            if (pass)
+                subscriber.onNext(next);
+            else
+                subscriber.onComplete();
+        }
+
+        public String toString()
+        {
+            return formatTrace(getClass().getSimpleName(), tester, subscriber);
         }
     }
 
@@ -516,40 +319,9 @@ public abstract class Flow<T>
      * This applies on the onNext phase of execution, after the item has been produced. If the item holds resources,
      * tester must release these resources as the item will not be passed on downstream.
      */
-    public Flow<T> takeWhile(TakeWhileOp<T> tester)
+    public Flow<T> takeWhile(Predicate<T> tester)
     {
-        return apply(tester);
-    }
-
-    /**
-     * Interface for operators that apply to the subscription chain, modifying request() and close().
-     */
-    public interface SubscriptionLifter<T>
-    {
-        FlowSubscription apply(FlowSubscription source, FlowSubscriber<T> subscriber);
-    }
-
-    /**
-     * Applies the given operator to the subscription chain of the given flow, permitting modifications to request()
-     * and subscribe().
-     *
-     * Note: This does not insert any corresponding operation on the subscriber chain, passing the previous subscriber
-     * directly to the upstream generator. As a result this operator will not be shown in the subscriber's chain.
-     */
-    public Flow<T> liftSubscription(SubscriptionLifter<T> lifter)
-    {
-        return liftSubscription(this, lifter);
-    }
-
-    public static <T> Flow<T> liftSubscription(Flow<T> source, SubscriptionLifter<T> lifter)
-    {
-        return new Flow<T>()
-        {
-            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
-            {
-                return lifter.apply(source.subscribe(subscriber), subscriber);
-            }
-        };
+        return new TakeWhile<>(this, tester);
     }
 
     /**
@@ -560,7 +332,51 @@ public abstract class Flow<T>
      */
     public Flow<T> takeUntil(BooleanSupplier tester)
     {
-        return takeUntilAndDoOnClose(tester, Runnables.doNothing());
+        Flow<T> sourceFlow = this;
+
+        class TakeUntil extends FlowSource<T>
+        {
+            FlowSubscription source;
+
+            @SuppressWarnings("resource") // source subscriber is closed with close, `subscribe` result can be safely ignored
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
+            {
+                super.subscribe(subscriber);
+                source = sourceFlow.subscribe(subscriber);
+                return this;
+            }
+
+            public void request()
+            {
+                boolean stop;
+                try
+                {
+                    stop = tester.getAsBoolean();
+                }
+                catch (Throwable t)
+                {
+                    subscriber.onError(t);
+                    return;
+                }
+
+                if (stop)
+                    subscriber.onComplete();
+                else
+                    source.request();
+            }
+
+            public void close() throws Exception
+            {
+                source.close();
+            }
+
+            public String toString()
+            {
+                return Flow.formatTrace(getClass().getSimpleName(), tester, subscriber);
+            }
+        };
+
+        return new TakeUntil();
     }
 
     /**
@@ -568,9 +384,45 @@ public abstract class Flow<T>
      */
     public Flow<T> doOnClose(Runnable onClose)
     {
-        return takeUntilAndDoOnClose(() -> false, onClose);
-    }
+        Flow<T> sourceFlow = this;
 
+        class DoOnClose extends FlowSource<T>
+        {
+            FlowSubscription source;
+
+            @SuppressWarnings("resource") // source subscriber is closed with close, `subscribe` result can be safely ignored
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
+            {
+                super.subscribe(subscriber);
+                source = sourceFlow.subscribe(subscriber);
+                return this;
+            }
+
+            public void request()
+            {
+                source.request();
+            }
+
+            public void close() throws Exception
+            {
+                try
+                {
+                    source.close();
+                }
+                finally
+                {
+                    onClose.run();
+                }
+            }
+
+            public String toString()
+            {
+                return Flow.formatTrace(getClass().getSimpleName(), onClose, subscriber);
+            }
+        };
+
+        return new DoOnClose();
+    }
 
     /**
      * Combination of takeUntil and doOnClose using a single subscription object.
@@ -579,8 +431,20 @@ public abstract class Flow<T>
      */
     public Flow<T> takeUntilAndDoOnClose(BooleanSupplier tester, Runnable onClose)
     {
-        return liftSubscription((source, subscriber) -> new FlowSubscription()
+        Flow<T> sourceFlow = this;
+
+        class TakeUntilAndDoOnClose extends FlowSource<T>
         {
+            FlowSubscription source;
+
+            @SuppressWarnings("resource") // source subscriber is closed with close, `subscribe` result can be safely ignored
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
+            {
+                super.subscribe(subscriber);
+                source = sourceFlow.subscribe(subscriber);
+                return this;
+            }
+
             public void request()
             {
                 boolean stop;
@@ -612,90 +476,95 @@ public abstract class Flow<T>
                 }
             }
 
-            public Throwable addSubscriberChainFromSource(Throwable throwable)
+            public String toString()
             {
-                return source.addSubscriberChainFromSource(throwable);
+                return Flow.formatTrace(getClass().getSimpleName(), tester, subscriber);
             }
-        });
-    }
+        };
 
-    /**
-     * Op for filtering out items.
-     *
-     * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
-     */
-    public interface FilterOp<I> extends Predicate<I>, FlowableOp<I, I>
-    {
-        default void onNext(FlowSubscriber<I> subscriber, ApplyOpSubscription source, I next)
-        {
-            try
-            {
-                // Calls below should not fail.
-                if (test(next))
-                    subscriber.onNext(next);
-                else
-                    source.requestInLoop();
-            }
-            catch (Throwable t)
-            {
-                subscriber.onError(t);
-            }
-        }
-    }
-
-    /**
-     * Take only the items from from the flow that pass the supplied tester.
-     */
-    public Flow<T> filter(FilterOp<T> tester)
-    {
-        return apply(tester, "filter");
-    }
-
-    /**
-     * Op for applying an operation on error.
-     *
-     * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
-     */
-    public interface OnErrorOp<T> extends FlowableOp<T, T>
-    {
-        default void onNext(FlowSubscriber<T> subscriber, ApplyOpSubscription source, T next)
-        {
-            subscriber.onNext(next);
-        }
-
-        void onError(Throwable throwable) throws Exception;
+        return new TakeUntilAndDoOnClose();
     }
 
     /**
      * Apply the operation when the flow errors out. If handler throws, exception will be added as suppressed.
      */
-    public Flow<T> doOnError(OnErrorOp<T> onError)
+    public Flow<T> doOnError(Consumer<Throwable> onError)
     {
-        return apply(onError, "doOnError");
-    }
-
-    /**
-     * Op for applying an operation on completion.
-     *
-     * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
-     */
-    public interface OnCompleteOp<T> extends FlowableOp<T, T>
-    {
-        default void onNext(FlowSubscriber<T> subscriber, ApplyOpSubscription source, T next)
+        class DoOnError extends FlowTransformNext<T, T>
         {
-            subscriber.onNext(next);
+            protected DoOnError(Flow<T> source)
+            {
+                super(source);
+            }
+
+            public void onNext(T item)
+            {
+                subscriber.onNext(item);
+            }
+
+            public void onError(Throwable t)
+            {
+                try
+                {
+                    onError.accept(t);
+                }
+                catch (Throwable mt)
+                {
+                    t.addSuppressed(mt);
+                }
+
+                subscriber.onError(t);
+            }
+
+            public String toString()
+            {
+                return Flow.formatTrace(getClass().getSimpleName(), onError, subscriber);
+            }
         }
 
-        void onComplete() throws Exception;
+        return new DoOnError(this);
     }
 
     /**
-     * Apply the operation when the flow completes. If handler throws, subscriber's onNext will be called instead
+     * Apply the operation when the flow completes. If handler throws, subscriber's onError will be called instead
      * of onComplete.
      */
-    public Flow<T> doOnComplete(OnCompleteOp<T> onComplete)
+    public Flow<T> doOnComplete(Runnable onComplete)
     {
-        return apply(onComplete, "doOnComplete");
+        class DoOnComplete extends FlowTransformNext<T, T>
+        {
+            DoOnComplete(Flow<T> source)
+            {
+                super(source);
+            }
+
+            public void onNext(T item)
+            {
+                subscriber.onNext(item);
+            }
+
+            public void onComplete()
+            {
+                try
+                {
+                    onComplete.run();
+                }
+                catch (Throwable t)
+                {
+                    subscriber.onError(t);
+                    return;
+                }
+
+                subscriber.onComplete();
+            }
+
+            public String toString()
+            {
+                return Flow.formatTrace(getClass().getSimpleName(), onComplete, subscriber);
+            }
+        }
+
+        return new DoOnComplete(this);
     }
 
     /**
@@ -776,23 +645,6 @@ public abstract class Flow<T>
     }
 
     /**
-     * Converts and iterable to a flow. If the iterator is closeable, also closes it with the subscription.
-     *
-     * onNext() is called synchronously with the next item from the iterator for each request().
-     */
-    public static <O> Flow<O> fromIterable(Iterable<O> o)
-    {
-        class IterableToFlow extends Flow<O>
-        {
-            public FlowSubscription subscribe(FlowSubscriber<O> subscriber)
-            {
-                return new IteratorSubscription(subscriber, o.iterator());
-            }
-        }
-        return new IterableToFlow();
-    }
-
-    /**
      * Return a flow that executes normally except that in case of error it fallbacks to the
      * flow provided by the next source supplier.
      *
@@ -802,18 +654,22 @@ public abstract class Flow<T>
      */
     public Flow<T> onErrorResumeNext(Function<Throwable, Flow<T>> nextSourceSupplier)
     {
-        final Flow<T> source = this;
-
-        class OnErrorResultNextSubscriber implements FlowSubscriber<T>, FlowSubscription
+        class OnErrorResultNext extends Flow<T> implements FlowSubscriber<T>, FlowSubscription
         {
-            private FlowSubscriber subscriber;
+            private FlowSubscriber<T> subscriber;
             private FlowSubscription subscription;
             private boolean nextSubscribed = false;
 
-            OnErrorResultNextSubscriber(FlowSubscriber<T> subscriber) throws Exception
+            OnErrorResultNext(Flow<T> source)
             {
-                this.subscriber = subscriber;
                 this.subscription = source.subscribe(this);
+            }
+
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
+            {
+                assert this.subscriber == null : "Flow are single-use.";
+                this.subscriber = subscriber;
+                return this;
             }
 
             public void onNext(T item)
@@ -886,46 +742,88 @@ public abstract class Flow<T>
             }
         }
 
-        return new Flow<T>()
-        {
-            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
-            {
-                return new OnErrorResultNextSubscriber(subscriber);
-            }
-        };
+        return new OnErrorResultNext(this);
     }
 
     public Flow<T> mapError(Function<Throwable, Throwable> mapper)
     {
-        // TODO implement directly
-        return onErrorResumeNext(e -> error(mapper.apply(e)));
+        class MapError extends FlowTransformNext<T, T>
+        {
+            protected MapError(Flow<T> source)
+            {
+                super(source);
+            }
+
+            public void onNext(T item)
+            {
+                subscriber.onNext(item);
+            }
+
+            public void onError(Throwable t)
+            {
+                try
+                {
+                    t = mapper.apply(t);
+                }
+                catch (Throwable mt)
+                {
+                    mt.addSuppressed(t);
+                    t = mt;
+                }
+
+                subscriber.onError(t);
+            }
+
+            public String toString()
+            {
+                return Flow.formatTrace(getClass().getSimpleName(), mapper, subscriber);
+            }
+        }
+
+        return new MapError(this);
     }
 
-    static class IteratorSubscription<O> implements FlowSubscription
+    /**
+     * Converts and iterable to a flow. If the iterator is closeable, also closes it with the subscription.
+     *
+     * onNext() is called synchronously with the next item from the iterator for each request().
+     */
+    public static <O> Flow<O> fromIterable(Iterable<O> o)
+    {
+        return new IteratorSubscription(o.iterator());
+    }
+
+    static class IteratorSubscription<O> extends FlowSource<O>
     {
         final Iterator<O> iter;
-        final FlowSubscriber<O> subscriber;
 
-        IteratorSubscription(FlowSubscriber<O> subscriber, Iterator<O> iter)
+        IteratorSubscription(Iterator<O> iter)
         {
             this.iter = iter;
-            this.subscriber = subscriber;
         }
 
         public void request()
         {
+            boolean hasNext = false;
+            O next = null;
             try
             {
-                if (!iter.hasNext())
-                    subscriber.onComplete();
-                else
-                    subscriber.onNext(iter.next());
+                if (iter.hasNext())
+                {
+                    hasNext = true;
+                    next = iter.next();
+                }
             }
             catch (Throwable t)
             {
                 subscriber.onError(t);
+                return;
             }
 
+            if (!hasNext)
+                subscriber.onComplete();
+            else
+                subscriber.onNext(next);
         }
 
         public void close() throws Exception
@@ -933,17 +831,13 @@ public abstract class Flow<T>
             if (iter instanceof AutoCloseable)
                 ((AutoCloseable) iter).close();
         }
+    }
 
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return wrapException(throwable, this);
-        }
-
-        @Override
-        public String toString()
-        {
-            return formatTrace("iteratorSubscription", subscriber);
-        }
+    enum RequestLoopState
+    {
+        OUT_OF_LOOP,
+        IN_LOOP_READY,
+        IN_LOOP_REQUESTED
     }
 
     /**
@@ -960,18 +854,11 @@ public abstract class Flow<T>
      * only for requests that the operation itself makes. By convention the downstream subscriber is also issuing
      * requests to the operation in a loop.
      *
-     * This is implemented in two versions, RequestLoop and DebugRequestLoop, where the former assumes everything is
-     * working correctly while the latter verifies that there is no unexpected behaviour.
+     * This version is used in operations that are not Flow instances (e.g. reduce). Unfortunately we can't extends from
+     * both Flow and RequestLoop, so the code is explicitly copied below for Flow operators.
      */
     public static class RequestLoop
     {
-        enum RequestLoopState
-        {
-            OUT_OF_LOOP,
-            IN_LOOP_READY,
-            IN_LOOP_REQUESTED
-        }
-
         volatile RequestLoopState state = RequestLoopState.OUT_OF_LOOP;
         static final AtomicReferenceFieldUpdater<RequestLoop, RequestLoopState> stateUpdater =
             AtomicReferenceFieldUpdater.newUpdater(RequestLoop.class, RequestLoopState.class, "state");
@@ -996,15 +883,52 @@ public abstract class Flow<T>
         }
     }
 
-    static class DebugRequestLoop extends RequestLoop
+    /**
+     * Helper class for implementing requests looping to avoid stack overflows when an operation needs to request
+     * many items from its source. In such cases requests have to be performed in a loop to avoid growing the stack with
+     * a full request... -> onNext... -> chain for each new requested element, which can easily cause stack overflow
+     * if that is not guaranteed to happen only a small number of times for each item generated by the operation.
+     *
+     * The main idea is that if a request was issued in response to onNext which an ongoing request triggered (and thus
+     * control will return to the request loop after the onNext and request chains return), mark it and process
+     * it when control returns to the loop.
+     *
+     * Note that this does not have to be used for _all_ requests served by an operation. It suffices to apply the loop
+     * only for requests that the operation itself makes. By convention the downstream subscriber is also issuing
+     * requests to the operation in a loop.
+     *
+     * This is implemented in two versions, RequestLoopFlow and DebugRequestLoopFlow, where the former assumes
+     * everything is working correctly while the latter verifies that there is no unexpected behaviour.
+     */
+    public static abstract class RequestLoopFlow<T> extends Flow<T>
     {
-        final FlowSubscriber<?> errorRecepient;
+        volatile RequestLoopState state = RequestLoopState.OUT_OF_LOOP;
+        static final AtomicReferenceFieldUpdater<RequestLoopFlow, RequestLoopState> stateUpdater =
+        AtomicReferenceFieldUpdater.newUpdater(RequestLoopFlow.class, RequestLoopState.class, "state");
 
-        public DebugRequestLoop(FlowSubscriber<?> errorRecepient)
+        public void requestInLoop(FlowSubscription source)
         {
-            super();
-            this.errorRecepient = errorRecepient;
+            // See DebugRequestLoop below for a more precise description of the state transitions on which this is built.
+
+            if (stateUpdater.compareAndSet(this, RequestLoopState.IN_LOOP_READY, RequestLoopState.IN_LOOP_REQUESTED))
+                // Another call (concurrent or in the call chain) has the loop and we successfully told it to continue.
+                return;
+
+            // If the above failed, we must be OUT_OF_LOOP (possibly just concurrently transitioned out of it).
+            // Since there can be no other concurrent access, we can grab the loop now.
+            do
+            {
+                state = RequestLoopState.IN_LOOP_READY;
+                source.request();
+                // If we didn't get another request, leave.
+            }
+            while (!stateUpdater.compareAndSet(this, RequestLoopState.IN_LOOP_READY, RequestLoopState.OUT_OF_LOOP));
         }
+    }
+
+    static abstract class DebugRequestLoopFlow<T> extends RequestLoopFlow<T>
+    {
+        abstract FlowSubscriber<T> errorRecepient();
 
         @Override
         public void requestInLoop(FlowSubscription source)
@@ -1040,7 +964,7 @@ public abstract class Flow<T>
             if (prev == from)
                 return true;
 
-            errorRecepient.onError(new AssertionError("Invalid state " + prev));
+            errorRecepient().onError(new AssertionError("Invalid state " + prev));
             return false;
         }
 
@@ -1057,7 +981,7 @@ public abstract class Flow<T>
         private final StackTraceElement[] stackTrace;
         final FlowSubscription source;
 
-        ReduceSubscriber(O seed, Flow<T> source, BiFunction<O, T, O> reducer) throws Exception
+        ReduceSubscriber(O seed, Flow<T> source, BiFunction<O, T, O> reducer)
         {
             this.reducer = reducer;
             current = seed;
@@ -1150,6 +1074,7 @@ public abstract class Flow<T>
             }
         };
 
+        @SuppressWarnings("resource") // subscription is closed right away
         ReduceBlockingSubscription s = new ReduceBlockingSubscription(this, reducer);
         s.request();
         Uninterruptibles.awaitUninterruptibly(latch);
@@ -1168,6 +1093,7 @@ public abstract class Flow<T>
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
      */
+    @SuppressWarnings("resource") // subscription is closed on future completion
     public <O> CompletableFuture<O> reduceToFuture(O seed, ReduceFunction<O, T> reducer)
     {
         Future<O> future = new Future<>();
@@ -1400,6 +1326,7 @@ public abstract class Flow<T>
      */
     public <O> Single<O> reduceToRxSingle(O seed, ReduceFunction<O, T> reducerToSingle)
     {
+        @SuppressWarnings("resource") // reduce subscriber is disposed by the Rx observer
         class SingleFromFlow extends Single<O>
         {
             protected void subscribeActual(SingleObserver<? super O> observer)
@@ -1472,13 +1399,14 @@ public abstract class Flow<T>
     // Not fully tested -- this is not meant for long-term use
     public Completable processToRxCompletable(ConsumingOp<T> consumer)
     {
+        @SuppressWarnings("resource") // future is disposed by the Rx observer
         class CompletableFromFlow extends Completable
         {
             protected void subscribeActual(CompletableObserver observer)
             {
                 class CompletableFromFlowSubscriber extends DisposableReduceSubscriber<T, Void>
                 {
-                    public CompletableFromFlowSubscriber() throws Exception
+                    private CompletableFromFlowSubscriber() throws Exception
                     {
                         super(null, Flow.this, consumer);
                     }
@@ -1547,7 +1475,7 @@ public abstract class Flow<T>
         Flow<T> self = this;
         return new Flow<O>()
         {
-            public FlowSubscription subscribe(FlowSubscriber<O> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<O> subscriber)
             {
                 return new ReduceSubscriber<T, O>(seed, self, reducer)
                 {
@@ -1582,14 +1510,6 @@ public abstract class Flow<T>
         };
     }
 
-    public <I, O, F> Flow<F> flatReduce(O seed, BiFunction<O, T, Flow<I>> mapper, ReduceFunction<O, I> reducer, MappingOp<O, F> onComplete)
-    {
-        return this.flatMap(x -> mapper.apply(seed, x))
-                   .reduce(seed,
-                           reducer)
-                   .map(onComplete);
-    }
-
     public interface ConsumingOp<T> extends ReduceFunction<Void, T>
     {
         void accept(T item) throws Exception;
@@ -1601,7 +1521,9 @@ public abstract class Flow<T>
         }
     }
 
-    static final ConsumingOp<Object> NO_OP_CONSUMER = (v) -> {};
+    private static final ConsumingOp<Object> NO_OP_CONSUMER = (v) -> {};
+
+    @SuppressWarnings("unchecked")
     static <T> ConsumingOp<T> noOp()
     {
         return (ConsumingOp<T>) NO_OP_CONSUMER;
@@ -1634,29 +1556,19 @@ public abstract class Flow<T>
 
     public static <T> Flow<T> ifEmpty(Flow<T> source, T value)
     {
-        class IfEmptyFlow extends Flow<T>
-        {
-            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
-            {
-                return new IfEmptySubscription<>(subscriber, value, source);
-            }
-        }
-        return new IfEmptyFlow();
+        return new IfEmptyFlow<>(source, value);
     }
 
-    static class IfEmptySubscription<T> implements FlowSubscription, FlowSubscriber<T>
+    static class IfEmptyFlow<T> extends FlowTransform<T, T>
     {
-        final FlowSubscription source;
-        final FlowSubscriber<T> subscriber;
         final T value;
         boolean hadItem;
         boolean completed;
 
-        IfEmptySubscription(FlowSubscriber<T> subscriber, T value, Flow<T> source) throws Exception
+        IfEmptyFlow(Flow<T> source, T value)
         {
-            this.subscriber = subscriber;
+            super(source);
             this.value = value;
-            this.source = source.subscribe(this);
         }
 
         public void request()
@@ -1670,11 +1582,6 @@ public abstract class Flow<T>
         public void close() throws Exception
         {
             source.close();
-        }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return source.addSubscriberChainFromSource(throwable);
         }
 
         public void onNext(T item)
@@ -1695,12 +1602,6 @@ public abstract class Flow<T>
         public void onError(Throwable t)
         {
             subscriber.onError(t);
-        }
-
-        @Override
-        public String toString()
-        {
-            return formatTrace("ifEmpty", subscriber);
         }
     }
 
@@ -1759,43 +1660,25 @@ public abstract class Flow<T>
         blockingLast(null);
     }
 
-    static private Flow<?> EMPTY = new Flow<Object>()
-    {
-        public FlowSubscription subscribe(FlowSubscriber subscriber) throws Exception
-        {
-            return new FlowSubscription()
-            {
-
-                public void request()
-                {
-                    subscriber.onComplete();
-                }
-
-                public void close() throws Exception
-                {
-                }
-
-                public Throwable addSubscriberChainFromSource(Throwable throwable)
-                {
-                    return Flow.wrapException(throwable, this);
-                }
-
-                @Override
-                public String toString()
-                {
-                    return formatTrace("empty", subscriber);
-                }
-            };
-        }
-    };
-
     /**
      * Returns an empty flow.
      */
     public static <T> Flow<T> empty()
     {
-        return (Flow<T>) EMPTY;
+        return new EmptyFlow<>();
     }
+
+    static class EmptyFlow<T> extends FlowSource<T>
+    {
+        public void request()
+        {
+            subscriber.onComplete();
+        }
+
+        public void close() throws Exception
+        {
+        }
+    };
 
     /**
      * Returns a flow that simply emits an error as soon as the subscriber
@@ -1807,35 +1690,19 @@ public abstract class Flow<T>
      */
     public static <T> Flow<T> error(Throwable t)
     {
-        return new Flow<T>()
+        class ErrorFlow extends FlowSource<T>
         {
-            public FlowSubscription subscribe(FlowSubscriber subscriber) throws Exception
+            public void request()
             {
-                return new FlowSubscription()
-                {
+                subscriber.onError(t);
+            }
 
-                    public void request()
-                    {
-                        subscriber.onError(t);
-                    }
-
-                    public void close() throws Exception
-                    {
-                    }
-
-                    public Throwable addSubscriberChainFromSource(Throwable throwable)
-                    {
-                        return Flow.wrapException(throwable, this);
-                    }
-
-                    @Override
-                    public String toString()
-                    {
-                        return formatTrace("error", subscriber);
-                    }
-                };
+            public void close() throws Exception
+            {
             }
         };
+
+        return new ErrorFlow();
     }
 
     /**
@@ -1850,15 +1717,9 @@ public abstract class Flow<T>
      */
     public static <T> Flow<T> concat(Completable completable, Flow<T> source)
     {
-        class CompletableFlowSubscriber implements FlowSubscription
+        class CompletableFlow extends FlowSource<T>
         {
-            private final FlowSubscriber<T> subscriber;
             private FlowSubscription subscription;
-
-            CompletableFlowSubscriber(FlowSubscriber<T> subscriber)
-            {
-                this.subscriber = subscriber;
-            }
 
             public void request()
             {
@@ -1906,13 +1767,7 @@ public abstract class Flow<T>
                 return formatTrace("concatCompletableFlow", completable, subscriber);
             }
         }
-        return new Flow<T>()
-        {
-            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
-            {
-                return new CompletableFlowSubscriber(subscriber);
-            }
-        };
+        return new CompletableFlow();
     }
 
     /**
@@ -1927,17 +1782,8 @@ public abstract class Flow<T>
      */
     public static <T> Flow<T> concat(Flow<T> source, Completable completable)
     {
-        class FlowCompletableSubscriber implements FlowSubscriber<T>, FlowSubscription
+        return new FlowTransformNext<T, T>(source)
         {
-            private FlowSubscriber subscriber;
-            private FlowSubscription subscription;
-
-            FlowCompletableSubscriber(FlowSubscriber<T> subscriber) throws Exception
-            {
-                this.subscriber = subscriber;
-                this.subscription = source.subscribe(this);
-            }
-
             public void onNext(T item)
             {
                 subscriber.onNext(item);
@@ -1948,39 +1794,10 @@ public abstract class Flow<T>
                 completable.subscribe(() -> subscriber.onComplete(), error -> onError(error));
             }
 
-            public void request()
-            {
-                subscription.request();
-            }
-
-            public void close() throws Exception
-            {
-                subscription.close();
-            }
-
             @Override
             public String toString()
             {
                 return formatTrace("concatFlowCompletable", completable, subscriber);
-            }
-
-            @Override
-            public Throwable addSubscriberChainFromSource(Throwable t)
-            {
-                return subscription.addSubscriberChainFromSource(t);
-            }
-
-            public final void onError(Throwable t)
-            {
-                subscriber.onError(t);
-            }
-        }
-
-        return new Flow<T>()
-        {
-            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
-            {
-                return new FlowCompletableSubscriber(subscriber);
             }
         };
     }
@@ -1990,24 +1807,16 @@ public abstract class Flow<T>
      */
     public static <T> Flow<T> just(T value)
     {
-        return new Flow<T>()
-        {
-            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
-            {
-                return new SingleSubscription<>(subscriber, value);
-            }
-        };
+        return new SingleFlow<>(value);
     }
 
-    static class SingleSubscription<T> implements FlowSubscription
+    static class SingleFlow<T> extends FlowSource<T>
     {
-        final FlowSubscriber<T> subscriber;
         final T value;
         boolean supplied = false;
 
-        SingleSubscription(FlowSubscriber<T> subscriber, T value)
+        SingleFlow(T value)
         {
-            this.subscriber = subscriber;
             this.value = value;
         }
 
@@ -2024,11 +1833,6 @@ public abstract class Flow<T>
 
         public void close() throws Exception
         {
-        }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return throwable;
         }
     }
 
@@ -2067,7 +1871,7 @@ public abstract class Flow<T>
 
     public interface Operator<I, O>
     {
-        FlowSubscription subscribe(Flow<I> source, FlowSubscriber<O> subscriber) throws Exception;
+        FlowSubscription subscribe(Flow<I> source, FlowSubscriber<O> subscriber);
     }
 
     /**
@@ -2078,7 +1882,7 @@ public abstract class Flow<T>
         Flow<T> self = this;
         return new Flow<O>()
         {
-            public FlowSubscription subscribe(FlowSubscriber subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<O> subscriber)
             {
                 return operator.subscribe(self, subscriber);
             }
@@ -2095,7 +1899,7 @@ public abstract class Flow<T>
     {
         return new Flow<T>()
         {
-            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
             {
                 R resource = resourceSupplier.get();
                 try
@@ -2128,11 +1932,16 @@ public abstract class Flow<T>
      */
     public Flow<T> delayOnNext(long sleepFor, TimeUnit timeUnit, TPCTaskType taskType)
     {
-        return apply(((subscriber, source, next) ->
-                      TPC.bestTPCScheduler().scheduleDirect(() -> subscriber.onNext(next),
-                                                            taskType,
-                                                            sleepFor,
-                                                            timeUnit)));
+        return new FlowTransformNext<T, T>(this)
+        {
+            public void onNext(T item)
+            {
+                TPC.bestTPCScheduler().scheduleDirect(() -> subscriber.onNext(item),
+                                                      taskType,
+                                                      sleepFor,
+                                                      timeUnit);
+            }
+        };
     }
 
     /**
@@ -2176,10 +1985,10 @@ public abstract class Flow<T>
 
     public static <T> CloseableIterator<T> toIterator(Flow<T> source) throws Exception
     {
-        return new ToIteratorSubscription<T>(source);
+        return new ToIteratorSubscriber<T>(source);
     }
 
-    static class ToIteratorSubscription<T> implements CloseableIterator<T>, FlowSubscriber<T>
+    static class ToIteratorSubscriber<T> implements CloseableIterator<T>, FlowSubscriber<T>
     {
         static final Object POISON_PILL = new Object();
 
@@ -2188,7 +1997,7 @@ public abstract class Flow<T>
         Throwable error = null;
         Object next = null;
 
-        public ToIteratorSubscription(Flow<T> source) throws Exception
+        public ToIteratorSubscriber(Flow<T> source) throws Exception
         {
             subscription = source.subscribe(this);
         }
@@ -2255,7 +2064,7 @@ public abstract class Flow<T>
             boolean has = hasNext();
             assert has;
 
-            @SuppressWarnings("resource")
+            @SuppressWarnings("unchecked")
             T toReturn = (T) next;
             next = null;
             return toReturn;
@@ -2284,7 +2093,7 @@ public abstract class Flow<T>
      * "controlling" flow subscribes and requests. When that happens onNext calls will be issued to all clients, and
      * any of them can delay (by not requesting) or withdraw from (by closing) futher processing.
      */
-    public Tee<T> tee(int count) throws Exception
+    public Tee<T> tee(int count)
     {
         return new TeeImpl<>(this, count);
     }
@@ -2303,7 +2112,7 @@ public abstract class Flow<T>
      * "controlling" flow subscribes and requests. When that happens onNext calls will be issued to all clients, and
      * any of them can delay (by not requesting) or withdraw from (by closing) futher processing.
      */
-    public Tee<T> tee() throws Exception
+    public Tee<T> tee()
     {
         return new TeeImpl<>(this, 2);
     }

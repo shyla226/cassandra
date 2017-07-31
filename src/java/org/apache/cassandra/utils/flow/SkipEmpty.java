@@ -45,29 +45,28 @@ public class SkipEmpty
     {
         final Function<Flow<T>, U> mapper;
         FlowSubscriber<U> subscriber;
-        Flow<T> content;
-        SkipEmptyContentSubscriber<T> child;
+        final SkipEmptyContentSubscriber<T> child;
 
         private enum State
         {
-            READY,
+            UNSUBSCRIBED,
             SUBSCRIBED,
             REQUESTED,
             SUPPLIED,
             COMPLETED,
             CLOSED
         }
-        State state = State.READY;
+        State state = State.UNSUBSCRIBED;
 
         public SkipEmptyContent(Flow<T> content, Function<Flow<T>, U> mapper)
         {
-            this.content = content;
             this.mapper = mapper;
+            child = new SkipEmptyContentSubscriber(content, this);
         }
 
         public FlowSubscription subscribe(FlowSubscriber<U> subscriber)
         {
-            if (state != State.READY)
+            if (state != State.UNSUBSCRIBED)
                 throw new AssertionError("skipEmpty partitions can only be subscribed to once. State was " + state);
 
             this.subscriber = subscriber;
@@ -85,14 +84,7 @@ public class SkipEmpty
             if (!verifyTransition(State.SUBSCRIBED, State.REQUESTED))
                 return;
 
-            try
-            {
-                child = new SkipEmptyContentSubscriber(content, this);
-            }
-            catch (Exception e)
-            {
-                onError(e);
-            }
+            child.source.request();
         }
 
         public void close() throws Exception
@@ -162,7 +154,7 @@ public class SkipEmpty
 
         public Throwable addSubscriberChainFromSource(Throwable throwable)
         {
-            return child != null ? child.addSubscriberChainFromSource(throwable) : Flow.wrapException(throwable, this);
+            return child.addSubscriberChainFromSource(throwable);
         }
 
         public String toString()
@@ -175,29 +167,22 @@ public class SkipEmpty
      * This is both flow and subscription. Done this way as we can only subscribe to these implementations once
      * and thus it doesn't make much sense to create subscription-specific instances.
      */
-    private static class SkipEmptyContentSubscriber<T> extends Flow<T> implements FlowSubscriber<T>, FlowSubscription
+    private static class SkipEmptyContentSubscriber<T> extends FlowTransform<T, T>
     {
         final SkipEmptyContent parent;
-        final FlowSubscription upstream;
-
-        FlowSubscriber<T> downstream = null;
         T first = null;
 
         public SkipEmptyContentSubscriber(Flow<T> content,
-                                          SkipEmptyContent parent) throws Exception
+                                          SkipEmptyContent parent)
         {
+            super(content);
             this.parent = parent;
-            upstream = content.subscribe(this);
-            upstream.request();
         }
 
         public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
         {
-            assert downstream == null : "skipEmpty content can only be subscribed to once, " + parent.toString();
             assert first != null;
-            downstream = subscriber;
-
-            return this;
+            return super.subscribe(subscriber);
         }
 
         public void request()
@@ -206,21 +191,16 @@ public class SkipEmpty
             {
                 T toReturn = first;
                 first = null;
-                downstream.onNext(toReturn);
+                subscriber.onNext(toReturn);
             }
             else
-                upstream.request();
-        }
-
-        public void close() throws Exception
-        {
-            upstream.close();
+                source.request();
         }
 
         public void onNext(T item)
         {
-            if (downstream != null)
-                downstream.onNext(item);
+            if (subscriber != null)
+                subscriber.onNext(item);
             else
             {
                 if (first != null)
@@ -233,14 +213,14 @@ public class SkipEmpty
 
         public void onComplete()
         {
-            if (downstream != null)
-                downstream.onComplete();
+            if (subscriber != null)
+                subscriber.onComplete();
             else
             {
                 // Empty flow. No one will subscribe to us now, so make sure our subscription is closed.
                 try
                 {
-                    upstream.close();
+                    source.close();
                     parent.onEmpty();
                 }
                 catch (Exception e)
@@ -252,14 +232,14 @@ public class SkipEmpty
 
         public void onError(Throwable t)
         {
-            if (downstream != null)
-                downstream.onError(t);
+            if (subscriber != null)
+                subscriber.onError(t);
             else
             {
                 // Error before first element. No one will subscribe to us now, so make sure our subscription is closed.
                 try
                 {
-                    upstream.close();
+                    source.close();
                 }
                 catch (Throwable tt)
                 {
@@ -269,14 +249,9 @@ public class SkipEmpty
             }
         }
 
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return upstream.addSubscriberChainFromSource(throwable);
-        }
-
         public String toString()
         {
-            return Flow.formatTrace("skipEmpty", parent.mapper, downstream);
+            return Flow.formatTrace("skipEmpty", parent.mapper, subscriber);
         }
     }
 }
