@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -48,6 +49,7 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.Completable;
 import io.reactivex.Observable;
+import io.reactivex.internal.operators.completable.CompletableEmpty;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.StageManager;
@@ -1174,7 +1176,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     private static final class WriteTimeTransaction implements UpdateTransaction
     {
         private final Index.Indexer[] indexers;
-        private List<Completable> allCompletables;
+        private final List<Completable> allCompletables;
 
         private WriteTimeTransaction(Index.Indexer... indexers)
         {
@@ -1194,16 +1196,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             for (Index.Indexer indexer : indexers)
             {
-                try
-                {
-                    Completable c = indexer.partitionDelete(deletionTime);
-                    if (c != Completable.complete())
-                        allCompletables.add(c);
-                }
-                catch (Exception exc)
-                {
-                    allCompletables.add(Completable.error(exc));
-                }
+                checkNotCompleteAndAdd(() -> indexer.partitionDelete(deletionTime));
             }
         }
 
@@ -1211,16 +1204,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             for (Index.Indexer indexer : indexers)
             {
-                try
-                {
-                    Completable c = indexer.rangeTombstone(tombstone);
-                    if (c != Completable.complete())
-                        allCompletables.add(c);
-                }
-                catch (Exception exc)
-                {
-                    allCompletables.add(Completable.error(exc));
-                }
+                checkNotCompleteAndAdd(() -> indexer.rangeTombstone(tombstone));
             }
         }
 
@@ -1229,16 +1213,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
             for (Index.Indexer indexer : indexers)
             {
-                try
-                {
-                    Completable c = indexer.insertRow(row);
-                    if (c != Completable.complete())
-                        allCompletables.add(c);
-                }
-                catch (Exception exc)
-                {
-                    allCompletables.add(Completable.error(exc));
-                }
+                checkNotCompleteAndAdd(() -> indexer.insertRow(row));
             }
         }
 
@@ -1282,16 +1257,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
             for (Index.Indexer indexer : indexers)
             {
-                try
-                {
-                    Completable c = indexer.updateRow(oldRow, newRow);
-                    if (c != Completable.complete())
-                        allCompletables.add(c);
-                }
-                catch (Exception exc)
-                {
-                    allCompletables.add(Completable.error(exc));
-                }
+                checkNotCompleteAndAdd(() -> indexer.updateRow(oldRow, newRow));
             }
         }
 
@@ -1299,16 +1265,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             for (Index.Indexer indexer : indexers)
             {
-                try
-                {
-                    Completable c = indexer.finish();
-                    if (c != Completable.complete())
-                        allCompletables.add(c);
-                }
-                catch (Exception exc)
-                {
-                    allCompletables.add(Completable.error(exc));
-                }
+                checkNotCompleteAndAdd(indexer::finish);
             }
 
             return Completable.concat(allCompletables);
@@ -1326,6 +1283,20 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             // identical ttl & localExpirationTime) will not get this far due
             // to the oldCell.equals(newCell) in StandardUpdater.update
             return !oldCell.value().equals(newCell.value()) || oldCell.timestamp() != newCell.timestamp();
+        }
+
+        private void checkNotCompleteAndAdd(Supplier<Completable> s)
+        {
+            try
+            {
+                Completable c = s.get();
+                if (c != CompletableEmpty.INSTANCE)
+                    allCompletables.add(c);
+            }
+            catch (Exception exc)
+            {
+                allCompletables.add(Completable.error(exc));
+            }
         }
     }
 
