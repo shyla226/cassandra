@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
+
 import io.netty.util.internal.shaded.org.jctools.queues.MpscArrayQueue;
 import io.reactivex.Single;
 import org.slf4j.Logger;
@@ -729,6 +730,14 @@ public abstract class Message
         @Override
         public boolean apply(Throwable exception)
         {
+            if (exception instanceof RuntimeException &&
+                exception.getCause() != null &&
+                exception.getCause() instanceof IOException)
+            {
+                // Netty 4.1.13 wraps client issues such as NotSslRecordException into decoder exceptions, which are RuntimeExceptions, not IOExceptions
+                exception = exception.getCause();
+            }
+
             String message;
             try
             {
