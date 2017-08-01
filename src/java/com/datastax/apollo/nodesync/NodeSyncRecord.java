@@ -16,6 +16,7 @@ import java.util.function.Function;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.dht.Range;
@@ -159,10 +160,11 @@ public class NodeSyncRecord
      *      {@link ValidationInfo#composeWith}, which picks the oldest start time and worst outcome we have (it's the
      *      best we can do).
      */
-    private static ValidationInfo consolidateValidations(Range<Token> range,
-                                                         Iterable<NodeSyncRecord> coveringRecords,
-                                                         int maxRecords,
-                                                         Function<NodeSyncRecord, ValidationInfo> getter)
+    @VisibleForTesting
+    static ValidationInfo consolidateValidations(Range<Token> range,
+                                                 Iterable<NodeSyncRecord> coveringRecords,
+                                                 int maxRecords,
+                                                 Function<NodeSyncRecord, ValidationInfo> getter)
     {
         // To make this a bit simpler, we proceed in 2 phases. In the first one, we basically deal with rule 1. and 2.
         // above, building list of ValidationInfo that correspond to strictly successive sub-ranges covering 'range'.
@@ -272,7 +274,8 @@ public class NodeSyncRecord
      * use the exact IP for anything, we only care about 'blockedBy' being set or not, the details is for external
      * monitoring).
      */
-    private static InetAddress consolidateLockedBy(Range<Token> range, List<NodeSyncRecord> coveringRecords)
+    @VisibleForTesting
+    static InetAddress consolidateLockedBy(Range<Token> range, List<NodeSyncRecord> coveringRecords)
     {
         int i = 0;
 
