@@ -1,19 +1,7 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Please see the included license file for details.
  */
 package com.datastax.apollo.nodesync;
 
@@ -68,7 +56,7 @@ import org.apache.cassandra.utils.units.TimeValue;
  * <p>
  * When using this proposer, the following specific properties should be kept in mind:
  *  - it doesn't check if the table has NodeSync enabled or not; it runs on any table irrespective of that setting (very
- *    much on purpose: this makes targeted testing of NodeSync (by us or by user) much easier).
+ *    much on purpose: this makes targeted testing of NodeSync (by us or by user) much easier). Note that  if the NodeSync
  *  - it uses the same segments for a table than {@link ContinuousTableValidationProposer}, and saves each segment
  *    validation results in the {@link SystemDistributedKeyspace#NODESYNC_STATUS} table (no reason to throw hard work
  *    on the floor). As the requested ranges may not fall exactly on segments boundary however, it means this may end up

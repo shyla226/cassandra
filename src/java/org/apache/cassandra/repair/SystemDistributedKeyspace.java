@@ -449,7 +449,7 @@ public final class SystemDistributedKeyspace
 
         Callable<List<NodeSyncRecord>> callable = () ->
         {
-            List<NodeSyncRecord> ranges = new ArrayList<>();
+            List<NodeSyncRecord> records = new ArrayList<>();
             Iterator<UntypedResultSet> iter = queryNodeSyncRecords(segment, tkf);
             while (iter.hasNext())
             {
@@ -473,7 +473,7 @@ public final class SystemDistributedKeyspace
                                                         ? lastSuccessfulValidation
                                                         : lastUnsuccessfulValidation;
                         InetAddress lockedBy = row.has("locked_by") ? row.getInetAddress("locked_by") : null;
-                        ranges.add(new NodeSyncRecord(new Segment(segment.table, range), lastValidation, lastSuccessfulValidation, lockedBy));
+                        records.add(new NodeSyncRecord(new Segment(segment.table, range), lastValidation, lastSuccessfulValidation, lockedBy));
                     }
                     catch (RuntimeException e)
                     {
@@ -482,7 +482,7 @@ public final class SystemDistributedKeyspace
                     }
                 }
             }
-            return ranges;
+            return records;
         };
         return withNodeSyncExceptionHandling(callable,
                                              Collections.emptyList(),
@@ -502,69 +502,38 @@ public final class SystemDistributedKeyspace
         Token start = segment.range.left;
         Token end = segment.range.right;
 
-        String qBase = "SELECT start_token, end_token, last_successful_validation, last_unsuccessful_validation, locked_by"
-                       + " FROM %s.%s"
-                       + " WHERE keyspace_name = ? AND table_name = ?"
-                       + " AND range_group = ?";
+        String q = "SELECT start_token, end_token, last_successful_validation, last_unsuccessful_validation, locked_by"
+                   + " FROM %s.%s"
+                   + " WHERE keyspace_name = ? AND table_name = ?"
+                   + " AND range_group = ?"
+                   + " AND start_token >= ? AND start_token < ?";
 
-        // Even though segment ranges can't be wrapping, the "last" range will still have the min token as "right" bound,
-        // which throws off a 'start_token < ?' condition against it and so we should special case.
-        if (end.isMinimum())
+        // Not that even though segment ranges can't be wrapping, the "last" range will still have the min token as
+        // "right" bound, which throws off a 'start_token < ?' condition against it and so we should special case
+        // somewhat.
+        final int startGroup = rangeGroupFor(start);
+        final int endGroup = end.isMinimum()
+                             ? 255 // Groups are the first byte of the token, so they go from 0 to 255.
+                             : rangeGroupFor(end);
+
+        return new AbstractIterator<UntypedResultSet>()
         {
-            final int startGroup = rangeGroupFor(start);
-            final int endGroup = 255; // Groups are the first byte of the token, so they go from 0 to 255.
+            private int nextGroup = startGroup;
 
-            // Same thing than in the else branch, but we just don't limit the end.
-            String q = qBase + " AND start_token >= ?";
-
-            return new AbstractIterator<UntypedResultSet>()
+            protected UntypedResultSet computeNext()
             {
-                private int nextGroup = startGroup;
+                if (nextGroup > endGroup)
+                    return endOfData();
 
-                protected UntypedResultSet computeNext()
-                {
-                    if (nextGroup > endGroup)
-                        return endOfData();
-
-                    return QueryProcessor.execute(String.format(q, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS),
-                                                  ConsistencyLevel.ONE,
-                                                  segment.table.keyspace,
-                                                  segment.table.name,
-                                                  ByteBufferUtil.bytes((byte)nextGroup++),
-                                                  tkf.toByteArray(start));
-                }
-            };
-
-        }
-        else
-        {
-            final int startGroup = rangeGroupFor(start);
-            final int endGroup = rangeGroupFor(end);
-
-            // Queries all ranges that cover the requested one. Note that we can have a strict inequality on the end of our
-            // queried interval (i.e. 'start_token < ?' below) because range are start exclusive, so any stored range that
-            // start exactly where our range stops doesn't really intersect.
-            String q = qBase + " AND start_token >= ? AND start_token < ?";
-
-            return new AbstractIterator<UntypedResultSet>()
-            {
-                private int nextGroup = startGroup;
-
-                protected UntypedResultSet computeNext()
-                {
-                    if (nextGroup > endGroup)
-                        return endOfData();
-
-                    return QueryProcessor.execute(String.format(q, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS),
-                                                  ConsistencyLevel.ONE,
-                                                  segment.table.keyspace,
-                                                  segment.table.name,
-                                                  ByteBufferUtil.bytes((byte)nextGroup++),
-                                                  tkf.toByteArray(start),
-                                                  tkf.toByteArray(end));
-                }
-            };
-        }
+                return QueryProcessor.execute(String.format(q, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS),
+                                              ConsistencyLevel.ONE,
+                                              segment.table.keyspace,
+                                              segment.table.name,
+                                              ByteBufferUtil.bytes((byte)nextGroup++),
+                                              tkf.toByteArray(start),
+                                              end.isMinimum() ? ByteBufferUtil.UNSET_BYTE_BUFFER : tkf.toByteArray(end));
+            }
+        };
     }
 
     /**
