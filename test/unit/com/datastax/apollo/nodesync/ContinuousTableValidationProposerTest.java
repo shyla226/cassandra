@@ -29,7 +29,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import static org.junit.Assert.*;
 import static com.datastax.apollo.nodesync.NodeSyncTestTools.*;
 
-public class ContinuousTableValidationProposerTest extends AbstractValidationProposerTest
+public class ContinuousTableValidationProposerTest extends AbstractValidationProposerTester
 {
     @Test
     public void testValidationProposalGeneration() throws Exception

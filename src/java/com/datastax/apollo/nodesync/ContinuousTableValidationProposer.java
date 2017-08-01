@@ -83,6 +83,8 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
      */
     private volatile ReloadableProposals proposals = new ReloadableProposals(EMPTY_QUEUE);
 
+    private volatile boolean cancelled;
+
     private ContinuousTableValidationProposer(NodeSyncService service,
                                               TableMetadata table,
                                               int depth,
@@ -200,13 +202,16 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
 
     public boolean supplyNextProposal(Consumer<ValidationProposal> proposalConsumer)
     {
+        if (cancelled)
+            return false;
+
         proposals.supplyNextTo(proposalConsumer);
         return true;
     }
 
     public boolean isDone()
     {
-        return false;
+        return !cancelled;
     }
 
     public ValidationProposer onTableUpdate(TableMetadata table)
@@ -231,6 +236,17 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
             return null;
         }
         return this;
+    }
+
+    public boolean cancel()
+    {
+        cancelled = true;
+        return true;
+    }
+
+    public boolean isCancelled()
+    {
+        return cancelled;
     }
 
     /**
@@ -483,6 +499,9 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
 
         Validator activate()
         {
+            if (proposer().isCancelled())
+                return null;
+
             // Things may have changed since we created the proposal and the segment may be or have been validated by
             // another node, so we need to re-check the system table.
             List<NodeSyncRecord> records = SystemDistributedKeyspace.nodeSyncRecords(segment);

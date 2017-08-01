@@ -28,7 +28,8 @@ import org.apache.cassandra.schema.TableMetadata;
 
 import static com.datastax.apollo.nodesync.NodeSyncTestTools.*;
 
-public class AbstractValidationProposerTest extends CQLTester
+// Note: it's called Tester and not Test so JUnit don't pick it up and complain it has no runnable methods
+class AbstractValidationProposerTester extends CQLTester
 {
     static Function<String, Collection<Range<Token>>> TEST_RANGES = k -> Arrays.asList(range(0, 100),
                                                                                        range(200, 300),
