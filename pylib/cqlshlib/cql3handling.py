@@ -64,7 +64,7 @@ class Cql3ParsingRuleSet(CqlParsingRuleSet):
         ('caching', None,
             ('rows_per_partition', 'keys')),
         ('nodesync', None,
-            ('enabled')),
+            ('enabled', 'deadline_target_sec')),
     )
 
     obsolete_cf_options = ()

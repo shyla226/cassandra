@@ -136,7 +136,8 @@ class Validator
         this.segment = segment;
         this.startTime = startTime;
         this.limiter = service.config.rateLimiter;
-        this.pageSize = (int)service.config.getPageSize(SizeUnit.BYTES);
+        long pageSizeInBytes = service.config.getPageSize(SizeUnit.BYTES) / TableRowSizeEstimator.instance.getAverageRowSize(segment.table);
+        this.pageSize = Math.max(1, (int)pageSizeInBytes);
 
         ReadCommand command = PartitionRangeReadCommand.fullRangeRead(table(),
                                                                       DataRange.forTokenRange(range()),

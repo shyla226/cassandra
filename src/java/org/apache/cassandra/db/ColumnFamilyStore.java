@@ -2512,6 +2512,23 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return count > 0 ? sum * 1.0 / count : 0;
     }
 
+    public int getAverageRowSize()
+    {
+        // Average the per-sstable row size averages
+        long sum = 0;
+        long count = 0;
+        for (SSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
+        {
+            // We don't have tons of per-row stats currently, but we do have the total number of rows in the sstable
+            // so dividing the full size by that is probably the best we can do (of course taking the total sstable
+            // size includes the overhead of the partition key for each partitions, but afaik we don't have anything
+            // better currently).
+            sum += sstable.uncompressedLength() / sstable.getTotalRows();
+            count++;
+        }
+        return (int)(count == 0 ? 0 : sum / count);
+    }
+
     public long estimateKeys()
     {
         long n = 0;
