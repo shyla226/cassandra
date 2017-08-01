@@ -175,6 +175,17 @@ public class NodeSyncService implements NodeSyncServiceMBean
         return executor.shutdown(force).thenRun(this::finishShutdown);
     }
 
+    /**
+     * Disables the NodeSync service (if it is running) and blocks (indefinitely) on the shutdown completing.
+     * <p>
+     * This method only exists for the sake of JMX and more precisely JConsole. The {@link #disable(boolean)} variant
+     * cannot be used through JMX at all and the {@link #disable(boolean, long, TimeUnit)}, while exposed by JMX, cannot
+     * be called from JConsole due to the use of {@link TimeUnit}. As some users may find it convenient to still be
+     * able to disable through JConsole (after, you can call {@link #enable()} from there), we expose this variant as
+     * well.
+     *
+     * @return {@code true} if the service was stopped, {@code false} if it wasn't already running.
+     */
     public boolean disable()
     {
         try
@@ -189,6 +200,10 @@ public class NodeSyncService implements NodeSyncServiceMBean
 
     /**
      * Disables the NodeSync service (if it is running) and blocks on the shutdown completing.
+     * <p>
+     * For internal code, the {@link #disable(boolean)} variant should be preferred to this method as it's a bit more
+     * flexible (doesn't block by default and the returned future allows for a few conveniences), but this method exists
+     * for JMX where we basically have to block (or do something a lot more complex).
      *
      * @param force whether the shutdown should be forced, which means that ongoing validation will be interrupted and the
      *              service is stopped as quickly as possible. if {@code false}, a clean shutdown is performed where

@@ -9,6 +9,7 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
@@ -61,8 +62,8 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
      * end up with 2 {@link ContinuousTableValidationProposer} object for the same table, see {@link ContinuousTableValidationProposer#equals(Object)}
      * (Note: we don't use the alternative of making this a map keyed by {@link TableMetadata} because 1) we want to
      * leave open the possibility to have non-table based proposers and 2) because while we don't want 2
-     * {@link ContinuousTableValidationProposer} for the same table, we might want 2 object of different type of proposers
-     * even if they are on the same table (to implement user-forced validation cleanly for instance)).
+     * {@link ContinuousTableValidationProposer} for the same table, we might want 2 {@link UserValidationProposer} on
+     * the same table (for say, different ranges) or for any other future proposer.
      */
     private final Set<ValidationProposer> proposers;
     private final PriorityQueue<ValidationProposal> proposalQueue;
@@ -179,7 +180,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         lock.lock();
         try
         {
-            return removeProposer(proposer, true);
+            return removeProposer(proposer);
         }
         finally
         {
@@ -201,12 +202,26 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     }
 
     // *Must* only be called while holding the lock
-    private boolean removeProposer(ValidationProposer proposer, boolean checkForQueuedProposals)
+    private boolean removeProposer(ValidationProposer proposer)
     {
-        boolean removed = proposers.remove(proposer);
-        if (removed && checkForQueuedProposals)
-            proposalQueue.removeIf(p -> p.proposer().equals(proposer));
-        return removed;
+        // We need to cancel the removed proposer (to cancel no-yet-activated proposals and make sure in general than
+        // we don't wrongly preserve the proposer due to activities concurrent to this call) but the actual proposer to
+        // remove might not be the one passed to that method (see removeContinuousProposerFor() for instance). So we
+        // have to iterate to find the actual object we're about to remove.
+        // TODO(Sylvain): this is as clean as it could be. We should refactor things a bit to avoid that (probably make
+        // ValidationProposer expose an ID class and use that to turn 'proposers' into a map keyed by such ID, so we
+        // don't have to rely on subtle equal behavior).
+        for (Iterator<ValidationProposer> iter = proposers.iterator(); iter.hasNext();)
+        {
+            ValidationProposer p = iter.next();
+            if (!proposer.equals(p))
+                continue;
+
+            iter.remove();
+            p.cancel();
+            return true;
+        }
+        return false;
     }
 
     private void mapOnProposers(Function<ValidationProposer, ValidationProposer> fct)
@@ -230,7 +245,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
             }
 
             // The order below don't matter much, but do the remove first so we don't grow proposalQueue unnecessarily
-            toRemove.forEach(c -> removeProposer(c, true));
+            toRemove.forEach(this::removeProposer);
             toAdd.forEach(this::addProposer);
         }
         finally
@@ -348,10 +363,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     private void requeue(ValidationProposer proposer)
     {
         if (!proposer.supplyNextProposal(this::queueProposal))
-        {
-            // We know we don't any proposal for this proposer in the queue, hence the false below
-            removeProposer(proposer, false);
-        }
+            removeProposer(proposer);
     }
 
     // This needs the lock but may or may not be called while already holding it, so we acquire said lock and rely

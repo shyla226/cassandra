@@ -276,6 +276,13 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                     // future is properly competed.
                     returnValidationPermit();
                 }
+                catch (Exception e)
+                {
+                    logger.error("Unexpected error submitting new validation to NodeSync executor. This shouldn't happen "
+                                 + "and should be reported but unless this happens repeatedly, this shouldn't prevent "
+                                 + "NodeSync general progress", e);
+                    returnValidationPermit();
+                }
             });
         }
     }
@@ -350,7 +357,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
      * to not achieve our rate, but only because we throttle ourselves from repairing the same segment too often. Plus,
      * with almost empty ranges, our time may be dominated by the reads to the system table, which we don't really
      * account for properly. For the first issue, we should add tracking of the time the executor spends blocking on
-     * {@link ValidationScheduler#getNextValidation()} and not warn (nor raises capacity like crazy) when that's too
+     * {@link ValidationScheduler#getNextValidation} and not warn (nor raises capacity like crazy) when that's too
      * big. Less clear how to deal efficiently with the 2nd problem.
      */
     private class Controller implements Runnable

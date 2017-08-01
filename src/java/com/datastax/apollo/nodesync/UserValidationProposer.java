@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -34,6 +35,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import javax.annotation.Nullable;
@@ -154,32 +156,11 @@ class UserValidationProposer extends AbstractValidationProposer
         assert !allSegments.isEmpty();
 
         if (requestedRanges == null)
-        {
             toValidate = allSegments;
-            return;
-        }
-
-        // allSegments only contains unwrapped ranges (by definition of segments) but it may not contain them ordered
-        // by the start of the segment so sort them to make the following filtering easier.
-        allSegments.sort(Comparator.comparing(s -> s.range.left));
-
-        toValidate = new ArrayList<>();
-        int reqIdx = 0, allIdx = 0;
-        while (reqIdx < requestedRanges.size() && allIdx < allSegments.size())
-        {
-            Range<Token> nextReq = requestedRanges.get(reqIdx);
-            Range<Token> nextAll = allSegments.get(allIdx).range;
-
-            if (!nextAll.right.isMinimum() && nextAll.right.compareTo(nextReq.left) <= 0)
-                // if the next segment stops strictly before the next requested, skip it and move to next segment
-                ++allIdx;
-            else if (nextReq.right.isMinimum() || nextAll.left.compareTo(nextReq.right) < 0)
-                // otherwise, if that next segment intersects the next requested, it's a match and we return it.
-                toValidate.add(allSegments.get(allIdx++));
-            else
-                // Otherwise, the next segment starts strictly after the next requested: we're done with that requested
-                ++reqIdx;
-        }
+        else
+            toValidate = allSegments.stream()
+                                    .filter(s -> requestedRanges.stream().anyMatch(s.range::intersects))
+                                    .collect(Collectors.toList());
     }
 
     static UserValidationProposer create(NodeSyncService service, UserValidationOptions options)
@@ -222,29 +203,13 @@ class UserValidationProposer extends AbstractValidationProposer
 
     private static void checkAllLocalRanges(List<Range<Token>> requestedRanges, List<Range<Token>> localRanges)
     {
-        int i = 0; // index in localRanges
-        Range<Token> local = localRanges.get(i);
-        for (Range<Token> requested : requestedRanges)
-        {
-            // Because ranges are normalized, either every requested is strictly contained in one local range, or it
-            // has some part that is not local.
-
-            // Move to whichever local range may contain requested, i.e. skip any local range that ends before the start
-            // of requested.
-            while (!local.right.isMinimum() && requested.left.compareTo(local.right) >= 0)
-            {
-                if (++i >= localRanges.size())
-                    throw new IllegalArgumentException(String.format("Can only validate local ranges: range %s is not local to this node (%s)",
-                                                                     requested, FBUtilities.getBroadcastAddress()));
-                local = localRanges.get(i);
-            }
-
-            // requested starts before the end of the current local range (requested.left < local.right).
-            // If if also starts strictly before that same local range start, or stops strictly after that local range
-            // end, it's not fully local, otherwise, it's fully included and we move to the next requested range.
-            if (requested.left.compareTo(local.left) < 0 || requested.right.compareTo(local.right) > 0)
-                throw new IllegalArgumentException(String.format("Can only validate local ranges: range %s is not (entirely) local to this node (%s) ()", requested, FBUtilities.getBroadcastAddress()));
-        }
+        // Because ranges are normalized, either every requested is strictly contained in one local range, or it
+        // has some part that is not local.
+        Set<Range<Token>> nonLocal = requestedRanges.stream()
+                                                    .filter(r -> localRanges.stream().noneMatch(l -> l.contains(r)))
+                                                    .collect(Collectors.toSet());
+        if (!nonLocal.isEmpty())
+            throw new IllegalArgumentException(String.format("Can only validate local ranges: ranges %s are not (entirely) local to node %s with ranges %s", nonLocal, FBUtilities.getBroadcastAddress(), localRanges));
     }
 
     /**
@@ -276,7 +241,12 @@ class UserValidationProposer extends AbstractValidationProposer
 
     public boolean cancel()
     {
-        return completionFuture.cancel(false);
+         return completionFuture.cancel(false);
+    }
+
+    public boolean isCancelled()
+    {
+        return completionFuture.isCancelled();
     }
 
     public ValidationProposer onTableUpdate(TableMetadata table)
@@ -342,6 +312,9 @@ class UserValidationProposer extends AbstractValidationProposer
 
         Validator activate()
         {
+            if (proposer().isCancelled())
+                return null;
+
             // We want to mark the 'startTime' (used for the stats returned on completion to tell how long the whole
             // thing took) to be set as close to the true beginning of the work as possible, so set it here. Note that
             // this is racy but we don't care.

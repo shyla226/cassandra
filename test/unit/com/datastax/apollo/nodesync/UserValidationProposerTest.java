@@ -29,7 +29,7 @@ import static java.util.Arrays.asList;
 import static org.junit.Assert.*;
 import static com.datastax.apollo.nodesync.NodeSyncTestTools.*;
 
-public class UserValidationProposerTest extends AbstractValidationProposerTest
+public class UserValidationProposerTest extends AbstractValidationProposerTester
 {
     @Test
     public void testSegmentGeneration() throws Exception

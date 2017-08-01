@@ -87,4 +87,20 @@ interface ValidationProposer
      * unaffected, or a new proposer object that should replace this one if this is more appropriate.
      */
     ValidationProposer onTableRemoval(String keyspace, String table);
+
+    /**
+     * Cancel a proposer, forcing it to stop emitting new proposals even if it was not naturally finished.
+     * <p>
+     * This method <b>must</b> be idempotent: cancelling an already finished or already cancelled proposer should be
+     * a no-op and should not, in particular, throw.
+     *
+     * @return {@code true} if the proposer is cancelled following the call to this method, {@code false} if the
+     * proposer had already naturally finished prior to this call.
+     */
+    boolean cancel();
+
+    /**
+     * Whether the proposer has been cancelled before natural completion (through {@link #cancel()}).
+     */
+    boolean isCancelled();
 }
