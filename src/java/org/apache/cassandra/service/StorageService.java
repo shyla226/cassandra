@@ -3365,9 +3365,32 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (option.getRanges().isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor() < 2)
             return 0;
 
+        // We reject any repair that targets a table on which NodeSync is enabled.
+        checkForNodeSyncEnabledTables(keyspace, option);
+
         int cmd = nextRepairCommand.incrementAndGet();
         NamedThreadFactory.createThread(createRepairTask(cmd, keyspace, option), "Repair-Task-" + threadCounter.incrementAndGet()).start();
         return cmd;
+    }
+
+    private void checkForNodeSyncEnabledTables(String keyspace, RepairOption option)
+    {
+        String[] columnFamilies = option.getColumnFamilies().toArray(new String[option.getColumnFamilies().size()]);
+        try
+        {
+            Iterable<ColumnFamilyStore> validTables = getValidColumnFamilies(false, false, keyspace, columnFamilies);
+            Iterable<TableMetadata> withNodeSync = Iterables.filter(Iterables.transform(validTables, ColumnFamilyStore::metadata),
+                                                                    t -> t.params.nodeSync.isEnabled(t));
+            if (!Iterables.isEmpty(withNodeSync))
+                throw new IllegalStateException(String.format("Cannot run anti-entropy repair on tables with NodeSync enabled (and NodeSync is enabled on %s)",
+                                                              withNodeSync));
+        }
+        catch (IOException e)
+        {
+            // Called by getValidColumnFamilies when the keyspace is unknown (?!?!) but we shouldn't get here in that
+            // case since we'd have break in repairAsync at the Keyspace.open() call.
+            throw new RuntimeException(e);
+        }
     }
 
     /**
