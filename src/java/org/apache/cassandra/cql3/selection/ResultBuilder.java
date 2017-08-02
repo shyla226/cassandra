@@ -159,6 +159,12 @@ public abstract class ResultBuilder
 
         }
         current = new ArrayList<>(selection.columns.size());
+
+        // Timestamps and TTLs are arrays per row, we must null them out between rows
+        if (timestamps != null)
+            Arrays.fill(timestamps, Long.MIN_VALUE);
+        if (ttls != null)
+            Arrays.fill(ttls, -1);
     }
 
     /**

@@ -4,6 +4,7 @@
  * Duplicate the buffer before passing it to analyser in SASI operation (CASSANDRA-13512)
  * Properly evict pstmts from prepared statements cache (CASSANDRA-13641)
 Merged from 3.0:
+ * Fix invalid writetime for null cells (CASSANDRA-13711)
  * Fix ALTER TABLE statement to atomically propagate changes to the table and its MVs (CASSANDRA-12952)
  * Fix Digest mismatch Exception if hints file has UnknownColumnFamily (CASSANDRA-13696)
  * Fixed ambiguous output of nodetool tablestats command (CASSANDRA-13722)
@@ -20,6 +21,7 @@ Merged from 2.2:
  * Fix nested Tuples/UDTs validation (CASSANDRA-13646)
 Merged from 2.1:
  * Clone HeartBeatState when building gossip messages. Make its generation/version volatile (CASSANDRA-13700)
+
 
 3.11.0
  * Allow native function calls in CQLSSTableWriter (CASSANDRA-12606)
