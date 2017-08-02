@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import javax.annotation.Nullable;
@@ -33,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.CQLSyntaxHelper;
+import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -187,15 +189,42 @@ public final class NodeSyncParams
         return map;
     }
 
+    // For MVs, we default anything to it's base table and this method handles this.
+    private static <T> T withViewDefaultHandling(TableMetadata table,
+                                                 Option option,
+                                                 T nonViewDefault,
+                                                 BiFunction<NodeSyncParams, TableMetadata, T> getter)
+    {
+        if (!table.isView())
+            return nonViewDefault;
+
+        TableMetadataRef baseTable = View.findBaseTable(table.keyspace, table.name);
+        if (baseTable == null)
+        {
+            // Shouldn't really happen so logging, but not a very appropriate place to break otherwise.
+            nospamLogger.warn("Cannot find base table for view {} while checking NodeSync '{}' setting: "
+                              + "this shouldn't happen and should be reported but defaulting to {} in the meantime",
+                              table, option, nonViewDefault);
+            return nonViewDefault;
+        }
+        TableMetadata base = baseTable.get();
+        return getter.apply(base.params.nodeSync, base);
+    }
+
     /**
      * Whether NodeSync is enabled on the table of which this is the NodeSync parameters.
      */
     public boolean isEnabled(TableMetadata table)
     {
+        if (isEnabled != null)
+            return isEnabled;
+
         // We force nodesync on the system distributed keyspace because it cannot be altered manually.
-        return isEnabled == null
-               ? (SchemaConstants.isReplicatedSystemKeyspace(table.keyspace) || DEFAULT_ENABLED)
-               : isEnabled;
+        // TODO(Sylvain): we should fix the later part, this is not ideal at all.
+        if (SchemaConstants.isReplicatedSystemKeyspace(table.keyspace))
+            return true;
+
+        return withViewDefaultHandling(table, Option.ENABLED, DEFAULT_ENABLED, NodeSyncParams::isEnabled);
     }
 
     /**
@@ -221,10 +250,11 @@ public final class NodeSyncParams
      */
     public long deadlineTarget(TableMetadata table, TimeUnit unit)
     {
-        int inSec = deadlineTargetSec == null
-                    ? Math.max(MIN_DEFAULT_DEADLINE_TARGET_SEC, table.params.gcGraceSeconds)
-                    : deadlineTargetSec;
-        return unit.convert(inSec, TimeUnit.SECONDS);
+        if (deadlineTargetSec != null)
+            return unit.convert(deadlineTargetSec, TimeUnit.SECONDS);
+
+        long defaultValue = unit.convert(Math.max(MIN_DEFAULT_DEADLINE_TARGET_SEC, table.params.gcGraceSeconds), TimeUnit.SECONDS);
+        return withViewDefaultHandling(table, Option.DEADLINE_TARGET_SEC, defaultValue, (p, t) -> p.deadlineTarget(t, unit));
     }
 
     @Override
