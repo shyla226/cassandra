@@ -191,7 +191,7 @@ public class NodeSyncRecord
         List<ValidationInfo> step1Output = new ArrayList<>();
         NodeSyncRecord first = records.poll();
         // The first record is not entirely on the left of our segment. But if it starts after our segment start, we're
-        // done as it means some part of the segment is not covered by any record.
+        // done as it means some part of the range is not covered by any record.
         if (first.segment.range.left.compareTo(range.left) > 0)
             return null;
 

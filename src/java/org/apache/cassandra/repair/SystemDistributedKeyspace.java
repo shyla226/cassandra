@@ -502,19 +502,28 @@ public final class SystemDistributedKeyspace
         Token start = segment.range.left;
         Token end = segment.range.right;
 
-        String q = "SELECT start_token, end_token, last_successful_validation, last_unsuccessful_validation, locked_by"
-                   + " FROM %s.%s"
-                   + " WHERE keyspace_name = ? AND table_name = ?"
-                   + " AND range_group = ?"
-                   + " AND start_token >= ? AND start_token < ?";
+        String qBase = "SELECT start_token, end_token, last_successful_validation, last_unsuccessful_validation, locked_by"
+                       + " FROM %s.%s"
+                       + " WHERE keyspace_name = ? AND table_name = ?"
+                       + " AND range_group = ?"
+                       + " AND start_token >= ?";
 
         // Not that even though segment ranges can't be wrapping, the "last" range will still have the min token as
-        // "right" bound, which throws off a 'start_token < ?' condition against it and so we should special case
-        // somewhat.
+        // "right" bound, which throws off a 'start_token < ?' condition against it and so we have to special case
+        // (CQL doesn't currently have a way to skip a condition; would be nice to allow to do so using 'unset' values
+        // but that doesn't work right now).
+        if (end.isMinimum())
+            qBase += " AND start_token < ?";
+
+        final String q = String.format(qBase, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS);
+
         final int startGroup = rangeGroupFor(start);
         final int endGroup = end.isMinimum()
                              ? 255 // Groups are the first byte of the token, so they go from 0 to 255.
                              : rangeGroupFor(end);
+
+        final ByteBuffer startBytes = tkf.toByteArray(start);
+        final ByteBuffer endBytes = end.isMinimum() ? null : tkf.toByteArray(end);
 
         return new AbstractIterator<UntypedResultSet>()
         {
@@ -525,13 +534,10 @@ public final class SystemDistributedKeyspace
                 if (nextGroup > endGroup)
                     return endOfData();
 
-                return QueryProcessor.execute(String.format(q, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS),
-                                              ConsistencyLevel.ONE,
-                                              segment.table.keyspace,
-                                              segment.table.name,
-                                              ByteBufferUtil.bytes((byte)nextGroup++),
-                                              tkf.toByteArray(start),
-                                              end.isMinimum() ? ByteBufferUtil.UNSET_BYTE_BUFFER : tkf.toByteArray(end));
+                ByteBuffer group = ByteBufferUtil.bytes((byte)nextGroup++);
+                return end.isMinimum()
+                       ? QueryProcessor.execute(q, ConsistencyLevel.ONE, segment.table.keyspace, segment.table.name, group, startBytes)
+                       : QueryProcessor.execute(q, ConsistencyLevel.ONE, segment.table.keyspace, segment.table.name, group, startBytes, endBytes);
             }
         };
     }
