@@ -7,7 +7,6 @@ package com.datastax.apollo.nodesync;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -153,7 +152,7 @@ class UserValidationProposer extends AbstractValidationProposer
 
     static UserValidationProposer create(NodeSyncService service, UserValidationOptions options)
     {
-        return create(service, options, DEFAULT_LOCAL_RANGES_PROVIDER, DEFAULT_TABLE_SIZE_PROVIDER, NodeSyncService.MAX_SEGMENT_SIZE);
+        return create(service, options, DEFAULT_LOCAL_RANGES_PROVIDER, DEFAULT_TABLE_SIZE_PROVIDER, NodeSyncService.SEGMENT_SIZE_TARGET);
     }
 
     @VisibleForTesting
