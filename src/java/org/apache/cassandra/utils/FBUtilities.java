@@ -563,11 +563,29 @@ public class FBUtilities
 
     /**
      * Used to get access to protected/private field of the specified class
-     * @param klass - name of the class
-     * @param fieldName - name of the field
-     * @return Field or null on error
+     * @param className the class name
+     * @param fieldName the field name
+     * @return the requested {@code Field}
      */
-    public static Field getProtectedField(Class klass, String fieldName)
+    public static Field getProtectedField(String className, String fieldName)
+    {
+        try
+        {
+            return getProtectedField(Class.forName(className), fieldName);
+        }
+        catch (Exception e)
+        {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * Used to get access to protected/private field of the specified class
+     * @param klass the class
+     * @param fieldName the field name
+     * @return the requested Field
+     */
+    public static Field getProtectedField(Class<?> klass, String fieldName)
     {
         try
         {
@@ -577,7 +595,7 @@ public class FBUtilities
         }
         catch (Exception e)
         {
-            throw new AssertionError(e);
+            throw new IllegalStateException(e);
         }
     }
 
