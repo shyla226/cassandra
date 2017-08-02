@@ -55,9 +55,14 @@ public class NodeSyncService implements NodeSyncServiceMBean
 {
     private static final Logger logger = LoggerFactory.getLogger(NodeSyncService.class);
 
-    /** The maximum size a table segment will correspond to (any bigger segment will get split more). */
+    /**
+     * The target size for table segments. NodeSync will compute segments so that, in the hypothesis of perfect
+     * distribution, segments are lower than this this. Of course, we won't have perfect distribution in practice,
+     * so this is more a target size, but distribution should still be good enough in practice (or you will have
+     * bigger problem than large NodeSync segments).
+     */
     // TODO(Sylvain): probably want to make that at least configurable through a system property. Not sure how good of a default it is also.
-    static final long MAX_SEGMENT_SIZE = SizeUnit.MEGABYTES.toBytes(200);
+    static final long SEGMENT_SIZE_TARGET = Long.getLong("datastax.nodesync.segment_size_target_bytes", SizeUnit.MEGABYTES.toBytes(200));
 
     private static final long LOG_REPORTING_DELAY_SEC = Long.getLong("datastax.nodesync.log_reporter_interval_sec", TimeUnit.MINUTES.toSeconds(10));
 

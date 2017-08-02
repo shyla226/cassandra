@@ -77,8 +77,12 @@ class Validator
 {
     private static final Logger logger = LoggerFactory.getLogger(Validator.class);
 
-    // TODO(Sylvain): may want to make somewhat configurable for tests.
-    private static final long LOCK_TIMEOUT_MS = TimeUnit.MINUTES.toMillis(10);
+    /**
+     * The TTL used on the {@link SystemDistributedKeyspace#NODESYNC_STATUS} "lock". Note that this doesn't put a limit
+     * on the maximum time for validating a segment as the lock is refreshed if necessary, it's only here to have the
+     * lock automatically release on failure.
+     */
+    private static final long LOCK_TIMEOUT_MS = Long.getLong("datastax.nodesync.segment_lock_timeout_ms", TimeUnit.MINUTES.toMillis(10));
 
     /**
      * The possible states of a validator.

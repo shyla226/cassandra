@@ -69,8 +69,7 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
      * (reading the {@link SystemDistributedKeyspace#NodeSyncStatus} table mostly) and this prevents this to get out of
      * hand.
      */
-    // TODO(Sylvain): should make this configurable for testing purposes (less meaningful for end user though)
-    private static final long MIN_VALIDATION_INTERVAL_MS = TimeUnit.MINUTES.toMillis(10);
+    private static final long MIN_VALIDATION_INTERVAL_MS = Long.getLong("datastax.nodesync.min_validation_interval_ms", TimeUnit.MINUTES.toMillis(10));
     // TODO(Sylvain): should (probably) make this configurable, at least for testing (not that important for end-user).
     private static final ThreadPoolExecutor reloadExecutor = DebuggableThreadPoolExecutor.createWithMaximumPoolSize("NodeSyncValidationProposers", 4, 30, TimeUnit.SECONDS);
 
@@ -134,7 +133,7 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
     {
         return createForKeyspace(service,
                                  keyspace,
-                                 NodeSyncService.MAX_SEGMENT_SIZE,
+                                 NodeSyncService.SEGMENT_SIZE_TARGET,
                                  DEFAULT_TABLE_SIZE_PROVIDER,
                                  DEFAULT_LOCAL_RANGES_PROVIDER);
     }
@@ -175,7 +174,7 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
         return create(service,
                       store,
                       DEFAULT_LOCAL_RANGES_PROVIDER.apply(store.keyspace.getName()).size(),
-                      NodeSyncService.MAX_SEGMENT_SIZE,
+                      NodeSyncService.SEGMENT_SIZE_TARGET,
                       DEFAULT_TABLE_SIZE_PROVIDER,
                       DEFAULT_LOCAL_RANGES_PROVIDER);
     }

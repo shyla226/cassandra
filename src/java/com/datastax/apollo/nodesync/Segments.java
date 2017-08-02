@@ -28,7 +28,7 @@ import org.apache.cassandra.schema.TableMetadata;
  * Segments are generated for a given table {@code t} and on the local node in the following way:
  * 1) We compute the "depth" {@code d} of {@code t} (see {@link #depth): that depth is directly related to the size of the data
  *    contained in {@code t} and is computed in such a way that the segments generated in the next step don't cover
- *    more than {@link NodeSyncService#MAX_SEGMENT_SIZE} of data.
+ *    more than {@link NodeSyncService#SEGMENT_SIZE_TARGET } of data.
  * 2) We then take each local ranges for {@code t} and recursively split said range in half {@code d} times.
  * 3) If one of the range generated in the previous step is wrapping, we split it in two at the minimum token to get 2
  *    non-wrapping ranges.
@@ -189,7 +189,7 @@ abstract class Segments
 
         // We special case depth 1 because it's likely somewhat common (along with depth=0). For instance, with 256
         // vnodes, each node stores 256 * RF ranges for every table, so typically 768 (RF=3). Depth == 1 will handle
-        // ranges up to 400MB (with the default MAX_SEGMENT_SIZE of 200MB), which handles 768*400 ~= 300GB.
+        // ranges up to 400MB (with the default SEGMENT_SIZE_TARGET of 200MB), which handles 768*400 ~= 300GB.
         // And while node with > 300GB may not be that rare, this is for a single table, so this likely cover many cases.
         // We course, we still handle higher depth properly below, but worth a simple optimization.
         if (depth == 1)
@@ -262,7 +262,7 @@ abstract class Segments
     {
         Token midpoint = partitioner.midpoint(range.left, range.right);
         // It's theoretically possible the range is small enough to not be splittable. This shouldn't really happen as
-        // local ranges shouldn't be *that* small and we don't split unless a range covers more than MAX_SEGMENT_SIZE,
+        // local ranges shouldn't be *that* small and we don't split unless a range covers more than SEGMENT_SIZE_TARGET,
         // but let's not have a hard to reproduce bug just-in-case.
         return midpoint.equals(range.left) || midpoint.equals(range.right) ? null : midpoint;
     }
