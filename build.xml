@@ -408,9 +408,11 @@
             <exclusion groupId="org.eclipse.jdt" artifactId="core"/>
             <exclusion groupId="ant" artifactId="ant"/>
             <exclusion groupId="junit" artifactId="junit"/>
+            <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
           </dependency>
           <dependency groupId="org.apache.hadoop" artifactId="hadoop-minicluster" version="1.0.3">
             <exclusion groupId="asm" artifactId="asm"/> <!-- this is the outdated version 3.1 -->
+            <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
           </dependency>
           <dependency groupId="net.java.dev.jna" artifactId="jna" version="4.2.2"/>
 
@@ -422,8 +424,8 @@
           <dependency groupId="org.jboss.byteman" artifactId="byteman-submit" version="${byteman.version}"/>
           <dependency groupId="org.jboss.byteman" artifactId="byteman-bmunit" version="${byteman.version}"/>
 
-          <dependency groupId="org.openjdk.jmh" artifactId="jmh-core" version="1.17.3"/>
-          <dependency groupId="org.openjdk.jmh" artifactId="jmh-generator-annprocess" version="1.17.3"/>
+          <dependency groupId="org.openjdk.jmh" artifactId="jmh-core" version="1.19"/>
+          <dependency groupId="org.openjdk.jmh" artifactId="jmh-generator-annprocess" version="1.19"/>
 
           <dependency groupId="org.apache.cassandra" artifactId="cassandra-all" version="${version}" />
           <dependency groupId="io.dropwizard.metrics" artifactId="metrics-core" version="3.1.0" />
@@ -438,9 +440,12 @@
             <exclusion groupId="io.netty" artifactId="netty-codec"/>
             <exclusion groupId="io.netty" artifactId="netty-handler"/>
             <exclusion groupId="io.netty" artifactId="netty-transport"/>
+            <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
           </dependency>
           <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj" version="4.4.2" />
-          <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core" version="0.4.4" />
+          <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core" version="0.4.4">
+            <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
+          </dependency>
           <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core-j8" version="0.4.4" />
           <dependency groupId="net.ju-n.compile-command-annotations" artifactId="compile-command-annotations" version="1.2.0" />
           <dependency groupId="org.fusesource" artifactId="sigar" version="1.6.4">
@@ -593,12 +598,7 @@
         <dependency groupId="io.airlift" artifactId="airline"/>
         <dependency groupId="io.netty" artifactId="netty-all"/>
         <dependency groupId="com.clearspring.analytics" artifactId="stream"/>
-        <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" classifier="shaded">
-          <exclusion groupId="io.netty" artifactId="netty-buffer"/>
-          <exclusion groupId="io.netty" artifactId="netty-codec"/>
-          <exclusion groupId="io.netty" artifactId="netty-handler"/>
-          <exclusion groupId="io.netty" artifactId="netty-transport"/>
-        </dependency>
+        <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" classifier="shaded"/>
         <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj"/>
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core"/>
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core-j8"/>
@@ -704,12 +704,7 @@
         <dependency groupId="io.airlift" artifactId="airline"/>
         <dependency groupId="io.netty" artifactId="netty-all"/>
         <dependency groupId="com.clearspring.analytics" artifactId="stream"/>
-        <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" classifier="shaded">
-          <exclusion groupId="io.netty" artifactId="netty-buffer"/>
-          <exclusion groupId="io.netty" artifactId="netty-codec"/>
-          <exclusion groupId="io.netty" artifactId="netty-handler"/>
-          <exclusion groupId="io.netty" artifactId="netty-transport"/>
-        </dependency>
+        <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" classifier="shaded"/>
         <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj"/>
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core"/>
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core-j8"/>
