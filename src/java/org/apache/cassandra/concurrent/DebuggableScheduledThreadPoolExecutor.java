@@ -67,18 +67,21 @@ public class DebuggableScheduledThreadPoolExecutor extends ScheduledThreadPoolEx
     {
         super(corePoolSize, new NamedThreadFactory(threadPoolName, priority));
         setRejectedExecutionHandler(rejectedExecutionHandler);
+        setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
     }
 
     public DebuggableScheduledThreadPoolExecutor(int corePoolSize, ThreadFactory threadFactory)
     {
         super(corePoolSize, threadFactory);
         setRejectedExecutionHandler(rejectedExecutionHandler);
+        setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
     }
 
     public DebuggableScheduledThreadPoolExecutor(String threadPoolName)
     {
         this(1, threadPoolName, Thread.NORM_PRIORITY);
         setRejectedExecutionHandler(rejectedExecutionHandler);
+        setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
     }
 
     // We need this as well as the wrapper for the benefit of non-repeating tasks

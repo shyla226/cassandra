@@ -250,8 +250,7 @@ public final class Schema
      * @param keyspace The Keyspace instance to store
      *
      * @throws IllegalArgumentException if Keyspace is already stored
-     */
-    public void storeKeyspaceInstance(Keyspace keyspace)
+     */ public void storeKeyspaceInstance(Keyspace keyspace)
     {
         if (keyspaceInstances.containsKey(keyspace.getName()))
             throw new IllegalArgumentException(String.format("Keyspace %s was already initialized.", keyspace.getName()));

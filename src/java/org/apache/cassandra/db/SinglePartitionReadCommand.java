@@ -51,7 +51,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.CacheService;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.ReadRepairDecision;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
@@ -365,9 +365,9 @@ public class SinglePartitionReadCommand extends ReadCommand
                                               clusteringIndexFilter);
     }
 
-    public Flow<FlowablePartition> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
+    public Flow<FlowablePartition> execute(ReadContext ctx) throws RequestExecutionException
     {
-        return StorageProxy.read(Group.one(this), consistency, clientState, queryStartNanoTime, forContinuousPaging);
+        return StorageProxy.read(Group.one(this), ctx);
     }
 
     public SinglePartitionPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)
@@ -998,6 +998,15 @@ public class SinglePartitionReadCommand extends ReadCommand
     }
 
     @Override
+    public ReadContext.Builder applyDefaults(ReadContext.Builder ctx)
+    {
+        // Single partition reads use both digests and read-repair (if enabled) by default (contrarily to range queries
+        // which ignore them).
+        return ctx.useDigests()
+                  .readRepairDecision(ReadRepairDecision.newDecision(metadata()));
+    }
+
+    @Override
     public String toString()
     {
         return String.format("Read(%s columns=%s rowFilter=%s limits=%s key=%s filter=%s, nowInSec=%d)",
@@ -1070,9 +1079,9 @@ public class SinglePartitionReadCommand extends ReadCommand
             return new Group(Collections.singletonList(command), command.limits());
         }
 
-        public Flow<FlowablePartition> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
+        public Flow<FlowablePartition> execute(ReadContext ctx) throws RequestExecutionException
         {
-            return StorageProxy.read(this, consistency, clientState, queryStartNanoTime, forContinuousPaging);
+            return StorageProxy.read(this, ctx);
         }
 
         public int nowInSec()

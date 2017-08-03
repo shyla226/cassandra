@@ -25,17 +25,16 @@ import io.reactivex.Completable;
 import io.reactivex.Single;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.FlowablePartition;
-import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.net.Response;
 import org.apache.cassandra.utils.flow.Flow;
 
-public class DigestResolver extends ResponseResolver
+public class DigestResolver extends ResponseResolver<FlowablePartition>
 {
     private volatile ReadResponse dataResponse;
 
-    DigestResolver(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistency, int maxResponseCount)
+    DigestResolver(ReadCommand command, ReadContext params, int maxResponseCount)
     {
-        super(keyspace, command, consistency, maxResponseCount);
+        super(command, params, maxResponseCount);
     }
 
     @Override
@@ -52,7 +51,9 @@ public class DigestResolver extends ResponseResolver
     public Flow<FlowablePartition> getData()
     {
         assert isDataPresent();
-        return FlowablePartitions.filterAndSkipEmpty(dataResponse.data(command), command.nowInSec());
+        if (ctx.readObserver != null)
+            ctx.readObserver.onDigestMatch();
+        return fromSingleResponseFiltered(dataResponse);
     }
 
     /*
@@ -74,7 +75,7 @@ public class DigestResolver extends ResponseResolver
             logger.trace("resolving {} responses", responses.size());
 
         return Flow.concat(compareResponses(),
-                           FlowablePartitions.filterAndSkipEmpty(dataResponse.data(command), command.nowInSec()));
+                           fromSingleResponseFiltered(dataResponse));
     }
 
     public Completable completeOnReadRepairAnswersReceived()
@@ -93,14 +94,18 @@ public class DigestResolver extends ResponseResolver
                           if (prev.equals(digest))
                               return digest;
 
-                          // rely on the fact that only single partition queries use digests
-                          throw new DigestMismatchException(((SinglePartitionReadCommand) command).partitionKey(), prev, digest);
+                          if (ctx.readObserver != null)
+                              ctx.readObserver.onDigestMismatch();
+
+                          throw new DigestMismatchException(command, prev, digest);
                       })
                       .ignoreElement();
 
         if (logger.isTraceEnabled())
             pipeline = pipeline.doFinally(() -> logger.trace("resolve: {} ms.", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)));
 
+        if (ctx.readObserver != null)
+            pipeline = pipeline.doOnComplete(ctx.readObserver::onDigestMatch);
         return pipeline;
     }
 

@@ -19,6 +19,8 @@ package org.apache.cassandra.service.pager;
 
 import java.nio.ByteBuffer;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,7 +29,6 @@ import org.apache.cassandra.db.aggregation.GroupingState;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.flow.Flow;
 
@@ -36,8 +37,7 @@ import org.apache.cassandra.utils.flow.Flow;
  * <p>
  * For aggregation/group by queries, the user page size is in number of groups. But each group could be composed of very
  * many rows so to avoid running into OOMs, this pager will page internal queries into sub-pages. So each call to
- * {@link QueryPager#fetchPage(int, ConsistencyLevel, ClientState, long, boolean)}  may (transparently) yield multiple
- * internal queries (sub-pages).
+ * {@link QueryPager#fetchPage(int, ReadContext)} may (transparently) yield multiple internal queries (sub-pages).
  */
 public final class AggregationQueryPager implements QueryPager
 {
@@ -55,25 +55,21 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     @Override
-    public Flow<FlowablePartition> fetchPage(int pageSize,
-                                             ConsistencyLevel consistency,
-                                             ClientState clientState,
-                                             long queryStartNanoTime,
-                                             boolean forContinuousPaging)
+    public Flow<FlowablePartition> fetchPage(int pageSize, ReadContext ctx)
     {
         if (limits.isGroupByLimit())
-            return new GroupByPartitions(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging).partitions();
+            return new GroupByPartitions(pageSize, ctx).partitions();
 
-        return new AggregatedPartitions(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging).partitions();
+        return new AggregatedPartitions(pageSize, ctx).partitions();
     }
 
     @Override
     public Flow<FlowablePartition> fetchPageInternal(int pageSize)
     {
         if (limits.isGroupByLimit())
-            return new GroupByPartitions(pageSize, null, System.nanoTime()).partitions();
+            return new GroupByPartitions(pageSize, null).partitions();
 
-        return new AggregatedPartitions(pageSize, null, System.nanoTime()).partitions();
+        return new AggregatedPartitions(pageSize, null).partitions();
     }
 
     @Override
@@ -115,13 +111,9 @@ public final class AggregationQueryPager implements QueryPager
          */
         private final int pageSize;
 
-        /**
-         * For distributed and local queries, null for internal queries
-         */
-        private final ConsistencyLevel consistency;
-
-        /** For distributed queries, null for local and distributed queries */
-        private final ClientState clientState;
+        // For distributed and local queries, null for internal queries
+        @Nullable
+        private final ReadContext ctx;
 
         /**
          * The key of the last partition processed.
@@ -138,32 +130,12 @@ public final class AggregationQueryPager implements QueryPager
          */
         private int initialMaxRemaining;
 
-        private final boolean forContinuousPaging;
-
-        private final long queryStartNanoTime;
-
-        GroupByPartitions(int pageSize,
-                          ConsistencyLevel consistency,
-                          long queryStartNanoTime)
-       {
-           this(pageSize, consistency, null, queryStartNanoTime, false);
-       }
-
-        private GroupByPartitions(int pageSize,
-                                  ConsistencyLevel consistency,
-                                  ClientState clientState,
-                                  long queryStartNanoTime,
-                                  boolean forContinuousPaging)
+        GroupByPartitions(int pageSize, ReadContext ctx)
         {
             this.pageSize = handlePagingOff(pageSize);
-            this.consistency = consistency;
-            this.clientState = clientState;
-            this.queryStartNanoTime = queryStartNanoTime;
-            this.forContinuousPaging = forContinuousPaging;
-
+            this.ctx = ctx;
             if (logger.isTraceEnabled())
-                logger.trace("{} - created with page size {}, cl {}, client state {}, cp {}",
-                             hashCode(), this.pageSize, this.consistency, this.clientState, this.forContinuousPaging);
+                logger.trace("{} - created with page size={}, ctx={}", hashCode(), pageSize, ctx);
         }
 
         /**
@@ -285,11 +257,11 @@ public final class AggregationQueryPager implements QueryPager
         private Flow<FlowablePartition> fetchSubPage(int subPageSize)
         {
             if (logger.isTraceEnabled())
-                logger.trace("Fetching sub-page with consistency {}", consistency);
+                logger.trace("Fetching sub-page with consistency {}", ctx == null ? "<internal>" : ctx.consistencyLevel);
 
-            return consistency == null
+            return ctx == null
                  ? subPager.fetchPageInternal(subPageSize)
-                 : subPager.fetchPage(subPageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging);
+                 : subPager.fetchPage(subPageSize, ctx);
         }
     }
 
@@ -301,20 +273,9 @@ public final class AggregationQueryPager implements QueryPager
      */
     private final class AggregatedPartitions extends GroupByPartitions
     {
-        AggregatedPartitions(int pageSize,
-                             ConsistencyLevel consistency,
-                             ClientState clientState,
-                             long queryStartNanoTime,
-                             boolean forContinuousPaging)
+        AggregatedPartitions(int pageSize, ReadContext ctx)
         {
-            super(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging);
-        }
-
-        AggregatedPartitions(int pageSize,
-                             ConsistencyLevel consistency,
-                             long queryStartNanoTime)
-        {
-            super(pageSize, consistency, queryStartNanoTime);
+            super(pageSize, ctx);
         }
 
         @Override

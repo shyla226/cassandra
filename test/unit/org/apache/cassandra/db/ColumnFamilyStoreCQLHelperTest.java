@@ -321,6 +321,7 @@ public class ColumnFamilyStoreCQLHelperTest extends CQLTester
                .memtableFlushPeriod(8)
                .readRepairChance(0.9)
                .speculativeRetry(SpeculativeRetryParam.always())
+               .nodesync(new NodeSyncParams(true, null, Collections.emptyMap()))
                .extensions(ImmutableMap.of("ext1", ByteBuffer.wrap("val1".getBytes())))
                .recordColumnDrop(ColumnMetadata.regularColumn(keyspace, table, "reg1", AsciiType.instance),
                                  FBUtilities.timestampMicros());
@@ -329,23 +330,25 @@ public class ColumnFamilyStoreCQLHelperTest extends CQLTester
 
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
 
+        System.out.println(ColumnFamilyStoreCQLHelper.getTableMetadataAsCQL(cfs.metadata(), true));
         assertTrue(ColumnFamilyStoreCQLHelper.getTableMetadataAsCQL(cfs.metadata(), true).endsWith(
         "AND bloom_filter_fp_chance = 1.0\n" +
-        "\tAND dclocal_read_repair_chance = 0.2\n" +
-        "\tAND crc_check_chance = 0.3\n" +
-        "\tAND default_time_to_live = 4\n" +
-        "\tAND gc_grace_seconds = 5\n" +
-        "\tAND min_index_interval = 6\n" +
-        "\tAND max_index_interval = 7\n" +
-        "\tAND memtable_flush_period_in_ms = 8\n" +
-        "\tAND read_repair_chance = 0.9\n" +
-        "\tAND speculative_retry = 'ALWAYS'\n" +
-        "\tAND comment = 'comment'\n" +
         "\tAND caching = { 'keys': 'ALL', 'rows_per_partition': 'NONE' }\n" +
+        "\tAND cdc = false\n" +
+        "\tAND comment = 'comment'\n" +
         "\tAND compaction = { 'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy', 'sstable_size_in_mb': '1' }\n" +
         "\tAND compression = { 'chunk_length_in_kb': '64', 'min_compress_ratio': '2.0', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor' }\n" +
-        "\tAND cdc = false\n" +
-        "\tAND extensions = { 'ext1': 0x76616c31 };"
+        "\tAND crc_check_chance = 0.3\n" +
+        "\tAND dclocal_read_repair_chance = 0.2\n" +
+        "\tAND default_time_to_live = 4\n" +
+        "\tAND extensions = { 'ext1': 0x76616c31 }\n" +
+        "\tAND gc_grace_seconds = 5\n" +
+        "\tAND max_index_interval = 7\n" +
+        "\tAND memtable_flush_period_in_ms = 8\n" +
+        "\tAND min_index_interval = 6\n" +
+        "\tAND nodesync = { 'enabled': 'true' }\n" +
+        "\tAND read_repair_chance = 0.9\n" +
+        "\tAND speculative_retry = 'ALWAYS';"
         ));
     }
 

@@ -24,6 +24,7 @@ import java.util.Objects;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.*;
 
+import com.datastax.apollo.nodesync.NodeSyncService;
 import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -713,6 +714,12 @@ public final class TableMetadata
         public Builder speculativeRetry(SpeculativeRetryParam val)
         {
             params.speculativeRetry(val);
+            return this;
+        }
+
+        public Builder nodesync(NodeSyncParams val)
+        {
+            params.nodeSync(val);
             return this;
         }
 

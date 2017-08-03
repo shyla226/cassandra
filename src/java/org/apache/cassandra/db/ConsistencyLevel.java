@@ -185,20 +185,23 @@ public enum ConsistencyLevel
         return dcEndpoints;
     }
 
-    public List<InetAddress> filterForQuery(Keyspace keyspace, List<InetAddress> liveEndpoints)
-    {
-        return filterForQuery(keyspace, liveEndpoints, ReadRepairDecision.NONE);
-    }
-
     public List<InetAddress> filterForQuery(Keyspace keyspace, List<InetAddress> liveEndpoints, ReadRepairDecision readRepair)
     {
+        // 11980: Excluding EACH_QUORUM reads from potential RR, so that we do not miscount DC responses
+        if (this == EACH_QUORUM)
+            readRepair = ReadRepairDecision.NONE;
+
+        // Quickly drop out if read repair is GLOBAL, since we just use all of the live endpoints
+        if (readRepair == ReadRepairDecision.GLOBAL)
+            return liveEndpoints;
+
         /*
          * If we are doing an each quorum query, we have to make sure that the endpoints we select
          * provide a quorum for each data center. If we are not using a NetworkTopologyStrategy,
          * we should fall through and grab a quorum in the replication strategy.
          */
         if (this == EACH_QUORUM && keyspace.getReplicationStrategy() instanceof NetworkTopologyStrategy)
-            return filterForEachQuorum(keyspace, liveEndpoints, readRepair);
+            return filterForEachQuorum(keyspace, liveEndpoints);
 
         /*
          * Endpoints are expected to be restricted to live replicas, sorted by snitch preference.
@@ -213,8 +216,6 @@ public enum ConsistencyLevel
         {
             case NONE:
                 return liveEndpoints.subList(0, Math.min(liveEndpoints.size(), blockFor(keyspace)));
-            case GLOBAL:
-                return liveEndpoints;
             case DC_LOCAL:
                 List<InetAddress> local = new ArrayList<InetAddress>();
                 List<InetAddress> other = new ArrayList<InetAddress>();
@@ -235,13 +236,9 @@ public enum ConsistencyLevel
         }
     }
 
-    private List<InetAddress> filterForEachQuorum(Keyspace keyspace, List<InetAddress> liveEndpoints, ReadRepairDecision readRepair)
+    private List<InetAddress> filterForEachQuorum(Keyspace keyspace, List<InetAddress> liveEndpoints)
     {
         NetworkTopologyStrategy strategy = (NetworkTopologyStrategy) keyspace.getReplicationStrategy();
-
-        // quickly drop out if read repair is GLOBAL, since we just use all of the live endpoints
-        if (readRepair == ReadRepairDecision.GLOBAL)
-            return liveEndpoints;
 
         Map<String, List<InetAddress>> dcsEndpoints = new HashMap<>();
         for (String dc: strategy.getDatacenters())
@@ -257,10 +254,7 @@ public enum ConsistencyLevel
         for (Map.Entry<String, List<InetAddress>> dcEndpoints : dcsEndpoints.entrySet())
         {
             List<InetAddress> dcEndpoint = dcEndpoints.getValue();
-            if (readRepair == ReadRepairDecision.DC_LOCAL && dcEndpoints.getKey().equals(DatabaseDescriptor.getLocalDataCenter()))
-                waitSet.addAll(dcEndpoint);
-            else
-                waitSet.addAll(dcEndpoint.subList(0, Math.min(localQuorumFor(keyspace, dcEndpoints.getKey()), dcEndpoint.size())));
+            waitSet.addAll(dcEndpoint.subList(0, Math.min(localQuorumFor(keyspace, dcEndpoints.getKey()), dcEndpoint.size())));
         }
 
         return waitSet;

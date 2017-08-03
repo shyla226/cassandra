@@ -24,6 +24,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.*;
 import com.google.common.collect.Maps;
 import io.reactivex.*;
@@ -118,6 +119,7 @@ public final class SchemaKeyspace
               + "table_name text,"
               + "bloom_filter_fp_chance double,"
               + "caching frozen<map<text, text>>,"
+              + "cdc boolean,"
               + "comment text,"
               + "compaction frozen<map<text, text>>,"
               + "compression frozen<map<text, text>>,"
@@ -131,9 +133,9 @@ public final class SchemaKeyspace
               + "max_index_interval int,"
               + "memtable_flush_period_in_ms int,"
               + "min_index_interval int,"
+              + "nodesync frozen<map<text, text>>,"
               + "read_repair_chance double,"
               + "speculative_retry text,"
-              + "cdc boolean,"
               + "PRIMARY KEY ((keyspace_name), table_name))");
 
     private static final TableMetadata Columns =
@@ -183,6 +185,7 @@ public final class SchemaKeyspace
               + "where_clause text,"
               + "bloom_filter_fp_chance double,"
               + "caching frozen<map<text, text>>,"
+              + "cdc boolean,"
               + "comment text,"
               + "compaction frozen<map<text, text>>,"
               + "compression frozen<map<text, text>>,"
@@ -196,9 +199,9 @@ public final class SchemaKeyspace
               + "max_index_interval int,"
               + "memtable_flush_period_in_ms int,"
               + "min_index_interval int,"
+              + "nodesync frozen<map<text, text>>,"
               + "read_repair_chance double,"
               + "speculative_retry text,"
-              + "cdc boolean,"
               + "PRIMARY KEY ((keyspace_name), view_name))");
 
     private static final TableMetadata Indexes =
@@ -543,25 +546,33 @@ public final class SchemaKeyspace
     private static void addTableParamsToRowBuilder(TableParams params, Row.SimpleBuilder builder)
     {
         builder.add("bloom_filter_fp_chance", params.bloomFilterFpChance)
+               .add("caching", params.caching.asMap())
                .add("comment", params.comment)
+               .add("compaction", params.compaction.asMap())
+               .add("compression", params.compression.asMap())
+               .add("crc_check_chance", params.crcCheckChance)
                .add("dclocal_read_repair_chance", params.dcLocalReadRepairChance)
                .add("default_time_to_live", params.defaultTimeToLive)
+               .add("extensions", params.extensions)
                .add("gc_grace_seconds", params.gcGraceSeconds)
                .add("max_index_interval", params.maxIndexInterval)
                .add("memtable_flush_period_in_ms", params.memtableFlushPeriodInMs)
                .add("min_index_interval", params.minIndexInterval)
                .add("read_repair_chance", params.readRepairChance)
-               .add("speculative_retry", params.speculativeRetry.toString())
-               .add("crc_check_chance", params.crcCheckChance)
-               .add("caching", params.caching.asMap())
-               .add("compaction", params.compaction.asMap())
-               .add("compression", params.compression.asMap())
-               .add("extensions", params.extensions);
+               .add("speculative_retry", params.speculativeRetry.toString());
 
         // Only add CDC-enabled flag to schema if it's enabled on the node. This is to work around RTE's post-8099 if a 3.8+
         // node sends table schema to a < 3.8 versioned node with an unknown column.
         if (DatabaseDescriptor.isCDCEnabled())
             builder.add("cdc", params.cdc);
+
+        // If a user leave all defaults for NodeSync, the resulting map will be empty, so it feels logical to no bother
+        // pushing anything in that case. But doing so also solves the same problem than for the cdc issue above: it
+        // makes sure we don't send an unknown column to pre-NodeSync nodes (as long as the user didn't try to do
+        // anything NodeSync related before all his node are upgraded, which is something users should not do).
+        Map<String, String> nodeSyncParams = params.nodeSync.asMap();
+        if (!nodeSyncParams.isEmpty())
+            builder.add("nodesync", nodeSyncParams);
     }
 
     static Mutation.SimpleBuilder makeUpdateTableMutation(KeyspaceMetadata keyspace,
@@ -991,7 +1002,7 @@ public final class SchemaKeyspace
 
         return TableMetadata.builder(keyspaceName, tableName, TableId.fromUUID(row.getUUID("id")))
                             .flags(TableMetadata.Flag.fromStringSet(row.getFrozenSet("flags", UTF8Type.instance)))
-                            .params(createTableParamsFromRow(row))
+                            .params(createTableParamsFromRow(keyspaceName, tableName, row))
                             .addColumns(fetchColumns(keyspaceName, tableName, types))
                             .droppedColumns(fetchDroppedColumns(keyspaceName, tableName))
                             .indexes(fetchIndexes(keyspaceName, tableName))
@@ -999,14 +1010,17 @@ public final class SchemaKeyspace
                             .build();
     }
 
-    static TableParams createTableParamsFromRow(UntypedResultSet.Row row)
+    @VisibleForTesting
+    static TableParams createTableParamsFromRow(String ksName, String tableName, UntypedResultSet.Row row)
     {
         return TableParams.builder()
                           .bloomFilterFpChance(row.getDouble("bloom_filter_fp_chance"))
                           .caching(CachingParams.fromMap(row.getFrozenTextMap("caching")))
+                          .cdc(row.has("cdc") && row.getBoolean("cdc"))
                           .comment(row.getString("comment"))
                           .compaction(CompactionParams.fromMap(row.getFrozenTextMap("compaction")))
                           .compression(CompressionParams.fromMap(row.getFrozenTextMap("compression")))
+                          .crcCheckChance(row.getDouble("crc_check_chance"))
                           .dcLocalReadRepairChance(row.getDouble("dclocal_read_repair_chance"))
                           .defaultTimeToLive(row.getInt("default_time_to_live"))
                           .extensions(row.getFrozenMap("extensions", UTF8Type.instance, BytesType.instance))
@@ -1014,10 +1028,9 @@ public final class SchemaKeyspace
                           .maxIndexInterval(row.getInt("max_index_interval"))
                           .memtableFlushPeriodInMs(row.getInt("memtable_flush_period_in_ms"))
                           .minIndexInterval(row.getInt("min_index_interval"))
+                          .nodeSync(NodeSyncParams.fromMap(ksName, tableName, row.getFrozenTextMap("nodesync")))
                           .readRepairChance(row.getDouble("read_repair_chance"))
-                          .crcCheckChance(row.getDouble("crc_check_chance"))
                           .speculativeRetry(SpeculativeRetryParam.fromString(row.getString("speculative_retry")))
-                          .cdc(row.has("cdc") && row.getBoolean("cdc"))
                           .build();
     }
 
@@ -1155,7 +1168,7 @@ public final class SchemaKeyspace
                          .isView(true)
                          .addColumns(columns)
                          .droppedColumns(fetchDroppedColumns(keyspaceName, viewName))
-                         .params(createTableParamsFromRow(row))
+                         .params(createTableParamsFromRow(keyspaceName, viewName, row))
                          .build();
 
         String rawSelect = View.buildSelectStatement(baseTableName, columns, whereClause);

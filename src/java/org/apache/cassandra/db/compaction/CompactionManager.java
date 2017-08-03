@@ -1401,7 +1401,7 @@ public class CompactionManager implements CompactionManagerMBean
         }
     }
 
-    private static MerkleTrees createMerkleTrees(Iterable<SSTableReader> sstables, Collection<Range<Token>> ranges, ColumnFamilyStore cfs)
+    public static MerkleTrees createMerkleTrees(Iterable<SSTableReader> sstables, Collection<Range<Token>> ranges, ColumnFamilyStore cfs)
     {
         MerkleTrees tree = new MerkleTrees(cfs.getPartitioner());
         long allPartitions = 0;
@@ -1675,7 +1675,7 @@ public class CompactionManager implements CompactionManagerMBean
         return cfs.isIndex() ? nowInSec : cfs.gcBefore(nowInSec);
     }
 
-    private static class ValidationCompactionIterator extends CompactionIterator
+    public static class ValidationCompactionIterator extends CompactionIterator
     {
         public ValidationCompactionIterator(List<ISSTableScanner> scanners, ValidationCompactionController controller, int nowInSec, CompactionMetrics metrics)
         {
@@ -1689,7 +1689,7 @@ public class CompactionManager implements CompactionManagerMBean
      * sstables because those sstables are not guaranteed to be active sstables
      * (since we can run repair on a snapshot).
      */
-    private static class ValidationCompactionController extends CompactionController
+    public static class ValidationCompactionController extends CompactionController
     {
         public ValidationCompactionController(ColumnFamilyStore cfs, int gcBefore)
         {

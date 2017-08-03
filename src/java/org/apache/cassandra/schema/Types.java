@@ -74,7 +74,12 @@ public final class Types implements Iterable<UserType>
 
     public static Types of(UserType... types)
     {
-        return builder().add(types).build();
+        return types.length == 0 ? none(): builder().add(types).build();
+    }
+
+    public static Types of(Collection<UserType> types)
+    {
+        return types.isEmpty() ? none() : builder().add(types).build();
     }
 
     public Iterator<UserType> iterator()

@@ -29,11 +29,10 @@ import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.utils.flow.Flow;
 
 /**
@@ -45,99 +44,101 @@ import org.apache.cassandra.utils.flow.Flow;
  */
 public interface ReadQuery extends Monitorable
 {
-    final static class EmptyQuery implements ReadQuery
+    public static ReadQuery empty(final TableMetadata metadata)
     {
-        private final TableMetadata metadata;
-
-        public EmptyQuery(TableMetadata metadata)
+        return new ReadQuery()
         {
-            this.metadata = metadata;
-        }
+            public TableMetadata metadata()
+            {
+                return metadata;
+            }
 
-        public ReadExecutionController executionController()
-        {
-            return ReadExecutionController.empty();
-        }
+            public Flow<FlowablePartition> execute(ReadContext ctx) throws RequestExecutionException
+            {
+                return Flow.empty();
+            }
 
-        public Flow<FlowablePartition> execute(ConsistencyLevel consistency,
-                                               ClientState clientState,
-                                               long queryStartNanoTime,
-                                               boolean forContinuousPaging) throws RequestExecutionException
-        {
-            return Flow.empty();
-        }
+            public Flow<FlowablePartition> executeInternal(Monitor monitor)
+            {
+                return Flow.empty();
+            }
 
-        public Flow<FlowablePartition> executeInternal(Monitor monitor)
-        {
-            return Flow.empty();
-        }
+            public Flow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
+            {
+                return Flow.empty();
+            }
 
-        public Flow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
-        {
-            return Flow.empty();
-        }
+            @Override
+            public boolean isEmpty()
+            {
+                return true;
+            }
 
-        public DataLimits limits()
-        {
-            // What we return here doesn't matter much in practice. However, returning DataLimits.NONE means
-            // "no particular limit", which makes SelectStatement.execute() take the slightly more complex "paging"
-            // path. Not a big deal but it's easy enough to return a limit of 0 rows which avoids this.
-            return DataLimits.cqlLimits(0);
-        }
+            public ReadExecutionController executionController()
+            {
+                return ReadExecutionController.empty();
+            }
 
-        public QueryPager getPager(PagingState state, ProtocolVersion protocolVersion)
-        {
-            return QueryPager.EMPTY;
-        }
+            public DataLimits limits()
+            {
+                // What we return here doesn't matter much in practice. However, returning DataLimits.NONE means
+                // "no particular limit", which makes SelectStatement.execute() take the slightly more complex "paging"
+                // path. Not a big deal but it's easy enough to return a limit of 0 rows which avoids this.
+                return DataLimits.cqlLimits(0);
+            }
 
-        public boolean selectsKey(DecoratedKey key)
-        {
-            return false;
-        }
+            public QueryPager getPager(PagingState state, ProtocolVersion protocolVersion)
+            {
+                return QueryPager.EMPTY;
+            }
 
-        public boolean selectsClustering(DecoratedKey key, Clustering clustering)
-        {
-            return false;
-        }
+            public boolean selectsKey(DecoratedKey key)
+            {
+                return false;
+            }
 
-        public int nowInSec()
-        {
-            return FBUtilities.nowInSeconds();
-        }
+            public boolean selectsClustering(DecoratedKey key, Clustering clustering)
+            {
+                return false;
+            }
 
-        public boolean queriesOnlyLocalData()
-        {
-            return true;
-        }
+            public int nowInSec()
+            {
+                return FBUtilities.nowInSeconds();
+            }
 
-        public String toCQLString()
-        {
-            return "<EMPTY>";
-        }
 
-        public TableMetadata metadata()
-        {
-            return metadata;
-        }
+            @Override
+            public boolean selectsFullPartition()
+            {
+                return false;
+            }
 
-        public boolean isEmpty()
-        {
-            return true;
-        }
+            public boolean queriesOnlyLocalData()
+            {
+                return true;
+            }
 
-         @Override
-        public boolean selectsFullPartition()
-        {
-            return false;
-        }
+            public String toCQLString()
+            {
+                return "<EMPTY>";
+            }
+        };
     }
+
+    /**
+     * The metadata for the table this is a query on.
+     *
+     * @return the metadata for the table this is a query on.
+     */
+    public TableMetadata metadata();
 
     /**
      * Starts a new read operation.
      * <p>
      * This must be called before {@link this#executeInternal()} and passed to it to protect the read.
      * The returned object <b>must</b> be closed on all path and it is thus strongly advised to
-     * use it in a try-with-ressource construction.
+     * use it in a try-with-resource construction.
      *
      * @return a newly started execution controller for this {@code ReadQuery}.
      */
@@ -146,24 +147,10 @@ public interface ReadQuery extends Monitorable
     /**
      * Executes the query for external client requests, at the provided consistency level.
      *
-     * @param consistency the consistency level to achieve for the query.
-     * @param clientState the {@code ClientState} for the query. In practice, this can be null unless
-     * {@code consistency} is a serial consistency.
-     * @param queryStartNanoTime the time at which we have received the client request, in nano seconds
-     * @param forContinuousPaging indicates that this a query for continuous paging. When this is
-     * provided, queries that are fully local (and are CL.ONE or CL.LOCAL_ONE) are optimized by
-     * returning a direct iterator to the data (as from calling executeInternal() but with the additional
-     * bits needed for a full user query), which 1) leave to the caller the responsibility of not holding
-     * the iterator open too long (as it holds a {@code executionController} open) and 2) this bypass
-     * the dynamic snitch, read repair and speculative retries. This flag is also used to record
-     * different metrics than for non-continuous queries.
-     *
+     * @param ctx the read context.
      * @return the result of the query as as asynchronous flow of {@link FlowablePartition}
      */
-    public Flow<FlowablePartition> execute(ConsistencyLevel consistency,
-                                           ClientState clientState,
-                                           long queryStartNanoTime,
-                                           boolean forContinuousPaging) throws RequestExecutionException;
+    public Flow<FlowablePartition> execute(ReadContext ctx) throws RequestExecutionException;
 
     /**
      * Execute the query for internal queries.
@@ -259,20 +246,6 @@ public interface ReadQuery extends Monitorable
     }
 
     /**
-     * Return the table metadata of this query.
-     *
-     * @return - the table metadata
-     */
-    public TableMetadata metadata();
-
-    /**
-     * Return true if the query is empty.
-     *
-     * @return - true if the query is empty, false otherwise.
-     */
-    public boolean isEmpty();
-
-    /**
      * Checks if this {@code ReadQuery} selects full partitions, that is it has no filtering on clustering or regular columns.
      * @return {@code true} if this {@code ReadQuery} selects full partitions, {@code false} otherwise.
      */
@@ -292,5 +265,32 @@ public interface ReadQuery extends Monitorable
     default public PartitionIterator executeInternalForTests()
     {
         return FlowablePartitions.toPartitionsFiltered(executeInternal());
+    }
+
+    /**
+     * Whether this query is known to return nothing upfront.
+     * <p>
+     * This is overridden by the {@code ReadQuery} created through {@link #empty(TableMetadata)}, and that's probably the
+     * only place that should override it (we should be creating true {@code ReadCommand} otherwise).
+     *
+     * @return if this method is guaranteed to return no results whatsoever.
+     */
+    public default boolean isEmpty()
+    {
+        return false;
+    }
+
+    /**
+     * Apply potential defaults for this type of query to the provided context.
+     * <p>
+     * Note that this is only defaults and can be overwritten for specific reads through the {@link ReadContext.Builder}
+     * as appropriate.
+     *
+     * @param ctx the read context (builder) to apply the default to.
+     * @return {@code ctx} (for chaining purposes).
+     */
+    public default ReadContext.Builder applyDefaults(ReadContext.Builder ctx)
+    {
+        return ctx;
     }
 }

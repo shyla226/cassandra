@@ -51,7 +51,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
 
     private final AtomicReference<Flow<T>> source;
     private final long deadlineNanos;
-    private final Supplier<Throwable> timeoutSupplier;
+    private final Supplier<Flow<T>> timeoutSupplier;
 
     private volatile FlowSubscriber<T> subscriber;
     private volatile FlowSubscription subscription;
@@ -71,7 +71,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
     private final AtomicReference<RequestStatus> requestStatus = new AtomicReference<>(RequestStatus.NONE);
     private final AtomicReference<SubscribeStatus> subscribeStatus = new AtomicReference<>(SubscribeStatus.NONE);
 
-    DeferredFlowImpl(long deadlineNanos, Supplier<Throwable> timeoutSupplier)
+    DeferredFlowImpl(long deadlineNanos, Supplier<Flow<T>> timeoutSupplier)
     {
         this.source = new AtomicReference<>(null);
         this.deadlineNanos = deadlineNanos;
@@ -93,7 +93,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
     /**
      * Request to the source unless there was a subscription error, in which
      * case we report it. This method is guaranteed to be called when subscribeStatus
-     * is already SUBSCRIBED, and therefore both subcriber and subscription are available.
+     * is already SUBSCRIBED, and therefore both subscriber and subscription are available.
      */
     private void realRequest()
     {
@@ -179,7 +179,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
         // else
         // {
         // TODO - Are we at risk of resource leaks if a timeout beats a real source? We shouldn't be, since Flow
-        // is not closeable and therefore implementors should not allocate resurces until there is a subscription
+        // is not closeable and therefore implementors should not allocate resources until there is a subscription
         // but we should probably review the code at some point and possibly merge Flow and FlowSubscription.
         // }
     }
@@ -194,7 +194,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
         long timeoutNanos = this.deadlineNanos - System.nanoTime();
         if (timeoutNanos <= 0)
         { // deadline already passed
-            onSource(Flow.error(timeoutSupplier.get()));
+            onSource(timeoutSupplier.get());
             return;
         }
 
@@ -202,7 +202,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
 
             timeoutTask = null;
             if (!hasSource()) // important to check because it is expensive to create an exception, due to the callstack
-                onSource(Flow.error(timeoutSupplier.get()));
+                onSource(timeoutSupplier.get());
 
         }, timeoutNanos, TimeUnit.NANOSECONDS);
     }

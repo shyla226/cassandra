@@ -141,14 +141,10 @@ public class PendingRangeMaps implements Iterable<Map.Entry<Range<Token>, List<I
 
     public void addPendingRange(Range<Token> range, InetAddress address)
     {
-        if (Range.isWrapAround(range.left, range.right))
-        {
+        if (range.isWrapAround())
             addToMap(range, address, ascendingMapForWrapAround, descendingMapForWrapAround);
-        }
         else
-        {
             addToMap(range, address, ascendingMap, descendingMap);
-        }
     }
 
     static final void addIntersections(Set<InetAddress> endpointsToAdd,

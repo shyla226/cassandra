@@ -21,6 +21,8 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 import java.util.Arrays;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,7 +31,6 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.flow.Flow;
 
 /**
@@ -148,52 +149,39 @@ public class MultiPartitionPager implements QueryPager
         return true;
     }
 
-    public Flow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
+    public Flow<FlowablePartition> fetchPage(int pageSize, ReadContext ctx)
     throws RequestValidationException, RequestExecutionException
     {
         int toQuery = Math.min(remaining, pageSize);
-
-        return new MultiPartitions(toQuery, consistency, clientState, queryStartNanoTime, forContinuousPaging).partitions();
+        return new MultiPartitions(toQuery, ctx).partitions();
     }
 
     public Flow<FlowablePartition> fetchPageInternal(int pageSize)
     throws RequestValidationException, RequestExecutionException
     {
         int toQuery = Math.min(remaining, pageSize);
-
-        return new MultiPartitions(toQuery, null, null, System.nanoTime(), false).partitions();
+        return new MultiPartitions(toQuery, null).partitions();
     }
 
     private class MultiPartitions
     {
         private final int pageSize;
-        private final long queryStartNanoTime;
-
-        // For distributed and local queries, will be null for internal queries
-        private final ConsistencyLevel consistency;
-        // For distributed queries, will be null for internal and local queries
-        private final ClientState clientState;
-
-        private final boolean forContinuousPaging;
+        // For distributed queries, will be null for internal ones
+        @Nullable
+        private final ReadContext ctx;
 
         private int pagerMaxRemaining;
         private int counted;
 
-        public MultiPartitions(int pageSize,
-                              ConsistencyLevel consistency,
-                              ClientState clientState,
-                              long queryStartNanoTime,
-                              boolean forContinuousPaging)
+        private MultiPartitions(int pageSize,
+                                ReadContext ctx)
         {
             this.pageSize = pageSize;
-            this.consistency = consistency;
-            this.clientState = clientState;
-            this.queryStartNanoTime = queryStartNanoTime;
-            this.forContinuousPaging = forContinuousPaging;
+            this.ctx = ctx;
             this.pagerMaxRemaining = pagers[current].maxRemaining();
         }
 
-        Flow<FlowablePartition> partitions()
+        private Flow<FlowablePartition> partitions()
         {
             return fetchSubPage(pageSize).concatWith(this::moreContents)
                                          .doOnClose(this::close);
@@ -223,12 +211,12 @@ public class MultiPartitionPager implements QueryPager
 
         private Flow<FlowablePartition> fetchSubPage(int toQuery)
         {
-            return consistency == null
+            return ctx == null
                    ? pagers[current].fetchPageInternal(toQuery)
-                   : pagers[current].fetchPage(toQuery, consistency, clientState, queryStartNanoTime, forContinuousPaging);
+                   : pagers[current].fetchPage(toQuery, ctx);
         }
 
-        public void close()
+        private void close()
         {
             remaining -= counted;
 

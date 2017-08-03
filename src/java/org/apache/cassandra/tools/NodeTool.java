@@ -30,6 +30,10 @@ import io.airlift.airline.*;
 
 import org.apache.cassandra.locator.EndpointSnitchInfoMBean;
 import org.apache.cassandra.tools.nodetool.*;
+import org.apache.cassandra.tools.nodetool.nodesync.Disable;
+import org.apache.cassandra.tools.nodetool.nodesync.Enable;
+import org.apache.cassandra.tools.nodetool.nodesync.GetRate;
+import org.apache.cassandra.tools.nodetool.nodesync.SetRate;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static com.google.common.base.Throwables.getStackTraceAsString;
@@ -195,6 +199,14 @@ public class NodeTool
                 .withDescription("Monitor/manage node's bootstrap process")
                 .withDefaultCommand(Help.class)
                 .withCommand(BootstrapResume.class);
+
+        builder.withGroup("nodesyncservice")
+               .withDescription("Manage the NodeSync service on the connected node")
+               .withDefaultCommand(Help.class)
+               .withCommand(SetRate.class)
+               .withCommand(GetRate.class)
+               .withCommand(Enable.class)
+               .withCommand(Disable.class);
 
         return builder.build();
     }

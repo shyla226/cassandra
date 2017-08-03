@@ -247,8 +247,18 @@ public class MigrationManager
 
     public static Completable announceNewType(UserType newType, boolean announceLocally)
     {
+        return announceNewType(newType, announceLocally, FBUtilities.timestampMicros());
+    }
+
+    public static Completable forceAnnounceNewType(UserType newType)
+    {
+        return announceNewType(newType, false, 0);
+    }
+
+    public static Completable announceNewType(UserType newType, boolean announceLocally, long timestamp)
+    {
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(newType.keyspace);
-        return announce(SchemaKeyspace.makeCreateTypeMutation(ksm, newType, FBUtilities.timestampMicros()), announceLocally);
+        return announce(SchemaKeyspace.makeCreateTypeMutation(ksm, newType, timestamp), announceLocally);
     }
 
     public static Completable announceNewFunction(UDFunction udf, boolean announceLocally)

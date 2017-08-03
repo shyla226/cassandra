@@ -20,14 +20,11 @@ package org.apache.cassandra.service;
 import java.net.InetAddress;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import io.reactivex.Completable;
-import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
@@ -39,25 +36,21 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.flow.DeferredFlow;
 import org.apache.cassandra.utils.flow.Flow;
 
-public class DataResolver extends ResponseResolver
+public class DataResolver extends ResponseResolver<FlowablePartition>
 {
     @VisibleForTesting
     final ReadRepairFuture repairResults = new ReadRepairFuture();
-    private final long queryStartNanoTime;
 
-    DataResolver(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistency, int maxResponseCount, long queryStartNanoTime)
+    DataResolver(ReadCommand command, ReadContext ctx, int maxResponseCount)
     {
-        super(keyspace, command, consistency, maxResponseCount);
-        this.queryStartNanoTime = queryStartNanoTime;
+        super(command, ctx, maxResponseCount);
     }
 
     public Flow<FlowablePartition> getData()
     {
-        ReadResponse response = responses.iterator().next().payload();
-        return FlowablePartitions.filterAndSkipEmpty(response.data(command), command.nowInSec());
+        return fromSingleResponseFiltered(responses.iterator().next().payload());
     }
 
     public Flow<FlowablePartition> resolve()
@@ -93,13 +86,13 @@ public class DataResolver extends ResponseResolver
                 subscriber.onComplete();
         })).timeout(DatabaseDescriptor.getWriteRpcTimeout(), TimeUnit.MILLISECONDS, (subscriber) -> {
             // We got all responses, but timed out while repairing
-            int blockFor = consistency.blockFor(keyspace);
+            int required = ctx.requiredResponses();
             if (Tracing.isTracing())
-                Tracing.trace("Timed out while read-repairing after receiving all {} data and digest responses", blockFor);
+                Tracing.trace("Timed out while read-repairing after receiving all {} data and digest responses", required);
             else
-                logger.debug("Timeout while read-repairing after receiving all {} data and digest responses", blockFor);
+                logger.debug("Timeout while read-repairing after receiving all {} data and digest responses", required);
 
-            subscriber.onError(new ReadTimeoutException(consistency, blockFor-1, blockFor, true));
+            subscriber.onError(new ReadTimeoutException(consistency(), required-1, required, true));
         });
     }
 
@@ -136,7 +129,7 @@ public class DataResolver extends ResponseResolver
     {
         private final InetAddress[] sources;
 
-        RepairMergeListener(InetAddress[] sources)
+        private RepairMergeListener(InetAddress[] sources)
         {
             this.sources = sources;
         }
@@ -196,7 +189,7 @@ public class DataResolver extends ResponseResolver
             // For each source, record if there is an open range to send as repair, and from where.
             private final ClusteringBound[] markerToRepair = new ClusteringBound[sources.length];
 
-            MergeListener(DecoratedKey partitionKey, RegularAndStaticColumns columns, boolean isReversed)
+            private MergeListener(DecoratedKey partitionKey, RegularAndStaticColumns columns, boolean isReversed)
             {
                 this.partitionKey = partitionKey;
                 this.columns = columns;
@@ -241,6 +234,9 @@ public class DataResolver extends ResponseResolver
                         return column.isComplex() ? filter.fetchedCellIsQueried(column, cell.path()) : filter.fetchedColumnIsQueried(column);
                     }
                 };
+
+                if (ctx.readObserver != null)
+                    ctx.readObserver.onPartition(partitionKey);
             }
 
             private PartitionUpdate update(int i)
@@ -263,11 +259,19 @@ public class DataResolver extends ResponseResolver
             public void onMergedPartitionLevelDeletion(DeletionTime mergedDeletion, DeletionTime[] versions)
             {
                 this.partitionLevelDeletion = mergedDeletion;
+                boolean isConsistent = true;
                 for (int i = 0; i < versions.length; i++)
                 {
                     if (mergedDeletion.supersedes(versions[i]))
+                    {
                         update(i).addPartitionDeletion(mergedDeletion);
+                        isConsistent = false;
+                    }
                 }
+
+                // We call this method for every partition but we're really only have a deletion if it's not live
+                if (ctx.readObserver != null && !mergedDeletion.isLive())
+                    ctx.readObserver.onPartitionDeletion(mergedDeletion, isConsistent);
             }
 
             public void onMergedRows(Row merged, Row[] versions)
@@ -279,12 +283,20 @@ public class DataResolver extends ResponseResolver
                     return;
 
                 Rows.diff(diffListener, merged, versions);
+                boolean isConsistent = true;
                 for (int i = 0; i < currentRows.length; i++)
                 {
                     if (currentRows[i] != null)
+                    {
+                        isConsistent = false;
                         update(i).add(currentRows[i].build());
+                    }
                 }
+
                 Arrays.fill(currentRows, null);
+
+                if (ctx.readObserver != null)
+                    ctx.readObserver.onRow(merged, isConsistent);
             }
 
             private DeletionTime currentDeletion()
@@ -294,6 +306,8 @@ public class DataResolver extends ResponseResolver
 
             public void onMergedRangeTombstoneMarkers(RangeTombstoneMarker merged, RangeTombstoneMarker[] versions)
             {
+                boolean isConsistent = true;
+
                 // The current deletion as of dealing with this marker.
                 DeletionTime currentDeletion = currentDeletion();
 
@@ -344,12 +358,16 @@ public class DataResolver extends ResponseResolver
                             // deletion (see comment above for why this can actually happen), we have to repair the source
                             // from that point on.
                             if (!(marker.isOpen(isReversed) && currentDeletion.equals(marker.openDeletionTime(isReversed))))
+                            {
                                 markerToRepair[i] = marker.closeBound(isReversed).invert();
+                                isConsistent = false;
+                            }
                         }
                         // In case 2) above, we only have something to do if the source is up-to-date after that point
                         else if (marker.isOpen(isReversed) && currentDeletion.equals(marker.openDeletionTime(isReversed)))
                         {
                             closeOpenMarker(i, marker.openBound(isReversed).invert());
+                            isConsistent = false;
                         }
                     }
                     else
@@ -361,8 +379,10 @@ public class DataResolver extends ResponseResolver
                             // We're closing the merged range. If we're recorded that this should be repaird for the
                             // source, close and add said range to the repair to send.
                             if (markerToRepair[i] != null)
+                            {
                                 closeOpenMarker(i, merged.closeBound(isReversed));
-
+                                isConsistent = false;
+                            }
                         }
 
                         if (merged.isOpen(isReversed))
@@ -373,13 +393,19 @@ public class DataResolver extends ResponseResolver
                             DeletionTime newDeletion = merged.openDeletionTime(isReversed);
                             DeletionTime sourceDeletion = sourceDeletionTime[i];
                             if (!newDeletion.equals(sourceDeletion))
+                            {
                                 markerToRepair[i] = merged.openBound(isReversed);
+                                isConsistent = false;
+                            }
                         }
                     }
                 }
 
                 if (merged != null)
                     mergedDeletionTime = merged.isOpen(isReversed) ? merged.openDeletionTime(isReversed) : null;
+
+                if (ctx.readObserver != null)
+                    ctx.readObserver.onRangeTombstoneMarker(merged, isConsistent);
             }
 
             private void closeOpenMarker(int i, ClusteringBound close)
@@ -393,13 +419,17 @@ public class DataResolver extends ResponseResolver
             {
                 for (int i = 0; i < repairs.length; i++)
                 {
-                    if (repairs[i] == null)
+                    PartitionUpdate repair = repairs[i];
+                    if (repair == null)
                         continue;
 
                     InetAddress source = sources[i];
                     // use a separate verb here because we don't want these to be get the white glove hint-
                     // on-timeout behavior that a "real" mutation gets
                     Tracing.trace("Sending read-repair-mutation to {}", source);
+                    if (ctx.readObserver != null)
+                        ctx.readObserver.onRepair(source, repair);
+
                     Request<Mutation, EmptyPayload> request = Verbs.WRITES.READ_REPAIR.newRequest(source, new Mutation(repairs[i]));
                     MessagingService.instance().send(request, repairResults.newRepairMessageCallback());
                 }
@@ -411,7 +441,7 @@ public class DataResolver extends ResponseResolver
                                                                       Flow<FlowableUnfilteredPartition> data,
                                                                       DataLimits.Counter counter)
     {
-        ShortReadProtection shortReadProtection = new ShortReadProtection(source, counter, queryStartNanoTime);
+        ShortReadProtection shortReadProtection = new ShortReadProtection(source, counter);
         return shortReadProtection.apply(data);
     }
 
@@ -420,24 +450,19 @@ public class DataResolver extends ResponseResolver
         private final InetAddress source;
         private final DataLimits.Counter counter;
         private final DataLimits.Counter postReconciliationCounter;
-        private final long queryStartNanoTime;
 
-        private TableMetadata metadata;
         private DecoratedKey lastPartitionKey;
         private Clustering lastClustering;
-        int lastCount = 0;
+        private int lastCount = 0;
 
-        private ShortReadProtection(InetAddress source,
-                                    DataLimits.Counter postReconciliationCounter,
-                                    long queryStartNanoTime)
+        private ShortReadProtection(InetAddress source, DataLimits.Counter postReconciliationCounter)
         {
             this.source = source;
             this.counter = command.limits().newCounter(command.nowInSec(), false, command.selectsFullPartition());
             this.postReconciliationCounter = postReconciliationCounter;
-            this.queryStartNanoTime = queryStartNanoTime;
         }
 
-        Flow<FlowableUnfilteredPartition> apply(Flow<FlowableUnfilteredPartition> data)
+        private Flow<FlowableUnfilteredPartition> apply(Flow<FlowableUnfilteredPartition> data)
         {
             return DataLimits.countUnfiltered(data, counter).map(this::applyPartition);
         }
@@ -445,8 +470,6 @@ public class DataResolver extends ResponseResolver
         private FlowableUnfilteredPartition applyPartition(FlowablePartitionBase<? extends Unfiltered> p)
         {
             FlowableUnfilteredPartition partition = (FlowableUnfilteredPartition)p;
-
-            metadata = partition.header.metadata;
             lastPartitionKey = partition.header.partitionKey;
             lastClustering = null;
             lastCount = 0;
@@ -495,7 +518,7 @@ public class DataResolver extends ResponseResolver
 
             DataLimits retryLimits = command.limits().forShortReadRetry(toQuery);
             ClusteringIndexFilter filter = command.clusteringIndexFilter(lastPartitionKey);
-            ClusteringIndexFilter retryFilter = lastClustering == null ? filter : filter.forPaging(metadata.comparator, lastClustering, false);
+            ClusteringIndexFilter retryFilter = lastClustering == null ? filter : filter.forPaging(command.metadata().comparator, lastClustering, false);
             SinglePartitionReadCommand cmd = SinglePartitionReadCommand.create(command.metadata(),
                                                                                command.nowInSec(),
                                                                                command.columnFilter(),
@@ -542,29 +565,49 @@ public class DataResolver extends ResponseResolver
 
         private Flow<FlowableUnfilteredPartition> doShortReadRetry(SinglePartitionReadCommand retryCommand)
         {
-            final long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(command.getTimeout());
-            final Supplier<Throwable> timeoutExceptionSupplier = () -> new ReadTimeoutException(ConsistencyLevel.ONE, 0, 1, false);
-            final DeferredFlow<FlowableUnfilteredPartition> result = DeferredFlow.create(queryStartNanoTime + timeoutNanos, timeoutExceptionSupplier);
+            RetryResolver resolver = new RetryResolver(retryCommand, ctx.withConsistency(ConsistencyLevel.ONE));
+            ReadCallback<FlowableUnfilteredPartition> handler = ReadCallback.forResolver(resolver, Collections.singletonList(source));
+            MessagingService.instance().send(Verbs.READS.READ.newRequest(source, retryCommand), handler);
 
-            MessagingService.instance().send(Verbs.READS.READ.newRequest(source, retryCommand), new MessageCallback<ReadResponse>()
-            {
-                public void onResponse(Response<ReadResponse> response)
-                {
-                    result.onSource(response.payload().data(command));
-                }
-
-                public void onFailure(FailureResponse<ReadResponse> response)
-                {
-                    result.onSource(Flow.error(new ReadFailureException(ConsistencyLevel.ONE, 0, 1, false, Collections.singletonMap(response.from(), response.reason()))));
-                }
-            });
-
-            return result;
+            return handler.result();
         }
     }
 
     public boolean isDataPresent()
     {
         return !responses.isEmpty();
+    }
+
+    private static class RetryResolver extends ResponseResolver<FlowableUnfilteredPartition>
+    {
+        RetryResolver(ReadCommand command, ReadContext ctx)
+        {
+            super(command, ctx, 1);
+        }
+
+        public Flow<FlowableUnfilteredPartition> getData()
+        {
+            return fromSingleResponse(responses.iterator().next().payload());
+        }
+
+        public Flow<FlowableUnfilteredPartition> resolve() throws DigestMismatchException
+        {
+            return getData();
+        }
+
+        public Completable completeOnReadRepairAnswersReceived()
+        {
+            return Completable.complete();
+        }
+
+        public Completable compareResponses() throws DigestMismatchException
+        {
+            return Completable.complete();
+        }
+
+        public boolean isDataPresent()
+        {
+            return !responses.isEmpty();
+        }
     }
 }
