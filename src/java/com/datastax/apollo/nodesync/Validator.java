@@ -236,9 +236,9 @@ class Validator
 
         logger.trace("Starting execution of validation on {}", segment);
         Flow<FlowablePartition> flow = moreContents(executor);
-        assert flow != null; // A newly created QueryPager shouldn't be exhausted.
-
-        flowFuture = flow.flatProcess(p -> p.content.process())
+        // Can be null on an exception
+        if (flow != null)
+            flowFuture = flow.flatProcess(p -> p.content.process())
                          .lift(Threads.requestOn(executor.asScheduler()))
                          .processToFuture()
                          .thenRun(this::markFinished)
