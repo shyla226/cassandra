@@ -1972,7 +1972,8 @@
   <classpathentry kind="src" path="conf" including="hotspot_compiler"/>
   <classpathentry kind="src" output="build/test/classes" path="test/unit"/>
   <classpathentry kind="src" output="build/test/classes" path="test/long"/>
-  <classpathentry kind="src" output="build/test/classes" path="test/resources" />
+  <classpathentry kind="src" output="build/test/classes" path="test/resources"/>
+  <classpathentry kind="src" output="build/test/classes" path="test/burn"/>
   <classpathentry kind="src" path="tools/stress/src"/>
   <classpathentry kind="src" output="build/test/stress-classes" path="tools/stress/test/unit" />
   <classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
