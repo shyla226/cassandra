@@ -441,6 +441,19 @@ public final class SystemDistributedKeyspace
      * @param segment the segment for which to retrieve the records.
      * @return the NodeSync records that cover {@code segment} fully.
      */
+    // TODO(Sylvain): this actually doesn't guarantee to get all records covering a segment, because any range
+    // that starts strictly before the requested segment but covers it will not be fetched. I don't think it's
+    // actually possible to query efficiently all covering ranges _in general_, at least not with the current data mode
+    // (and I suspect you have to complicate things quite a bit to make it work), because you really only can express
+    // conditions on the start of the range and that's not enough (you can never exclude a range that would start from
+    // the beginning but cover the range you want to query). It's not _that_ much of a big deal in context though
+    // because segments will be well behaved and we will almost always get what we want. When we don't (after a
+    // topology change typically), it's also not the end of the world as it only mean we will validate range a bit more
+    // than we would otherwise, so it's only a small inefficiency.
+    // All this being said, we could do a bit better than we currently do by querying from 'segment.start - <1/2 segment size>'.
+    // The idea being that as we segments won't be of completely random size, we can make it so that we don't fetch
+    // anything unnecessary in the "normal" case while make it much more likely to get what we should in the "bad" cases,
+    // thus lowering the performance impact of this issue (to something hopefully completely negligible).
     public static List<NodeSyncRecord> nodeSyncRecords(Segment segment)
     {
         logger.trace("Requesting NodeSync records for segment {}", segment);
