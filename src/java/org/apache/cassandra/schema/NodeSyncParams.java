@@ -122,7 +122,7 @@ public final class NodeSyncParams
             // Somewhat random estimation of when user have toyed with the min validation interval in an un-reasonable
             // way. Only there to provide slightly more helpful message so guess-estimate is fine.
             boolean minValidationIsHigh = NodeSyncService.MIN_VALIDATION_INTERVAL_MS > TimeUnit.HOURS.toMillis(10);
-            throw new InvalidRequestException(String.format("nodesync '%s' setting  has been to %s which is lower than the %s value (%s): "
+            throw new InvalidRequestException(String.format("nodesync '%s' setting has been set to %s which is lower than the %s value (%s): "
                                                             + "this mean the deadline cannot be achieved, at least on this node. %s",
                                                             Option.DEADLINE_TARGET_SEC,
                                                             Units.toString(params.deadlineTargetSec, TimeUnit.SECONDS),
