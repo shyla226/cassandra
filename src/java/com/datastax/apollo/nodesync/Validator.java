@@ -48,6 +48,7 @@ import org.apache.cassandra.service.ReadRepairDecision;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.units.SizeUnit;
@@ -251,11 +252,21 @@ class Validator
         if (pager.isExhausted() || state.get() == State.CANCELLED)
             return null;
 
-        observer.onNewPage();
-        maybeRefreshLock();
-        return pager.fetchPage(pageSize, readContext)
-                    .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), listener))
-                    .concatWith(() -> moreContents(listener));
+        try
+        {
+            observer.onNewPage();
+            maybeRefreshLock();
+            return pager.fetchPage(pageSize, readContext)
+                        .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), listener))
+                        .concatWith(() -> moreContents(listener));
+        }
+        catch (Throwable t)
+        {
+            // We can typically get UnavailableException here. In any case, delegate to handleError(), which will
+            // always make sure to complete the validator so we can just return null (to stop the flow otherwise).
+            handleError(t, listener);
+            return null;
+        }
     }
 
     private Void handleError(Throwable t, PageProcessingStatsListener listener)
