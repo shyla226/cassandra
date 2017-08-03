@@ -1,7 +1,8 @@
 4.0
+ * batch_size_warn_threshold_in_kb can now be set at runtime (CASSANDRA-13699)
  * Avoid always rebuilding secondary indexes at startup (CASSANDRA-13725)
- * Upgrade JMH from 1.13 to 1.19
- * Upgrade SLF4J from 1.7.7 to 1.7.25
+ * Upgrade JMH from 1.13 to 1.19 (CASSANDRA-13727)
+ * Upgrade SLF4J from 1.7.7 to 1.7.25 (CASSANDRA-12996)
  * Default for start_native_transport now true if not set in config (CASSANDRA-13656)
  * Don't add localhost to the graph when calculating where to stream from (CASSANDRA-13583)
  * Allow skipping equality-restricted clustering columns in ORDER BY clause (CASSANDRA-10271)
@@ -105,6 +106,7 @@
  * Properly evict pstmts from prepared statements cache (CASSANDRA-13641)
 Merged from 3.0:
  * Fixed ambiguous output of nodetool tablestats command (CASSANDRA-13722)
+ * Fix Digest mismatch Exception if hints file has UnknownColumnFamily (CASSANDRA-13696)
  * Purge tombstones created by expired cells (CASSANDRA-13643)
  * Make concat work with iterators that have different subsets of columns (CASSANDRA-13482)
  * Set test.runners based on cores and memory size (CASSANDRA-13078)
