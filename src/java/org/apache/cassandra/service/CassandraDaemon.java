@@ -117,7 +117,7 @@ public class CassandraDaemon
                 return;
             }
 
-            StorageMetrics.exceptions.inc();
+            StorageMetrics.uncaughtExceptions.inc();
             logger.error("Exception in thread " + t, e);
             Tracing.trace("Exception in thread {}", t, e);
 
