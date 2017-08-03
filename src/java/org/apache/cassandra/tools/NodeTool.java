@@ -200,8 +200,8 @@ public class NodeTool
                 .withDefaultCommand(Help.class)
                 .withCommand(BootstrapResume.class);
 
-        builder.withGroup("nodesync")
-               .withDescription("Manage NodeSync")
+        builder.withGroup("nodesyncservice")
+               .withDescription("Manage the NodeSync service on the connected node")
                .withDefaultCommand(Help.class)
                .withCommand(SetRate.class)
                .withCommand(GetRate.class)
