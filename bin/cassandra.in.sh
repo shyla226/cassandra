@@ -74,7 +74,7 @@ JVM_PATCH_VERSION=${jvmver#*_}
 if [ "$JVM_VENDOR" != "OpenJDK" -o "$JVM_VERSION" \> "1.6.0" ] \
       || [ "$JVM_VERSION" = "1.6.0" -a "$JVM_PATCH_VERSION" -ge 23 ]
 then
-    JAVA_AGENT="$JAVA_AGENT -javaagent:$CASSANDRA_HOME/lib/jamm-0.3.2-SNAPSHOT.jar"
+    JAVA_AGENT="$JAVA_AGENT -javaagent:$CASSANDRA_HOME/lib/jamm-0.3.2.jar"
 fi
 
 if [ "$JVM_VERSION" \< "1.8" ] ; then
