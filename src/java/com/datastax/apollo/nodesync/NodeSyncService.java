@@ -317,12 +317,13 @@ public class NodeSyncService implements NodeSyncServiceMBean
             throw new IllegalStateException("Cannot start user validation, NodeSync is not currently running.");
 
         // TODO: we should use JMX notifications for progress reporting. Not really a priority though.
-        return scheduler.userValidations().createAndStart(UserValidationOptions.fromMap(optionMap)).id().toString();
+        return scheduler.userValidations().createAndStart(UserValidationOptions.fromMap(optionMap)).id();
     }
 
-    public String startUserValidation(String keyspace, String table, String ranges)
+    public String startUserValidation(String id, String keyspace, String table, String ranges)
     {
         HashMap<String, String> m = new HashMap<>();
+        m.put(UserValidationOptions.ID, id);
         m.put(UserValidationOptions.KEYSPACE_NAME, keyspace);
         m.put(UserValidationOptions.TABLE_NAME, table);
         if (ranges != null && !ranges.isEmpty())
@@ -330,21 +331,11 @@ public class NodeSyncService implements NodeSyncServiceMBean
         return startUserValidation(m);
     }
 
-    public void cancelUserValidation(String idStr)
+    public void cancelUserValidation(String id)
     {
         ValidationScheduler scheduler = this.scheduler;
         if (scheduler == null)
             throw new IllegalStateException("Cannot cancel user validation, NodeSync is not currently running.");
-
-        UUID id;
-        try
-        {
-            id = UUID.fromString(idStr);
-        }
-        catch (IllegalArgumentException e)
-        {
-            throw new IllegalArgumentException("Invalid (badly formed) user validation identifier (got '" + idStr + ')');
-        }
 
         UserValidationProposer proposer = scheduler.userValidations().get(id);
         if (proposer == null)

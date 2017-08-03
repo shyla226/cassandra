@@ -34,10 +34,14 @@ class UserValidationOptions
     private static final Splitter ON_COMMA = Splitter.on(',').omitEmptyStrings().trimResults();
     private static final Splitter ON_COLON = Splitter.on(':').omitEmptyStrings().trimResults();
 
+    static final String ID = "id";
     static final String KEYSPACE_NAME = "keyspace";
     static final String TABLE_NAME = "table";
     static final String REQUESTED_RANGES = "ranges";
 
+    /** Identifier for the validation. This can be anything as long as no other user validation on the node reuse that
+     * same id at the time of submission. */
+    final String id;
     /** The table on which the user validation should operate. */
     final TableMetadata table;
     /** The normalized list of ranges on which validation should operate. This can be {@code null} in which case the
@@ -45,9 +49,10 @@ class UserValidationOptions
     @Nullable
     final List<Range<Token>> requestedRanges;
 
-    UserValidationOptions(TableMetadata table, Collection<Range<Token>> requestedRanges)
+    UserValidationOptions(String id, TableMetadata table, Collection<Range<Token>> requestedRanges)
     {
         assert requestedRanges == null || !requestedRanges.isEmpty();
+        this.id = id;
         this.table = table;
         this.requestedRanges = requestedRanges == null ? null : Range.normalize(requestedRanges);
     }
@@ -56,6 +61,10 @@ class UserValidationOptions
      * Parse user validation options from a string map (used to provide user validation options through JMX).
      * <p>
      * The provided map <b>must</b> have the following options:
+     * - "id": a string identifying the validation. The only constraint on identifier is that no other user validation
+     *   with the same id should be used by another validation _on the same node_ at the time of submission. This is
+     *   "user" provided so as to make it easy to re-use the same identifier when submitting related validations on
+     *   different nodes.
      * - "keyspace": the name of the keyspace for the table of which this is a user validation specification.
      * - "table": the name of the table of which this is a user validation specification.
      * <p>
@@ -76,6 +85,10 @@ class UserValidationOptions
      */
     public static UserValidationOptions fromMap(Map<String, String> optionMap)
     {
+        String id = optionMap.get(ID);
+        if (id == null)
+            throw new IllegalArgumentException("Missing mandatory option " + KEYSPACE_NAME);
+
         String ksName = optionMap.get(KEYSPACE_NAME);
         if (ksName == null)
             throw new IllegalArgumentException("Missing mandatory option " + KEYSPACE_NAME);
@@ -101,7 +114,7 @@ class UserValidationOptions
                 throw new IllegalArgumentException("Invalid empty list of ranges to validate (if you want to validate "
                                                    + "all local ranges, do not specify the " + REQUESTED_RANGES + " option)");
         }
-        return new UserValidationOptions(table, ranges);
+        return new UserValidationOptions(id, table, ranges);
     }
 
     private static Collection<Range<Token>> parseTokenRanges(String str, IPartitioner partitioner)

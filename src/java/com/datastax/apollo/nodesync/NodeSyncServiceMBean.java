@@ -80,7 +80,7 @@ public interface NodeSyncServiceMBean
      * {@code nodesync} option is not enabled) or for extreme cases where one wants to manually force the validation
      * of some segments independently of NodeSync automatic segment prioritization.
      *
-     * @param options the options for the validation (at least the keyspace, table; optionally the ranges on which to
+     * @param options the options for the validation (at least the id, keyspace, table; optionally the ranges on which to
      *                force validation (all local ranges are validated if no specific ranges are provided)). Those
      *                are passed in a string map for JMX sakes but see the comment {@link UserValidationOptions#fromMap}
      *                for details on valid (and mandatory) values for this argument.
@@ -96,6 +96,7 @@ public interface NodeSyncServiceMBean
      * cannot input a map. This call is equivalent to:
      * <pre>
      *     Map<String, String> m = new HashMap();
+     *     m.put("id", id);
      *     m.put("keyspace", keyspace);
      *     m.put("table", table);
      *     if (ranges != null && !ranges.isEmpty())
@@ -104,13 +105,16 @@ public interface NodeSyncServiceMBean
      * </pre>
      * and so see the javadoc of {@link #startUserValidation(Map)} for details.
      *
+     * @param id an identifier to identify this validation (for cancelling for instance). The only constraint on this
+     *           id is that the node shouldn't have another ongoing validation with that ID or the new submission will
+     *            be rejected.
      * @param keyspace the name of the keyspace to validate.
      * @param table the name of the table to validate.
      * @param ranges the ranges to validate (see {@link UserValidationOptions} for format) or {@code null} to validate
      *               all local ranges.
      * @return the user validation identifier.
      */
-    public String startUserValidation(String keyspace, String table, String ranges);
+    public String startUserValidation(String id, String keyspace, String table, String ranges);
 
     /**
      * Cancel a user validation given the validation identifier.

@@ -7,7 +7,6 @@ package com.datastax.apollo.nodesync;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -25,7 +24,7 @@ class UserValidations
     private static final Logger logger = LoggerFactory.getLogger(UserValidations.class);
 
     private final ValidationScheduler scheduler;
-    private final Map<UUID, UserValidationProposer> proposers = new ConcurrentHashMap<>();
+    private final Map<String, UserValidationProposer> proposers = new ConcurrentHashMap<>();
 
     UserValidations(ValidationScheduler scheduler)
     {
@@ -36,7 +35,10 @@ class UserValidations
     {
         UserValidationProposer proposer = UserValidationProposer.create(scheduler.service(), options);
 
-        proposers.put(proposer.id(), proposer);
+        if (proposers.putIfAbsent(proposer.id(), proposer) != null)
+            throw new IllegalStateException(String.format("Cannot submit user validation with identifier %s as that "
+                                                          + "identifier is already used by an ongoing validation", proposer.id()));
+
         proposer.completionFuture().whenComplete((s, e) -> {
             proposers.remove(proposer.id());
             if (e == null || e instanceof CancellationException)
@@ -57,12 +59,12 @@ class UserValidations
         return ImmutableList.copyOf(proposers.values());
     }
 
-    UserValidationProposer get(UUID id)
+    UserValidationProposer get(String id)
     {
         return proposers.get(id);
     }
 
-    void forceRemove(UUID id)
+    void forceRemove(String id)
     {
         proposers.remove(id);
     }

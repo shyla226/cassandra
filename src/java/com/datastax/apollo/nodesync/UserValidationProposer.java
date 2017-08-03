@@ -77,7 +77,9 @@ class UserValidationProposer extends AbstractValidationProposer
 {
     private static final Logger logger = LoggerFactory.getLogger(UserValidationProposer.class);
 
-    private final UUID id;
+    // An identifier of the user validation; see UserValidationOptions for details.
+    private final String id;
+    private final long createdTime = System.currentTimeMillis();
 
     // The list of ranges requested by the user. This contains only local, "normalized" ranges (in the sense of Range#normalize).
     // This can null to signify that all local ranges are requested.
@@ -97,6 +99,7 @@ class UserValidationProposer extends AbstractValidationProposer
     private final AtomicReference<ValidationMetrics> metrics = new AtomicReference<>();
 
     private UserValidationProposer(NodeSyncService service,
+                                   String id,
                                    TableMetadata table,
                                    int depth,
                                    List<Range<Token>> requestedRanges,
@@ -105,7 +108,7 @@ class UserValidationProposer extends AbstractValidationProposer
     {
         super(service, table, depth, localRangesProvider, tableSizeProvider);
         assert requestedRanges == null || !requestedRanges.isEmpty();
-        this.id = UUIDGen.getTimeUUID();
+        this.id = id;
         this.requestedRanges = requestedRanges;
     }
 
@@ -115,7 +118,7 @@ class UserValidationProposer extends AbstractValidationProposer
         return toValidate;
     }
 
-    public UUID id()
+    public String id()
     {
         return id;
     }
@@ -185,7 +188,7 @@ class UserValidationProposer extends AbstractValidationProposer
         }
 
         int depth = computeDepth(store, local.size(), tableSizeProvider, maxSegmentSize);
-        return new UserValidationProposer(service, table, depth, requested, localRangesProvider, tableSizeProvider);
+        return new UserValidationProposer(service, options.id, table, depth, requested, localRangesProvider, tableSizeProvider);
     }
 
     private static void checkAllLocalRanges(List<Range<Token>> requestedRanges, List<Range<Token>> localRanges)
@@ -329,13 +332,13 @@ class UserValidationProposer extends AbstractValidationProposer
             // first for all proposals (no very strong reason for that btw, it just feels like the easiest to reason
             // with).
             // Same if by some uncanny coincidence 2 proposers are created at exactly the same millisecond.
-            return Longs.compare(this.proposer().id().timestamp(), that.proposer().id().timestamp());
+            return Longs.compare(this.proposer().createdTime, that.proposer().createdTime);
         }
 
         @Override
         public String toString()
         {
-            return String.format("%s(user triggered #%s @ %d)", segment, proposer().id, UUIDGen.unixTimestamp(proposer().id));
+            return String.format("%s(user triggered #%s @ %d)", segment, proposer().id, creationTime);
         }
     }
 

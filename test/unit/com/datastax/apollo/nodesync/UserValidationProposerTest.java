@@ -70,7 +70,7 @@ public class UserValidationProposerTest extends AbstractValidationProposerTester
         List<Range<Token>> requested = asList(requestedRanges);
 
         NodeSyncService service = new NodeSyncService(); // Not even started, just here because we need a reference below
-        UserValidationOptions options = new UserValidationOptions(table, requested);
+        UserValidationOptions options = new UserValidationOptions("test", table, requested);
         UserValidationProposer proposer = UserValidationProposer.create(service,
                                                                         options,
                                                                         TEST_RANGES,
