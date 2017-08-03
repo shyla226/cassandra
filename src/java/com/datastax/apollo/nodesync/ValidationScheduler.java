@@ -32,6 +32,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.IEndpointLifecycleSubscriber;
+import org.apache.cassandra.service.StorageService;
 
 /**
  * Continuously schedules the segment validations to be ran (by an {@link ValidationExecutor}) for NodeSync.
@@ -521,6 +522,10 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         if (store == null)
             return;
 
+        // Don't bother doing anything if the keyspace the table is in is not replicated, or we're a one node cluster
+        if (store.keyspace.getReplicationStrategy().getReplicationFactor() <= 1 || StorageService.instance.getTokenMetadata().getAllEndpoints().size() == 1)
+            return;
+
         eventExecutor.execute(() -> {
             // We want to keep things as generic and flexible for future new implementations of ValidationProposer, so when a table
             // is updated, we let each proposer tell us exactly if it's affected and how.
@@ -534,7 +539,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
             // inefficiently don't matter concretely (outside of hurting our feelings that is)).
             ContinuousTableValidationProposer.create(service, store).ifPresent(p -> {
                 if (add(p))
-                    logger.info("Starting NodeSync validations on table {} following user activation", store.metadata());
+                    logger.info("Starting NodeSync validations on table {}: it has been enabled with ALTER TABLE", store.metadata());
             });
         });
     }
