@@ -32,7 +32,6 @@ import org.slf4j.LoggerFactory;
 
 import com.sun.jna.LastErrorException;
 import sun.nio.ch.FileChannelImpl;
-import sun.nio.ch.SimpleAsynchronousFileChannelImpl;
 
 import static org.apache.cassandra.utils.NativeLibrary.OSType.LINUX;
 import static org.apache.cassandra.utils.NativeLibrary.OSType.MAC;
@@ -83,7 +82,7 @@ public final class NativeLibrary
     {
         FILE_DESCRIPTOR_FD_FIELD = FBUtilities.getProtectedField(FileDescriptor.class, "fd");
         FILE_CHANNEL_FD_FIELD = FBUtilities.getProtectedField(FileChannelImpl.class, "fd");
-        FILE_ASYNC_CHANNEL_FD_FIELD = FBUtilities.getProtectedField(SimpleAsynchronousFileChannelImpl.class.getSuperclass(), "fdObj");
+        FILE_ASYNC_CHANNEL_FD_FIELD = FBUtilities.getProtectedField("sun.nio.ch.AsynchronousFileChannelImpl", "fdObj");
 
         // detect the OS type the JVM is running on and then set the CLibraryWrapper
         // instance to a compatable implementation of CLibraryWrapper for that OS type
