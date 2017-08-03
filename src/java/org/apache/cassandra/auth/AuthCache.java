@@ -20,10 +20,11 @@ package org.apache.cassandra.auth;
 
 import java.lang.management.ManagementFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import javax.annotation.Nullable;
+import java.util.function.IntConsumer;
+import java.util.function.IntSupplier;
 import javax.management.MBeanServer;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
@@ -45,24 +46,24 @@ public class AuthCache<K, V> implements AuthCacheMBean
     private volatile LoadingCache<K, V> cache;
 
     private final String name;
-    private final Consumer<Integer> setValidityDelegate;
-    private final Supplier<Integer> getValidityDelegate;
-    private final Consumer<Integer> setUpdateIntervalDelegate;
-    private final Supplier<Integer> getUpdateIntervalDelegate;
-    private final Consumer<Integer> setMaxEntriesDelegate;
-    private final Supplier<Integer> getMaxEntriesDelegate;
+    private final IntConsumer setValidityDelegate;
+    private final IntSupplier getValidityDelegate;
+    private final IntConsumer setUpdateIntervalDelegate;
+    private final IntSupplier getUpdateIntervalDelegate;
+    private final IntConsumer setMaxEntriesDelegate;
+    private final IntSupplier getMaxEntriesDelegate;
     private final Function<K, V> loadFunction;
-    private final Supplier<Boolean> enableCache;
+    private final BooleanSupplier enableCache;
 
     protected AuthCache(String name,
-                        Consumer<Integer> setValidityDelegate,
-                        Supplier<Integer> getValidityDelegate,
-                        Consumer<Integer> setUpdateIntervalDelegate,
-                        Supplier<Integer> getUpdateIntervalDelegate,
-                        Consumer<Integer> setMaxEntriesDelegate,
-                        Supplier<Integer> getMaxEntriesDelegate,
+                        IntConsumer setValidityDelegate,
+                        IntSupplier getValidityDelegate,
+                        IntConsumer setUpdateIntervalDelegate,
+                        IntSupplier getUpdateIntervalDelegate,
+                        IntConsumer setMaxEntriesDelegate,
+                        IntSupplier getMaxEntriesDelegate,
                         Function<K, V> loadFunction,
-                        Supplier<Boolean> enableCache)
+                        BooleanSupplier enableCache)
     {
         this.name = name;
         this.setValidityDelegate = setValidityDelegate;
@@ -148,7 +149,7 @@ public class AuthCache<K, V> implements AuthCacheMBean
 
     public int getValidity()
     {
-        return getValidityDelegate.get();
+        return getValidityDelegate.getAsInt();
     }
 
     public void setUpdateInterval(int updateInterval)
@@ -162,7 +163,7 @@ public class AuthCache<K, V> implements AuthCacheMBean
 
     public int getUpdateInterval()
     {
-        return getUpdateIntervalDelegate.get();
+        return getUpdateIntervalDelegate.getAsInt();
     }
 
     public void setMaxEntries(int maxEntries)
@@ -176,12 +177,12 @@ public class AuthCache<K, V> implements AuthCacheMBean
 
     public int getMaxEntries()
     {
-        return getMaxEntriesDelegate.get();
+        return getMaxEntriesDelegate.getAsInt();
     }
 
     private LoadingCache<K, V> initCache(LoadingCache<K, V> existing)
     {
-        if (!enableCache.get())
+        if (!enableCache.getAsBoolean())
             return null;
 
         if (getValidity() <= 0)

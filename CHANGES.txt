@@ -1,4 +1,6 @@
 4.0
+ * Refactoring to primitive functional interfaces in AuthCache (CASSANDRA-13732)
+ * Update metrics to 3.1.5 (CASSANDRA-13648)
  * batch_size_warn_threshold_in_kb can now be set at runtime (CASSANDRA-13699)
  * Avoid always rebuilding secondary indexes at startup (CASSANDRA-13725)
  * Upgrade JMH from 1.13 to 1.19 (CASSANDRA-13727)
