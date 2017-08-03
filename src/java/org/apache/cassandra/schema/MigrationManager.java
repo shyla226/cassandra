@@ -250,6 +250,11 @@ public class MigrationManager
         return announceNewType(newType, announceLocally, FBUtilities.timestampMicros());
     }
 
+    public static Completable forceAnnounceNewType(UserType newType)
+    {
+        return announceNewType(newType, false, 0);
+    }
+
     public static Completable announceNewType(UserType newType, boolean announceLocally, long timestamp)
     {
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(newType.keyspace);

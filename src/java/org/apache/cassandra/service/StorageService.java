@@ -69,6 +69,7 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.mos.MemoryOnlyStatus;
 import org.apache.cassandra.db.mos.MemoryOnlyStatusMBean;
 import org.apache.cassandra.dht.*;
@@ -91,8 +92,10 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.streaming.*;
 import org.apache.cassandra.tracing.TraceKeyspace;
@@ -1067,23 +1070,46 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         else
             migration = Completable.complete();
 
-        return migration.andThen(Completable.defer( () -> {
+        return migration.andThen(Completable.defer(()-> {
+            KeyspaceMetadata defined = Schema.instance.getKeyspaceMetadata(expected.name);
+
+            // Same as for tables, it might miss types.
+            return maybeAddOrUpdateTypes(expected.types, defined.types);
+        })).andThen(Completable.defer(() -> {
             KeyspaceMetadata defined = Schema.instance.getKeyspaceMetadata(expected.name);
 
             // While the keyspace exists, it might miss table or have outdated one
             // There is also the potential for a race, as schema migrations add the bare
             // keyspace into Schema.instance before adding its tables, so double check that
             // all the expected tables are present
-            List<Completable> migrations = new ArrayList<>();
-            for (TableMetadata expectedTable : expected.tables)
-            {
-                TableMetadata definedTable = defined.tables.get(expectedTable.name).orElse(null);
-                if (definedTable == null || !definedTable.equals(expectedTable))
-                    migrations.add(MigrationManager.forceAnnounceNewTable(expectedTable));
-            }
-
-            return migrations.isEmpty() ? Completable.complete() : Completable.merge(migrations);
+            return maybeAddOrUpdateTables(expected.tables, defined.tables);
         }));
+    }
+
+    private Completable maybeAddOrUpdateTypes(Types expected, Types defined)
+    {
+        List<Completable> migrations = new ArrayList<>();
+        for (UserType expectedType : expected)
+        {
+            UserType definedType = defined.get(expectedType.name).orElse(null);
+            if (definedType == null || !definedType.equals(expectedType))
+                migrations.add(MigrationManager.forceAnnounceNewType(expectedType));
+        }
+
+        return migrations.isEmpty() ? Completable.complete() : Completable.merge(migrations);
+    }
+
+    private Completable maybeAddOrUpdateTables(Tables expected, Tables defined)
+    {
+        List<Completable> migrations = new ArrayList<>();
+        for (TableMetadata expectedTable : expected)
+        {
+            TableMetadata definedTable = defined.get(expectedTable.name).orElse(null);
+            if (definedTable == null || !definedTable.equals(expectedTable))
+                migrations.add(MigrationManager.forceAnnounceNewTable(expectedTable));
+        }
+
+        return migrations.isEmpty() ? Completable.complete() : Completable.merge(migrations);
     }
 
     public boolean isJoined()
