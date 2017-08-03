@@ -33,10 +33,12 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.apollo.nodesync.NodeSyncService;
 import org.apache.cassandra.cql3.CQLSyntaxHelper;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.units.Units;
 
 /**
  * Per-table parameters for NodeSync.
@@ -103,7 +105,32 @@ public final class NodeSyncParams
         });
 
         if (!params.unknownParameters.isEmpty())
-            throw new InvalidRequestException("Unknown options provided for nodesync: " + map.keySet());
+            throw new InvalidRequestException(String.format("Unknown options provided for nodesync: %s", map.keySet()));
+
+        // Setting a deadline lower than the minimum time we'll enforce between validation is a sure way to make sure
+        // your deadline is never meant. Doing so is also genuinely a misconfiguration since MIN_VALIDATION_INTERVAL_MS
+        // is meant to be order of magnitude lower than any reasonable deadline (it is by default and it's not meant
+        // to be changed from its default by user, only for testing).
+        // That said, this check is pretty imperfect because while the deadline is cluster-wide and persistent thing (by
+        // virtue of being part of the schema), the value of MIN_VALIDATION_INTERVAL_MS is node-based (so may not be
+        // set wrong on the node on which this method is called) and could be changed on any node restart (so after
+        // the deadline has been set in particular). We actually have a more consistent warning in
+        // ContinuousTableValidationProposer.Proposal#computeMinTimeForNextValidation, so this one is here more because
+        // it's more user friendly (directly reject the CREATE/ALTER) when it's triggered.
+        if (params.deadlineTargetSec != null && TimeUnit.SECONDS.toMillis(params.deadlineTargetSec) <= NodeSyncService.MIN_VALIDATION_INTERVAL_MS)
+        {
+            // Somewhat random estimation of when user have toyed with the min validation interval in an un-reasonable
+            // way. Only there to provide slightly more helpful message so guess-estimate is fine.
+            boolean minValidationIsHigh = NodeSyncService.MIN_VALIDATION_INTERVAL_MS > TimeUnit.HOURS.toMillis(10);
+            throw new InvalidRequestException(String.format("nodesync '%s' setting  has been to %s which is lower than the %s value (%s): "
+                                                            + "this mean the deadline cannot be achieved, at least on this node. %s",
+                                                            Option.DEADLINE_TARGET_SEC,
+                                                            Units.toString(params.deadlineTargetSec, TimeUnit.SECONDS),
+                                                            NodeSyncService.MIN_VALIDATION_INTERVAL_PROP_NAME,
+                                                            Units.toString(NodeSyncService.MIN_VALIDATION_INTERVAL_MS, TimeUnit.MILLISECONDS),
+                                                            minValidationIsHigh ? "The custom value set for " + NodeSyncService.MIN_VALIDATION_INTERVAL_PROP_NAME + " seems unwisely high"
+                                                                                : "This seems like an unwisely low value for " + Option.DEADLINE_TARGET_SEC));
+        }
 
         return params;
     }

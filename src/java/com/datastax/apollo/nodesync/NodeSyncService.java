@@ -35,6 +35,7 @@ import org.apache.cassandra.metrics.AbstractMetricNameFactory;
 import org.apache.cassandra.metrics.NodeSyncMetrics;
 import org.apache.cassandra.metrics.MetricNameFactory;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
@@ -61,8 +62,24 @@ public class NodeSyncService implements NodeSyncServiceMBean
      * so this is more a target size, but distribution should still be good enough in practice (or you will have
      * bigger problem than large NodeSync segments).
      */
-    // TODO(Sylvain): probably want to make that at least configurable through a system property. Not sure how good of a default it is also.
+    // TODO(Sylvain): Not sure how good of a default it is, could be worth some experimentation (but doesn't seem too bad either)
     static final long SEGMENT_SIZE_TARGET = Long.getLong("datastax.nodesync.segment_size_target_bytes", SizeUnit.MEGABYTES.toBytes(200));
+
+    /**
+     * The minimum delay we enforce between doing 2 validation on the same segment.
+     * <p>
+     * This exists because on very small clusters (typically brand new empty ones) we might end up validating everything
+     * in a very very short time, and it doesn't feel very meaningful to re-validate the empty system distributed tables
+     * every 50ms (which is what happens without this on an empty cluster). Note that the amount of resources devoted to
+     * NodeSync is globally guarded by {@link NodeSyncConfig#rateLimiter} so the importance of this shouldn't be
+     * over-stated but 1) this feels reasonable and 2) we don't account for validations over empty data with the limiter
+     * (since it rate limits validated bytes) but there is costs associated to creating the validation in the first place
+     * (reading the {@link SystemDistributedKeyspace#NodeSyncStatus} table mostly) and this prevents this to get out of
+     * hand.
+     */
+    // publicly Visible because we warn if user are setting a deadline lowe than this in NodeSyncParams and that's outside the nodesync package
+    public static final String MIN_VALIDATION_INTERVAL_PROP_NAME = "datastax.nodesync.min_validation_interval_ms";
+    public static final long MIN_VALIDATION_INTERVAL_MS = Long.getLong(MIN_VALIDATION_INTERVAL_PROP_NAME, TimeUnit.MINUTES.toMillis(5));
 
     private static final long LOG_REPORTING_DELAY_SEC = Long.getLong("datastax.nodesync.log_reporter_interval_sec", TimeUnit.MINUTES.toSeconds(10));
 

@@ -36,8 +36,10 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
+import org.apache.cassandra.schema.NodeSyncParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.units.Units;
 
 /**
@@ -57,19 +59,8 @@ import org.apache.cassandra.utils.units.Units;
 class ContinuousTableValidationProposer extends AbstractValidationProposer
 {
     private static final Logger logger = LoggerFactory.getLogger(ContinuousTableValidationProposer.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.MINUTES);
 
-    /**
-     * The minimum delay we enforce between doing 2 validation on the same segment.
-     * This exists because on very small clusters (typically brand new empty ones) we might end up validating everything
-     * in a very very short time, and it doesn't feel very meaningful to re-validate the empty system distributed tables
-     * every 50ms (which is what happens without this on an empty cluster). Note that the amount of resources devoted to
-     * NodeSync is globally guarded by {@link NodeSyncConfig#rateLimiter} so the importance of this shouldn't be
-     * over-stated but 1) this feels reasonable and 2) we don't account for validations over empty data with the limiter
-     * (since it rate limit validated bytes) but there is costs associated to creating the validation in the first place
-     * (reading the {@link SystemDistributedKeyspace#NodeSyncStatus} table mostly) and this prevents this to get out of
-     * hand.
-     */
-    private static final long MIN_VALIDATION_INTERVAL_MS = Long.getLong("datastax.nodesync.min_validation_interval_ms", TimeUnit.MINUTES.toMillis(10));
     // TODO(Sylvain): should (probably) make this configurable, at least for testing (not that important for end-user).
     private static final ThreadPoolExecutor reloadExecutor = DebuggableThreadPoolExecutor.createWithMaximumPoolSize("NodeSyncValidationProposers", 4, 30, TimeUnit.SECONDS);
 
@@ -438,8 +429,8 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
          */
         private final long nextValidationDeadlineTarget;
         /**
-         * For reasons explained on {@link #MIN_VALIDATION_INTERVAL_MS}, we want to ensure a minimum time interval
-         * between 2 validations on the same segment. To enforce that, this variable represents the earlier time
+         * For reasons explained on {@link NodeSyncService#MIN_VALIDATION_INTERVAL_MS}, we want to ensure a minimum time
+         * interval between 2 validations on the same segment. To enforce that, this variable represents the earlier time
          * at which we're willing to validate the segment again. The proposer will make sure it doesn't "publish"
          * this proposal until that time (see {@link ReloadableProposals#supplyNextProposal(Consumer)}). Of course,
          * there is no guarantee that once the proposal is published to the scheduler, it will be picked up for
@@ -486,14 +477,26 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
                 return lastValidationTime;
             }
 
-            // Having MIN_VALIDATION_INTERVAL_MS >= tableDeadlineTargetMs is kind of a misconfiguration by design, but
-            // this is not the place to validate that (and it's actually kind of hard to enforce it doesn't happen: we
-            // can offer recommendation on table deadline not being set crazy low, nor changing MIN_VALIDATION_INTERVAL_MS
-            // unless you know what you're doing but that's about it). So if that ever happen, just ignore
-            // MIN_VALIDATION_INTERVAL_MS as, within that realm of misconfiguration, is what makes the most sense.
-            return MIN_VALIDATION_INTERVAL_MS >= tableDeadlineTargetMs
-                   ? lastValidationTime
-                   : lastValidationTime + MIN_VALIDATION_INTERVAL_MS;
+            // As explained in NodeSyncParams, having tableDeadlineTargetMs <= MIN_VALIDATION_INTERVAL_MS is wrong and this
+            // may be the only place where we can detect this, even if that's not ideal in theory (we will get there for every
+            // proposal created while the misconfiguration persists). So still warn, but with care of not spamming the log.
+            if (tableDeadlineTargetMs <= NodeSyncService.MIN_VALIDATION_INTERVAL_MS)
+            {
+                // Somewhat random estimation of when user have toyed with the min validation interval in an un-reasonable
+                // way. Only there to provide slightly more helpful message so guess-estimate is fine.
+                boolean minValidationIsHigh = NodeSyncService.MIN_VALIDATION_INTERVAL_MS > TimeUnit.HOURS.toMillis(10);
+                noSpamLogger.warn("NodeSync '{}' setting on {} is {} which is lower than the {} value ({}): "
+                            + "this mean that deadline cannot be achieved, at least on this node, and indicate a misconfiguration. {}",
+                                  NodeSyncParams.Option.DEADLINE_TARGET_SEC,
+                                  segment.table,
+                                  Units.toString(tableDeadlineTargetMs, TimeUnit.MILLISECONDS),
+                                  NodeSyncService.MIN_VALIDATION_INTERVAL_PROP_NAME,
+                                  Units.toString(NodeSyncService.MIN_VALIDATION_INTERVAL_MS, TimeUnit.MILLISECONDS),
+                            minValidationIsHigh ? "The custom value set for " + NodeSyncService.MIN_VALIDATION_INTERVAL_PROP_NAME + " seems unwisely high"
+                                                : "That '" + NodeSyncParams.Option.DEADLINE_TARGET_SEC + "' value seems unwisely low value");
+            }
+
+            return lastValidationTime + NodeSyncService.MIN_VALIDATION_INTERVAL_MS;
         }
 
         Validator activate()
