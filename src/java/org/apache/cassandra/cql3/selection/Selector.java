@@ -237,7 +237,6 @@ public abstract class Selector
     }
 
     /**
-<<<<<<< HEAD
      * A row of data that need to be processed by a {@code Selector}
      */
     public static final class InputRow
@@ -283,18 +282,24 @@ public abstract class Selector
         {
             if (c == null)
             {
-                values[index++] = null;
-                return;
+                values[index] = null;
+
+                if (timestamps != null)
+                    timestamps[index] = Long.MIN_VALUE;
+
+                if (ttls != null)
+                    ttls[index] = -1;
             }
+            else
+            {
+                values[index] = value(c);
 
-            values[index] = value(c);
+                if (timestamps != null)
+                    timestamps[index] = c.timestamp();
 
-            if (timestamps != null)
-                timestamps[index] = c.timestamp();
-
-            if (ttls != null)
-                ttls[index] = remainingTTL(c, nowInSec);
-
+                if (ttls != null)
+                    ttls[index] = remainingTTL(c, nowInSec);
+            }
             index++;
         }
 
