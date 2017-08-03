@@ -512,7 +512,7 @@ public final class SystemDistributedKeyspace
         // "right" bound, which throws off a 'start_token < ?' condition against it and so we have to special case
         // (CQL doesn't currently have a way to skip a condition; would be nice to allow to do so using 'unset' values
         // but that doesn't work right now).
-        if (end.isMinimum())
+        if (!end.isMinimum())
             qBase += " AND start_token < ?";
 
         final String q = String.format(qBase, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS);

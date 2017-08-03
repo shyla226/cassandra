@@ -48,7 +48,7 @@ import static org.junit.Assert.*;
  *
  * Note: some methods really deal with token range, which has usefulness outside of NodeSync, could probably be move t
  */
-class NodeSyncTestTools
+public class NodeSyncTestTools
 {
     // When building validation time, we want in test pass human-readable values, but the ValidatioInfo.toString()
     // assumes that the time is genuine timestamp for proper display, so the methods of this class ends up mixing the
@@ -76,13 +76,13 @@ class NodeSyncTestTools
     }
 
     /** The minimum token (on which we wrap). */
-    static long min()
+    public static long min()
     {
         return Long.MIN_VALUE;
     }
 
     /** The maximum token. Note that we don't wrap on this, but it can be useful to express some ranges. */
-    static long max()
+    public static long max()
     {
         return Long.MAX_VALUE;
     }
@@ -126,7 +126,7 @@ class NodeSyncTestTools
     /**
      * Creates a segment from the table and range it covers.
      */
-    static Segment seg(TableMetadata table, long left, long right)
+    public static Segment seg(TableMetadata table, long left, long right)
     {
         return new Segment(table, range(left, right));
     }
@@ -171,71 +171,71 @@ class NodeSyncTestTools
                                   missingNodes);
     }
 
-    static ValidationInfo fullInSync(long daysAgo)
+    public static ValidationInfo fullInSync(long daysAgo)
     {
         return vInfo(daysAgo, ValidationOutcome.FULL_IN_SYNC, null);
     }
 
-    static ValidationInfo fullRepaired(long daysAgo)
+    public static ValidationInfo fullRepaired(long daysAgo)
     {
         return vInfo(daysAgo, ValidationOutcome.FULL_REPAIRED, null);
     }
 
-    static ValidationInfo partialInSync(long daysAgo, InetAddress... missingNodes)
+    public static ValidationInfo partialInSync(long daysAgo, InetAddress... missingNodes)
     {
         return vInfo(daysAgo, ValidationOutcome.PARTIAL_IN_SYNC, Sets.newHashSet(missingNodes));
     }
 
-    static ValidationInfo partialRepaired(long daysAgo, InetAddress... missingNodes)
+    public static ValidationInfo partialRepaired(long daysAgo, InetAddress... missingNodes)
     {
         return vInfo(daysAgo, ValidationOutcome.PARTIAL_REPAIRED, Sets.newHashSet(missingNodes));
     }
 
-    static ValidationInfo uncompleted(long daysAgo)
+    public static ValidationInfo uncompleted(long daysAgo)
     {
         return vInfo(daysAgo, ValidationOutcome.UNCOMPLETED, null);
     }
 
-    static ValidationInfo failed(long daysAgo)
+    public static ValidationInfo failed(long daysAgo)
     {
         return vInfo(daysAgo, ValidationOutcome.FAILED, null);
     }
 
-    static NodeSyncRecord record(Segment seg)
+    public static NodeSyncRecord record(Segment seg)
     {
         return record(seg, null, null);
     }
 
-    static NodeSyncRecord record(Segment seg, ValidationInfo lastValidation)
+    public static NodeSyncRecord record(Segment seg, ValidationInfo lastValidation)
     {
         return record(seg, lastValidation, lastValidation.wasSuccessful() ? lastValidation : null);
     }
 
-    static NodeSyncRecord record(Segment seg, InetAddress lockedBy)
+    public static NodeSyncRecord record(Segment seg, InetAddress lockedBy)
     {
         return record(seg, null, null, lockedBy);
     }
 
-    static NodeSyncRecord record(Segment seg, ValidationInfo lastValidation, ValidationInfo lastSuccessfulValidation)
+    public static NodeSyncRecord record(Segment seg, ValidationInfo lastValidation, ValidationInfo lastSuccessfulValidation)
     {
         assert lastSuccessfulValidation == null || lastSuccessfulValidation.wasSuccessful();
         return record(seg, lastValidation, lastSuccessfulValidation, null);
     }
 
-    static NodeSyncRecord record(Segment seg,
-                                 ValidationInfo lastValidation,
-                                 ValidationInfo lastSuccessfulValidation,
-                                 InetAddress lockedBy)
+    public static NodeSyncRecord record(Segment seg,
+                                        ValidationInfo lastValidation,
+                                        ValidationInfo lastSuccessfulValidation,
+                                        InetAddress lockedBy)
     {
         return new NodeSyncRecord(seg, lastValidation, lastSuccessfulValidation, lockedBy);
     }
 
-    static RecordsBuilder records(TableMetadata table)
+    public static RecordsBuilder records(TableMetadata table)
     {
         return new RecordsBuilder(table);
     }
 
-    static InetAddress inet(int... ipAddress)
+    public static InetAddress inet(int... ipAddress)
     {
         assert ipAddress.length == 4;
         try
@@ -286,7 +286,7 @@ class NodeSyncTestTools
     /**
      * Very simple builder of multiple NodeSync records over a table.
      */
-    static class RecordsBuilder
+    public static class RecordsBuilder
     {
         private final TableMetadata table;
         private final List<NodeSyncRecord> records = new ArrayList<>();
@@ -296,22 +296,22 @@ class NodeSyncTestTools
             this.table = table;
         }
 
-        RecordsBuilder add(int left, int right, ValidationInfo lastValidation)
+        public RecordsBuilder add(int left, int right, ValidationInfo lastValidation)
         {
             return add(record(seg(table, left, right), lastValidation));
         }
 
-        RecordsBuilder add(int left, int right, InetAddress lockedBy)
+        public RecordsBuilder add(int left, int right, InetAddress lockedBy)
         {
             return add(record(seg(table, left, right), lockedBy));
         }
 
-        RecordsBuilder add(int left, int right, ValidationInfo lastValidation, ValidationInfo lastSuccessfulValidation)
+        public RecordsBuilder add(int left, int right, ValidationInfo lastValidation, ValidationInfo lastSuccessfulValidation)
         {
             return add(record(seg(table, left, right), lastValidation, lastSuccessfulValidation));
         }
 
-        RecordsBuilder add(int left, int right, ValidationInfo lastValidation, ValidationInfo lastSuccessfulValidation, InetAddress lockedBy)
+        public RecordsBuilder add(int left, int right, ValidationInfo lastValidation, ValidationInfo lastSuccessfulValidation, InetAddress lockedBy)
         {
             return add(record(seg(table, left, right), lastValidation, lastSuccessfulValidation, lockedBy));
         }
@@ -322,7 +322,7 @@ class NodeSyncTestTools
             return this;
         }
 
-        List<NodeSyncRecord> asList()
+        public List<NodeSyncRecord> asList()
         {
             return new ArrayList<>(records);
         }
