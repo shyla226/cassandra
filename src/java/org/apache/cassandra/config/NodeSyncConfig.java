@@ -20,7 +20,7 @@ import org.apache.cassandra.utils.units.SizeValue;
  */
 public class NodeSyncConfig
 {
-    private static final boolean DEFAULT_ENABLED = true;
+    private static final boolean DEFAULT_ENABLED = false;
     private static final long DEFAULT_RATE_KB = 1024;
     private static final long DEFAULT_PAGE_SIZE_KB = 100;
 
