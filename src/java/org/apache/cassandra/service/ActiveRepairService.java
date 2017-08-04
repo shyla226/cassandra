@@ -796,10 +796,8 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                     {
                         // mark as compacting so the received SSTable does not participate any compaction in the unrepaired bucket,
                         // since it will be marked as repaired at the end of repair
-                        LifecycleTransaction txn = markSSTablesCompacting(columnFamilyStores.get(cfId), Collections.singleton(received));
-                        if (txn != null && !txn.originals().isEmpty())
+                        if (addToRemoteCompactingSSTables(cfId, markSSTablesCompacting(columnFamilyStores.get(cfId), Collections.singleton(received))))
                         {
-                            remoteCompactingSSTables.get(cfId).add(txn);
                             logger.trace("[repair #{}] Marked received SSTable with tombstone as compacting: {}", parentSessionId, received);
                         }
                         else
@@ -810,6 +808,21 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                     }
                 }
             }
+        }
+
+        private boolean addToRemoteCompactingSSTables(UUID cfId, LifecycleTransaction txn)
+        {
+            boolean shouldAdd = txn != null && !txn.originals().isEmpty();
+            if (shouldAdd)
+            {
+                remoteCompactingSSTables.get(cfId).add(txn);
+            }
+            else if (txn != null)
+            {
+                txn.close();
+            }
+
+            return shouldAdd;
         }
 
         /**
