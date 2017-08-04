@@ -314,6 +314,15 @@ public class NodeSyncRecordTest
     }
 
     @Test
+    public void consolidateAllBeforeRequestedRange() throws Exception
+    {
+        RecordsBuilder toConsolidate = records(TABLE).add(-200, -100, fullInSync(10))
+                                                     .add(-50, -10, fullInSync(12))
+                                                     .add(-10, -5, fullInSync(8));
+        assertEquals(null, NodeSyncRecord.consolidate(SEGMENT, toConsolidate.asList()));
+    }
+
+    @Test
     public void consolidateBlockedBy() throws Exception
     {
         RecordsBuilder toConsolidate;

@@ -281,7 +281,7 @@ public class NodeSyncRecord
 
         // Skip records that are fully before our range of interest
         while (coveringRecords.get(i).segment.range.right.compareTo(range.left) <= 0)
-            i++;
+            if (++i == coveringRecords.size()) return null; //all ranges before range of interest
 
         // If the first record that ends after our range start is strictly after said start, it means at least some part
         // of the range is not covered by a record and is thus not locked.
