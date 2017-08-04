@@ -669,11 +669,11 @@ public final class SchemaKeyspace
         for (ColumnMetadata column : table.columns())
             dropColumnFromSchemaMutation(table, column, builder);
 
-        for (TriggerMetadata trigger : table.triggers)
-            dropTriggerFromSchemaMutation(table, trigger, builder);
-
         for (DroppedColumn column : table.droppedColumns.values())
             dropDroppedColumnFromSchemaMutation(table, column, builder);
+
+        for (TriggerMetadata trigger : table.triggers)
+            dropTriggerFromSchemaMutation(table, trigger, builder);
 
         for (IndexMetadata index : table.indexes)
             dropIndexFromSchemaMutation(table, index, builder);

@@ -41,8 +41,8 @@ import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 
-import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertNotNull;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.apache.cassandra.Util.dk;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
@@ -163,7 +163,7 @@ public class HintsReaderTest
         try
         {
             generateHints(3, ks);
-            MigrationManager.announceTableDrop(ks, CF_STANDARD1, true);
+            MigrationManager.announceTableDrop(ks, CF_STANDARD1, true).blockingAwait(5, TimeUnit.SECONDS);
             readHints(3, 1);
         }
         finally
