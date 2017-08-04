@@ -1,5 +1,6 @@
 DSE 5.1.3
 Merged from dse5.0:
+ * Prevent marking remote SSTables shadowing compacted data as repaired (APOLLO-688)
  * fix completed rebuild logging always says 0 bytes (APOLLO-810)
  * nodetool rebuild & bootstrap improvements (APOLLO-581)
 Merged from DSE 4.8.14:

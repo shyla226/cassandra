@@ -45,6 +45,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
@@ -208,6 +209,7 @@ public class StreamReceiveTask extends StreamTask
                     }
                     else
                     {
+                        ActiveRepairService.instance.receiveStreamedSSTables(readers);
                         task.finishTransaction();
 
                         // add sstables and build secondary indexes

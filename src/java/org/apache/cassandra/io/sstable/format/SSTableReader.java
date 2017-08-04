@@ -1928,6 +1928,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return sstableMetadata.maxLocalDeletionTime;
     }
 
+    /** sstable contains no tombstones if minLocalDeletionTime == Integer.MAX_VALUE */
+    public boolean hasTombstones()
+    {
+        // sstable contains no tombstone if minLocalDeletionTime is still set to  the default value Integer.MAX_VALUE
+        // which is bigger than any valid deletion times
+        return getMinLocalDeletionTime() != Integer.MAX_VALUE;
+    }
+
     /**
      * Whether the sstable may contain tombstones or if it is guaranteed to not contain any.
      * <p>
@@ -2339,5 +2347,15 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                            OpenReason openReason,
                                            SerializationHeader header);
 
+    }
+
+    public boolean intersectsWith(SSTableReader other)
+    {
+        return getRange().intersects(new Range<>(other.first.getToken(), other.last.getToken()));
+    }
+
+    public Range<Token> getRange()
+    {
+        return new Range<>(first.getToken(), last.getToken());
     }
 }

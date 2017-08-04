@@ -21,6 +21,7 @@ package org.apache.cassandra;
 
 import java.io.Closeable;
 import java.io.EOFException;
+import java.io.File;
 import java.io.IOError;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -53,6 +54,7 @@ import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 
 import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
@@ -62,6 +64,7 @@ import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTableTxnWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.pager.PagingState;
@@ -733,4 +736,67 @@ public class Util
         return new PagingState(pk, mark, 10, 0, inclusive);
     }
 
+    public static SSTableReader writeSSTable(ColumnFamilyStore cfs, CFMetaData cfm, int startPK, int endPK, int startCK, int endCK, long ts)
+    {
+        File dir = cfs.getDirectories().getDirectoryForNewSSTables();
+        String filename = cfs.getSSTablePath(dir);
+
+        try (SSTableTxnWriter writer = SSTableTxnWriter.create(cfs, filename, 0, 0, new SerializationHeader(true, cfm, cfm.partitionColumns(), EncodingStats.NO_STATS)))
+        {
+            for (int i = startPK; i < endPK; i++)
+            {
+                UpdateBuilder builder = UpdateBuilder.create(cfm, ByteBufferUtil.bytes(i)).withTimestamp(ts);
+                for (int j = startCK; j < endCK; j++)
+                    builder.newRow("c" + j).add("val", "value1");
+                writer.append(builder.build().unfilteredIterator());
+            }
+            Collection<SSTableReader> sstables = writer.finish(true);
+            assertNotNull(sstables);
+            assertEquals(1, sstables.size());
+            return sstables.iterator().next();
+        }
+    }
+
+    public static SSTableReader writeSSTableWithTombstones(ColumnFamilyStore cfs, CFMetaData cfm, int startPK, int endPK, int startCK, int endCK, long ts)
+    {
+        File dir = cfs.getDirectories().getDirectoryForNewSSTables();
+        String filename = cfs.getSSTablePath(dir);
+
+        try (SSTableTxnWriter writer = SSTableTxnWriter.create(cfs, filename, 0, 0, new SerializationHeader(true, cfm, cfm.partitionColumns(), EncodingStats.NO_STATS)))
+        {
+            for (int i = startPK; i < endPK; i++)
+            {
+                for (int j = startCK; j < endCK; j++)
+                {
+                    Mutation deletedRow = RowUpdateBuilder.deleteRow(cfm, ts, ByteBufferUtil.bytes(i), ByteBufferUtil.bytes("c" + j));
+                    writer.append(deletedRow.get(cfm).unfilteredIterator());
+                }
+            }
+            Collection<SSTableReader> sstables = writer.finish(true);
+            assertNotNull(sstables);
+            assertEquals(1, sstables.size());
+            return sstables.iterator().next();
+        }
+    }
+
+    public static Collection<Range<Token>> getFullRange(ColumnFamilyStore store)
+    {
+        return Collections.singleton(getRange(store.getPartitioner().getMinimumToken(), store.getPartitioner().getMinimumToken()));
+    }
+
+    public static Range<Token> getRange(String start, String end)
+    {
+        return Util.getRange(new ByteOrderedPartitioner.BytesToken(start.getBytes()), new ByteOrderedPartitioner.BytesToken(end.getBytes()));
+    }
+
+    public static Range<Token> getRange(int start, int end)
+    {
+        return Util.getRange(new ByteOrderedPartitioner.BytesToken(ByteBufferUtil.bytes(start)), new ByteOrderedPartitioner.BytesToken(ByteBufferUtil.bytes(end)));
+    }
+
+
+    public static Range<Token> getRange(Token start, Token end)
+    {
+        return new Range<>(start, end);
+    }
 }

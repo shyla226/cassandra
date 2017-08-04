@@ -28,6 +28,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import javax.management.*;
 import javax.management.openmbean.*;
 
@@ -72,6 +73,7 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TableMetrics.Sampler;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.*;
@@ -2635,5 +2637,29 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             return null;
 
         return keyspace.getColumnFamilyStore(id);
+    }
+
+    public int mutateRepairedAt(Collection<SSTableReader> sstables, long repairedAt) throws IOException
+    {
+        return mutateRepairedAt(sstables, repairedAt, true);
+    }
+
+    public int mutateRepairedAt(Collection<SSTableReader> sstables, long repairedAt, boolean notify) throws IOException
+    {
+        Set<SSTableReader> changedStatus = new HashSet<>(sstables.size());
+        for (SSTableReader sstable : sstables)
+        {
+            assert metadata.cfId.equals(sstable.metadata.cfId);
+            boolean previousRepaired = sstable.isRepaired();
+            sstable.descriptor.getMetadataSerializer().mutateRepairedAt(sstable.descriptor, repairedAt);
+            sstable.reloadSSTableMetadata();
+            if (previousRepaired != sstable.isRepaired())
+            {
+                changedStatus.add(sstable);
+            }
+        }
+        if (notify)
+            getTracker().notifySSTableRepairedStatusChanged(changedStatus);
+        return changedStatus.size();
     }
 }
