@@ -30,6 +30,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -526,7 +527,9 @@ public final class Ref<T> implements RefCounted<T>
         @Override
         public String toString()
         {
-            return field == null ? name : field.toString() + "-" + o.getClass().getName();
+            return field == null
+                   ? String.format("%s.%s", o.getClass().getName(), name)
+                   : field.toString(); // includes name of declaring class
         }
     }
 
@@ -610,12 +613,13 @@ public final class Ref<T> implements RefCounted<T>
                         if (haveLoops != null)
                             haveLoops.add(visiting);
                         NoSpamLogger.log(logger,
-                                NoSpamLogger.Level.ERROR,
-                                rootObject.getClass().getName(),
-                                1,
-                                TimeUnit.SECONDS,
-                                "Strong self-ref loop detected {}",
-                                path);
+                                         NoSpamLogger.Level.ERROR,
+                                         rootObject.getClass().getName(),
+                                         1,
+                                         TimeUnit.SECONDS,
+                                         "Strong self-ref loop detected, {} references itself:\n {}",
+                                         visiting,
+                                         String.join("\n", path.stream().map(Object::toString).collect(Collectors.toList())));
                     }
                     else if (child == null)
                     {
@@ -637,6 +641,17 @@ public final class Ref<T> implements RefCounted<T>
     {
         if (clazz == null || clazz == PhantomReference.class || clazz == Class.class || java.lang.reflect.Member.class.isAssignableFrom(clazz))
             return emptyList();
+
+        // APOLLO-942
+        // Ignore fields for the following classes because of the async file executor in AsynchronousChannelProxy and the executor and futures used by
+        // Caffeine in ChunkCache. The executors own worker threads, which own thread groups, which end up strong referencing FileHandle or ChannelProxy
+        // thanks to Keyspace and CFS. This is either caused by JMX (possibly via logback) or directly by tasks that run on other executors, with threads
+        // that share thread groups. Note that creating a new group doesn't help, because it references other groups via its parent. Also creating
+        // executors with a weakref to another executor that is statically linked somewhere else is not sufficient, because
+        // sun.nio.ch.SimpleAsynchronousFileChannelImpl uses thread pool workers from other pools that we don't control for its locks
+        if (ThreadGroup.class.isAssignableFrom(clazz) || ThreadPoolExecutor.class.isAssignableFrom(clazz) || CompletableFuture.class.isAssignableFrom(clazz))
+            return emptyList();
+
         List<Field> fields = fieldMap.get(clazz);
         if (fields != null)
             return fields;
