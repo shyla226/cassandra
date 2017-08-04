@@ -20,6 +20,7 @@ package org.apache.cassandra.locator;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.concurrent.CompletableFuture;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -62,22 +63,23 @@ public class ReconnectableSnitchHelper implements IEndpointStateChangeSubscriber
     }
 
     @VisibleForTesting
-    static void reconnect(InetAddress publicAddress, InetAddress localAddress, IEndpointSnitch snitch, String localDc)
+    static CompletableFuture<Void> reconnect(InetAddress publicAddress, InetAddress localAddress, IEndpointSnitch snitch, String localDc)
     {
-        OutboundTcpConnectionPool cp = MessagingService.instance().getConnectionPool(publicAddress);
-        //InternodeAuthenticator said don't connect
-        if (cp == null)
-        {
-            logger.debug("InternodeAuthenticator said don't reconnect to {} on {}", publicAddress, localAddress);
-            return;
-        }
+        return MessagingService.instance().getConnectionPool(publicAddress).thenAccept(cp -> {
+            //InternodeAuthenticator said don't connect
+            if (cp == null)
+            {
+                logger.debug("InternodeAuthenticator said don't reconnect to {} on {}", publicAddress, localAddress);
+                return;
+            }
 
-        if (snitch.getDatacenter(publicAddress).equals(localDc)
+            if (snitch.getDatacenter(publicAddress).equals(localDc)
                 && !cp.endPoint().equals(localAddress))
-        {
-            cp.reset(localAddress);
-            logger.debug("Initiated reconnect to an Internal IP {} for the {}", localAddress, publicAddress);
-        }
+            {
+                cp.reset(localAddress);
+                logger.debug("Initiated reconnect to an Internal IP {} for the {}", localAddress, publicAddress);
+            }
+        });
     }
 
     public void beforeChange(InetAddress endpoint, EndpointState currentState, ApplicationState newStateKey, VersionedValue newValue)
