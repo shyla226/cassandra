@@ -296,22 +296,22 @@ public class NodeSyncTestTools
             this.table = table;
         }
 
-        public RecordsBuilder add(int left, int right, ValidationInfo lastValidation)
+        public RecordsBuilder add(long left, long right, ValidationInfo lastValidation)
         {
             return add(record(seg(table, left, right), lastValidation));
         }
 
-        public RecordsBuilder add(int left, int right, InetAddress lockedBy)
+        public RecordsBuilder add(long left, long right, InetAddress lockedBy)
         {
             return add(record(seg(table, left, right), lockedBy));
         }
 
-        public RecordsBuilder add(int left, int right, ValidationInfo lastValidation, ValidationInfo lastSuccessfulValidation)
+        public RecordsBuilder add(long left, long right, ValidationInfo lastValidation, ValidationInfo lastSuccessfulValidation)
         {
             return add(record(seg(table, left, right), lastValidation, lastSuccessfulValidation));
         }
 
-        public RecordsBuilder add(int left, int right, ValidationInfo lastValidation, ValidationInfo lastSuccessfulValidation, InetAddress lockedBy)
+        public RecordsBuilder add(long left, long right, ValidationInfo lastValidation, ValidationInfo lastSuccessfulValidation, InetAddress lockedBy)
         {
             return add(record(seg(table, left, right), lastValidation, lastSuccessfulValidation, lockedBy));
         }

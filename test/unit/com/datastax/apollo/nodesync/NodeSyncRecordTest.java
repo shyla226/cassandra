@@ -47,22 +47,36 @@ public class NodeSyncRecordTest
     @Test
     public void testNullValidationDueToHoleAtTheBeginning() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(10, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK).asList();
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(10, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
         assertNull(NodeSyncRecord.consolidateValidations(SEGMENT.range, records, records.size(), r -> r.lastSuccessfulValidation));
     }
 
     @Test
     public void testNullValidationDueToHoleAtTheEnd() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(0, 90, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK).asList();
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, 90, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
         assertNull(NodeSyncRecord.consolidateValidations(SEGMENT.range, records, records.size(), r -> r.lastSuccessfulValidation));
     }
 
     @Test
     public void testNullValidationDueToHoleInTheMiddle() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(60, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
+        assertNull(NodeSyncRecord.consolidateValidations(SEGMENT.range, records, records.size(), r -> r.lastSuccessfulValidation));
+    }
+    
+    @Test
+    public void testNullValidationWithMinLeftToken() throws Exception
+    {
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(Long.MIN_VALUE, 10, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNull(NodeSyncRecord.consolidateValidations(SEGMENT.range, records, records.size(), r -> r.lastSuccessfulValidation));
     }
@@ -70,7 +84,8 @@ public class NodeSyncRecordTest
     @Test
     public void testValidationWithExactRanges() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(50, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNotNull(NodeSyncRecord.consolidateValidations(SEGMENT.range, records, records.size(), r -> r.lastSuccessfulValidation));
@@ -79,7 +94,8 @@ public class NodeSyncRecordTest
     @Test
     public void testValidationWithContainedRanges() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(0, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(50, 60, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNotNull(NodeSyncRecord.consolidateValidations(SEGMENT.range, records, records.size(), r -> r.lastSuccessfulValidation));
@@ -88,7 +104,8 @@ public class NodeSyncRecordTest
     @Test
     public void testValidationWithOverflowingRanges() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(-10, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(-10, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(50, 110, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNotNull(NodeSyncRecord.consolidateValidations(SEGMENT.range, records, records.size(), r -> r.lastSuccessfulValidation));
@@ -101,6 +118,15 @@ public class NodeSyncRecordTest
             .add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(40, 90, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(80, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
+        assertNotNull(NodeSyncRecord.consolidateValidations(SEGMENT.range, records, records.size(), r -> r.lastSuccessfulValidation));
+    }
+    
+    @Test
+    public void testValidationWithMinRightToken() throws Exception
+    {
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, Long.MIN_VALUE, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNotNull(NodeSyncRecord.consolidateValidations(SEGMENT.range, records, records.size(), r -> r.lastSuccessfulValidation));
     }
@@ -128,21 +154,26 @@ public class NodeSyncRecordTest
     @Test
     public void testNullLockDueToHoleAtTheBeginning() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(10, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK).asList();
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(10, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
         assertNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
     }
 
     @Test
     public void testNullLockDueToHoleAtTheEnd() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(0, 90, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK).asList();
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, 90, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
         assertNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
     }
 
     @Test
     public void testNullLockDueToHoleInTheMiddle() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(60, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
@@ -151,7 +182,19 @@ public class NodeSyncRecordTest
     @Test
     public void testNullLockDueToUnlockedInitialRange() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(0, 50, DUMMY_INFO, DUMMY_INFO, null)
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, 50, DUMMY_INFO, DUMMY_INFO, null)
+            .add(60, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
+        assertNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
+    }
+    
+    @Test
+    public void testNullLockDueToUnlockedMiddleRange() throws Exception
+    {
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .add(50, 60, DUMMY_INFO, DUMMY_INFO, null)
             .add(60, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
@@ -160,8 +203,18 @@ public class NodeSyncRecordTest
     @Test
     public void testNullLockDueToUnlockedFinalRange() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(60, 100, DUMMY_INFO, DUMMY_INFO, null)
+            .asList();
+        assertNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
+    }
+    
+    @Test
+    public void testNullLockWithMinLeftToken() throws Exception
+    {
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(Long.MIN_VALUE, 10, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
     }
@@ -169,7 +222,8 @@ public class NodeSyncRecordTest
     @Test
     public void testLockWithExactRanges() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(50, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNotNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
@@ -178,7 +232,8 @@ public class NodeSyncRecordTest
     @Test
     public void testLockWithContainedRanges() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(0, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(50, 60, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNotNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
@@ -187,7 +242,8 @@ public class NodeSyncRecordTest
     @Test
     public void testLockWithOverflowingRanges() throws Exception
     {
-        List<NodeSyncRecord> records = records(TABLE).add(-10, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(-10, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(50, 110, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNotNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
@@ -200,6 +256,15 @@ public class NodeSyncRecordTest
             .add(0, 50, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(40, 90, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .add(80, 100, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
+        assertNotNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
+    }
+    
+    @Test
+    public void testLockWithMinRightToken() throws Exception
+    {
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(0, Long.MIN_VALUE, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
             .asList();
         assertNotNull(NodeSyncRecord.consolidateLockedBy(SEGMENT.range, records));
     }
@@ -341,5 +406,59 @@ public class NodeSyncRecordTest
                                       .add(10, 60, fullInSync(1))
                                       .add(60, 100, inet(127, 0, 0, 3));
         assertEquals(null, NodeSyncRecord.consolidate(SEGMENT, toConsolidate.asList()));
+    }
+    
+    /**
+     * This test runs consolidation on the following simulated range movements:
+     * <ol>
+     * <li>Given ranges (Long.MIN_VALUE, -10] and (-10, Long.MIN_VALUE], add range (-10, 10].</li>
+     * <li>Given ranges (Long.MIN_VALUE, -10], (-10, 10] and (10, Long.MIN_VALUE], remove range (-10, 10].</li>
+     * <li>Given ranges (Long.MIN_VALUE, -10], (-10, Long.MIN_VALUE], add back range (-10, 10].</li>
+     * </ol>
+     * The test assumes pre-existing recorded ranges, and assumes a nodesync run at each step, causing the
+     * recording of the given ranges.
+     */
+    @Test
+    public void simulateRangeMovements() throws Exception
+    {
+        // 1
+        List<NodeSyncRecord> records = records(TABLE)
+            .add(Long.MIN_VALUE, -10, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
+        assertNotNull(NodeSyncRecord.consolidate(seg(TABLE, Long.MIN_VALUE, -10), records));
+        
+        records = records(TABLE)
+            .add(-10, Long.MIN_VALUE, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
+        assertNotNull(NodeSyncRecord.consolidate(seg(TABLE, -10, 10), records));
+
+        // 2
+        records = records(TABLE)
+            .add(Long.MIN_VALUE, -10, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
+        assertNotNull(NodeSyncRecord.consolidate(seg(TABLE, Long.MIN_VALUE, -10), records));
+        
+        records = records(TABLE)
+            .add(-10, 10, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .add(-10, Long.MIN_VALUE, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .add(10, Long.MIN_VALUE, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
+        assertNotNull(NodeSyncRecord.consolidate(seg(TABLE, -10, Long.MIN_VALUE), records));
+
+        // 3
+        records = records(TABLE)
+            .add(Long.MIN_VALUE, -10, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
+        assertNotNull(NodeSyncRecord.consolidate(seg(TABLE, Long.MIN_VALUE, -10), records));
+        
+        records = records(TABLE)
+            .add(-10, 10, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
+        assertNotNull(NodeSyncRecord.consolidate(seg(TABLE, -10, 10), records));
+        
+        records = records(TABLE)
+            .add(10, Long.MIN_VALUE, DUMMY_INFO, DUMMY_INFO, DUMMY_LOCK)
+            .asList();
+        assertNotNull(NodeSyncRecord.consolidate(seg(TABLE, 10, Long.MIN_VALUE), records));
     }
 }
