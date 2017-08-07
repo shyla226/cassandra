@@ -311,15 +311,11 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 break;
         }
 
-        // FIXME: Should really be a single announce for the table and views.
-        List<Completable> migrations = new ArrayList<>();
-        migrations.add(MigrationManager.announceTableUpdate(builder.build(), isLocalOnly));
-        for (ViewMetadata viewUpdate : viewUpdates)
-            migrations.add(MigrationManager.announceViewUpdate(viewUpdate, isLocalOnly));
-
-
-        return Completable.merge(migrations)
-                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())));
+        return MigrationManager.announceTableUpdate(builder.build(), viewUpdates, isLocalOnly)
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED,
+                                                                          Event.SchemaChange.Target.TABLE,
+                                                                          keyspace(),
+                                                                          columnFamily())));
     }
 
     @Override
