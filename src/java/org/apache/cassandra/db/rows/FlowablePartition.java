@@ -31,31 +31,211 @@ import org.apache.cassandra.utils.flow.Flow;
  * Note that as for FlowableUnfilteredPartition, the rows returned must be in clustering order (or
  * reverse clustering order if isReverseOrder is true).
  */
-public class FlowablePartition extends FlowablePartitionBase<Row>
+public interface FlowablePartition extends FlowablePartitionBase<Row>
 {
-
-    public FlowablePartition(PartitionHeader header, Row staticRow, Flow<Row> content)
+    public static FlowablePartition create(PartitionHeader header, Row staticRow, Flow<Row> content)
     {
-        super(header, staticRow, content);
+        return new Instance(header, staticRow, content);
     }
 
-    @Override
-    public FlowablePartition withHeader(PartitionHeader header, Row staticRow)
+    class Instance implements FlowablePartition
     {
-        return new FlowablePartition(header, staticRow, content);
+        private final PartitionHeader header;
+        private final Row staticRow;
+        private final Flow<Row> content;
+
+        private Instance(PartitionHeader header, Row staticRow, Flow<Row> content)
+        {
+            this.header = header;
+            this.staticRow = staticRow;
+            this.content = content;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+
+        public Flow<Row> content()
+        {
+            return content;
+        }
     }
 
-    @Override
-    public FlowablePartition withContent(Flow<Row> content)
+    default FlowablePartition withHeader(PartitionHeader header, Row staticRow)
     {
-        return new FlowablePartition(header,
-                                     staticRow,
-                                     content);
+        return create(header, staticRow, content());
     }
 
-    @Override
-    public FlowablePartition mapContent(Function<Row, Row> mappingOp)
+    default FlowablePartition withContent(Flow<Row> content)
     {
-        return withContent(content.map(mappingOp));
+        return create(header(),
+                      staticRow(),
+                      content);
+    }
+
+    abstract class FlowTransformNext extends org.apache.cassandra.utils.flow.FlowTransformNext<Row, Row>
+    implements FlowablePartition
+    {
+        private final PartitionHeader header;
+        private final Row staticRow;
+
+        protected FlowTransformNext(Flow<Row> sourceContent, Row staticRow, PartitionHeader header)
+        {
+            super(sourceContent);
+            this.header = header;
+            this.staticRow = staticRow;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Flow<Row> content()
+        {
+            return this;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+
+        // onNext and onFinal to be implemented by op
+    }
+
+    abstract class FlowTransform extends org.apache.cassandra.utils.flow.FlowTransform<Row, Row>
+    implements FlowablePartition
+    {
+        private final PartitionHeader header;
+        private final Row staticRow;
+
+        protected FlowTransform(Flow<Row> sourceContent, Row staticRow, PartitionHeader header)
+        {
+            super(sourceContent);
+            this.header = header;
+            this.staticRow = staticRow;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Flow<Row> content()
+        {
+            return this;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+
+        // onNext, onFinal and requestNext() to be implemented by op
+    }
+
+    abstract class FlowSource extends org.apache.cassandra.utils.flow.FlowSource<Row>
+    implements FlowablePartition
+    {
+        private final PartitionHeader header;
+        private final Row staticRow;
+
+        protected FlowSource(PartitionHeader header, Row staticRow)
+        {
+            this.header = header;
+            this.staticRow = staticRow;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Flow<Row> content()
+        {
+            return this;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+
+        // requestNext() to be implemented by op
+    }
+
+    class Map extends org.apache.cassandra.utils.flow.Flow.Map<Row, Row>
+    implements FlowablePartition
+    {
+        private final PartitionHeader header;
+        private final Row staticRow;
+
+        protected Map(Flow<Row> sourceContent, Row staticRow, PartitionHeader header, Function<Row, Row> mapper)
+        {
+            super(sourceContent, mapper);
+            this.header = header;
+            this.staticRow = staticRow;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Flow<Row> content()
+        {
+            return this;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+    }
+
+    default FlowablePartition mapContent(Function<Row, Row> mapper)
+    {
+        return new Map(content(), staticRow(), header(), mapper);
+    }
+
+    class SkippingMap extends org.apache.cassandra.utils.flow.Flow.SkippingMap<Row, Row>
+    implements FlowablePartition
+    {
+        private final PartitionHeader header;
+        private final Row staticRow;
+
+        protected SkippingMap(Flow<Row> sourceContent, Row staticRow, PartitionHeader header, Function<Row, Row> mapper)
+        {
+            super(sourceContent, mapper);
+            this.header = header;
+            this.staticRow = staticRow;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Flow<Row> content()
+        {
+            return this;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+    }
+
+    default FlowablePartition skippingMapContent(Function<Row, Row> mapper, Row staticRow)
+    {
+        return new SkippingMap(content(), staticRow, header(), mapper);
     }
 }

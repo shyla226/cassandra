@@ -438,12 +438,12 @@ public class Util
 
     public static Flow<DecoratedKey> nonEmptyKeys(FlowablePartitionBase partition) throws Exception
     {
-        if (!partition.staticRow.isEmpty() || !partition.header.partitionLevelDeletion.isLive())
+        if (!partition.staticRow().isEmpty() || !partition.partitionLevelDeletion().isLive())
         {
             partition.unused();
-            return Flow.just(partition.header.partitionKey);
+            return Flow.just(partition.partitionKey());
         }
-        return partition.content.take(1).map(x -> partition.header.partitionKey);
+        return partition.content().take(1).map(x -> partition.partitionKey());
     }
 
     public static long size(Flow<FlowableUnfilteredPartition> partitions, int nowInSec)

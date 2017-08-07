@@ -36,6 +36,10 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscription;
+import org.apache.cassandra.utils.flow.FlowSubscriptionRecipient;
+import org.apache.cassandra.utils.flow.FlowTransform;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -226,6 +230,13 @@ public abstract class DataLimits
         public abstract void endOfPartition();
         public abstract void endOfIteration();
 
+        Unfiltered newUnfiltered(Unfiltered unfiltered)     // shorthand, applies newRow to rows and leaves markers unchanged
+        {
+            return unfiltered instanceof Row
+                   ? newRow((Row) unfiltered)
+                   : unfiltered;
+        }
+
         /**
          * The number of results counted.
          * <p>
@@ -300,26 +311,15 @@ public abstract class DataLimits
      */
     public static Flow<Unfiltered> countUnfilteredRows(Flow<Unfiltered> rows, Counter counter)
     {
-        return rows
-            .map(unfiltered ->
-            {
-                if (unfiltered instanceof Row)
-                    counter.newRow((Row) unfiltered);
-
-                return unfiltered;
-            });
+        return rows.map(counter::newUnfiltered);
     }
 
     private static FlowableUnfilteredPartition countUnfilteredPartition(FlowableUnfilteredPartition partition, Counter counter)
     {
-        counter.newPartition(partition.partitionKey(), partition.staticRow);
+        counter.newPartition(partition.partitionKey(), partition.staticRow());
 
-        Flow<Unfiltered> content = countUnfilteredRows(partition.content, counter);
-
-        counter.newStaticRow(partition.staticRow);
-        return new FlowableUnfilteredPartition(partition.header,
-                                               partition.staticRow,
-                                               content);
+        counter.newStaticRow(partition.staticRow());
+        return partition.mapContent(counter::newUnfiltered);
     }
 
     /**
@@ -340,9 +340,64 @@ public abstract class DataLimits
 
     public static Flow<FlowableUnfilteredPartition> truncateUnfiltered(Flow<FlowableUnfilteredPartition> partitions, Counter counter)
     {
-        return partitions.takeUntilAndDoOnClose(counter::isDone,
-                                                counter::endOfIteration)
-                         .map(partition -> truncateUnfiltered(counter, partition));
+        class Truncate extends FlowTransform<FlowableUnfilteredPartition, FlowableUnfilteredPartition>
+        {
+            Truncate()
+            {
+                super(partitions);
+            }
+
+            public void requestFirst(FlowSubscriber<FlowableUnfilteredPartition> subscriber,
+                                     FlowSubscriptionRecipient subscriptionRecipient)
+            {
+                subscribe(subscriber, subscriptionRecipient);
+
+                if (counter.isDone())
+                {
+                    source = FlowSubscription.DONE;
+                    subscriber.onComplete();
+                }
+                else
+                    sourceFlow.requestFirst(this, this);
+            }
+
+            public void onNext(FlowableUnfilteredPartition item)
+            {
+                item = truncateUnfiltered(counter, item);
+                if (counter.isDone())
+                    subscriber.onFinal(item);
+                else
+                    subscriber.onNext(item);
+            }
+
+            public void onFinal(FlowableUnfilteredPartition item)
+            {
+                item = truncateUnfiltered(counter, item);
+                subscriber.onFinal(item);
+            }
+
+            public void requestNext()
+            {
+                // Although we check counter.isDone after each onNext, we still need to recheck at request because
+                // the counter may have changed after processing the rows within the partition.
+                if (counter.isDone())
+                    subscriber.onComplete();
+                else
+                    source.requestNext();
+            }
+
+            public void close() throws Exception
+            {
+                counter.endOfIteration();
+                super.close();
+            }
+        }
+
+        return new Truncate();
+        // Truncate above is equivalent to the following sequence of ops:
+        // return partitions.map(partition -> truncateUnfiltered(counter, partition))
+        //                  .takeUntil(counter::isDone)
+        //                  .doOnClose(counter::endOfIteration);
     }
 
     public FlowableUnfilteredPartition truncateUnfiltered(FlowableUnfilteredPartition partition, int nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
@@ -353,18 +408,95 @@ public abstract class DataLimits
 
     public static FlowableUnfilteredPartition truncateUnfiltered(Counter counter, FlowableUnfilteredPartition partition)
     {
-        counter.newPartition(partition.partitionKey(), partition.staticRow);
+        counter.newPartition(partition.partitionKey(), partition.staticRow());
 
-        Flow<Unfiltered> content = partition.content
-                                              .takeUntilAndDoOnClose(counter::isDoneForPartition,
-                                                                     counter::endOfPartition)
-                                              .skippingMap(unfiltered ->
-                                                       unfiltered instanceof Row
-                                                               ? counter.newRow((Row) unfiltered)
-                                                               : unfiltered);
-        return new FlowableUnfilteredPartition(partition.header,
-                                               counter.newStaticRow(partition.staticRow),
-                                               content);
+        class Truncate extends FlowableUnfilteredPartition.FlowTransform
+        {
+            Truncate()
+            {
+                super(partition.content(),
+                      counter.newStaticRow(partition.staticRow()),
+                      partition.header());
+            }
+
+            public void requestFirst(FlowSubscriber<Unfiltered> subscriber,
+                                     FlowSubscriptionRecipient subscriptionRecipient)
+            {
+                subscribe(subscriber, subscriptionRecipient);
+
+                if (counter.isDoneForPartition())
+                    subscriber.onComplete();
+                else
+                    sourceFlow.requestFirst(this, this);
+            }
+
+            public void onNext(Unfiltered item)
+            {
+                try
+                {
+                    item = counter.newUnfiltered(item);
+                }
+                catch (Throwable t)
+                {
+                    // newRow can throw, especially on group counters
+                    subscriber.onError(t);
+                    return;
+                }
+
+                if (counter.isDoneForPartition())
+                {
+                    if (item != null)
+                        subscriber.onFinal(item);
+                    else
+                        subscriber.onComplete();
+                }
+                else
+                {
+                    assert item != null;
+                    subscriber.onNext(item);
+                }
+            }
+
+            public void onFinal(Unfiltered item)
+            {
+                try
+                {
+                    item = counter.newUnfiltered(item);
+                }
+                catch (Throwable t)
+                {
+                    // newRow can throw, especially on group counters
+                    subscriber.onError(t);
+                    return;
+                }
+
+                if (item != null)
+                    subscriber.onFinal(item);
+                else
+                    subscriber.onComplete();
+            }
+
+            // Unlike above, we don't need to check again on requestNext(), because the counter can only change in
+            // response to receiving new rows.
+
+            public void close() throws Exception
+            {
+                counter.endOfPartition();
+                if (source != null)
+                    source.close();
+                else
+                    partition.unused();
+            }
+        }
+
+        return new Truncate();
+        // Truncate above is equivalent to the following sequence of ops:
+        // return FlowableUnfilteredPartition.create(partition.header(),
+        //                                           counter.newStaticRow(partition.staticRow()),
+        //                                           partition.content()
+        //                                                    .skippingMap(counter::newUnfiltered)
+        //                                                    .takeUntil(counter::isDoneForPartition)
+        //                                                    .doOnClose(counter::endOfPartition));
     }
 
     /**
@@ -385,9 +517,64 @@ public abstract class DataLimits
 
     public static Flow<FlowablePartition> truncateFiltered(Flow<FlowablePartition> partitions, Counter counter)
     {
-        return partitions.takeUntilAndDoOnClose(counter::isDone,
-                                                counter::endOfIteration)
-                         .map(partition -> truncateFiltered(counter, partition));
+        class Truncate extends FlowTransform<FlowablePartition, FlowablePartition>
+        {
+            Truncate()
+            {
+                super(partitions);
+            }
+
+            public void requestFirst(FlowSubscriber<FlowablePartition> subscriber,
+                                     FlowSubscriptionRecipient subscriptionRecipient)
+            {
+                subscribe(subscriber, subscriptionRecipient);
+
+                if (counter.isDone())
+                {
+                    source = FlowSubscription.DONE;
+                    subscriber.onComplete();
+                }
+                else
+                    sourceFlow.requestFirst(this, this);
+            }
+
+            public void onNext(FlowablePartition item)
+            {
+                item = truncateFiltered(counter, item);
+                if (counter.isDone())
+                    subscriber.onFinal(item);
+                else
+                    subscriber.onNext(item);
+            }
+
+            public void onFinal(FlowablePartition item)
+            {
+                item = truncateFiltered(counter, item);
+                subscriber.onFinal(item);
+            }
+
+            public void requestNext()
+            {
+                // Although we check counter.isDone after each onNext, we still need to recheck at request because
+                // the counter may have changed after processing the rows within the partition.
+                if (counter.isDone())
+                    subscriber.onComplete();
+                else
+                    source.requestNext();
+            }
+
+            public void close() throws Exception
+            {
+                counter.endOfIteration();
+                super.close();
+            }
+        }
+
+        return new Truncate();
+        // Truncate above is equivalent to the following sequence of ops:
+        // return partitions.map(partition -> truncateFiltered(counter, partition))
+        //                  .takeUntil(counter::isDone)
+        //                  .doOnClose(counter::endOfIteration)));
     }
 
     public FlowablePartition truncateFiltered(FlowablePartition partition, int nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
@@ -398,14 +585,95 @@ public abstract class DataLimits
 
     public static FlowablePartition truncateFiltered(Counter counter, FlowablePartition partition)
     {
-        counter.newPartition(partition.partitionKey(), partition.staticRow);
+        counter.newPartition(partition.partitionKey(), partition.staticRow());
 
-        Flow<Row> content = partition.content.takeUntilAndDoOnClose(counter::isDoneForPartition,
-                                                                    counter::endOfPartition)
-                                             .skippingMap(counter::newRow);
-        return new FlowablePartition(partition.header,
-                                     counter.newStaticRow(partition.staticRow),
-                                     content);
+        class Truncate extends FlowablePartition.FlowTransform
+        {
+            Truncate()
+            {
+                super(partition.content(),
+                      counter.newStaticRow(partition.staticRow()),
+                      partition.header());
+            }
+
+            public void requestFirst(FlowSubscriber<Row> subscriber,
+                                     FlowSubscriptionRecipient subscriptionRecipient)
+            {
+                subscribe(subscriber, subscriptionRecipient);
+
+                if (counter.isDoneForPartition())
+                    subscriber.onComplete();
+                else
+                    sourceFlow.requestFirst(this, this);
+            }
+
+            public void onNext(Row item)
+            {
+                try
+                {
+                    item = counter.newRow(item);
+                }
+                catch (Throwable t)
+                {
+                    // newRow can throw, especially on group counters
+                    subscriber.onError(t);
+                    return;
+                }
+
+                if (counter.isDoneForPartition())
+                {
+                    if (item != null)
+                        subscriber.onFinal(item);
+                    else
+                        subscriber.onComplete();
+                }
+                else
+                {
+                    assert item != null;
+                    subscriber.onNext(item);
+                }
+            }
+
+            public void onFinal(Row item)
+            {
+                try
+                {
+                    item = counter.newRow(item);
+                }
+                catch (Throwable t)
+                {
+                    // newRow can throw, especially on group counters
+                    subscriber.onError(t);
+                    return;
+                }
+
+                if (item != null)
+                    subscriber.onFinal(item);
+                else
+                    subscriber.onComplete();
+            }
+
+            // Unlike above, we don't need to check again on requestNext(), because the counter can only change in
+            // response to receiving new rows.
+
+            public void close() throws Exception
+            {
+                counter.endOfPartition();
+                if (source != null)
+                    source.close();
+                else
+                    partition.unused();
+            }
+        }
+
+        return new Truncate();
+        // Truncate above is equivalent to the following sequence of ops:
+        // return FlowablePartition.create(partition.header(),
+        //                                 counter.newStaticRow(partition.staticRow()),
+        //                                 partition.content()
+        //                                          .skippingMap(counter::newRow)
+        //                                          .takeUntil(counter::isDoneForPartition)
+        //                                          .doOnClose(counter::endOfPartition)));
     }
 
     /**
@@ -505,7 +773,7 @@ public abstract class DataLimits
             FlowableUnfilteredPartition partition = DataLimits.truncateUnfiltered(counter, cachePart);
 
             // Consume the iterator until we've counted enough
-            partition.content.process().blockingSingle(); // will also close cacheIter
+            partition.content().process().blockingSingle(); // will also close cacheIter
             return counter.isDone();
         }
 

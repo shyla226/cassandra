@@ -237,7 +237,7 @@ class Validator
         // Can be null on an exception
         if (flow != null)
             flowFuture = flow.lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
-                             .flatProcess(p -> p.content)
+                             .flatProcess(p -> p.content())
                              .processToFuture()
                              .handleAsync((v, t) -> {
                                  if (t == null)

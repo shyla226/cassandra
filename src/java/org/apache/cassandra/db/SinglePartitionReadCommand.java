@@ -538,11 +538,11 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                                                                       nowInSec(),
                                                                                                       partitionKey())
                                                                                    .deferredQuery(cfs,
-                                                                                                    executionController);
+                                                                                                  executionController);
 
                 return iter.flatMap(partition -> {
 
-                    Flow.Tee<Unfiltered> tee = partition.content.tee();
+                    Flow.Tee<Unfiltered> tee = partition.content().tee();
                     FlowableUnfilteredPartition toCache = partition.withContent(tee.child(0));
                     FlowableUnfilteredPartition toReturn = partition.withContent(tee.child(1));
 
@@ -670,7 +670,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                                    p.stats().minLocalDeletionTime);
 
                               state.mostRecentPartitionTombstone = Math.max(state.mostRecentPartitionTombstone,
-                                                                      p.partitionLevelDeletion().markedForDeleteAt());
+                                                                            p.partitionLevelDeletion().markedForDeleteAt());
 
                               return clusteringIndexFilter().getFlowableUnfilteredPartition(columnFilter(), p);
                           }));
@@ -728,7 +728,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                           .map(fup ->
                           {
                               state.mostRecentPartitionTombstone = Math.max(state.mostRecentPartitionTombstone,
-                                                                      fup.header.partitionLevelDeletion.markedForDeleteAt());
+                                                                            fup.header().partitionLevelDeletion.markedForDeleteAt());
                               return fup;
                           }));
 

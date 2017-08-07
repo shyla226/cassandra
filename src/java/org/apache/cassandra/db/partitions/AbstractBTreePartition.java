@@ -172,7 +172,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
     //TODO - we should implement the content flow directly, without the iterator
     public FlowableUnfilteredPartition unfilteredPartition(ColumnFilter selection, Slices slices, boolean reversed)
     {
-        return FlowablePartitions.fromIterator(unfilteredIterator(holder(), selection, slices, reversed), null);
+        return FlowablePartitions.fromIterator(unfilteredIterator(holder(), selection, slices, reversed));
     }
 
     public UnfilteredRowIterator unfilteredIterator()
@@ -284,13 +284,13 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
 
     public static Holder build(FlowableUnfilteredPartition fup, List<Unfiltered> materializedRows)
     {
-        TableMetadata metadata = fup.header.metadata;
-        RegularAndStaticColumns columns = fup.header.columns;
-        boolean reversed = fup.header.isReverseOrder;
+        TableMetadata metadata = fup.metadata();
+        RegularAndStaticColumns columns = fup.columns();
+        boolean reversed = fup.isReverseOrder();
 
         BTree.Builder<Row> builder = BTree.builder(metadata.comparator, materializedRows.size());
         builder.auto(false);
-        MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(fup.header.partitionLevelDeletion, metadata.comparator, reversed);
+        MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(fup.partitionLevelDeletion(), metadata.comparator, reversed);
 
         for (Unfiltered unfiltered : materializedRows)
         {
@@ -303,7 +303,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         if (reversed)
             builder.reverse();
 
-        return new Holder(columns, builder.build(), deletionBuilder.build(), fup.staticRow, fup.header.stats);
+        return new Holder(columns, builder.build(), deletionBuilder.build(), fup.staticRow(), fup.stats());
     }
 
     protected static Holder build(UnfilteredRowIterator iterator, int initialRowCapacity, boolean ordered)
@@ -333,34 +333,34 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
 
     protected static Flow<Holder> build(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
     {
-        PartitionHeader header = partition.header;
+        PartitionHeader header = partition.header();
         ClusteringComparator comparator = header.metadata.comparator;
-        Row staticRow = partition.staticRow;
+        Row staticRow = partition.staticRow();
 
         MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(header.partitionLevelDeletion, comparator, header.isReverseOrder);
         BTree.Builder builder = BTree.builder(comparator, initialRowCapacity).auto(!ordered);
 
         // Note that multiple subscribers would share the builder, i.e. Holder should not be reused.
-        return partition.content
-               .process(unfiltered ->
-                       {
-                           if (unfiltered.kind() == Unfiltered.Kind.ROW)
-                               builder.add(unfiltered);
-                           else
-                               deletionBuilder.add((RangeTombstoneMarker)unfiltered);
-                       })
-               .skippingMap(VOID ->
-                    {
-                        DeletionInfo deletion = deletionBuilder.build();
-                        // At this point we can easily check if the partition is empty and skip such partitions.
-                        if (builder.isEmpty() && deletion.isLive() && staticRow.isEmpty())
-                            return null;
+        return partition.content()
+                        .process(unfiltered ->
+                        {
+                            if (unfiltered.kind() == Unfiltered.Kind.ROW)
+                                builder.add(unfiltered);
+                            else
+                                deletionBuilder.add((RangeTombstoneMarker)unfiltered);
+                        })
+                        .skippingMap(VOID ->
+                        {
+                            DeletionInfo deletion = deletionBuilder.build();
+                            // At this point we can easily check if the partition is empty and skip such partitions.
+                            if (builder.isEmpty() && deletion.isLive() && staticRow.isEmpty())
+                                return null;
 
-                        if (header.isReverseOrder)
-                            builder.reverse();
+                            if (header.isReverseOrder)
+                                builder.reverse();
 
-                        return new Holder(header.columns, builder.build(), deletion, staticRow, header.stats);
-                    });
+                            return new Holder(header.columns, builder.build(), deletion, staticRow, header.stats);
+                        });
     }
 
     // Note that when building with a RowIterator, deletion will generally be LIVE, but we allow to pass it nonetheless because PartitionUpdate
@@ -392,20 +392,20 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         RegularAndStaticColumns columns = partition.columns();
         boolean reversed = partition.isReverseOrder();
 
-        return partition.content
-               .reduce(BTree.builder(metadata.comparator, initialRowCapacity).auto(false),
-                       BTree.Builder::add)
-               .map(builder ->
-                    {
-                        if (reversed)
-                            builder.reverse();
+        return partition.content()
+                        .reduce(BTree.builder(metadata.comparator, initialRowCapacity).auto(false),
+                                BTree.Builder::add)
+                        .map(builder ->
+                        {
+                            if (reversed)
+                                builder.reverse();
 
-                        Row staticRow = partition.staticRow();
-                        Object[] tree = builder.build();
-                        EncodingStats stats = buildEncodingStats ? EncodingStats.Collector.collect(staticRow, BTree.iterator(tree), deletion)
-                                                                 : EncodingStats.NO_STATS;
-                        return new Holder(columns, tree, deletion, staticRow, stats);
-                    });
+                            Row staticRow = partition.staticRow();
+                            Object[] tree = builder.build();
+                            EncodingStats stats = buildEncodingStats ? EncodingStats.Collector.collect(staticRow, BTree.iterator(tree), deletion)
+                                                                     : EncodingStats.NO_STATS;
+                            return new Holder(columns, tree, deletion, staticRow, stats);
+                        });
     }
 
     @Override

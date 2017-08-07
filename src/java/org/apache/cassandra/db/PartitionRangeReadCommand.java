@@ -332,7 +332,7 @@ public class PartitionRangeReadCommand extends ReadCommand
                                      .map(partition ->
                                           {
                                               // Note that we rely on the fact that until we start iterating the partition no really costly operation is done.
-                                              DecoratedKey dk = partition.header.partitionKey;
+                                              DecoratedKey dk = partition.partitionKey();
 
                                               // Check if this partition is in the rowCache and if it is, if  it covers our filter
                                               CachedPartition cached = cfs.getRawCachedPartition(dk);

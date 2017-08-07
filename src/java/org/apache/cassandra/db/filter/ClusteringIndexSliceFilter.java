@@ -104,9 +104,13 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
     public FlowableUnfilteredPartition filterNotIndexed(ColumnFilter columnFilter, FlowableUnfilteredPartition partition)
     {
         final Slices.InOrderTester tester = slices.inOrderTester(reversed);
-        return new FlowableUnfilteredPartition(partition.header,
-                                               filterNotIndexedStaticRow(columnFilter, partition.metadata(), partition.staticRow),
-                                               partition.content.skippingMap(row -> filterNotIndexedRow(columnFilter, partition.metadata(), tester, row)));
+        return partition.skippingMapContent(row -> filterNotIndexedRow(columnFilter,
+                                                                       partition.metadata(),
+                                                                       tester,
+                                                                       row),
+                                            filterNotIndexedStaticRow(columnFilter,
+                                                                      partition.metadata(),
+                                                                      partition.staticRow()));
     }
 
 

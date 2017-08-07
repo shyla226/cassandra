@@ -32,12 +32,17 @@ public abstract class FlowTransformNext<I, O> extends FlowTransformBase<I, O>
         super(source);
     }
 
-    @Override
-    public void requestFirst(FlowSubscriber<O> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+    protected void subscribe(FlowSubscriber<O> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
     {
         assert this.subscriber == null : "Flow are single-use.";
         this.subscriber = subscriber;
         this.subscriptionRecipient = subscriptionRecipient;
+    }
+
+    @Override
+    public void requestFirst(FlowSubscriber<O> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+    {
+        subscribe(subscriber, subscriptionRecipient);
         sourceFlow.requestFirst(this, this);
     }
 

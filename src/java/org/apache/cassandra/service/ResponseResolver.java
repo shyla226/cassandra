@@ -110,8 +110,8 @@ public abstract class ResponseResolver<T>
                                 if (!p.partitionLevelDeletion().isLive())
                                     ctx.readObserver.onPartitionDeletion(p.partitionLevelDeletion(), true);
 
-                                if (!p.staticRow.isEmpty())
-                                    ctx.readObserver.onRow(p.staticRow, true);
+                                if (!p.staticRow().isEmpty())
+                                    ctx.readObserver.onRow(p.staticRow(), true);
 
                                 return p.mapContent(u -> {
                                     if (u.isRow())

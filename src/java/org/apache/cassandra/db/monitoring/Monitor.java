@@ -249,9 +249,7 @@ public class Monitor
                                   try
                                   {
                                       check();
-                                      return new FlowableUnfilteredPartition(partition.header,
-                                                                             partition.staticRow,
-                                                                             partition.content.map(checkForAbort));
+                                      return partition.mapContent(checkForAbort);
                                   }
                                   catch (Throwable t)
                                   {

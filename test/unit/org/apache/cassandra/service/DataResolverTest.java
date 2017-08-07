@@ -1195,7 +1195,7 @@ public class DataResolverTest
 
     private Response<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator, ReadCommand cmd)
     {
-        final Flow<FlowableUnfilteredPartition> partitions = cmd.applyController(controller -> FlowablePartitions.fromPartitions(partitionIterator, null));
+        final Flow<FlowableUnfilteredPartition> partitions = cmd.applyController(controller -> FlowablePartitions.fromPartitions(partitionIterator));
         return Response.testResponse(from,
                                      FBUtilities.getBroadcastAddress(),
                                      Verbs.READS.SINGLE_READ,

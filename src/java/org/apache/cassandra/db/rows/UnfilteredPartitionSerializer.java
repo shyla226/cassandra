@@ -30,9 +30,6 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.flow.Flow;
-import org.apache.cassandra.utils.flow.FlowSource;
-import org.apache.cassandra.utils.flow.FlowSubscriber;
-import org.apache.cassandra.utils.flow.FlowSubscription;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -97,21 +94,21 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
     public Flow<Void> serialize(FlowableUnfilteredPartition partition, ColumnFilter selection, DataOutputPlus out, int rowEstimate) throws IOException
     {
         SerializationHeader header = new SerializationHeader(false,
-                                                             partition.header.metadata,
-                                                             partition.header.columns,
-                                                             partition.header.stats);
+                                                             partition.header().metadata,
+                                                             partition.header().columns,
+                                                             partition.header().stats);
 
         // Note: Emptiness check is not easy with flows. Since we skip over empty stuff anyway, we prefer not to invest
         // the effort to check and we do not perform the serialization optimization for empty partitions.
 
         serializeBeginningOfPartition(partition, header, selection, out, rowEstimate, false);
 
-        return partition.content.process(unfiltered -> serialize(unfiltered, header, out))
-                                .map(VOID ->
-                                     {
-                                         serializeEndOfPartition(out);
-                                         return VOID;
-                                     });
+        return partition.content().process(unfiltered -> serialize(unfiltered, header, out))
+                                  .map(VOID ->
+                                       {
+                                           serializeEndOfPartition(out);
+                                           return VOID;
+                                       });
     }
 
     // Should only be used for the on-wire format.
@@ -290,7 +287,7 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
         };
     }
 
-    private class DeserializePartitionFlow extends FlowSource<Unfiltered>
+    private class DeserializePartitionFlow extends FlowableUnfilteredPartition.FlowSource
     {
         private final Row.Builder builder;
         private final SerializationHelper helper;
@@ -298,8 +295,10 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
         private final DataInputPlus in;
         private volatile boolean completed;
 
-        private DeserializePartitionFlow(DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header)
+        private DeserializePartitionFlow(PartitionHeader ph, Row staticRow,
+                                         DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header)
         {
+            super(ph, staticRow);
             this.builder = BTreeRow.sortedBuilder();
             this.in = in;
             this.helper = new SerializationHelper(metadata, version, flag);
@@ -356,16 +355,14 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
         if (header.isEmpty)
             return FlowablePartitions.empty(metadata, header.key, header.isReversed);
 
-        Flow<Unfiltered> content = new DeserializePartitionFlow(in, metadata, flag, header);
-
-        return new FlowableUnfilteredPartition(new PartitionHeader(metadata,
-                                                                   header.key,
-                                                                   header.partitionDeletion,
-                                                                   header.sHeader.columns(),
-                                                                   header.isReversed,
-                                                                   header.sHeader.stats()),
-                                               header.staticRow,
-                                               content);
+        return new DeserializePartitionFlow(new PartitionHeader(metadata,
+                                                                header.key,
+                                                                header.partitionDeletion,
+                                                                header.sHeader.columns(),
+                                                                header.isReversed,
+                                                                header.sHeader.stats()),
+                                            header.staticRow,
+                                            in, metadata, flag, header);
     }
 
     public FlowableUnfilteredPartition deserializeToFlow(DataInputPlus in, TableMetadata metadata, ColumnFilter selection, SerializationHelper.Flag flag) throws IOException

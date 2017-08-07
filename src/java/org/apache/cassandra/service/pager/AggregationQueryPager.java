@@ -176,9 +176,9 @@ public final class AggregationQueryPager implements QueryPager
         private FlowablePartition applyToPartition(FlowablePartition partition)
         {
             if (logger.isTraceEnabled())
-                logger.trace("{} applyToPartition {}", hashCode(), ByteBufferUtil.bytesToHex(partition.header.partitionKey.getKey()));
+                logger.trace("{} applyToPartition {}", hashCode(), ByteBufferUtil.bytesToHex(partition.header().partitionKey.getKey()));
 
-            lastPartitionKey = partition.header.partitionKey.getKey();
+            lastPartitionKey = partition.partitionKey().getKey();
             lastClustering = null;
             return partition.mapContent(this::applyToRow);
         }

@@ -176,7 +176,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
                 if (partition == null)
                     continue;
 
-                RegularAndStaticColumns cols = partition.header.columns;
+                RegularAndStaticColumns cols = partition.columns();
                 statics = statics.mergeTo(cols.statics);
                 regulars = regulars.mergeTo(cols.regulars);
             }
@@ -191,7 +191,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
                     continue;
 
                 // Everything will be in the same order
-                return partition.header.isReverseOrder;
+                return partition.isReverseOrder();
             }
 
             assert false : "Expected at least one iterator";
@@ -563,7 +563,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
         private FlowableUnfilteredPartition applyPartition(FlowableUnfilteredPartition partition)
         {
             partitionsFetched = true;
-            lastPartitionKey = partition.header.partitionKey;
+            lastPartitionKey = partition.partitionKey();
             return new ShortReadRowsProtection().applyPartition(partition);
         }
 
@@ -653,10 +653,10 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
 
             private FlowableUnfilteredPartition applyPartition(FlowableUnfilteredPartition partition)
             {
-                return partition.withContent(partition.content
-                                             .concatWith(this::moreContents)
-                                             .map(this::applyUnfiltered)
-                                             .doOnClose(singleResultCounter::endOfPartition));
+                return partition.withContent(partition.content()
+                                                      .concatWith(this::moreContents)
+                                                      .map(this::applyUnfiltered)
+                                                      .doOnClose(singleResultCounter::endOfPartition));
             }
 
             private Unfiltered applyUnfiltered(Unfiltered unfiltered)
@@ -763,7 +763,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
 
                 SinglePartitionReadCommand cmd = makeFetchAdditionalRowsReadCommand(lastQueried);
                 Flow<FlowableUnfilteredPartition> rows = executeReadCommand(cmd);
-                return DataLimits.countUnfilteredRows(rows.flatMap(fup -> fup.content), singleResultCounter);
+                return DataLimits.countUnfilteredRows(rows.flatMap(fup -> fup.content()), singleResultCounter);
             }
 
             private SinglePartitionReadCommand makeFetchAdditionalRowsReadCommand(int toQuery)

@@ -26,7 +26,7 @@ import com.google.common.base.Throwables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Scheduler;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.Clusterable;
 import org.apache.cassandra.db.Columns;
@@ -40,6 +40,8 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscriptionRecipient;
 import org.apache.cassandra.utils.flow.Threads;
 
 /**
@@ -116,7 +118,7 @@ public class FlowablePartitions
     {
         try
         {
-            CloseableIterator<Unfiltered> iterator = Flow.toIterator(partition.content);
+            CloseableIterator<Unfiltered> iterator = Flow.toIterator(partition.content());
 
             class URI extends BaseRowIterator<Unfiltered> implements UnfilteredRowIterator
             {
@@ -139,7 +141,7 @@ public class FlowablePartitions
     {
         try
         {
-            CloseableIterator<Row> iterator = Flow.toIterator(partition.content);
+            CloseableIterator<Row> iterator = Flow.toIterator(partition.content());
 
             class RI extends BaseRowIterator<Row> implements RowIterator
             {
@@ -157,34 +159,125 @@ public class FlowablePartitions
         }
     }
 
-    public static FlowableUnfilteredPartition fromIterator(UnfilteredRowIterator iter, Scheduler callOn)
+    public static FlowableUnfilteredPartition fromIterator(UnfilteredRowIterator iter)
     {
-        Flow<Unfiltered> data = Flow.fromIterable(() -> iter);
-        if (callOn != null)
-            data = data.lift(Threads.requestOn(callOn, TPCTaskType.READ_FROM_ITERATOR));
-        Row staticRow = iter.staticRow();
-        return new FlowableUnfilteredPartition(new PartitionHeader(iter.metadata(), iter.partitionKey(), iter.partitionLevelDeletion(), iter.columns(), iter.isReverseOrder(), iter.stats()),
-                                               staticRow,
-                                               data);
+        return new FromUnfilteredRowIterator(iter);
     }
 
-    public static FlowablePartition fromIterator(RowIterator iter, Scheduler callOn)
+    private static class FromUnfilteredRowIterator extends FlowableUnfilteredPartition.FlowSource
     {
-        Flow<Row> data = Flow.fromIterable(() -> iter);
-        if (callOn != null)
-            data = data.lift(Threads.requestOn(callOn, TPCTaskType.READ_FROM_ITERATOR));
+        private final UnfilteredRowIterator iter;
 
-        Row staticRow = iter.staticRow();
-        return new FlowablePartition(new PartitionHeader(iter.metadata(), iter.partitionKey(), DeletionTime.LIVE, iter.columns(), iter.isReverseOrder(), EncodingStats.NO_STATS),
-                                     staticRow,
-                                     data);
+        public FromUnfilteredRowIterator(UnfilteredRowIterator iter)
+        {
+            super(new PartitionHeader(iter.metadata(),
+                                      iter.partitionKey(),
+                                      iter.partitionLevelDeletion(),
+                                      iter.columns(),
+                                      iter.isReverseOrder(),
+                                      iter.stats()), iter.staticRow());
+            this.iter = iter;
+        }
+
+        @Override
+        public void requestFirst(FlowSubscriber<Unfiltered> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+        {
+            super.subscribe(subscriber, subscriptionRecipient);
+
+            if (iter.hasNext())
+                requestNext();
+            else
+                subscriber.onComplete();
+        }
+
+        public void requestNext()
+        {
+            // This is only called when we know there is a next element
+            Unfiltered next = iter.next();
+            if (iter.hasNext())
+                subscriber.onNext(next);
+            else
+                subscriber.onFinal(next);
+        }
+
+        public void unused() throws Exception
+        {
+            close();
+        }
+
+        public void close() throws Exception
+        {
+            iter.close();
+        }
+    }
+
+    public static FlowablePartition fromIterator(RowIterator iter, StagedScheduler callOn)
+    {
+        return new FromRowIterator(iter, callOn);
+    }
+
+    private static class FromRowIterator extends FlowablePartition.FlowSource implements Runnable
+    {
+        private final RowIterator iter;
+        private final StagedScheduler callOn;
+
+        public FromRowIterator(RowIterator iter, StagedScheduler callOn)
+        {
+            super(new PartitionHeader(iter.metadata(),
+                                      iter.partitionKey(),
+                                      DeletionTime.LIVE,
+                                      iter.columns(),
+                                      iter.isReverseOrder(),
+                                      EncodingStats.NO_STATS), iter.staticRow());
+            this.iter = iter;
+            this.callOn = callOn;
+        }
+
+        @Override
+        public void requestFirst(FlowSubscriber<Row> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+        {
+            super.subscribe(subscriber, subscriptionRecipient);
+
+            if (iter.hasNext())
+                requestNext();
+            else
+                subscriber.onComplete();
+        }
+
+        public void requestNext()
+        {
+            if (callOn == null || callOn.isOnScheduler(Thread.currentThread()))
+                run();
+            else
+                callOn.scheduleDirect(this, TPCTaskType.READ_FROM_ITERATOR, 0, null);
+        }
+
+        public void run()
+        {
+            // This is only called when we know there is a next element
+            Row next = iter.next();
+            if (iter.hasNext())
+                subscriber.onNext(next);
+            else
+                subscriber.onFinal(next);
+        }
+
+        public void unused() throws Exception
+        {
+            close();
+        }
+
+        public void close() throws Exception
+        {
+            iter.close();
+        }
     }
 
     public static FlowableUnfilteredPartition empty(TableMetadata metadata, DecoratedKey partitionKey, boolean reversed)
     {
-        return new FlowableUnfilteredPartition(PartitionHeader.empty(metadata, partitionKey, reversed),
-                                               Rows.EMPTY_STATIC_ROW,
-                                               Flow.empty());
+        return FlowableUnfilteredPartition.create(PartitionHeader.empty(metadata, partitionKey, reversed),
+                                                  Rows.EMPTY_STATIC_ROW,
+                                                  Flow.empty());
     }
 
     public static FlowableUnfilteredPartition merge(List<FlowableUnfilteredPartition> flowables, int nowInSec, UnfilteredRowIterators.MergeListener listener)
@@ -200,8 +293,8 @@ public class FlowablePartitions
         List<Flow<Unfiltered>> contents = new ArrayList<>(flowables.size());
         for (FlowableUnfilteredPartition flowable : flowables)
         {
-            headers.add(flowable.header);
-            contents.add(flowable.content);
+            headers.add(flowable.header());
+            contents.add(flowable.content());
         }
         PartitionHeader header = PartitionHeader.merge(headers, listener);
         MergeReducer reducer = new MergeReducer(flowables.size(), nowInSec, header, listener);
@@ -223,9 +316,9 @@ public class FlowablePartitions
         if (listener != null)
             content = content.doOnClose(listener::close);
 
-        return new FlowableUnfilteredPartition(header,
-                                               staticRow,
-                                               content);
+        return FlowableUnfilteredPartition.create(header,
+                                                  staticRow,
+                                                  content);
     }
 
     public static Row mergeStaticRows(List<FlowableUnfilteredPartition> sources,
@@ -239,13 +332,13 @@ public class FlowablePartitions
 
         boolean hasStatic = false;
         for (FlowableUnfilteredPartition source : sources)
-            hasStatic |= !source.staticRow.isEmpty();
+            hasStatic |= !source.staticRow().isEmpty();
         if (!hasStatic)
             return Rows.EMPTY_STATIC_ROW;
 
         Row.Merger merger = new Row.Merger(sources.size(), nowInSec, columns.size(), columns.hasComplex());
         for (int i = 0; i < sources.size(); i++)
-            merger.add(i, sources.get(i).staticRow);
+            merger.add(i, sources.get(i).staticRow());
 
         Row merged = merger.merge(header.partitionLevelDeletion);
 
@@ -258,7 +351,8 @@ public class FlowablePartitions
         return merged;
     }
 
-    private static final Comparator<FlowableUnfilteredPartition> flowablePartitionComparator = Comparator.comparing(x -> x.header.partitionKey);
+    private static final Comparator<FlowableUnfilteredPartition> flowablePartitionComparator =
+            Comparator.comparing(x -> x.header().partitionKey);
 
     public static Flow<FlowableUnfilteredPartition> mergePartitions(final List<Flow<FlowableUnfilteredPartition>> sources,
                                                                     final int nowInSec,
@@ -275,7 +369,7 @@ public class FlowablePartitions
 
             public void reduce(int idx, FlowableUnfilteredPartition current)
             {
-                header = current.header;
+                header = current.header();
                 toMerge[idx] = current;
             }
 
@@ -379,16 +473,13 @@ public class FlowablePartitions
         };
     }
 
-    public static Flow<FlowableUnfilteredPartition> fromPartitions(UnfilteredPartitionIterator iter, Scheduler scheduler)
+    public static Flow<FlowableUnfilteredPartition> fromPartitions(UnfilteredPartitionIterator iter)
     {
-        Flow<FlowableUnfilteredPartition> flow = Flow.fromIterable(() -> iter)
-                                                     .map(i -> fromIterator(i, scheduler));
-        if (scheduler != null)
-            flow = flow.lift(Threads.requestOn(scheduler, TPCTaskType.READ_FROM_ITERATOR));
-        return flow;
+        return Flow.fromIterable(() -> iter)
+                   .map(i -> fromIterator(i));
     }
 
-    public static Flow<FlowablePartition> fromPartitions(PartitionIterator iter, Scheduler scheduler)
+    public static Flow<FlowablePartition> fromPartitions(PartitionIterator iter, StagedScheduler scheduler)
     {
         Flow<FlowablePartition> flow = Flow.fromIterable(() -> iter)
                                            .map(i -> fromIterator(i, scheduler));
@@ -476,36 +567,36 @@ public class FlowablePartitions
     public static FlowablePartition filter(FlowableUnfilteredPartition data, int nowInSec)
     {
         boolean enforceStrictLiveness = data.metadata().enforceStrictLiveness();
-        return new FlowablePartition(data.header,
-                                     filterStaticRow(data.staticRow, nowInSec, enforceStrictLiveness),
-                                     filteredContent(data, nowInSec));
+        return FlowablePartition.create(data.header(),
+                                        filterStaticRow(data.staticRow(), nowInSec, enforceStrictLiveness),
+                                        filteredContent(data, nowInSec));
     }
 
     public static Flow<FlowablePartition> filterAndSkipEmpty(FlowableUnfilteredPartition data, int nowInSec)
     {
-        Row staticRow = filterStaticRow(data.staticRow, nowInSec, data.metadata().enforceStrictLiveness());
+        Row staticRow = filterStaticRow(data.staticRow(), nowInSec, data.metadata().enforceStrictLiveness());
         Flow<Row> content = filteredContent(data, nowInSec);
 
         if (!staticRow.isEmpty())
-            return Flow.just(new FlowablePartition(data.header,
-                                                   staticRow,
-                                                   content));
+            return Flow.just(FlowablePartition.create(data.header(),
+                                                      staticRow,
+                                                      content));
         else
-            return content.skipMapEmpty(c -> new FlowablePartition(data.header,
-                                                                   Rows.EMPTY_STATIC_ROW,
-                                                                   c));
+            return content.skipMapEmpty(c -> FlowablePartition.create(data.header(),
+                                                                      Rows.EMPTY_STATIC_ROW,
+                                                                      c));
     }
 
     public static Flow<FlowablePartition> skipEmpty(FlowablePartition data)
     {
-        return data.staticRow.isEmpty()
-               ? data.content.skipMapEmpty(c -> new FlowablePartition(data.header, Rows.EMPTY_STATIC_ROW, c))
-               : Flow.just(new FlowablePartition(data.header, data.staticRow, data.content));
+        return data.staticRow().isEmpty()
+               ? data.content().skipMapEmpty(c -> FlowablePartition.create(data.header(), Rows.EMPTY_STATIC_ROW, c))
+               : Flow.just(data);
     }
 
     private static Flow<Row> filteredContent(FlowableUnfilteredPartition data, int nowInSec)
     {
-        return data.content.skippingMap(unfiltered -> unfiltered.isRow()
+        return data.content().skippingMap(unfiltered -> unfiltered.isRow()
                 ? ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec, data.metadata().enforceStrictLiveness())
                 : null);
     }
@@ -534,7 +625,10 @@ public class FlowablePartitions
     {
         return partitions.flatMap(partition ->
                 partition.staticRow().isEmpty() && partition.partitionLevelDeletion().isLive() ?
-                partition.content.skipMapEmpty(content -> new FlowableUnfilteredPartition(partition.header, partition.staticRow, content)) :
+                partition.content()
+                         .skipMapEmpty(content -> FlowableUnfilteredPartition.create(partition.header(),
+                                                                                     partition.staticRow(),
+                                                                                     content)) :
                 Flow.just(partition));
     }
 
@@ -542,7 +636,7 @@ public class FlowablePartitions
     {
         return partitions.flatMap(FlowablePartitions::skipEmpty);
     }
-    
+
     public static Flow<FlowablePartition> mergeAndFilter(List<Flow<FlowableUnfilteredPartition>> results,
                                                          int nowInSec,
                                                          MergeListener listener)
@@ -552,6 +646,6 @@ public class FlowablePartitions
 
     public static Flow<Row> allRows(Flow<FlowablePartition> data)
     {
-        return data.flatMap(partition -> partition.content);
+        return data.flatMap(partition -> partition.content());
     }
 }

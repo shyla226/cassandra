@@ -54,9 +54,9 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
                                                                    final ReadCommand command,
                                                                    final ReadExecutionController executionController)
     {
-        assert indexHits.staticRow == Rows.EMPTY_STATIC_ROW;
+        assert indexHits.staticRow() == Rows.EMPTY_STATIC_ROW;
 
-        return indexHits.content.flatMap(hit ->
+        return indexHits.content().flatMap(hit ->
         {
             IndexEntry nextEntry = index.decodeEntry(indexKey, hit);
 
@@ -97,14 +97,14 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
         boolean stale = false;
         // if there is a partition level delete in the base table, we need to filter
         // any index entries which would be shadowed by it
-        if (!dataIter.header.partitionLevelDeletion.isLive())
+        if (!dataIter.header().partitionLevelDeletion.isLive())
         {
-            DeletionTime deletion = dataIter.header.partitionLevelDeletion;
+            DeletionTime deletion = dataIter.header().partitionLevelDeletion;
             if (deletion.deletes(entry.timestamp))
                 stale = true;
         }
 
-        if (stale || index.isStale(dataIter.staticRow, indexValue, nowInSec))
+        if (stale || index.isStale(dataIter.staticRow(), indexValue, nowInSec))
         {
             index.deleteStaleEntry(entry.indexValue,
                                    entry.indexClustering,

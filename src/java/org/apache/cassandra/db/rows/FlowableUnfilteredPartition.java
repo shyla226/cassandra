@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.rows;
 
 import io.reactivex.functions.Function;
+import io.reactivex.functions.Predicate;
 import org.apache.cassandra.utils.flow.Flow;
 
 /**
@@ -38,30 +39,245 @@ import org.apache.cassandra.utils.flow.Flow;
  *      in reverse order, "end" markers are returned before their "start" counterpart (i.e.
  *      "start" and "end" are always in the sense of the clustering order).
  */
-public class FlowableUnfilteredPartition extends FlowablePartitionBase<Unfiltered>
+public interface FlowableUnfilteredPartition extends FlowablePartitionBase<Unfiltered>
 {
-    public FlowableUnfilteredPartition(PartitionHeader header, Row staticRow, Flow<Unfiltered> content)
+    public static FlowableUnfilteredPartition create(PartitionHeader header, Row staticRow, Flow<Unfiltered> content)
     {
-        super(header, staticRow, content);
+        return new Instance(header, staticRow, content);
     }
 
-    @Override
-    public FlowableUnfilteredPartition withHeader(PartitionHeader header, Row staticRow)
+    public class Instance implements FlowableUnfilteredPartition
     {
-        return new FlowableUnfilteredPartition(header, staticRow, content);
+        private final PartitionHeader header;
+        private final Row staticRow;
+        private final Flow<Unfiltered> content;
+
+        public Instance(PartitionHeader header, Row staticRow, Flow<Unfiltered> content)
+        {
+            this.header = header;
+            this.staticRow = staticRow;
+            this.content = content;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+
+        public Flow<Unfiltered> content()
+        {
+            return content;
+        }
     }
 
-    @Override
-    public FlowableUnfilteredPartition withContent(Flow<Unfiltered> content)
+    default FlowableUnfilteredPartition withHeader(PartitionHeader header, Row staticRow)
     {
-        return new FlowableUnfilteredPartition(header,
-                                               staticRow,
-                                               content);
+        return create(header, staticRow, content());
     }
 
-    @Override
-    public FlowableUnfilteredPartition mapContent(Function<Unfiltered, Unfiltered> mappingOp)
+    default FlowableUnfilteredPartition withContent(Flow<Unfiltered> content)
     {
-        return withContent(content.map(mappingOp));
+        return create(header(),
+                      staticRow(),
+                      content);
+    }
+
+    abstract class FlowTransformNext extends org.apache.cassandra.utils.flow.FlowTransformNext<Unfiltered, Unfiltered>
+    implements FlowableUnfilteredPartition
+    {
+        private final PartitionHeader header;
+        private final Row staticRow;
+
+        protected FlowTransformNext(Flow<Unfiltered> sourceContent, Row staticRow, PartitionHeader header)
+        {
+            super(sourceContent);
+            this.header = header;
+            this.staticRow = staticRow;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Flow<Unfiltered> content()
+        {
+            return this;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+
+        // onNext, onFinal to be implemented by op
+    }
+
+    abstract class FlowTransform extends org.apache.cassandra.utils.flow.FlowTransform<Unfiltered, Unfiltered>
+    implements FlowableUnfilteredPartition
+    {
+        private final PartitionHeader header;
+        private final Row staticRow;
+
+        protected FlowTransform(Flow<Unfiltered> sourceContent, Row staticRow, PartitionHeader header)
+        {
+            super(sourceContent);
+            this.header = header;
+            this.staticRow = staticRow;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Flow<Unfiltered> content()
+        {
+            return this;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+
+        // onNext, onFinal and requestNext to be implemented by op
+    }
+
+    abstract class FlowSource extends org.apache.cassandra.utils.flow.FlowSource<Unfiltered>
+    implements FlowableUnfilteredPartition
+    {
+        private final PartitionHeader header;
+        private final Row staticRow;
+
+        protected FlowSource(PartitionHeader header, Row staticRow)
+        {
+            this.header = header;
+            this.staticRow = staticRow;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Flow<Unfiltered> content()
+        {
+            return this;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+
+        // requestNext() to be implemented by op
+    }
+
+    class Map extends org.apache.cassandra.utils.flow.Flow.Map<Unfiltered, Unfiltered>
+    implements FlowableUnfilteredPartition
+    {
+        private final PartitionHeader header;
+        private final Row staticRow;
+
+        protected Map(Flow<Unfiltered> sourceContent, Row staticRow, PartitionHeader header, Function<Unfiltered, Unfiltered> mapper)
+        {
+            super(sourceContent, mapper);
+            this.header = header;
+            this.staticRow = staticRow;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Flow<Unfiltered> content()
+        {
+            return this;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+    }
+
+    default FlowableUnfilteredPartition mapContent(Function<Unfiltered, Unfiltered> mapper)
+    {
+        return new Map(content(), staticRow(), header(), mapper);
+    }
+
+    class SkippingMap extends org.apache.cassandra.utils.flow.Flow.SkippingMap<Unfiltered, Unfiltered>
+    implements FlowableUnfilteredPartition
+    {
+        private final PartitionHeader header;
+        private final Row staticRow;
+
+        protected SkippingMap(Flow<Unfiltered> sourceContent, Row staticRow, PartitionHeader header, Function<Unfiltered, Unfiltered> mapper)
+        {
+            super(sourceContent, mapper);
+            this.header = header;
+            this.staticRow = staticRow;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Flow<Unfiltered> content()
+        {
+            return this;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+    }
+
+    default FlowableUnfilteredPartition skippingMapContent(Function<Unfiltered, Unfiltered> mapper, Row staticRow)
+    {
+        return new SkippingMap(content(), staticRow, header(), mapper);
+    }
+
+    class Filter extends org.apache.cassandra.utils.flow.Flow.Filter<Unfiltered>
+    implements FlowableUnfilteredPartition
+    {
+        private final PartitionHeader header;
+        private final Row staticRow;
+
+        protected Filter(Flow<Unfiltered> sourceContent, Row staticRow, PartitionHeader header, Predicate<Unfiltered> tester)
+        {
+            super(sourceContent, tester);
+            this.header = header;
+            this.staticRow = staticRow;
+        }
+
+        public PartitionHeader header()
+        {
+            return header;
+        }
+
+        public Flow<Unfiltered> content()
+        {
+            return this;
+        }
+
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+    }
+
+    default FlowableUnfilteredPartition filterContent(Predicate<Unfiltered> tester)
+    {
+        return new Filter(content(), staticRow(), header(), tester);
     }
 }

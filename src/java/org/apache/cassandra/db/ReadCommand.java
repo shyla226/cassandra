@@ -430,12 +430,10 @@ public abstract class ReadCommand implements ReadQuery, Schedulable
 
             public FlowableUnfilteredPartition countPartition(FlowableUnfilteredPartition iter)
             {
-                currentKey = iter.header.partitionKey;
-                countRow(iter.staticRow);
+                currentKey = iter.header().partitionKey;
+                countRow(iter.staticRow());
 
-                return new FlowableUnfilteredPartition(iter.header,
-                                                       iter.staticRow,
-                                                       iter.content.map(this::countUnfiltered));
+                return iter.mapContent(this::countUnfiltered);
             }
 
             public Unfiltered countUnfiltered(Unfiltered unfiltered)
@@ -533,15 +531,19 @@ public abstract class ReadCommand implements ReadQuery, Schedulable
 
         public FlowableUnfilteredPartition purgePartition(FlowableUnfilteredPartition partition)
         {
-            PartitionHeader header = partition.header;
+            PartitionHeader header = partition.header();
+            class Purged extends FlowableUnfilteredPartition.SkippingMap
+            {
+                Purged()
+                {
+                    super(partition.content(),
+                          applyToStatic(partition.staticRow()),
+                          purger.shouldPurge(header.partitionLevelDeletion) ? header.with(DeletionTime.LIVE) : header,
+                          PurgeOp.this::purgeUnfiltered);
+                }
+            }
 
-            if (purger.shouldPurge(header.partitionLevelDeletion))
-                header = header.with(DeletionTime.LIVE);
-
-            FlowableUnfilteredPartition purged = new FlowableUnfilteredPartition(header,
-                                                                                 applyToStatic(partition.staticRow),
-                                                                                 partition.content.skippingMap(this::purgeUnfiltered));
-            return purged;
+            return new Purged();
         }
 
         public Unfiltered purgeUnfiltered(Unfiltered next)

@@ -136,8 +136,8 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
                 if (internalPager.isFirstPartition)
                 {
                     internalPager.isFirstPartition = false;
-                    if (isPreviouslyReturnedPartition(partition.header.partitionKey))
-                        return partition.content.skipMapEmpty(c -> applyToPartition(partition.withContent(c)));
+                    if (isPreviouslyReturnedPartition(partition.partitionKey()))
+                        return partition.content().skipMapEmpty(c -> applyToPartition(partition.withContent(c)));
                 }
 
                 return Flow.just(applyToPartition(partition));
@@ -150,10 +150,10 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             if (logger.isTraceEnabled())
                 logger.trace("{} - applyToPartition {}",
                              AbstractQueryPager.this.hashCode(),
-                             ByteBufferUtil.bytesToHex(partition.header.partitionKey.getKey()));
+                             ByteBufferUtil.bytesToHex(partition.partitionKey().getKey()));
 
-            currentKey = partition.header.partitionKey;
-            applyToStatic(partition.staticRow);
+            currentKey = partition.partitionKey();
+            applyToStatic(partition.staticRow());
 
             return DataLimits.truncateUnfiltered(counter,
                                                  partition.mapContent(unfiltered -> unfiltered instanceof Row
@@ -189,8 +189,8 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
                 if (internalPager.isFirstPartition)
                 {
                     internalPager.isFirstPartition = false;
-                    if (isPreviouslyReturnedPartition(partition.header.partitionKey))
-                        return partition.content.skipMapEmpty(c -> applyToPartition(partition.withContent(c)));
+                    if (isPreviouslyReturnedPartition(partition.partitionKey()))
+                        return partition.content().skipMapEmpty(c -> applyToPartition(partition.withContent(c)));
                 }
 
                 return Flow.just(applyToPartition(partition));
@@ -203,10 +203,10 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             if (logger.isTraceEnabled())
                 logger.trace("{} - applyToPartition {}",
                              AbstractQueryPager.this.hashCode(),
-                             ByteBufferUtil.bytesToHex(partition.header.partitionKey.getKey()));
+                             ByteBufferUtil.bytesToHex(partition.partitionKey().getKey()));
 
-            currentKey = partition.header.partitionKey;
-            applyToStatic(partition.staticRow);
+            currentKey = partition.partitionKey();
+            applyToStatic(partition.staticRow());
 
             return DataLimits.truncateFiltered(counter, partition.mapContent(this::applyToRow));
 

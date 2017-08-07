@@ -115,12 +115,8 @@ public class QueryPlan
             Flow<FlowableUnfilteredPartition> fp = controller.getPartition(key, executionController);
             return fp.map(partition ->
             {
-                Row staticRow = partition.staticRow;
-
-                Flow<Unfiltered> filteredContent = partition.content
-                    .filter(row -> operationTree.satisfiedBy(row, staticRow, true));
-
-                return new FlowableUnfilteredPartition(partition.header, partition.staticRow, filteredContent);
+                Row staticRow = partition.staticRow();
+                return partition.filterContent(row -> operationTree.satisfiedBy(row, staticRow, true));
             });
         }
 

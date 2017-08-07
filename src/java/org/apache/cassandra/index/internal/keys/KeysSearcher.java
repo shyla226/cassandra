@@ -51,9 +51,9 @@ public class KeysSearcher extends CassandraIndexSearcher
                                                                    final ReadCommand command,
                                                                    final ReadExecutionController executionController)
     {
-        assert indexHits.staticRow == Rows.EMPTY_STATIC_ROW;
-        return indexHits.content
-               .flatMap(hit ->
+        assert indexHits.staticRow() == Rows.EMPTY_STATIC_ROW;
+        return indexHits.content()
+                        .flatMap(hit ->
                {
                    DecoratedKey key = index.baseCfs.decorateKey(hit.clustering().get(0));
                    if (!command.selectsKey(key))
@@ -96,14 +96,14 @@ public class KeysSearcher extends CassandraIndexSearcher
                                                       int nowInSec)
     throws Exception
     {
-        assert partition.header.metadata.isCompactTable();
-        Row data = partition.staticRow;
+        assert partition.header().metadata.isCompactTable();
+        Row data = partition.staticRow();
         if (!index.isStale(data, indexedValue, nowInSec))
             return partition;
 
         // Index is stale, remove the index entry and ignore
         index.deleteStaleEntry(index.getIndexCfs().decorateKey(indexedValue),
-                               makeIndexClustering(partition.header.partitionKey.getKey(), Clustering.EMPTY),
+                               makeIndexClustering(partition.header().partitionKey.getKey(), Clustering.EMPTY),
                                new DeletionTime(indexHit.primaryKeyLivenessInfo().timestamp(), nowInSec),
                                writeOp)
              .subscribe();    // We don't need to wait for the deletion to complete, and we don't care too much if it fails.

@@ -32,10 +32,6 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTreeSet;
-import org.apache.cassandra.utils.flow.Flow;
-import org.apache.cassandra.utils.flow.FlowSource;
-import org.apache.cassandra.utils.flow.FlowSubscriber;
-import org.apache.cassandra.utils.flow.FlowSubscription;
 
 /**
  * A filter selecting rows given their clustering value.
@@ -128,9 +124,12 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
 
     public FlowableUnfilteredPartition filterNotIndexed(ColumnFilter columnFilter, FlowableUnfilteredPartition partition)
     {
-        return new FlowableUnfilteredPartition(partition.header,
-                                               filterNotIndexedStaticRow(columnFilter, partition.metadata(), partition.staticRow),
-                                               partition.content.skippingMap(row -> filterNotIndexedRow(columnFilter, partition.metadata(), row)));
+        return partition.skippingMapContent(row -> filterNotIndexedRow(columnFilter,
+                                                                       partition.metadata(),
+                                                                       row),
+                                            filterNotIndexedStaticRow(columnFilter,
+                                                                      partition.metadata(),
+                                                                      partition.staticRow()));
     }
 
     public Slices getSlices(TableMetadata metadata)
@@ -171,36 +170,36 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
     public FlowableUnfilteredPartition getFlowableUnfilteredPartition(ColumnFilter columnFilter, Partition partition)
     {
         final SearchIterator<Clustering, Row> searcher = partition.searchIterator(columnFilter, reversed);
-        return new FlowableUnfilteredPartition(new PartitionHeader(partition.metadata(),
-                                                                   partition.partitionKey(),
-                                                                   partition.partitionLevelDeletion(),
-                                                                   columnFilter.fetchedColumns(),
-                                                                   reversed,
-                                                                   partition.stats()),
-                                               searcher.next(Clustering.STATIC_CLUSTERING),
-                                               new FlowSource<Unfiltered>() {
-                                                   final Iterator<Clustering> clusteringIter = clusteringsInQueryOrder.iterator();
+        return new FlowableUnfilteredPartition.FlowSource(new PartitionHeader(partition.metadata(),
+                                                                              partition.partitionKey(),
+                                                                              partition.partitionLevelDeletion(),
+                                                                              columnFilter.fetchedColumns(),
+                                                                              reversed,
+                                                                              partition.stats()),
+                                                          searcher.next(Clustering.STATIC_CLUSTERING))
+        {
+            final Iterator<Clustering> clusteringIter = clusteringsInQueryOrder.iterator();
 
-                                                   public void requestNext()
-                                                   {
-                                                       while (clusteringIter.hasNext())
-                                                       {
-                                                           Row row = searcher.next(clusteringIter.next());
-                                                           if (row != null)
-                                                           {
-                                                               subscriber.onNext(row);
-                                                               return;
-                                                           }
-                                                       }
+            public void requestNext()
+            {
+                while (clusteringIter.hasNext())
+                {
+                    Row row = searcher.next(clusteringIter.next());
+                    if (row != null)
+                    {
+                        subscriber.onNext(row);
+                        return;
+                    }
+                }
 
-                                                       subscriber.onComplete();
-                                                   }
+                subscriber.onComplete();
+            }
 
-                                                   public void close() throws Exception
-                                                   {
+            public void close() throws Exception
+            {
 
-                                                   }
-                                               });
+            }
+        };
     }
 
     public boolean shouldInclude(SSTableReader sstable)

@@ -830,7 +830,7 @@ public class SelectStatement implements CQLStatement
      */
     public ResultSet process(PartitionIterator partitions, int nowInSec)
     {
-        return process(FlowablePartitions.fromPartitions(partitions, Schedulers.io()),
+        return process(FlowablePartitions.fromPartitions(partitions, TPC.ioScheduler()),
                        nowInSec).blockingGet();
     }
 
@@ -1207,12 +1207,14 @@ public class SelectStatement implements CQLStatement
     throws InvalidRequestException
     {
         final ProtocolVersion protocolVersion = options.getProtocolVersion();
-        final ByteBuffer[] keyComponents = getComponents(table, partition.header.partitionKey);
+        final ByteBuffer[] keyComponents = getComponents(table, partition.header().partitionKey);
 
-        return partition.content
+        return partition
+               .content()
                .takeUntil(result::isCompleted)
-               .reduce(false, (hasContent, row) -> {
-                    result.newRow(partition.header.partitionKey, row.clustering());
+               .reduce(false, (hasContent, row) ->
+               {
+                    result.newRow(partition.partitionKey(), row.clustering());
                     // Respect selection order
                     for (ColumnMetadata def : selection.getColumns())
                     {
@@ -1228,34 +1230,35 @@ public class SelectStatement implements CQLStatement
                                 addValue(result, def, row, nowInSec, protocolVersion);
                                 break;
                             case STATIC:
-                                addValue(result, def, partition.staticRow, nowInSec, protocolVersion);
+                                addValue(result, def, partition.staticRow(), nowInSec, protocolVersion);
                                 break;
                         }
                     }
                     return true; // return true if any rows were included
                })
-               .map((hasContent) -> {
-                    if (!hasContent && !result.isCompleted() && !partition.staticRow.isEmpty() && returnStaticContentOnPartitionWithNoRows())
-                    { //if there were no rows but there is a static row then process it
-                        result.newRow(partition.header.partitionKey, partition.staticRow.clustering());
-                        for (ColumnMetadata def : selection.getColumns())
-                        {
-                            switch (def.kind)
-                            {
-                                case PARTITION_KEY:
-                                    result.add(keyComponents[def.position()]);
-                                    break;
-                                case STATIC:
-                                    addValue(result, def, partition.staticRow, nowInSec, protocolVersion);
-                                    break;
-                                default:
-                                    result.add(null);
-                            }
-                        }
-                    }
+               .map((hasContent) ->
+               {
+                   if (!hasContent && !result.isCompleted() && !partition.staticRow().isEmpty() && returnStaticContentOnPartitionWithNoRows())
+                   { //if there were no rows but there is a static row then process it
+                       result.newRow(partition.partitionKey(), partition.staticRow().clustering());
+                       for (ColumnMetadata def : selection.getColumns())
+                       {
+                           switch (def.kind)
+                           {
+                           case PARTITION_KEY:
+                               result.add(keyComponents[def.position()]);
+                               break;
+                           case STATIC:
+                               addValue(result, def, partition.staticRow(), nowInSec, protocolVersion);
+                               break;
+                           default:
+                               result.add(null);
+                           }
+                       }
+                   }
 
-                    return result;
-        });
+                   return result;
+               });
     }
 
     /**

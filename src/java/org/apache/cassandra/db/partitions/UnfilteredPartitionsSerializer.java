@@ -31,8 +31,6 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.FlowSource;
-import org.apache.cassandra.utils.flow.FlowSubscriber;
-import org.apache.cassandra.utils.flow.FlowSubscription;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -121,7 +119,7 @@ public class UnfilteredPartitionsSerializer
                     {
                         UnfilteredPartitionSerializer serializer = UnfilteredPartitionSerializer.serializers.get(version);
                         FlowableUnfilteredPartition fup = serializer.deserializeToFlow(in, metadata, selection, flag);
-                        current = fup.withContent(fup.content.doOnClose(() -> current = null));
+                        current = fup.withContent(fup.content().doOnClose(() -> current = null));
                         subscriber.onNext(current);
                     }
                     else

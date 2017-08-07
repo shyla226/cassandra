@@ -68,7 +68,7 @@ public class FilteredPartition extends ImmutableBTreePartition
     public static Flow<FilteredPartition> create(FlowablePartition partition)
     {
         return build(partition, DeletionInfo.LIVE, false, 16)
-               .map(holder -> new FilteredPartition(partition.header, holder));
+               .map(holder -> new FilteredPartition(partition.header(), holder));
     }
 
     public RowIterator rowIterator()

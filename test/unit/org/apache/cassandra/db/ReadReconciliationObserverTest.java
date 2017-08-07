@@ -208,7 +208,7 @@ public class ReadReconciliationObserverTest extends CQLTester
         // network messages (see injectMessageSink()) so said response will never come and we'd timeout if we where
         // to wait on completion. All we care is that all content gets processed. Note that this is all in-memory
         // anyway so we're not really leaking resources (not that it would matter much).
-        callback.result().flatProcess(p -> p.content).processToFuture();
+        callback.result().flatProcess(p -> p.content()).processToFuture();
     }
 
     private PartitionUpdate update(TableMetadata table, int[]... rows)
@@ -227,7 +227,7 @@ public class ReadReconciliationObserverTest extends CQLTester
 
     private Flow<FlowableUnfilteredPartition> flow(PartitionUpdate update)
     {
-        return FlowablePartitions.fromPartitions(new SingletonUnfilteredPartitionIterator(update.unfilteredIterator()), null);
+        return FlowablePartitions.fromPartitions(new SingletonUnfilteredPartitionIterator(update.unfilteredIterator()));
     }
 
     private Response<ReadResponse> dataResponse(InetAddress peer, PartitionUpdate values, ReadCommand cmd)

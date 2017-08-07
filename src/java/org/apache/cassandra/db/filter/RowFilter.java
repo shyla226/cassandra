@@ -279,11 +279,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             return iter.flatMap(
             partition ->
             {
-                DecoratedKey pk = partition.header.partitionKey;
+                DecoratedKey pk = partition.partitionKey();
 
                 // Short-circuit all partitions that won't match based on static and partition keys
                 return Flow.fromIterable(partitionLevelExpressions)
-                           .flatMap(e -> e.isSatisfiedBy(metadata, pk, partition.staticRow))
+                           .flatMap(e -> e.isSatisfiedBy(metadata, pk, partition.staticRow()))
                            .takeWhile(satisfied -> satisfied)
                            .reduce(0, (val, satisfied) -> ++val)
                            .map(val -> val == partitionLevelExpressions.size()) //all true
@@ -308,7 +308,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 // TODO: This method has some odd behavior. It purges deletions when they are on their own
                 // but leaves them in if they are together with a live cell, leading to potential changes in content
                 // before and after compacting data.
-                Flow<Unfiltered> content = partition.content.flatMap(unfiltered ->
+                Flow<Unfiltered> content = partition.content().flatMap(unfiltered ->
                 {
                     if (unfiltered.isRow())
                     {
@@ -339,9 +339,13 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 // full reads after digest mismatch).
 
                 if (filterNonStaticColumns)
-                    return content.skipMapEmpty(c -> new FlowableUnfilteredPartition(partition.header, partition.staticRow, c));
+                    return content.skipMapEmpty(c -> FlowableUnfilteredPartition.create(partition.header(),
+                                                                                        partition.staticRow(),
+                                                                                        c));
                 else
-                    return Flow.just(new FlowableUnfilteredPartition(partition.header, partition.staticRow, content));
+                    return Flow.just(FlowableUnfilteredPartition.create(partition.header(),
+                                                                        partition.staticRow(),
+                                                                        content));
             });
         }
 

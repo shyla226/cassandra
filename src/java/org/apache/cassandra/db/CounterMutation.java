@@ -353,13 +353,15 @@ public class CounterMutation implements IMutation, Schedulable
 
         return Completable.using(() -> cmd.executionController(),
                                  controller -> cmd.deferredQuery(cfs, controller)
-                                                  .flatMapCompletable(p -> {
+                                                  .flatMapCompletable(p ->
+                                                  {
                                                       FlowablePartition partition = FlowablePartitions.filter(p, nowInSec);
-                                                      updateForRow(markIter, partition.staticRow, cfs);
+                                                      updateForRow(markIter, partition.staticRow(), cfs);
 
-                                                      return partition.content.takeWhile((row) -> markIter.hasNext())
-                                                                              .processToRxCompletable(row -> updateForRow(markIter, row, cfs));
-                                        }),
+                                                      return partition.content()
+                                                                      .takeWhile((row) -> markIter.hasNext())
+                                                                      .processToRxCompletable(row -> updateForRow(markIter, row, cfs));
+                                                  }),
                                  controller -> controller.close());
     }
 

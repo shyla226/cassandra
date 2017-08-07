@@ -30,6 +30,7 @@ import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.PartitionHeader;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -144,55 +145,49 @@ class AsyncPartitionReader
         return new PartitionReader();
     }
 
-    abstract class Base<T> extends FlowSource<T>
+    private static void readWithRetry(Reader reader, boolean isRetry, TPCScheduler onReadyExecutor)
     {
-        //Force all disk callbacks through the same thread
-        private final TPCScheduler onReadyExecutor = TPC.bestTPCScheduler();
-
-        abstract void performRead(boolean isRetry) throws Exception;
-
-        private void readWithRetry(boolean isRetry)
+        try
         {
-            try
-            {
-                performRead(isRetry);
-            }
-            catch (NotInCacheException e)
-            {
-                // Retry the request once data is in the cache
-                e.accept(() -> readWithRetry(true),
-                         (t) ->
-                         {
-                             // Calling completeExceptionally() wraps the original exception into a CompletionException even
-                             // though the documentation says otherwise
-                             if (t instanceof CompletionException && t.getCause() != null)
-                                 t = t.getCause();
-
-                             subscriber.onError(t);
-                             return null;
-                         },
-                         onReadyExecutor);
-            }
-            catch (Throwable t)
-            {
-                subscriber.onError(t);
-            }
+            reader.performRead(isRetry);
         }
-
-        public void requestNext()
+        catch (NotInCacheException e)
         {
-            readWithRetry(false);
+            // Retry the request once data is in the cache
+            e.accept(() -> readWithRetry(reader, true, onReadyExecutor),
+                     (t) ->
+                     {
+                         // Calling completeExceptionally() wraps the original exception into a CompletionException even
+                         // though the documentation says otherwise
+                         if (t instanceof CompletionException && t.getCause() != null)
+                             t = t.getCause();
+
+                         reader.onError(t);
+                         return null;
+                     },
+                     onReadyExecutor);
+        }
+        catch (Throwable t)
+        {
+            reader.onError(t);
         }
     }
 
-    class PartitionReader extends Base<FlowableUnfilteredPartition>
+    interface Reader
     {
+        void performRead(boolean isRetry) throws Exception;
+        void onError(Throwable t);
+    }
+
+    class PartitionReader extends FlowSource<FlowableUnfilteredPartition> implements Reader
+    {
+        final TPCScheduler onReadyExecutor = TPC.bestTPCScheduler();
         boolean issued = false;
 
         /**
          * This method must be async-read-safe.
          */
-        void performRead(boolean isRetry) throws Exception
+        public void performRead(boolean isRetry) throws Exception
         {
             assert !issued;
 
@@ -230,16 +225,19 @@ class AsyncPartitionReader
                                                          ssTableIterator.isReverseOrder(),
                                                          ssTableIterator.stats());
 
-            PartitionSubscription partitionContent = new PartitionSubscription();
+            PartitionSubscription partitionContent = new PartitionSubscription(header, ssTableIterator.staticRow());
             issued = true;
-            subscriber.onFinal(new FlowableUnfilteredPartition(header, ssTableIterator.staticRow(), partitionContent)
-            {
-                @Override
-                public void unused() throws Exception
-                {
-                    partitionContent.close();
-                }
-            });
+            subscriber.onFinal(partitionContent);
+        }
+
+        public void onError(Throwable t)
+        {
+            subscriber.onError(t);
+        }
+
+        public void requestNext()
+        {
+            readWithRetry(this, false, onReadyExecutor);
         }
 
         public void close() throws Exception
@@ -261,16 +259,23 @@ class AsyncPartitionReader
         }
     }
 
-    class PartitionSubscription extends Base<Unfiltered>
+    class PartitionSubscription extends FlowableUnfilteredPartition.FlowSource implements Reader
     {
+        final TPCScheduler onReadyExecutor = TPC.bestTPCScheduler();
+
         //Used to track the work done iterating (hasNext vs next)
         //Since we could have an async break in either place
         volatile boolean needsHasNextCheck = true;
 
+        protected PartitionSubscription(PartitionHeader header, Row staticRow)
+        {
+            super(header, staticRow);
+        }
+
         /**
          * This method must be async-read-safe.
          */
-        void performRead(boolean isRetry)
+        public void performRead(boolean isRetry)
         {
             try
             {
@@ -312,6 +317,16 @@ class AsyncPartitionReader
             }
         }
 
+        public void onError(Throwable t)
+        {
+            subscriber.onError(t);
+        }
+
+        public void requestNext()
+        {
+            readWithRetry(this, false, onReadyExecutor);
+        }
+
         public void close() throws Exception
         {
             try
@@ -323,6 +338,12 @@ class AsyncPartitionReader
                 if (closeDataFile)
                     dfile.close();
             }
+        }
+
+        @Override
+        public void unused() throws Exception
+        {
+            close();
         }
 
         public String toString()

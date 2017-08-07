@@ -127,7 +127,7 @@ public abstract class Flow<T>
             O out;
             try
             {
-                out = mapper.apply(next);
+                out = map(next);
             }
             catch (Throwable t)
             {
@@ -143,7 +143,7 @@ public abstract class Flow<T>
             O out;
             try
             {
-                out = mapper.apply(next);
+                out = map(next);
             }
             catch (Throwable t)
             {
@@ -152,6 +152,11 @@ public abstract class Flow<T>
             }
 
             subscriber.onFinal(out);
+        }
+
+        public O map(I item) throws Exception
+        {
+            return mapper.apply(item);
         }
 
         public String toString()
@@ -188,7 +193,7 @@ public abstract class Flow<T>
             O out;
             try
             {
-                out = mapper.apply(next);
+                out = map(next);
             }
             catch (Throwable t)
             {
@@ -207,7 +212,7 @@ public abstract class Flow<T>
             O out;
             try
             {
-                out = mapper.apply(next);
+                out = map(next);
             }
             catch (Throwable t)
             {
@@ -219,6 +224,11 @@ public abstract class Flow<T>
                 subscriber.onFinal(out);
             else
                 subscriber.onComplete();
+        }
+
+        public O map(I item) throws Exception
+        {
+            return mapper.apply(item);
         }
 
         public String toString()

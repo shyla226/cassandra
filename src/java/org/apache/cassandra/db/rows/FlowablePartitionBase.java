@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.db.rows;
 
 import io.reactivex.functions.Function;
@@ -25,39 +26,19 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.flow.Flow;
 
 /**
- * Base class for partitions whose content is processed as a Flow.
+ * Base interface for partitions whose content is processed as a Flow.
  *
  * Flowable partitions must always be used (i.e. subscribed to and closed) because they usually hold resources
  * (e.g. file readers). If a partition instance happens to be not required before processing the contents, the method
  * unused() must be called (this will subscribe to and immediately close the flow).
  */
-public abstract class FlowablePartitionBase<T> implements PartitionTrait
+public interface FlowablePartitionBase<T> extends PartitionTrait
 {
-    /**
-     * The header contains information about the partition: key, metadata etc.
-     * Normally reused through transformations, merging, filtering etc.
-     */
-    public final PartitionHeader header;
+    public PartitionHeader header();
 
-    /**
-     * The static part corresponding to this partition.
-     */
-    public final Row staticRow;
+    public Flow<T> content();
 
-    /**
-     * The partition's contents as a Flow. This must be subscribed to exactly once, and will close all
-     * associated resources when the subscription completes (complete/error/cancel).
-     */
-    public final Flow<T> content;
-
-    public FlowablePartitionBase(PartitionHeader header,
-                                 Row staticRow,
-                                 Flow<T> content)
-    {
-        this.header = header;
-        this.staticRow = staticRow;
-        this.content = content;
-    }
+    public Row staticRow();
 
     /**
      * Return a new partition with the specified header and static row, but the same content.
@@ -67,7 +48,7 @@ public abstract class FlowablePartitionBase<T> implements PartitionTrait
      *
      * @return a new partition with the specified header and static row, but the same content.
      */
-    public abstract FlowablePartitionBase<T> withHeader(PartitionHeader header, Row staticRow);
+    public FlowablePartitionBase<T> withHeader(PartitionHeader header, Row staticRow);
 
     /**
      * Return a new partition with the same header but different content.
@@ -76,7 +57,7 @@ public abstract class FlowablePartitionBase<T> implements PartitionTrait
      *
      * @return the partition with the new content
      */
-    public abstract FlowablePartitionBase<T> withContent(Flow<T> content);
+    public FlowablePartitionBase<T> withContent(Flow<T> content);
 
     /**
      * Apply the mapper to the partition content
@@ -85,49 +66,54 @@ public abstract class FlowablePartitionBase<T> implements PartitionTrait
      *
      * @return a new identical partition with the content mapped
      */
-    public abstract FlowablePartitionBase<T> mapContent(Function<T, T> mappingOp);
+    public FlowablePartitionBase<T> mapContent(Function<T, T> mappingOp);
+
+    /**
+     * Apply the mapper to the partition content, skipping null items
+     *
+     * @param mappingOp the content mapper
+     * @param staticRow new value for the static row
+     *
+     * @return a new identical partition with the content mapped
+     */
+    public FlowablePartitionBase<T> skippingMapContent(Function<T, T> mappingOp, Row staticRow);
+
+    default TableMetadata metadata()
+    {
+        return header().metadata;
+    }
+
+    default boolean isReverseOrder()
+    {
+        return header().isReverseOrder;
+    }
+
+    default RegularAndStaticColumns columns()
+    {
+        return header().columns;
+    }
+
+    default DecoratedKey partitionKey()
+    {
+        return header().partitionKey;
+    }
+
+    default DeletionTime partitionLevelDeletion()
+    {
+        return header().partitionLevelDeletion;
+    }
+
+    default EncodingStats stats()
+    {
+        return header().stats;
+    }
 
     /**
      * Only to be called on requested but unused partitions (e.g. when aborting).
      * Since we usually verify one use only, this will throw if the partition was already used.
      */
-    public void unused() throws Exception
+    default void unused() throws Exception
     {
         // Nothing by default
-    }
-
-    public TableMetadata metadata()
-    {
-        return header.metadata;
-    }
-
-    public boolean isReverseOrder()
-    {
-        return header.isReverseOrder;
-    }
-
-    public RegularAndStaticColumns columns()
-    {
-        return header.columns;
-    }
-
-    public DecoratedKey partitionKey()
-    {
-        return header.partitionKey;
-    }
-
-    public Row staticRow()
-    {
-        return staticRow;
-    }
-
-    public DeletionTime partitionLevelDeletion()
-    {
-        return header.partitionLevelDeletion;
-    }
-
-    public EncodingStats stats()
-    {
-        return header.stats;
     }
 }

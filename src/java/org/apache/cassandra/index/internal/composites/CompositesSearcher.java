@@ -44,7 +44,6 @@ import org.apache.cassandra.index.internal.IndexEntry;
 import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.flow.Flow;
-import org.apache.cassandra.utils.flow.FlowTransformNext;
 import org.apache.cassandra.utils.flow.GroupOp;
 
 
@@ -73,7 +72,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
                                                                    final ReadCommand command,
                                                                    final ReadExecutionController executionController)
     {
-        assert indexHits.staticRow == Rows.EMPTY_STATIC_ROW;
+        assert indexHits.staticRow() == Rows.EMPTY_STATIC_ROW;
 
         class Collector implements GroupOp<IndexEntry, Flow<FlowableUnfilteredPartition>>
         {
@@ -108,9 +107,9 @@ public class CompositesSearcher extends CassandraIndexSearcher
             }
         }
 
-        return indexHits.content.skippingMap(hit -> decodeMatchingEntry(indexKey, hit, command))
-                                .group(new Collector())
-                                .flatMap(x -> x);
+        return indexHits.content().skippingMap(hit -> decodeMatchingEntry(indexKey, hit, command))
+                                  .group(new Collector())
+                                  .flatMap(x -> x);
     }
 
     // We assume all rows in dataIter belong to the same partition.
@@ -126,23 +125,23 @@ public class CompositesSearcher extends CassandraIndexSearcher
 
         // if there is a partition level delete in the base table, we need to filter
         // any index entries which would be shadowed by it
-        if (!dataIter.header.partitionLevelDeletion.isLive())
+        if (!dataIter.header().partitionLevelDeletion.isLive())
         {
-            DeletionTime deletion = dataIter.header.partitionLevelDeletion;
+            DeletionTime deletion = dataIter.header().partitionLevelDeletion;
             entries.forEach(e -> {
                 if (deletion.deletes(e.timestamp))
                     staleEntries.add(e);
             });
         }
 
-        ClusteringComparator comparator = dataIter.header.metadata.comparator;
-        class Transform extends Flow.Filter<Unfiltered>
+        ClusteringComparator comparator = dataIter.header().metadata.comparator;
+        class TransformedPartition extends FlowableUnfilteredPartition.Filter
         {
             private int entriesIdx;
 
-            public Transform(Flow<Unfiltered> source)
+            public TransformedPartition(FlowableUnfilteredPartition source)
             {
-                super(source, null);
+                super(source.content(), source.staticRow(), source.header(), null);
             }
 
             @Override
@@ -193,19 +192,16 @@ public class CompositesSearcher extends CassandraIndexSearcher
             }
         }
 
-        Flow<Unfiltered> content = new Transform(dataIter.content);
-        return new FlowableUnfilteredPartition(dataIter.header,
-                                               dataIter.staticRow,
-                                               content);
+        return new TransformedPartition(dataIter);
     }
 
     private Completable deleteAllEntries(final List<IndexEntry> entries, final OpOrder.Group writeOp, final int nowInSec)
     {
         return Completable.concat(entries.stream()
-                                        .map(entry -> index.deleteStaleEntry(entry.indexValue,
-                                                                             entry.indexClustering,
-                                                                             new DeletionTime(entry.timestamp, nowInSec),
-                                                                             writeOp))
-                                        .collect(Collectors.toList()));
+                                         .map(entry -> index.deleteStaleEntry(entry.indexValue,
+                                                                              entry.indexClustering,
+                                                                              new DeletionTime(entry.timestamp, nowInSec),
+                                                                              writeOp))
+                                         .collect(Collectors.toList()));
     }
 }
