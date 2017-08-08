@@ -81,6 +81,7 @@ public class ClientState
         DROPPABLE_SYSTEM_TABLES.add(DataResource.table(AuthKeyspace.NAME, PasswordAuthenticator.LEGACY_CREDENTIALS_TABLE));
         DROPPABLE_SYSTEM_TABLES.add(DataResource.table(AuthKeyspace.NAME, CassandraRoleManager.LEGACY_USERS_TABLE));
         DROPPABLE_SYSTEM_TABLES.add(DataResource.table(AuthKeyspace.NAME, CassandraAuthorizer.USER_PERMISSIONS));
+        DROPPABLE_SYSTEM_TABLES.add(DataResource.table(AuthKeyspace.NAME, "resource_role_permissons_index"));
     }
 
     // Current user for the session

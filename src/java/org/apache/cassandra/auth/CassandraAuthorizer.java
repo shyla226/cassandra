@@ -17,7 +17,11 @@
  */
 package org.apache.cassandra.auth;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Predicate;
@@ -31,13 +35,21 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.Attributes;
+import org.apache.cassandra.cql3.BatchQueryOptions;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.serializers.SetSerializer;
 import org.apache.cassandra.serializers.UTF8Serializer;
 import org.apache.cassandra.service.ClientState;
@@ -99,50 +111,24 @@ public class CassandraAuthorizer implements IAuthorizer
     throws RequestValidationException, RequestExecutionException
     {
         modifyRolePermissions(permissions, resource, grantee, "+");
-        addLookupEntry(resource, grantee);
     }
 
     public void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee)
     throws RequestValidationException, RequestExecutionException
     {
         modifyRolePermissions(permissions, resource, revokee, "-");
-        removeLookupEntry(resource, revokee);
     }
 
     // Called when deleting a role with DROP ROLE query.
     // Internal hook, so no permission checks are needed here.
-    // Executes a logged batch removing the granted premissions
-    // for the role as well as the entries from the reverse index
-    // table
     public void revokeAllFrom(RoleResource revokee)
     {
         try
         {
-            UntypedResultSet rows = process(String.format("SELECT resource FROM %s.%s WHERE role = '%s'",
-                                                          AuthKeyspace.NAME,
-                                                          AuthKeyspace.ROLE_PERMISSIONS,
-                                                          escape(revokee.getRoleName())));
-
-            List<CQLStatement> statements = new ArrayList<>();
-            for (UntypedResultSet.Row row : rows)
-            {
-                statements.add(
-                    QueryProcessor.getStatement(String.format("DELETE FROM %s.%s WHERE resource = '%s' AND role = '%s'",
-                                                              AuthKeyspace.NAME,
-                                                              AuthKeyspace.RESOURCE_ROLE_INDEX,
-                                                              escape(row.getString("resource")),
-                                                              escape(revokee.getRoleName())),
-                                                ClientState.forInternalCalls()).statement);
-
-            }
-
-            statements.add(QueryProcessor.getStatement(String.format("DELETE FROM %s.%s WHERE role = '%s'",
-                                                                     AuthKeyspace.NAME,
-                                                                     AuthKeyspace.ROLE_PERMISSIONS,
-                                                                     escape(revokee.getRoleName())),
-                                                       ClientState.forInternalCalls()).statement);
-
-            executeLoggedBatch(statements);
+            process(String.format("DELETE FROM %s.%s WHERE role = '%s'",
+                                  AuthKeyspace.NAME,
+                                  AuthKeyspace.ROLE_PERMISSIONS,
+                                  escape(revokee.getRoleName())));
         }
         catch (RequestExecutionException | RequestValidationException e)
         {
@@ -152,14 +138,13 @@ public class CassandraAuthorizer implements IAuthorizer
 
     // Called after a resource is removed (DROP KEYSPACE, DROP TABLE, etc.).
     // Execute a logged batch removing all the permissions for the resource
-    // as well as the index table entry
     public void revokeAllOn(IResource droppedResource)
     {
         try
         {
-            UntypedResultSet rows = process(String.format("SELECT role FROM %s.%s WHERE resource = '%s'",
+            UntypedResultSet rows = process(String.format("SELECT role FROM %s.%s WHERE resource = '%s' ALLOW FILTERING",
                                                           AuthKeyspace.NAME,
-                                                          AuthKeyspace.RESOURCE_ROLE_INDEX,
+                                                          AuthKeyspace.ROLE_PERMISSIONS,
                                                           escape(droppedResource.getName())));
 
             List<CQLStatement> statements = new ArrayList<>();
@@ -173,18 +158,11 @@ public class CassandraAuthorizer implements IAuthorizer
                                                            ClientState.forInternalCalls()).statement);
             }
 
-            statements.add(QueryProcessor.getStatement(String.format("DELETE FROM %s.%s WHERE resource = '%s'",
-                                                                                            AuthKeyspace.NAME,
-                                                                                            AuthKeyspace.RESOURCE_ROLE_INDEX,
-                                                                                            escape(droppedResource.getName())),
-                                                                               ClientState.forInternalCalls()).statement);
-
             executeLoggedBatch(statements);
         }
         catch (RequestExecutionException | RequestValidationException e)
         {
             logger.warn("CassandraAuthorizer failed to revoke all permissions on {}: {}", droppedResource, e);
-            return;
         }
     }
 
@@ -245,26 +223,6 @@ public class CassandraAuthorizer implements IAuthorizer
                               "'" + StringUtils.join(permissions, "','") + "'",
                               escape(role.getRoleName()),
                               escape(resource.getName())));
-    }
-
-    // Removes an entry from the inverted index table (from resource -> role with defined permissions)
-    private void removeLookupEntry(IResource resource, RoleResource role) throws RequestExecutionException
-    {
-        process(String.format("DELETE FROM %s.%s WHERE resource = '%s' and role = '%s'",
-                AuthKeyspace.NAME,
-                AuthKeyspace.RESOURCE_ROLE_INDEX,
-                escape(resource.getName()),
-                escape(role.getRoleName())));
-    }
-
-    // Adds an entry to the inverted index table (from resource -> role with defined permissions)
-    private void addLookupEntry(IResource resource, RoleResource role) throws RequestExecutionException
-    {
-        process(String.format("INSERT INTO %s.%s (resource, role) VALUES ('%s','%s')",
-                              AuthKeyspace.NAME,
-                              AuthKeyspace.RESOURCE_ROLE_INDEX,
-                              escape(resource.getName()),
-                              escape(role.getRoleName())));
     }
 
     // 'of' can be null - in that case everyone's permissions have been requested. Otherwise only single user's.
@@ -389,8 +347,7 @@ public class CassandraAuthorizer implements IAuthorizer
     }
 
     /**
-     * Copy legacy authz data from the system_auth.permissions table to the new system_auth.role_permissions table and
-     * also insert entries into the reverse lookup table.
+     * Copy legacy authz data from the system_auth.permissions table to the new system_auth.role_permissions table.
      * In theory, we could simply rename the existing table as the schema is structurally the same, but this would
      * break mixed clusters during a rolling upgrade.
      * This setup is not performed if AllowAllAuthenticator is configured (see Auth#setup).
@@ -407,11 +364,6 @@ public class CassandraAuthorizer implements IAuthorizer
                                                               "VALUES (?, ?, ?)",
                                                               AuthKeyspace.NAME,
                                                               AuthKeyspace.ROLE_PERMISSIONS),
-                                                ClientState.forInternalCalls()).statement;
-                CQLStatement indexStatement =
-                    QueryProcessor.getStatement(String.format("INSERT INTO %s.%s (resource, role) VALUES (?,?)",
-                                                              AuthKeyspace.NAME,
-                                                              AuthKeyspace.RESOURCE_ROLE_INDEX),
                                                 ClientState.forInternalCalls()).statement;
 
                 UntypedResultSet permissions = process("SELECT * FROM system_auth.permissions");
@@ -433,11 +385,6 @@ public class CassandraAuthorizer implements IAuthorizer
                                                                           Lists.newArrayList(row.getBytes("username"),
                                                                                              row.getBytes("resource"),
                                                                                              serializer.serialize(filteredPerms))));
-
-                    indexStatement.execute(QueryState.forInternalCalls(),
-                                           QueryOptions.forInternalCalls(ConsistencyLevel.ONE,
-                                                                         Lists.newArrayList(row.getBytes("resource"),
-                                                                                            row.getBytes("username"))));
 
                 }
                 logger.info("Completed conversion of legacy permissions");
