@@ -1,4 +1,5 @@
 4.0
+ * Improve sstablemetadata output (CASSANDRA-11483)
  * Support for migrating legacy users to roles has been dropped (CASSANDRA-13371)
  * Introduce error metrics for repair (CASSANDRA-13387)
  * Refactoring to primitive functional interfaces in AuthCache (CASSANDRA-13732)
@@ -102,6 +103,7 @@
  * Changing `max_hint_window_in_ms` at runtime (CASSANDRA-11720)
  * Nodetool repair can hang forever if we lose the notification for the repair completing/failing (CASSANDRA-13480)
  * Anticompaction can cause noisy log messages (CASSANDRA-13684)
+ * Switch to client init for sstabledump (CASSANDRA-13683)
 
 3.11.1
  * "ignore" option is ignored in sstableloader (CASSANDRA-13721)

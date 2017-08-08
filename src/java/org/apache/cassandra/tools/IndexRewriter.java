@@ -225,7 +225,7 @@ public class IndexRewriter
     {
         System.out.format("Rewriting %s\n", ssTableFileName);
         Descriptor desc = Descriptor.fromFilename(ssTableFileName);
-        TableMetadata metadata = SSTableExport.metadataFromSSTable(desc);
+        TableMetadata metadata = Util.metadataFromSSTable(desc);
         File destFile = new File(desc.filenameFor(Component.PARTITION_INDEX) + ".rewrite");
         try (SequentialWriter writer = new SequentialWriter(destFile);
              PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, null);
