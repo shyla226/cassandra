@@ -25,10 +25,8 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,7 +91,8 @@ public class StartupChecks
                                                                       checkSystemKeyspaceState,
                                                                       checkDatacenter,
                                                                       checkRack,
-                                                                      checkLegacyAuthTables);
+                                                                      checkLegacyAuthTables,
+                                                                      checkObsoleteAuthTables);
 
     public StartupChecks withDefaultTests()
     {
@@ -119,22 +118,22 @@ public class StartupChecks
     public void verify() throws StartupException
     {
         for (StartupCheck test : preFlightChecks)
-            test.execute();
+            test.execute(LoggerFactory.getLogger(StartupChecks.class));
     }
 
     public static final StartupCheck checkJemalloc = new StartupCheck()
     {
-        public void execute()
+        public void execute(Logger logger)
         {
             if (FBUtilities.isWindows)
                 return;
             String jemalloc = System.getProperty("cassandra.libjemalloc");
             if (jemalloc == null)
-                logger.warn("jemalloc shared library could not be preloaded to speed up memory allocations");
+                StartupChecks.logger.warn("jemalloc shared library could not be preloaded to speed up memory allocations");
             else if ("-".equals(jemalloc))
-                logger.info("jemalloc preload explicitly disabled");
+                StartupChecks.logger.info("jemalloc preload explicitly disabled");
             else
-                logger.info("jemalloc seems to be preloaded from {}", jemalloc);
+                StartupChecks.logger.info("jemalloc seems to be preloaded from {}", jemalloc);
         }
     };
 
@@ -146,7 +145,7 @@ public class StartupChecks
          * We use this to ensure the system clock is at least somewhat correct at startup.
          */
         private static final long EARLIEST_LAUNCH_DATE = 1215820800000L;
-        public void execute() throws StartupException
+        public void execute(Logger logger) throws StartupException
         {
             long now = System.currentTimeMillis();
             if (now < EARLIEST_LAUNCH_DATE)
@@ -158,60 +157,60 @@ public class StartupChecks
 
     public static final StartupCheck checkJMXPorts = new StartupCheck()
     {
-        public void execute()
+        public void execute(Logger logger)
         {
             String jmxPort = System.getProperty("cassandra.jmx.remote.port");
             if (jmxPort == null)
             {
-                logger.warn("JMX is not enabled to receive remote connections. Please see cassandra-env.sh for more info.");
+                StartupChecks.logger.warn("JMX is not enabled to receive remote connections. Please see cassandra-env.sh for more info.");
                 jmxPort = System.getProperty("cassandra.jmx.local.port");
                 if (jmxPort == null)
-                    logger.error("cassandra.jmx.local.port missing from cassandra-env.sh, unable to start local JMX service.");
+                    StartupChecks.logger.error("cassandra.jmx.local.port missing from cassandra-env.sh, unable to start local JMX service.");
             }
             else
             {
-                logger.info("JMX is enabled to receive remote connections on port: {}", jmxPort);
+                StartupChecks.logger.info("JMX is enabled to receive remote connections on port: {}", jmxPort);
             }
         }
     };
 
     public static final StartupCheck checkJMXProperties = new StartupCheck()
     {
-        public void execute()
+        public void execute(Logger logger)
         {
             if (System.getProperty("com.sun.management.jmxremote.port") != null)
             {
-                logger.warn("Use of com.sun.management.jmxremote.port at startup is deprecated. " +
-                            "Please use cassandra.jmx.remote.port instead.");
+                StartupChecks.logger.warn("Use of com.sun.management.jmxremote.port at startup is deprecated. " +
+                                          "Please use cassandra.jmx.remote.port instead.");
             }
         }
     };
 
     public static final StartupCheck inspectJvmOptions = new StartupCheck()
     {
-        public void execute()
+        public void execute(Logger logger)
         {
             // log warnings for different kinds of sub-optimal JVMs.  tldr use 64-bit Oracle >= 1.6u32
             if (!DatabaseDescriptor.hasLargeAddressSpace())
-                logger.warn("32bit JVM detected.  It is recommended to run Cassandra on a 64bit JVM for better performance.");
+                StartupChecks.logger.warn("32bit JVM detected.  It is recommended to run Cassandra on a 64bit JVM for better performance.");
 
             String javaVmName = System.getProperty("java.vm.name");
             if (javaVmName.contains("OpenJDK"))
             {
                 // There is essentially no QA done on OpenJDK builds, and
                 // clusters running OpenJDK have seen many heap and load issues.
-                logger.warn("OpenJDK is not recommended. Please upgrade to the newest Oracle Java release");
+                StartupChecks.logger.warn("OpenJDK is not recommended. Please upgrade to the newest Oracle Java release");
             }
             else if (!javaVmName.contains("HotSpot"))
             {
-                logger.warn("Non-Oracle JVM detected.  Some features, such as immediate unmap of compacted SSTables, may not work as intended");
+                StartupChecks.logger.warn("Non-Oracle JVM detected.  Some features, such as immediate unmap of compacted SSTables, may not work as intended");
             }
         }
     };
 
     public static final StartupCheck checkNativeLibraryInitialization = new StartupCheck()
     {
-        public void execute() throws StartupException
+        public void execute(Logger logger) throws StartupException
         {
             // Fail-fast if the native library could not be linked.
             if (!NativeLibrary.isAvailable())
@@ -221,7 +220,7 @@ public class StartupChecks
 
     public static final StartupCheck initSigarLibrary = new StartupCheck()
     {
-        public void execute()
+        public void execute(Logger logger)
         {
             SigarLibrary.instance.warnIfRunningInDegradedMode();
         }
@@ -232,7 +231,7 @@ public class StartupChecks
         private final long EXPECTED_MAX_MAP_COUNT = 1048575;
         private final String MAX_MAP_COUNT_PATH = "/proc/sys/vm/max_map_count";
 
-        private long getMaxMapCount()
+        private long getMaxMapCount(Logger logger)
         {
             final Path path = Paths.get(MAX_MAP_COUNT_PATH);
             try (final BufferedReader bufferedReader = Files.newBufferedReader(path))
@@ -257,7 +256,7 @@ public class StartupChecks
             return -1;
         }
 
-        public void execute()
+        public void execute(Logger logger)
         {
             if (!FBUtilities.isLinux)
                 return;
@@ -266,7 +265,7 @@ public class StartupChecks
                 DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.standard)
                 return; // no need to check if disk access mode is only standard and not mmap
 
-            long maxMapCount = getMaxMapCount();
+            long maxMapCount = getMaxMapCount(logger);
             if (maxMapCount < EXPECTED_MAX_MAP_COUNT)
                 logger.warn("Maximum number of memory map areas per process (vm.max_map_count) {} " +
                             "is too low, recommended value: {}, you can change it with sysctl.",
@@ -274,7 +273,7 @@ public class StartupChecks
         }
     };
 
-    public static final StartupCheck checkDataDirs = () ->
+    public static final StartupCheck checkDataDirs = (Logger logger) ->
     {
         // check all directories(data, commitlog, saved cache) for existence and permission
         Iterable<String> dirs = Iterables.concat(Arrays.asList(DatabaseDescriptor.getAllDataFileLocations()),
@@ -305,7 +304,7 @@ public class StartupChecks
 
     public static final StartupCheck checkSSTablesFormat = new StartupCheck()
     {
-        public void execute() throws StartupException
+        public void execute(Logger logger) throws StartupException
         {
             final Set<String> invalid = new HashSet<>();
             final Set<String> nonSSTablePaths = new HashSet<>();
@@ -368,7 +367,7 @@ public class StartupChecks
 
     public static final StartupCheck checkSystemKeyspaceState = new StartupCheck()
     {
-        public void execute() throws StartupException
+        public void execute(Logger logger) throws StartupException
         {
             // check the system keyspace to keep user from shooting self in foot by changing partitioner, cluster name, etc.
             // we do a one-off scrub of the system keyspace first; we can't load the list of the rest of the keyspaces,
@@ -390,7 +389,7 @@ public class StartupChecks
 
     public static final StartupCheck checkDatacenter = new StartupCheck()
     {
-        public void execute() throws StartupException
+        public void execute(Logger logger) throws StartupException
         {
             if (!Boolean.getBoolean("cassandra.ignore_dc"))
             {
@@ -412,7 +411,7 @@ public class StartupChecks
 
     public static final StartupCheck checkRack = new StartupCheck()
     {
-        public void execute() throws StartupException
+        public void execute(Logger logger) throws StartupException
         {
             if (!Boolean.getBoolean("cassandra.ignore_rack"))
             {
@@ -432,27 +431,52 @@ public class StartupChecks
         }
     };
 
-    public static final StartupCheck checkLegacyAuthTables = () -> checkLegacyAuthTablesMessage().ifPresent(logger::warn);
+    /**
+     * Auth tables that should have been migrated.
+     */
+    static final List<String> LEGACY_AUTH_TABLES = ImmutableList.of("credentials", "users", "permissions");
 
-    static final Set<String> LEGACY_AUTH_TABLES = ImmutableSet.of("credentials", "users", "permissions");
+    /**
+     * Obsolete Auth tables that should have been removed.
+     */
+    static final List<String> OBSOLETE_AUTH_TABLES = ImmutableList.of("resource_role_permissons_index");
 
-    @VisibleForTesting
-    static Optional<String> checkLegacyAuthTablesMessage()
+    public static final StartupCheck checkLegacyAuthTables = (logger) ->
     {
-        List<String> existing = new ArrayList<>(LEGACY_AUTH_TABLES).stream().filter((legacyAuthTable) ->
-            {
-                UntypedResultSet result = QueryProcessor.executeOnceInternal(String.format("SELECT table_name FROM %s.%s WHERE keyspace_name='%s' AND table_name='%s'",
-                                                                                           SchemaConstants.SCHEMA_KEYSPACE_NAME,
-                                                                                           "tables",
-                                                                                           SchemaConstants.AUTH_KEYSPACE_NAME,
-                                                                                           legacyAuthTable));
-                return result != null && !result.isEmpty();
-            }).collect(Collectors.toList());
-
-        if (!existing.isEmpty())
-            return Optional.of(String.format("Legacy auth tables %s in keyspace %s still exist and have not been properly migrated.",
-                        Joiner.on(", ").join(existing), SchemaConstants.AUTH_KEYSPACE_NAME));
-        else
-            return Optional.empty();
+        List<String> existingTables = getExistingAuthTablesFrom(LEGACY_AUTH_TABLES);
+        if (!existingTables.isEmpty())
+        {
+            logger.warn("Legacy auth tables {} in keyspace {} still exist and have not been properly migrated.",
+                        Joiner.on(", ").join(existingTables),
+                        SchemaConstants.AUTH_KEYSPACE_NAME);
+        }
     };
+
+    public static final StartupCheck checkObsoleteAuthTables = (logger) ->
+    {
+        List<String> existingTables = getExistingAuthTablesFrom(OBSOLETE_AUTH_TABLES);
+        if (!existingTables.isEmpty())
+            logger.warn("Auth tables {} in keyspace {} exist but can safely be dropped.",
+                        Joiner.on(", ").join(existingTables),
+                        SchemaConstants.AUTH_KEYSPACE_NAME);
+    };
+
+    /**
+     * Returns the specified tables that exists in the Auth keyspace.
+     * @param tables the tables to check for existence
+     * @return the specified tables that exists in the Auth keyspace
+     */
+    private static List<String> getExistingAuthTablesFrom(List<String> tables)
+    {
+        return tables.stream().filter((table) ->
+                                      {
+                                          String cql = String.format("SELECT table_name FROM %s.%s WHERE keyspace_name='%s' AND table_name='%s'",
+                                                                     SchemaConstants.SCHEMA_KEYSPACE_NAME,
+                                                                     "tables",
+                                                                     SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                                     table);
+                                          UntypedResultSet result = QueryProcessor.executeOnceInternal(cql);
+                                          return result != null && !result.isEmpty();
+                                      }).collect(Collectors.toList());
+    }
 }
