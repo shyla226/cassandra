@@ -66,11 +66,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.AsciiType;
-import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.marshal.LongType;
-import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
@@ -1678,6 +1674,20 @@ public class SASIIndexTest
 
         Assert.assertEquals(true,  indexE.isIndexed());
         Assert.assertEquals(false, indexE.isLiteral());
+
+        // test frozen-collection
+        ColumnMetadata columnF = ColumnMetadata.regularColumn(KS_NAME,
+                                                              CF_NAME,
+                                                              "special-F",
+                                                              ListType.getInstance(UTF8Type.instance, false));
+
+        ColumnIndex indexF = new ColumnIndex(UTF8Type.instance, columnF, IndexMetadata.fromSchemaMetadata("special-index-F", IndexMetadata.Kind.CUSTOM, new HashMap<String, String>()
+        {{
+            put(IndexTarget.CUSTOM_INDEX_OPTION_NAME, SASIIndex.class.getName());
+        }}));
+
+        Assert.assertEquals(true,  indexF.isIndexed());
+        Assert.assertEquals(false, indexF.isLiteral());
     }
 
     @Test
