@@ -58,6 +58,7 @@ public class ClientState
     private static final Set<IResource> READABLE_SYSTEM_RESOURCES = new HashSet<>();
     private static final Set<IResource> PROTECTED_AUTH_RESOURCES = new HashSet<>();
     private static final Set<String> ALTERABLE_SYSTEM_KEYSPACES = new HashSet<>();
+    private static final Set<IResource> DROPPABLE_SYSTEM_TABLES = new HashSet<>();
     static
     {
         // We want these system cfs to be always readable to authenticated users since many tools rely on them
@@ -78,6 +79,7 @@ public class ClientState
         // allow users with sufficient privileges to alter KS level options on AUTH_KS and TRACING_KS
         ALTERABLE_SYSTEM_KEYSPACES.add(SchemaConstants.AUTH_KEYSPACE_NAME);
         ALTERABLE_SYSTEM_KEYSPACES.add(SchemaConstants.TRACE_KEYSPACE_NAME);
+        DROPPABLE_SYSTEM_TABLES.add(DataResource.table(SchemaConstants.AUTH_KEYSPACE_NAME, "resource_role_permissons_index"));
     }
 
     // Current user for the session
@@ -381,7 +383,7 @@ public class ClientState
         // TRACING_KS, but not to drop any tables
         if (ALTERABLE_SYSTEM_KEYSPACES.contains(resource.getKeyspace().toLowerCase())
            && ((perm == CorePermission.ALTER && !resource.isKeyspaceLevel())
-               || (perm == CorePermission.DROP)))
+               || (perm == CorePermission.DROP && !DROPPABLE_SYSTEM_TABLES.contains(resource))))
         {
             throw new UnauthorizedException(String.format("Cannot %s %s", perm, resource));
         }

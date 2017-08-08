@@ -24,6 +24,12 @@ Operations
      See `nodetool help rebuild` about which combinations of DCs/racks or endpoints to include or
      exclude are possible. (APOLLO-581)
 
+Upgrading
+---------
+
+   - The table system_auth.resource_role_permissons_index is no longer used and should be dropped
+     after all nodes are on 6.0.
+
 
 4.0
 ===
