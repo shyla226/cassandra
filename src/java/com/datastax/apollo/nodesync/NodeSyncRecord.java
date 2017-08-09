@@ -182,7 +182,7 @@ public class NodeSyncRecord
         Iterables.addAll(records, coveringRecords);
 
         // Skips any segment that ends before our interested range
-        while (!records.isEmpty() && records.peek().segment.range.right.compareTo(range.left) <= 0)
+        while (!records.isEmpty() && compareLeftRight(range.left, records.peek().segment.range.right) >= 0)
             records.poll();
 
         if (records.isEmpty())
@@ -192,7 +192,7 @@ public class NodeSyncRecord
         NodeSyncRecord first = records.poll();
         // The first record is not entirely on the left of our segment. But if it starts after our segment start, we're
         // done as it means some part of the range is not covered by any record.
-        if (first.segment.range.left.compareTo(range.left) > 0)
+        if (compareLeftLeft(first.segment.range.left, range.left) > 0)
             return null;
 
         TableMetadata table = first.segment.table;
@@ -200,7 +200,7 @@ public class NodeSyncRecord
         Token currRight = first.segment.range.right;
         ValidationInfo currInfo = getter.apply(first);
 
-        while (!records.isEmpty() && currLeft.compareTo(range.right) < 0)
+        while (!records.isEmpty() && compareLeftRight(currLeft, range.right) < 0)
         {
             NodeSyncRecord nextRecord = records.poll();
             Token nextLeft = nextRecord.segment.range.left;
@@ -209,7 +209,7 @@ public class NodeSyncRecord
 
             // Enforces rule 1. of the javadoc: if the next record starts strictly after what we've seen so far, we have
             // a "hole"
-            int leftRightCmp = nextLeft.compareTo(currRight);
+            int leftRightCmp = compareLeftRight(nextLeft, currRight);
             if (leftRightCmp > 0)
                 return null;
 
@@ -226,13 +226,13 @@ public class NodeSyncRecord
             {
                 // The next record intersects with our current one for some part. We can add to the output the info
                 // corresponding to _before_ the intersection (if there is any).
-                if (currLeft.compareTo(nextLeft) < 0)
+                if (compareLeftLeft(currLeft, nextLeft) < 0)
                     step1Output.add(currInfo);
 
                 // Then we're going to update the current info, left and right to reflect the intersection of the current
                 // and next record. But said intersection only goes up to whichever record stops first, so we should make
                 // sure to push the handling of what's remain to later.
-                int rightRightCmp = nextRight.compareTo(currRight);
+                int rightRightCmp = compareRightRight(nextRight, currRight);
                 if (rightRightCmp < 0)
                 {
                     // The next record ends before the current one. Push the rest of the current one afterwards.
@@ -252,9 +252,9 @@ public class NodeSyncRecord
             }
         }
         // Unless we exited the loop because we where past our range of interest, we should deal with what's outstanding
-        if (currRight.compareTo(range.right) < 0)
+        if (compareRightRight(currRight, range.right) < 0)
             return null;
-        if (currLeft.compareTo(range.right) < 0)
+        if (compareLeftRight(currLeft, range.right) < 0)
             step1Output.add(currInfo);
 
         // Step 2:
@@ -280,25 +280,25 @@ public class NodeSyncRecord
         int i = 0;
 
         // Skip records that are fully before our range of interest
-        while (coveringRecords.get(i).segment.range.right.compareTo(range.left) <= 0)
+        while (compareLeftRight(range.left, coveringRecords.get(i).segment.range.right) >= 0)
             if (++i == coveringRecords.size()) return null; //all ranges before range of interest
 
         // If the first record that ends after our range start is strictly after said start, it means at least some part
         // of the range is not covered by a record and is thus not locked.
-        if (coveringRecords.get(i).segment.range.left.compareTo(range.left) > 0)
+        if (compareLeftLeft(coveringRecords.get(i).segment.range.left, range.left) > 0)
             return null;
 
-        InetAddress lockedBy = null;
-        Token lockedUpTo = range.left;
-        while (i < coveringRecords.size() && lockedUpTo.compareTo(range.right) < 0)
+        InetAddress lockedBy = coveringRecords.get(i).lockedBy;
+        Token lockedUpTo = coveringRecords.get(i).segment.range.right;
+        while (++i < coveringRecords.size() && compareRightRight(lockedUpTo, range.right) < 0)
         {
-            NodeSyncRecord record = coveringRecords.get(i++);
+            NodeSyncRecord record = coveringRecords.get(i);
             // If we have a gap with no records, we can lock the whole range
-            if (record.segment.range.left.compareTo(lockedUpTo) > 0)
+            if (compareLeftRight(record.segment.range.left, lockedUpTo) > 0)
                 return null;
 
             // If the range is strictly comprised within range that we know are locked, we can ignore it.
-            if (record.segment.range.right.compareTo(lockedUpTo) <= 0)
+            if (compareRightRight(record.segment.range.right, lockedUpTo) <= 0)
                 continue;
 
             // Otherwise, extend lockedUpTo if the record is locked itself. If the record is not locked, we do nothing
@@ -311,8 +311,32 @@ public class NodeSyncRecord
             }
         }
 
-        return lockedUpTo.compareTo(range.right) < 0 ? null : lockedBy;
-
+        return compareRightRight(lockedUpTo, range.right) < 0 ? null : lockedBy;
+    }
+    
+    private static int compareLeftLeft(Token l1, Token l2)
+    {
+        return l1.compareTo(l2);
+    }
+    
+    private static int compareLeftRight(Token l, Token r)
+    {
+        if (r.isMinimum())
+            return -1;
+        
+        return l.compareTo(r);
+    }
+    
+    private static int compareRightRight(Token r1, Token r2)
+    {
+        if (r1.isMinimum() && r2.isMinimum())
+            return 0;
+        if (r1.isMinimum())
+            return 1;
+        if (r2.isMinimum())
+            return -1;
+        
+        return r1.compareTo(r2);
     }
 
     @Override
