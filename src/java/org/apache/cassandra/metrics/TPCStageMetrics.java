@@ -35,6 +35,10 @@ public class TPCStageMetrics
     public final Gauge<Integer> activeTasks;
     /** Number of completed tasks. */
     public final Gauge<Long> completedTasks;
+    /** Number of pending tasks. */
+    public final Gauge<Integer> pendingTasks;
+    /** Number of blocked tasks. */
+    public final Gauge<Long> blockedTasks;
 
     public final TPCMetrics metrics;
     public final TPCTaskType stage;
@@ -60,7 +64,7 @@ public class TPCStageMetrics
         {
             public Integer getValue()
             {
-                return (int) (metrics.scheduledTaskCount(stage) - metrics.completedTaskCount(stage));
+                return (int) (metrics.activeTaskCount(stage));
             }
         });
         completedTasks = Metrics.register(factory.createMetricName("CompletedTasks"), new Gauge<Long>()
@@ -70,11 +74,38 @@ public class TPCStageMetrics
                 return metrics.completedTaskCount(stage);
             }
         });
+        if (stage.pendable)
+        {
+            pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), new Gauge<Integer>()
+            {
+                public Integer getValue()
+                {
+                    return (int) (metrics.pendingTaskCount(stage));
+                }
+            });
+            blockedTasks = Metrics.register(factory.createMetricName("TotalBlockedTasksGauge"), new Gauge<Long>()
+            {
+                public Long getValue()
+                {
+                    return metrics.blockedTaskCount(stage);
+                }
+            });
+        }
+        else
+        {
+            pendingTasks = null;
+            blockedTasks = null;
+        }
     }
 
     public void release()
     {
         Metrics.remove(factory.createMetricName("ActiveTasks"));
         Metrics.remove(factory.createMetricName("CompletedTasks"));
+        if (pendingTasks != null)
+        {
+            Metrics.remove(factory.createMetricName("PendingTasks"));
+            Metrics.remove(factory.createMetricName("TotalBlockedTasksGauge"));
+        }
     }
 }

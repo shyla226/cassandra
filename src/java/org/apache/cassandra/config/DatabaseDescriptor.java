@@ -1527,6 +1527,16 @@ public class DatabaseDescriptor
         conf.concurrent_validations = value;
     }
 
+    public static int getTPCConcurrentRequestsLimit()
+    {
+        return conf.tpc_concurrent_requests_limit;
+    }
+
+    public static int getTPCPendingRequestsLimit()
+    {
+        return conf.tpc_pending_requests_limit;
+    }
+
     public static long getMinFreeSpacePerDriveInBytes()
     {
         return conf.min_free_space_per_drive_in_mb * 1024L * 1024L;

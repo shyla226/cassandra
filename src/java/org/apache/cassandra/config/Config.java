@@ -176,6 +176,9 @@ public class Config
 
     public volatile int concurrent_validations = Integer.MAX_VALUE;
 
+    public volatile int tpc_concurrent_requests_limit = 128;
+    public volatile int tpc_pending_requests_limit = 65536;
+
     /**
      * @deprecated retry support removed on CASSANDRA-10992
      */

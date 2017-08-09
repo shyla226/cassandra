@@ -23,7 +23,7 @@ import java.util.Map;
 /**
  * Interface for recoding TPC thread metrics.
  */
-public interface TPCMetrics
+public interface TPCMetrics extends TPCLimitsMBean
 {
     // Task notifications
 
@@ -33,10 +33,24 @@ public interface TPCMetrics
     public void starting(TPCTaskType stage);
     public void failed(TPCTaskType stage, Throwable t);
     public void completed(TPCTaskType stage);
-    // This could be called from another thread as well.
+    // These could be called from another thread as well.
     public void cancelled(TPCTaskType stage);
+    public void pending(TPCTaskType stage, int adjustment);
+    public void blocked(TPCTaskType stage);
 
     // Information extraction for consumption by JMX etc
     public long scheduledTaskCount(TPCTaskType stage);
     public long completedTaskCount(TPCTaskType stage);
+    public long activeTaskCount(TPCTaskType stage);
+    public long pendingTaskCount(TPCTaskType stage);
+    public long blockedTaskCount(TPCTaskType stage);
+
+    /**
+     * The maximum size of the TPC queue, which is calculated by subtracting the number of async read outstanding
+     * from the maximum permitted concurrent requests.
+     *
+     * This is done because async reads do not show up in the TPC queue, and even if they did they would end up
+     * combining multiple requests served by one cache fetch.
+     */
+    public int maxQueueSize();
 }

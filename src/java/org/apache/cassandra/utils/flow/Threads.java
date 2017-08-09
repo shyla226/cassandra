@@ -23,6 +23,7 @@ import java.util.concurrent.Callable;
 
 import io.reactivex.Scheduler;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
@@ -208,7 +209,7 @@ public class Threads
                 if (TPC.isOnCore(coreId))
                     run();
                 else
-                    scheduler.scheduleDirect(this);
+                    TPC.getForCore(coreId).execute(this, ExecutorLocals.create(), stage);
                 break;
             default:
                 // Assuming no need to switch threads for no work.

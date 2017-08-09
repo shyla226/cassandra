@@ -60,6 +60,11 @@ public class TPCThread extends FastThreadLocalThread
         return new TPCThreadsCreator();
     }
 
+    public TPCMetrics metrics()
+    {
+        return TPC.metrics(coreId);
+    }
+
     /**
      * An {@link Executor} that creates a new TPC thread for every new command passed. Newly created TPC threads are
      * created with increasing core ID. This is to be used when creating the events loop (within the

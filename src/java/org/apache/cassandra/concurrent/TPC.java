@@ -108,6 +108,9 @@ public class TPC
     // Initialization
     static
     {
+        for (int i = 0; i <= NUM_CORES; ++i)
+            perCoreMetrics[i] = new TPCMetricsAndLimits();
+
         // Creates the event loops
         if (USE_EPOLL)
         {
@@ -123,23 +126,19 @@ public class TPC
             logger.info("Created {} NIO event loops (with I/O ratio set to {}).", NUM_CORES, NIO_IO_RATIO);
         }
 
-        for (int i = 0; i < NUM_CORES; ++i)
-        {
-            perCoreMetrics[i] = new TPCCoreMetrics();
-            new TPCTotalMetrics(perCoreMetrics[i], "internal", "TPC/" + i);
-        }
-        perCoreMetrics[NUM_CORES] = new TPCOtherMetrics();
-        new TPCTotalMetrics(perCoreMetrics[NUM_CORES], "internal", "TPC/other");
-        for (TPCTaskType type : TPCTaskType.values())
-            new TPCAggregatedStageMetrics(perCoreMetrics, type, "internal", "TPC/all");
-
-
         // Then create and set the scheduler corresponding to each event loop. Note that the initialization of each
         // scheduler must be done on the thread corresponding to that scheduler/event loop because 1) we need to be able
         // to access said thread easily and 2) we set thread locals as part of the initialization.
         eventLoopGroup.eventLoops().forEach(TPC::register);
 
         initRx();
+
+        // Publish metrics.
+        for (int i = 0; i < NUM_CORES; ++i)
+            new TPCTotalMetrics(perCoreMetrics[i], "internal", "TPC/" + i);
+        new TPCTotalMetrics(perCoreMetrics[NUM_CORES], "internal", "TPC/other");
+        for (TPCTaskType type : TPCTaskType.values())
+            new TPCAggregatedStageMetrics(perCoreMetrics, type, "internal", "TPC/all");
     }
 
     private static void register(TPCEventLoop loop)

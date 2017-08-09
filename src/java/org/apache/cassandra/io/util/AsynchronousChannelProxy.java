@@ -31,10 +31,12 @@ import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.channel.ChannelException;
 import io.netty.channel.epoll.AIOEpollFileChannel;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.channel.unix.FileDescriptor;
@@ -116,15 +118,51 @@ public final class AsynchronousChannelProxy extends AbstractChannelProxy<Asynchr
         return channel instanceof AIOEpollFileChannel;
     }
 
+    static final int MAX_RETRIES = 10;
+
     public void read(ByteBuffer dest, long offset, CompletionHandler<Integer, ByteBuffer> onComplete)
     {
+        CompletionHandler<Integer, ByteBuffer> retryingHandler = new CompletionHandler<Integer, ByteBuffer>()
+        {
+            int retries = 0;
+
+            public void completed(Integer result, ByteBuffer attachment)
+            {
+                onComplete.completed(result, attachment);
+            }
+
+            public void failed(Throwable exc, ByteBuffer attachment)
+            {
+                if (exc instanceof ChannelException && exc.getMessage().contains("Resource temporarily unavailable"))
+                {
+                    // This is EAGAIN, there are too many concurrent requests. As we limit the number of concurrent
+                    // tasks in the queue, this should not normally be hit. However, it can happen if the node is
+                    // heavily pounded by read requests. Rather than immediately failing (and even marking the sstable
+                    // as suspect), retry the read, backing off exponentially longer with each retry.
+                    if (++retries < MAX_RETRIES)
+                    {
+                        logger.warn("Got {}. Retrying {} more times.", exc.getMessage(), MAX_RETRIES - retries);
+                        TPC.bestTPCScheduler().scheduleDirect(() -> channel.read(dest, offset, dest, this),
+                                                              1 << retries - 1,
+                                                              TimeUnit.MILLISECONDS);
+                        return;
+                    }
+                    else
+                    {
+                        logger.error("Got {} and exhausted all retries.", exc.getMessage());
+                    }
+                }
+                onComplete.failed(exc, attachment);
+            }
+        };
+
         try
         {
-            channel.read(dest, offset, dest, onComplete);
+            channel.read(dest, offset, dest, retryingHandler);
         }
         catch (Throwable t)
         {
-            onComplete.failed(t, dest);
+            retryingHandler.failed(t, dest);
         }
     }
 

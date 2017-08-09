@@ -120,7 +120,10 @@ public class ThreadPoolMetrics
             ObjectName oName = new ObjectName(name);
             if (!mbeanServerConn.isRegistered(oName))
             {
-                return "N/A";
+                oName = new ObjectName(name + "Gauge");
+                metricName += "Gauge";
+                if (!mbeanServerConn.isRegistered(oName))
+                    return "N/A";
             }
 
             switch (metricName)
@@ -128,6 +131,7 @@ public class ThreadPoolMetrics
                 case "ActiveTasks":
                 case "PendingTasks":
                 case "CompletedTasks":
+                case "TotalBlockedTasksGauge":
                     return JMX.newMBeanProxy(mbeanServerConn, oName, JmxReporter.JmxGaugeMBean.class).getValue();
                 case "TotalBlockedTasks":
                 case "CurrentlyBlockedTasks":

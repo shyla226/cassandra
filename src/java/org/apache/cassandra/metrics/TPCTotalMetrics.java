@@ -36,6 +36,10 @@ public class TPCTotalMetrics
     public final Gauge<Integer> activeTasks;
     /** Number of completed tasks. */
     public final Gauge<Long> completedTasks;
+    /** Number of pending tasks. */
+    public final Gauge<Integer> pendingTasks;
+    /** Number of blocked tasks. */
+    public final Gauge<Long> blockedTasks;
 
     public final TPCMetrics metrics;
 
@@ -69,6 +73,20 @@ public class TPCTotalMetrics
                 return getCompletedTotal();
             }
         });
+        pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), new Gauge<Integer>()
+        {
+            public Integer getValue()
+            {
+                return getPendingTotal();
+            }
+        });
+        blockedTasks = Metrics.register(factory.createMetricName("TotalBlockedTasksGauge"), new Gauge<Long>()
+        {
+            public Long getValue()
+            {
+                return getBlockedTotal();
+            }
+        });
 
         stages = new EnumMap<>(TPCTaskType.class);
         for (TPCTaskType s : TPCTaskType.values())
@@ -79,7 +97,7 @@ public class TPCTotalMetrics
     {
         long active = 0;
         for (TPCTaskType s : TPCTaskType.values())
-            active += metrics.scheduledTaskCount(s) - metrics.completedTaskCount(s);
+            active += metrics.activeTaskCount(s);
         return (int) active;
     }
 
@@ -91,10 +109,28 @@ public class TPCTotalMetrics
         return completed;
     }
 
+    private int getPendingTotal()
+    {
+        long pending = 0;
+        for (TPCTaskType s : TPCTaskType.values())
+            pending += metrics.pendingTaskCount(s);
+        return (int) pending;
+    }
+
+    private long getBlockedTotal()
+    {
+        long blocked = 0;
+        for (TPCTaskType s : TPCTaskType.values())
+            blocked += metrics.blockedTaskCount(s);
+        return blocked;
+    }
+
     public void release()
     {
         Metrics.remove(factory.createMetricName("ActiveTasks"));
         Metrics.remove(factory.createMetricName("CompletedTasks"));
+        Metrics.remove(factory.createMetricName("PendingTasks"));
+        Metrics.remove(factory.createMetricName("TotalBlockedTasksGauge"));
         for (TPCTaskType s : TPCTaskType.values())
             stages.get(s).release();
     }

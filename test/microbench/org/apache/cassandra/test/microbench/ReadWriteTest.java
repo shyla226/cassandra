@@ -33,6 +33,8 @@ import io.reactivex.Scheduler;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCMetrics;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -54,10 +56,10 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 @Measurement(iterations = 10, time = 2, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 1
 , jvmArgsAppend = {"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
-                   "-Dcassandra.storagedir=/tmp/foobar",
-                   "-XX:CompileCommandFile=/home/jake/workspace/cassandra/conf/hotspot_compiler",
-                                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder",
-                                   "-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints", "-XX:+PreserveFramePointer"
+//                   "-Dcassandra.storagedir=/tmp/foobar",
+//                   "-XX:CompileCommandFile=/home/jake/workspace/cassandra/conf/hotspot_compiler",
+//                                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder",
+//                                   "-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints", "-XX:+PreserveFramePointer"
                                    //"-XX:StartFlightRecording=duration=60s,filename=./profiling-data.jfr,name=profile,settings=profile",
                                   // "-XX:FlightRecorderOptions=settings=/home/jake/workspace/cassandra/profiling-advanced.jfc,samplethreads=true"
 }
@@ -70,10 +72,10 @@ public class ReadWriteTest extends CQLTester
     String table;
     PreparedStatement writeStatement;
     PreparedStatement readStatement;
-    long numRows = 5000;
+    int numRows = 1_100_000;
     long numReads = 0;
 
-    @Param({"64"})
+    @Param({"1000", "64"})
     int INFLIGHT = 1;
     List<ResultSetFuture> futures;
     ColumnFamilyStore cfs;
@@ -99,16 +101,46 @@ public class ReadWriteTest extends CQLTester
         cfs.disableAutoCompaction();
 
         //Warm up
-        System.err.println("Writing " + numRows);
-        for (long i = 0; i < numRows; i++)
-            executeNet(ProtocolVersion.CURRENT, writeStatement.bind(i,i,i));
-
         futures = new ArrayList<>(INFLIGHT);
+        System.err.println("Writing " + numRows);
+        int lastPrint = 0;
+        for (int i = 0; i < numRows; i += INFLIGHT)
+        {
+            int max = Math.min(INFLIGHT, numRows - i);
+            for (int j = 0; j < max; ++j)
+            {
+                long v = i + j;
+                futures.add(executeNetAsync(ProtocolVersion.CURRENT, writeStatement.bind(v, v, v)));
+            }
+            FBUtilities.waitOnFutures(futures);
+            futures.clear();
+
+            if (i - lastPrint > numRows / 100)
+            {
+                System.out.print(".");
+                lastPrint = i;
+            }
+        }
+        cfs.forceBlockingFlush();
+
     }
 
     @TearDown(Level.Trial)
     public void teardown() throws IOException, ExecutionException, InterruptedException
     {
+        for (TPCTaskType stage : TPCTaskType.values())
+        {
+            String v = "";
+            for (int i = 0; i < TPC.perCoreMetrics.length; ++i)
+            {
+                TPCMetrics metrics = TPC.perCoreMetrics[i];
+                if (metrics.completedTaskCount(stage) > 0)
+                    v += String.format(" %d: %,d(%,d)", i, metrics.completedTaskCount(stage), metrics.blockedTaskCount(stage));
+            }
+            if (!v.isEmpty())
+                System.out.println(stage + ":" + v);
+        }
+
         JVMStabilityInspector.removeShutdownHooks();
         CQLTester.tearDownClass();
         CQLTester.cleanup();

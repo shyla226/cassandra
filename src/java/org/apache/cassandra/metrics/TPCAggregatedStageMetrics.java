@@ -35,6 +35,10 @@ public class TPCAggregatedStageMetrics
     public final Gauge<Integer> activeTasks;
     /** Number of completed tasks. */
     public final Gauge<Long> completedTasks;
+    /** Number of pending tasks. */
+    public final Gauge<Integer> pendingTasks;
+    /** Number of blocked tasks. */
+    public final Gauge<Long> blockedTasks;
 
     public final TPCMetrics[] metrics;
     public final TPCTaskType stage;
@@ -62,7 +66,7 @@ public class TPCAggregatedStageMetrics
             {
                 long v = 0;
                 for (int i = 0; i < metrics.length; ++i)
-                    v += (metrics[i].scheduledTaskCount(stage) - metrics[i].completedTaskCount(stage));
+                    v += metrics[i].activeTaskCount(stage);
                 return (int) v;
             }
         });
@@ -76,11 +80,44 @@ public class TPCAggregatedStageMetrics
                 return v;
             }
         });
+        if (stage.pendable)
+        {
+            pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), new Gauge<Integer>()
+            {
+                public Integer getValue()
+                {
+                    long v = 0;
+                    for (int i = 0; i < metrics.length; ++i)
+                        v += metrics[i].pendingTaskCount(stage);
+                    return (int) v;
+                }
+            });
+            blockedTasks = Metrics.register(factory.createMetricName("TotalBlockedTasksGauge"), new Gauge<Long>()
+            {
+                public Long getValue()
+                {
+                    long v = 0;
+                    for (int i = 0; i < metrics.length; ++i)
+                        return metrics[i].blockedTaskCount(stage);
+                    return v;
+                }
+            });
+        }
+        else
+        {
+            pendingTasks = null;
+            blockedTasks = null;
+        }
     }
 
     public void release()
     {
         Metrics.remove(factory.createMetricName("ActiveTasks"));
         Metrics.remove(factory.createMetricName("CompletedTasks"));
+        if (pendingTasks != null)
+        {
+            Metrics.remove(factory.createMetricName("PendingTasks"));
+            Metrics.remove(factory.createMetricName("TotalBlockedTasksGauge"));
+        }
     }
 }

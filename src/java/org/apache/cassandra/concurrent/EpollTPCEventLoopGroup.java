@@ -19,7 +19,6 @@
 package org.apache.cassandra.concurrent;
 
 
-import java.util.ArrayDeque;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -29,7 +28,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.Uninterruptibles;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,7 +39,6 @@ import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.channel.epoll.Native;
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
 import io.netty.util.concurrent.RejectedExecutionHandlers;
-
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
@@ -154,6 +151,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
         private final EpollTPCEventLoopGroup parent;
         private final TPCThread thread;
+        private final TPCMetrics metrics;
 
         private static final int busyExtraSpins =  1024 * 128;
         private static final int yieldExtraSpins = 1024 * 8;
@@ -165,11 +163,9 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         @Contended
         private volatile CoreState state;
 
-        @Contended
-        private final MpscArrayQueue<Runnable> externalQueue;
+        private final MpscArrayQueue<Runnable> queue;
+        private final MpscArrayQueue<TPCRunnable> pendingQueue;
 
-        @Contended
-        private final ArrayDeque<Runnable> internalQueue;
 
         private volatile long lastDrainTime;
 
@@ -178,8 +174,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             super(parent, executor, 0,  DefaultSelectStrategyFactory.INSTANCE.newSelectStrategy(), RejectedExecutionHandlers.reject(), true);
 
             this.parent = parent;
-            this.externalQueue = new MpscArrayQueue<>(1 << 16);
-            this.internalQueue = new ArrayDeque<>(1 << 16);
+            this.queue = new MpscArrayQueue<>(1 << 16);
 
             this.state = CoreState.WORKING;
             this.lastDrainTime = -1;
@@ -190,6 +185,10 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
             this.thread = executor.lastCreatedThread();
             assert this.thread != null;
+            TPCMetrics metrics = this.thread.metrics();
+
+            this.pendingQueue = new MpscArrayQueue<>(metrics.maxPendingQueueSize());
+            this.metrics = metrics;
         }
 
         public TPCThread thread()
@@ -290,20 +289,30 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         @Override
         protected void addTask(Runnable task)
         {
-            Thread currentThread = Thread.currentThread();
+            if (task instanceof TPCRunnable)
+            {
+                TPCRunnable tpc = (TPCRunnable) task;
+                if (tpc.isPendable())
+                {
+                    // If we already have something in the pending queue, this task should not jump it.
+                    if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(task, metrics.maxQueueSize()))
+                        return;
 
-            // Side-note: 'thread' will be null the very first time this is called for the empty task submitted in the
-            // ctor to kick-start the loop. This is fine, but that means 'thread' shouldn't be de-referenced.
-            if (currentThread == thread)
-            {
-                if (!internalQueue.offer(task))
-                    reject(task);
+                    if (pendingQueue.relaxedOffer(tpc))
+                    {
+                        tpc.setPending();
+                        return;
+                    }
+                    else
+                    {
+                        tpc.blocked();
+                        reject(task);
+                    }
+                }
             }
-            else
-            {
-                if (!externalQueue.relaxedOffer(task))
-                    reject(task);
-            }
+
+            if (!queue.relaxedOffer(task))
+                reject(task);
         }
 
         private int drain()
@@ -369,6 +378,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         private int drainTasks()
         {
             int processed = 0;
+            movePending();
 
             try
             {
@@ -379,16 +389,12 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
                 }
 
                 Runnable r;
-                while ((r = internalQueue.poll()) != null && processed < Short.MAX_VALUE)
-                {
-                    r.run();
-                    ++processed;
-                }
 
-                while ((r = externalQueue.relaxedPoll()) != null && processed < Short.MAX_VALUE * 2)
+                while ((r = queue.relaxedPoll()) != null && processed < Short.MAX_VALUE)
                 {
                     r.run();
                     ++processed;
+                    movePending();
                 }
             }
             catch (Throwable t)
@@ -409,11 +415,24 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             return processed;
         }
 
+        private void movePending()
+        {
+            if (metrics != null && queue.size() < metrics.maxQueueSize())
+            {
+                TPCRunnable tpc = pendingQueue.relaxedPoll();
+                if (tpc != null)
+                {
+                    queue.relaxedOffer(tpc);
+                    tpc.unsetPending();
+                }
+            }
+        }
+
         @Override
         @Inline
         protected boolean hasTasks()
         {
-            boolean hasTasks = internalQueue.peek() != null || externalQueue.relaxedPeek() != null;
+            boolean hasTasks = queue.relaxedPeek() != null;
 
             if (!hasTasks && delayedNanosDeadline > 0)
                 hasTasks = hasScheduledTasks(delayedNanosDeadline);
@@ -425,6 +444,8 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         boolean isEmpty()
         {
             if (hasTasks())
+                return false;
+            if (pendingQueue != null && !pendingQueue.isEmpty())
                 return false;
 
             try

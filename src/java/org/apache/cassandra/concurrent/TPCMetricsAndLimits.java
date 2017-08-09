@@ -21,23 +21,29 @@ import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+
 
 /**
  * Task counter for other threads used in TPC tasks. This can be called from multiple threads concurrently
  * and needs to do atomic counting.
  */
-public class TPCOtherMetrics implements TPCMetrics
+public class TPCMetricsAndLimits implements TPCMetrics
 {
     static class TaskStats
     {
         AtomicLong scheduledTasks = new AtomicLong(0);
-        AtomicLong startedTasks = new AtomicLong(0);
         AtomicLong completedTasks = new AtomicLong(0);
         AtomicLong failedTasks = new AtomicLong(0);
+        AtomicLong blockedTasks = new AtomicLong(0);
+        AtomicLong pendingTasks = new AtomicLong(0);
     }
     final EnumMap<TPCTaskType, TaskStats> stats;
 
-    public TPCOtherMetrics()
+    int maxConcurrentRequests = DatabaseDescriptor.getTPCConcurrentRequestsLimit();
+    int maxPendingQueueSize = DatabaseDescriptor.getTPCPendingRequestsLimit();
+
+    public TPCMetricsAndLimits()
     {
         this.stats = new EnumMap<>(TPCTaskType.class);
         for (TPCTaskType s : TPCTaskType.values())
@@ -53,8 +59,7 @@ public class TPCOtherMetrics implements TPCMetrics
 
     public void starting(TPCTaskType stage)
     {
-        TaskStats stat = stats.get(stage);
-        stat.startedTasks.incrementAndGet();
+        // We don't currently track this.
     }
 
     public void failed(TPCTaskType stage, Throwable t)
@@ -75,6 +80,18 @@ public class TPCOtherMetrics implements TPCMetrics
         completed(stage);
     }
 
+    public void pending(TPCTaskType stage, int adjustment)
+    {
+        TaskStats stat = stats.get(stage);
+        stat.pendingTasks.addAndGet(adjustment);
+    }
+
+    public void blocked(TPCTaskType stage)
+    {
+        TaskStats stat = stats.get(stage);
+        stat.blockedTasks.incrementAndGet();
+    }
+
     public long scheduledTaskCount(TPCTaskType stage)
     {
         TaskStats stat = stats.get(stage);
@@ -85,5 +102,45 @@ public class TPCOtherMetrics implements TPCMetrics
     {
         TaskStats stat = stats.get(stage);
         return stat.completedTasks.get();
+    }
+
+    public long activeTaskCount(TPCTaskType stage)
+    {
+        TaskStats stat = stats.get(stage);
+        return stat.scheduledTasks.get() - stat.completedTasks.get() - stat.pendingTasks.get();
+    }
+
+    public long pendingTaskCount(TPCTaskType stage)
+    {
+        TaskStats stat = stats.get(stage);
+        return stat.pendingTasks.get();
+    }
+
+    public long blockedTaskCount(TPCTaskType stage)
+    {
+        TaskStats stat = stats.get(stage);
+        return stat.blockedTasks.get();
+    }
+
+    public int maxQueueSize()
+    {
+        TaskStats stat = stats.get(TPCTaskType.READ_DISK_ASYNC);
+        long activeReads = stat.scheduledTasks.get() - stat.completedTasks.get();
+        return (int) Math.max(maxConcurrentRequests - activeReads, 0);
+    }
+
+    public int maxPendingQueueSize()
+    {
+        return maxPendingQueueSize;
+    }
+
+    public int getMaxConcurrentRequests()
+    {
+        return maxConcurrentRequests;
+    }
+
+    public void setMaxConcurrentRequests(int maxConcurrentRequests)
+    {
+        this.maxConcurrentRequests = maxConcurrentRequests;
     }
 }

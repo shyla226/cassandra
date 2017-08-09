@@ -1,4 +1,5 @@
 dse 6.0.0
+ * Limit the number of concurrent requests in TPC and retry on EAGAIN (APOLLO-1011)
  * Allow altering nodesync param on distributed system tables (APOLLO-965)
  * Clarify resource clean-up by Flow and flowable partitions (APOLLO-1074)
  * Do not use memory-mapping for the commit log (APOLLO-1061)

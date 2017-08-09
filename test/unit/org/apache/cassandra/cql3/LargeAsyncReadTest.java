@@ -16,62 +16,41 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.test.microbench;
+package org.apache.cassandra.cql3;
 
 
 import java.io.IOException;
 import java.util.Random;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import io.reactivex.Scheduler;
-import io.reactivex.functions.Consumer;
-import io.reactivex.plugins.RxJavaPlugins;
-import io.reactivex.schedulers.Schedulers;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+
+import io.reactivex.SingleObserver;
+import io.reactivex.disposables.Disposable;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCMetrics;
 import org.apache.cassandra.concurrent.TPCTaskType;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.tools.nodetool.SetBatchlogReplayThrottle;
-import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.openjdk.jmh.annotations.*;
 
-@BenchmarkMode(Mode.AverageTime)
-@OutputTimeUnit(TimeUnit.MILLISECONDS)
-@Warmup(iterations = 10, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 15, time = 2, timeUnit = TimeUnit.SECONDS)
-@Fork(value = 1)
-@Threads(1)
-@State(Scope.Benchmark)
-public class ReadWriteTestSmall extends CQLTester
+public class LargeAsyncReadTest extends CQLTester
 {
     static String keyspace;
     String table;
     String writeStatement;
     String readStatement;
-    long numRows = 0;
     ColumnFamilyStore cfs;
-    static final int count = 1_100_000;
-
-    @Param({"10000", "1000", "100"})
-    int BATCH = 2_500;
+    static final int count = 500_000;
+    int BATCH = 10_000;
 
     Random rand = new Random(1);
 
-    @Setup(Level.Trial)
-    public void setup() throws Throwable
+    @Before
+    public void prepare() throws Throwable
     {
-        Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters()));
-        RxJavaPlugins.setComputationSchedulerHandler((s) -> TPC.bestTPCScheduler());
-        RxJavaPlugins.initIoScheduler(() -> ioScheduler);
-        RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
-
-        CQLTester.setUpClass();
-//        CQLTester.requireNetwork();
         System.err.println("setupClass done.");
         keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
         table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid)) with compression = {'enabled': false}");
@@ -83,7 +62,6 @@ public class ReadWriteTestSmall extends CQLTester
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();
 
-        //Warm up
         System.err.println("Writing " + count);
         for (long i = 0; i < count; i++)
             execute(writeStatement, i, i, i );
@@ -95,7 +73,7 @@ public class ReadWriteTestSmall extends CQLTester
         }
     }
 
-    @TearDown(Level.Trial)
+    @After
     public void teardown() throws IOException, ExecutionException, InterruptedException
     {
         for (TPCTaskType stage : TPCTaskType.values())
@@ -105,63 +83,26 @@ public class ReadWriteTestSmall extends CQLTester
             {
                 TPCMetrics metrics = TPC.perCoreMetrics[i];
                 if (metrics.completedTaskCount(stage) > 0)
-                    v += String.format(" %d: %,d", i, metrics.completedTaskCount(stage));
+                    v += String.format(" %d: %,d(%,d)", i, metrics.completedTaskCount(stage), metrics.blockedTaskCount(stage));
             }
             if (!v.isEmpty())
                 System.out.println(stage + ":" + v);
         }
-
-        JVMStabilityInspector.removeShutdownHooks();
-        CQLTester.tearDownClass();
-        CQLTester.cleanup();
     }
 
-    @Benchmark
-    public Object write() throws Throwable
-    {
-        numRows++;
-        return execute(writeStatement, numRows, numRows, numRows );
-    }
-
-
-    @Benchmark
-    public Object readRandomInside() throws Throwable
+    @Test
+    public void readLargeBatch() throws Throwable
     {
         Waiter<UntypedResultSet> waiter = new Waiter<>(BATCH);
         for (int i = 0; i < BATCH; ++i)
             executeAsync(readStatement, (long) rand.nextInt(count)).subscribe(waiter);
-        return waiter.get();
+        waiter.get();
     }
 
-    @Benchmark
-    public Object readRandomWOutside() throws Throwable
-    {
-        return execute(readStatement, (long) rand.nextInt(count + count / 6));
-    }
-
-    @Benchmark
-    public Object readFixed() throws Throwable
-    {
-        return execute(readStatement, 1234567890123L % count);
-    }
-
-    @Benchmark
-    public Object readOutside() throws Throwable
-    {
-        return execute(readStatement, count + 1234567L);
-    }
-
-    @Override
-    public UntypedResultSet execute(String query, Object... values) throws Throwable
-    {
-        Waiter<UntypedResultSet> waiter = new Waiter<>(1);
-        executeAsync(query, values).subscribe(waiter);
-        return waiter.get();
-    }
-
-    static class Waiter<T> implements Consumer<T>
+    static class Waiter<T> implements SingleObserver<T>
     {
         T value;
+        Throwable error = null;
         final AtomicInteger countNeeded;
 
         Waiter(int countNeeded)
@@ -169,18 +110,36 @@ public class ReadWriteTestSmall extends CQLTester
             this.countNeeded = new AtomicInteger(countNeeded);
         }
 
-        public T get()
+        public T get() throws Throwable
         {
             while (countNeeded.get() > 0)
-//            {}
                 Thread.yield();
 
+            if (error != null)
+                throw error;
             return value;
         }
 
         public void accept(T v) throws Exception
         {
             value = v;
+            countNeeded.decrementAndGet();
+        }
+
+        public void onSubscribe(Disposable disposable)
+        {
+
+        }
+
+        public void onSuccess(T v)
+        {
+            value = v;
+            countNeeded.decrementAndGet();
+        }
+
+        public void onError(Throwable throwable)
+        {
+            error = throwable;
             countNeeded.decrementAndGet();
         }
     }

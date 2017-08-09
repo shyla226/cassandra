@@ -25,14 +25,14 @@ package org.apache.cassandra.concurrent;
 public enum TPCTaskType
 {
     UNKNOWN,
-    READ,
-    READ_RANGE,
+    READ(true),
+    READ_RANGE(true),
     READ_SWITCH_FOR_MEMTABLE,
     READ_FROM_ITERATOR,
     READ_SECONDARY_INDEX,
     READ_DISK_ASYNC,
-    WRITE,
-    WRITE_DEFRAGMENT,
+    WRITE(true),
+    WRITE_DEFRAGMENT(true),
     WRITE_SWITCH_FOR_MEMTABLE,
     WRITE_POST_COMMIT_LOG,
     COUNTER_ACQUIRE_LOCK,
@@ -53,4 +53,16 @@ public enum TPCTaskType
     TIMED_METER_TICK,
     TIMED_SPECULATE,
     TIMED_TIMEOUT;
+
+    public final boolean pendable;
+
+    TPCTaskType(boolean pendable)
+    {
+        this.pendable = pendable;
+    }
+
+    TPCTaskType()
+    {
+        this(false);
+    }
 }

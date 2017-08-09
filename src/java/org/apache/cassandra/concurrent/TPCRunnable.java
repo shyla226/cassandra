@@ -75,6 +75,26 @@ public class TPCRunnable implements Runnable
         TPC.metrics(scheduledOn).cancelled(stage);
     }
 
+    public void setPending()
+    {
+        TPC.metrics(scheduledOn).pending(stage, +1);
+    }
+
+    public void unsetPending()
+    {
+        TPC.metrics(scheduledOn).pending(stage, -1);
+    }
+
+    public boolean isPendable()
+    {
+        return stage.pendable;
+    }
+
+    public void blocked()
+    {
+        TPC.metrics(scheduledOn).blocked(stage);
+    }
+
     public static TPCRunnable wrap(Runnable runnable)
     {
         return wrap(runnable, TPCTaskType.UNKNOWN, TPC.getNumCores());

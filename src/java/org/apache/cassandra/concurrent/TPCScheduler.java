@@ -34,10 +34,10 @@ public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
 {
     public void execute(Runnable runnable, ExecutorLocals locals, TPCTaskType stage)
     {
-        scheduleDirect(new TPCRunnable(runnable,
-                                       locals,
-                                       stage,
-                                       coreId()));
+        getExecutor().execute(new TPCRunnable(runnable,
+                                              locals,
+                                              stage,
+                                              coreId()));
     }
 
     @Override
@@ -93,15 +93,15 @@ public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
     /**
      * Returns an executor that assigns the given task type to the runnables it receives.
      */
-    public TracingAwareExecutor forTaskType(TPCTaskType stage)
+    public TracingAwareExecutor forTaskType(TPCTaskType type)
     {
-        TracingAwareExecutor executor = executorsForTaskType.get(stage);
+        TracingAwareExecutor executor = executorsForTaskType.get(type);
         if (executor != null)
             return executor;
 
         synchronized (executorsForTaskType)
         {
-            return executorsForTaskType.computeIfAbsent(stage,
+            return executorsForTaskType.computeIfAbsent(type,
                                                         s -> (runnable, locals) -> execute(runnable,
                                                                                            locals,
                                                                                            s));

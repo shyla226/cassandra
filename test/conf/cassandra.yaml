@@ -44,3 +44,4 @@ row_cache_size_in_mb: 16
 enable_user_defined_functions: true
 enable_scripted_user_defined_functions: true
 prepared_statements_cache_size_mb: 1
+tpc_concurrent_requests_limit: 16
