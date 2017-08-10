@@ -339,7 +339,6 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
      */
     // The result iterator is closed upon exceptions (we know it's fine to potentially not close the intermediary
     // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
-    @SuppressWarnings("resource")
     @Override
     public Flow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
     {

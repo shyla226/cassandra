@@ -385,7 +385,6 @@ public class SinglePartitionReadCommand extends ReadCommand
         metric.readLatency.addNano(latencyNanos);
     }
 
-    @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)
     public Flow<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         //Resets our mutable state for short reads
@@ -489,7 +488,6 @@ public class SinglePartitionReadCommand extends ReadCommand
             if (sentinelSuccess)
             {
                 int rowsToCache = metadata().params.caching.rowsPerPartitionToCache();
-                @SuppressWarnings("resource") // we close on exception or upon closing the result of this method
                 Flow<FlowableUnfilteredPartition> iter = SinglePartitionReadCommand.fullPartitionRead(metadata(),
                                                                                                       nowInSec(),
                                                                                                       partitionKey())
@@ -586,7 +584,6 @@ public class SinglePartitionReadCommand extends ReadCommand
         return oldestUnrepairedTombstone;
     }
 
-    @SuppressWarnings("resource")
     private Flow<FlowableUnfilteredPartition> queryMemtableAndDiskInternal()
     {
         // We now build a flow of FlowableUnfilteredPartition sourced from three separate lists:
@@ -766,7 +763,6 @@ public class SinglePartitionReadCommand extends ReadCommand
      * no collection or counters are included).
      * This method assumes the filter is a {@code ClusteringIndexNamesFilter}.
      */
-    @SuppressWarnings("resource")
     private Flow<FlowableUnfilteredPartition> queryMemtableAndSSTablesInTimestampOrder(final ClusteringIndexNamesFilter initFilter)
     {
         try
