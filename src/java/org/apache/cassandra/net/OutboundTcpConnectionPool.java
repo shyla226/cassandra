@@ -193,9 +193,14 @@ public class OutboundTcpConnectionPool
         started.countDown();
     }
 
+    public boolean isStarted()
+    {
+        return started.getCount() == 0;
+    }
+
     public void waitForStarted()
     {
-        if (started.getCount() == 0)
+        if (isStarted())
             return;
 
         boolean error = false;

@@ -190,11 +190,11 @@ public final class MessagingService implements MessagingServiceMBean
             addLatency(expiredCallbackInfo.verb, target, pair.right.timeoutMillis());
 
             ConnectionMetrics.totalTimeouts.mark();
-            OutboundTcpConnectionPool cp = getConnectionPool(expiredCallbackInfo.target);
+            OutboundTcpConnectionPool cp = getConnectionPool(expiredCallbackInfo.target).join();
             if (cp != null)
                 cp.incrementTimeout();
 
-            updateBackPressureOnReceive(target, expiredCallbackInfo.verb, true);
+            updateBackPressureOnReceive(target, expiredCallbackInfo.verb, true).join();
             StageManager.getStage(Stage.INTERNAL_RESPONSE).submit(() -> callback.onTimeout(target));
         };
         callbacks = new ExpiringMap<>(DatabaseDescriptor.getMinRpcTimeout(), timeoutReporter);
@@ -421,12 +421,12 @@ public final class MessagingService implements MessagingServiceMBean
         messageInterceptors.intercept(response, this::sendInternal, null);
     }
 
-    private void sendInternal(Message<?> message)
+    private CompletableFuture<Void> sendInternal(Message<?> message)
     {
         if (logger.isTraceEnabled())
             logger.trace("Sending {}", message);
 
-        getConnection(message).enqueue(message);
+        return getConnection(message).thenAccept(cp -> cp.enqueue(message));
     }
 
     private <P, Q, M extends Request<P, Q>> void deliverLocallyInternal(M request,
@@ -443,17 +443,20 @@ public final class MessagingService implements MessagingServiceMBean
      *
      * @param request The request sent.
      */
-    <Q> void updateBackPressureOnSend(Request<?, Q> request)
+    <Q> CompletableFuture<Void> updateBackPressureOnSend(Request<?, Q> request)
     {
         if (request.verb().supportsBackPressure() && DatabaseDescriptor.backPressureEnabled())
         {
-            OutboundTcpConnectionPool cp = getConnectionPool(request.to());
-            if (cp != null)
-            {
-                BackPressureState backPressureState = cp.getBackPressureState();
-                backPressureState.onRequestSent(request);
-            }
+            return getConnectionPool(request.to()).thenAccept(cp -> {
+                if (cp != null)
+                {
+                    BackPressureState backPressureState = cp.getBackPressureState();
+                    backPressureState.onRequestSent(request);
+                }
+            });
         }
+
+        return CompletableFuture.completedFuture(null);
     }
 
     /**
@@ -463,20 +466,23 @@ public final class MessagingService implements MessagingServiceMBean
      * @param verb The message verb.
      * @param timeout True if updated following a timeout, false otherwise.
      */
-    void updateBackPressureOnReceive(InetAddress host, Verb<?, ?> verb, boolean timeout)
+    CompletableFuture<Void> updateBackPressureOnReceive(InetAddress host, Verb<?, ?> verb, boolean timeout)
     {
         if (verb.supportsBackPressure() && DatabaseDescriptor.backPressureEnabled())
         {
-            OutboundTcpConnectionPool cp = getConnectionPool(host);
-            if (cp != null)
-            {
-                BackPressureState backPressureState = cp.getBackPressureState();
-                if (!timeout)
-                    backPressureState.onResponseReceived();
-                else
-                    backPressureState.onResponseTimeout();
-            }
+            return getConnectionPool(host).thenAccept(cp -> {
+                if (cp != null)
+                {
+                    BackPressureState backPressureState = cp.getBackPressureState();
+                    if (!timeout)
+                        backPressureState.onResponseReceived();
+                    else
+                        backPressureState.onResponseTimeout();
+                }
+            });
         }
+
+        return CompletableFuture.completedFuture(null);
     }
 
     /**
@@ -488,21 +494,36 @@ public final class MessagingService implements MessagingServiceMBean
      * @param hosts The hosts to apply back-pressure to.
      * @param timeoutInNanos The max back-pressure timeout.
      */
-    public void applyBackPressure(Iterable<InetAddress> hosts, long timeoutInNanos)
+    @SuppressWarnings("unchecked")
+    public CompletableFuture<Void> applyBackPressure(Iterable<InetAddress> hosts, long timeoutInNanos)
     {
         if (DatabaseDescriptor.backPressureEnabled())
         {
             Set<BackPressureState> states = new HashSet<BackPressureState>();
+            CompletableFuture<Void> future = null;
             for (InetAddress host : hosts)
             {
                 if (host.equals(FBUtilities.getBroadcastAddress()))
                     continue;
-                OutboundTcpConnectionPool cp = getConnectionPool(host);
-                if (cp != null)
-                    states.add(cp.getBackPressureState());
+
+                CompletableFuture<Void> next = getConnectionPool(host).thenAccept(cp -> {
+                    if (cp != null)
+                        states.add(cp.getBackPressureState());
+                });
+
+                if (future == null)
+                    future = next;
+                else
+                    future = future.thenAcceptBoth(next, (a,b) -> {});
             }
-            backPressure.apply(states, timeoutInNanos, TimeUnit.NANOSECONDS);
+
+            if (future != null)
+            {
+                return future.thenAccept(ignored -> backPressure.apply(states, timeoutInNanos, TimeUnit.NANOSECONDS));
+            }
         }
+
+        return CompletableFuture.completedFuture(null);
     }
 
     /**
@@ -521,18 +542,19 @@ public final class MessagingService implements MessagingServiceMBean
     /**
      * called from gossiper when it notices a node is not responding.
      */
-    public void convict(InetAddress ep)
+    public CompletableFuture<Void> convict(InetAddress ep)
     {
-        OutboundTcpConnectionPool cp = getConnectionPool(ep);
-        if (cp != null)
-        {
-            logger.trace("Resetting pool for {}", ep);
-            cp.reset();
-        }
-        else
-        {
-            logger.debug("Not resetting pool for {} because internode authenticator said not to connect", ep);
-        }
+        return getConnectionPool(ep).thenAccept(cp -> {
+            if (cp != null)
+            {
+                logger.trace("Resetting pool for {}", ep);
+                cp.reset();
+            }
+            else
+            {
+                logger.debug("Not resetting pool for {} because internode authenticator said not to connect", ep);
+            }
+        });
     }
 
     public void listen()
@@ -663,30 +685,45 @@ public final class MessagingService implements MessagingServiceMBean
      * @param to
      * @return The connection pool or null if internode authenticator says not to
      */
-    public OutboundTcpConnectionPool getConnectionPool(InetAddress to)
+    public CompletableFuture<OutboundTcpConnectionPool> getConnectionPool(InetAddress to)
     {
-        OutboundTcpConnectionPool cp = connectionManagers.get(to);
-        if (cp == null)
-        {
-            //Don't attempt to connect to nodes that won't (or shouldn't) authenticate anyways
-            if (!DatabaseDescriptor.getInternodeAuthenticator().authenticate(to, OutboundTcpConnectionPool.portFor(to)))
-                return null;
+        final OutboundTcpConnectionPool cp = connectionManagers.get(to);
 
-            cp = new OutboundTcpConnectionPool(to, backPressure.newState(to));
-            OutboundTcpConnectionPool existingPool = connectionManagers.putIfAbsent(to, cp);
-            if (existingPool != null)
-                cp = existingPool;
-            else
-                cp.start();
+        if (cp != null)
+        {
+            if (cp.isStarted())
+                return CompletableFuture.completedFuture(cp);
+
+            return CompletableFuture.supplyAsync(() -> {
+                cp.waitForStarted();
+                return cp;
+            });
         }
-        cp.waitForStarted();
-        return cp;
+        else
+        {
+            return CompletableFuture.supplyAsync(() -> {
+
+                //Don't attempt to connect to nodes that won't (or shouldn't) authenticate anyways
+                if (!DatabaseDescriptor.getInternodeAuthenticator().authenticate(to, OutboundTcpConnectionPool.portFor(to)))
+                    return null;
+
+                OutboundTcpConnectionPool np = new OutboundTcpConnectionPool(to, backPressure.newState(to));
+                OutboundTcpConnectionPool existingPool = connectionManagers.putIfAbsent(to, np);
+                if (existingPool != null)
+                    np = existingPool;
+                else
+                    np.start();
+
+                np.waitForStarted();
+
+                return np;
+            });
+        }
     }
 
-    public OutboundTcpConnection getConnection(Message msg)
+    public CompletableFuture<OutboundTcpConnection> getConnection(Message msg)
     {
-        OutboundTcpConnectionPool cp = getConnectionPool(msg.to());
-        return cp == null ? null : cp.getConnection(msg);
+        return getConnectionPool(msg.to()).thenApply(cp -> cp == null ? null : cp.getConnection(msg));
     }
 
     public void register(ILatencySubscriber subcriber)

@@ -1030,14 +1030,15 @@ public class StorageProxy implements StorageProxyMBean
     throws OverloadedException
     {
         checkHintOverload(targets);
-        MessagingService.instance().applyBackPressure(targets.live(), handler.currentTimeout());
+        MessagingService.instance().applyBackPressure(targets.live(), handler.currentTimeout()).thenAccept(v -> {
 
-        Collection<InetAddress> endpointsToHint = Collections2.filter(targets.dead(), e -> shouldHint(e));
-        if (!endpointsToHint.isEmpty())
-            submitHint(mutation, endpointsToHint, handler);
+            Collection<InetAddress> endpointsToHint = Collections2.filter(targets.dead(), e -> shouldHint(e));
+            if (!endpointsToHint.isEmpty())
+                submitHint(mutation, endpointsToHint, handler);
 
-        MessagingService.instance().send(messageDefinition.newForwardingDispatcher(targets.live(), localDataCenter, mutation),
-                                         handler);
+            MessagingService.instance().send(messageDefinition.newForwardingDispatcher(targets.live(), localDataCenter, mutation),
+                                             handler);
+        });
     }
 
     private static void checkHintOverload(WriteEndpoints endpoints)

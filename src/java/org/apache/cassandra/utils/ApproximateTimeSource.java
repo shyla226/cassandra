@@ -21,23 +21,25 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.cassandra.db.monitoring.ApproximateTime;
+
 /**
- * Time source backed by JVM clock.
+ * Time source backed by {@link org.apache.cassandra.db.monitoring.ApproximateTime}.
  */
-public class SystemTimeSource implements TimeSource
-{    
+public class ApproximateTimeSource implements TimeSource
+{
     @Override
     public long currentTimeMillis()
     {
-        return System.currentTimeMillis();
+        return ApproximateTime.currentTimeMillis();
     }
 
     @Override
     public long nanoTime()
     {
-        return System.nanoTime();
+        return ApproximateTime.nanoTime();
     }
-
+    
     @Override
     public void autoAdvance(int calls, long time, TimeUnit unit)
     {

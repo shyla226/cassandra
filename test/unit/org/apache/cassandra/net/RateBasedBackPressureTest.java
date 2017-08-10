@@ -21,14 +21,18 @@ package org.apache.cassandra.net;
 import java.net.InetAddress;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiFunction;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.junit.Test;
 
+import org.apache.cassandra.utils.SlidingTimeRate;
 import org.apache.cassandra.utils.TestTimeSource;
 import org.apache.cassandra.utils.TimeSource;
 
@@ -45,41 +49,41 @@ public class RateBasedBackPressureTest
     @Test(expected = IllegalArgumentException.class)
     public void testAcceptsNoLessThanThreeArguments() throws Exception
     {
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "1"), new TestTimeSource(), 10);
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "1"), MoreExecutors.newDirectExecutorService(), new TestTimeSource(), 10);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testHighRatioMustBeBiggerThanZero() throws Exception
     {
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0", FACTOR, "2", FLOW, "FAST"), new TestTimeSource(), 10);
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0", FACTOR, "2", FLOW, "FAST"), MoreExecutors.newDirectExecutorService(), new TestTimeSource(), 10);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testHighRatioMustBeSmallerEqualThanOne() throws Exception
     {
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "2", FACTOR, "2", FLOW, "FAST"), new TestTimeSource(), 10);
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "2", FACTOR, "2", FLOW, "FAST"), MoreExecutors.newDirectExecutorService(), new TestTimeSource(), 10);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testFactorMustBeBiggerEqualThanOne() throws Exception
     {
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "0", FLOW, "FAST"), new TestTimeSource(), 10);
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "0", FLOW, "FAST"), MoreExecutors.newDirectExecutorService(), new TestTimeSource(), 10);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testWindowSizeMustBeBiggerEqualThanTen() throws Exception
     {
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "5", FLOW, "FAST"), new TestTimeSource(), 1);
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "5", FLOW, "FAST"), MoreExecutors.newDirectExecutorService(), new TestTimeSource(), 1);
     }
 
     @Test
     public void testFlowMustBeEitherFASTorSLOW() throws Exception
     {
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "FAST"), new TestTimeSource(), 10);
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "SLOW"), new TestTimeSource(), 10);
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "FAST"), MoreExecutors.newDirectExecutorService(), new TestTimeSource(), 10);
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "SLOW"), MoreExecutors.newDirectExecutorService(), new TestTimeSource(), 10);
         try
         {
-            new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "WRONG"), new TestTimeSource(), 10);
+            new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "WRONG"), MoreExecutors.newDirectExecutorService(), new TestTimeSource(), 10);
             fail("Expected to fail with wrong flow type.");
         }
         catch (Exception ex)
@@ -92,7 +96,11 @@ public class RateBasedBackPressureTest
     {
         long windowSize = 6000;
         TestTimeSource timeSource = new TestTimeSource();
-        RateBasedBackPressure strategy = new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "FAST"), timeSource, windowSize);
+        RateBasedBackPressure strategy = new RateBasedBackPressure(
+            ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "FAST"), 
+            MoreExecutors.newDirectExecutorService(), 
+            timeSource, 
+            windowSize);
 
         RateBasedBackPressureState state = strategy.newState(InetAddress.getLoopbackAddress());
         state.onRequestSent(null);
@@ -115,7 +123,12 @@ public class RateBasedBackPressureTest
     {
         long windowSize = 6000;
         TestTimeSource timeSource = new TestTimeSource();
-        RateBasedBackPressure strategy = new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "FAST"), timeSource, windowSize);
+        RateBasedBackPressure strategy = new RateBasedBackPressure(
+            ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "FAST"), 
+            MoreExecutors.newDirectExecutorService(), 
+            timeSource, 
+            windowSize);
+        
         RateBasedBackPressureState state = strategy.newState(InetAddress.getLoopbackAddress());
 
         // Get initial rate:
@@ -139,7 +152,12 @@ public class RateBasedBackPressureTest
     {
         long windowSize = 6000;
         TestTimeSource timeSource = new TestTimeSource();
-        RateBasedBackPressure strategy = new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "FAST"), timeSource, windowSize);
+        RateBasedBackPressure strategy = new RateBasedBackPressure(
+            ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "FAST"), 
+            MoreExecutors.newDirectExecutorService(), 
+            timeSource, 
+            windowSize);
+        
         RateBasedBackPressureState state = strategy.newState(InetAddress.getLoopbackAddress());
 
         // Get initial time:
@@ -173,7 +191,11 @@ public class RateBasedBackPressureTest
     {
         long windowSize = 6000;
         TestTimeSource timeSource = new TestTimeSource();
-        RateBasedBackPressure strategy = new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "FAST"), timeSource, windowSize);
+        RateBasedBackPressure strategy = new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "FAST"), 
+            MoreExecutors.newDirectExecutorService(), 
+            timeSource, 
+            windowSize);
+        
         RateBasedBackPressureState state = strategy.newState(InetAddress.getLoopbackAddress());
 
         // Update incoming and outgoing rate so that the ratio is 0.5:
@@ -193,7 +215,12 @@ public class RateBasedBackPressureTest
     {
         long windowSize = 6000;
         TestTimeSource timeSource = new TestTimeSource();
-        RateBasedBackPressure strategy = new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "FAST"), timeSource, windowSize);
+        RateBasedBackPressure strategy = new RateBasedBackPressure(
+            ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "FAST"), 
+            MoreExecutors.newDirectExecutorService(), 
+            timeSource, 
+            windowSize);
+        
         RateBasedBackPressureState state = strategy.newState(InetAddress.getLoopbackAddress());
 
         // Update incoming and outgoing rate so that the ratio is 0.5:
@@ -358,6 +385,7 @@ public class RateBasedBackPressureTest
         // Make one more apply call to saturate the rate limit timeout (0.5 requests per second means 2 requests span
         // 4 seconds, but we can only make one as we have to subtract the incoming response time):
         strategy.apply(replicaGroup, 4, TimeUnit.SECONDS);
+        assertTrue(strategy.checkAcquired());
 
         // Now verify another call to apply doesn't acquire the rate limit because of the max timeout of 4 seconds minus
         // 2 seconds of response time, so the time source itself sleeps two second:
@@ -370,25 +398,79 @@ public class RateBasedBackPressureTest
         assertEquals(strategy.timeout,
                      TimeUnit.NANOSECONDS.convert(timeSource.currentTimeMillis() - start, TimeUnit.MILLISECONDS));
     }
+    
+    @Test
+    public void testBackPressureQueueTime() throws Exception
+    {
+        long windowSize = 10000;
+        TestTimeSource timeSource = new TestTimeSource();
+        TestableBackPressure strategy = new TestableBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "SLOW"), timeSource, windowSize);
+        RateBasedBackPressureState state1 = strategy.newState(InetAddress.getByName("127.0.0.1"));
+
+        // Update incoming and outgoing rates:
+        state1.incomingRate.update(5); // slow
+        state1.outgoingRate.update(100);
+
+        // Move time ahead:
+        timeSource.sleep(windowSize, TimeUnit.MILLISECONDS);
+
+        // Apply:
+        Set<RateBasedBackPressureState> replicaGroup = Sets.newHashSet(state1);
+        strategy.apply(replicaGroup, 4, TimeUnit.SECONDS);
+        assertTrue(strategy.checkAcquired());
+
+        // Make one more apply call to saturate the rate limit timeout (0.5 requests per second means 2 requests span
+        // 4 seconds, but we can only make one as we have to subtract the incoming response time):
+        strategy.apply(replicaGroup, 4, TimeUnit.SECONDS);
+        assertTrue(strategy.checkAcquired());
+        
+        // Simulate queue time of 1 second:
+        strategy.setQueueTimeInMillis(1000);
+
+        // Verify another call to apply doesn't acquire the rate limit because of the max timeout of 4 seconds minus
+        // 2 seconds of response time, minus the 1 second queue time, so the time source itself sleeps 1 second:
+        strategy.apply(replicaGroup, 4, TimeUnit.SECONDS);
+        assertFalse(strategy.checkAcquired());
+        assertEquals(TimeUnit.NANOSECONDS.convert(1, TimeUnit.SECONDS), strategy.timeout);
+    }
 
     public static class TestableBackPressure extends RateBasedBackPressure
     {
         public volatile boolean acquired = false;
         public volatile boolean applied = false;
+        public volatile SlidingTimeRate invocations;
+        public volatile long queueTime;
         public volatile long timeout;
 
         public TestableBackPressure(Map<String, Object> args, TimeSource timeSource, long windowSize)
         {
-            super(args, timeSource, windowSize);
+            super(args, MoreExecutors.newDirectExecutorService(), timeSource, windowSize);
+            this.invocations = new SlidingTimeRate(timeSource, windowSize, 100, TimeUnit.MILLISECONDS);
         }
 
         @Override
-        public boolean doRateLimit(RateLimiter rateLimiter, long timeoutInNanos)
+        public CompletableFuture<Boolean> doRateLimit(BiFunction<Integer, Long, Boolean> rateLimiter, double limitedRate, long timeoutInNanos)
         {
-            acquired = super.doRateLimit(rateLimiter, timeoutInNanos);
-            applied = true;
-            timeout = timeoutInNanos;
-            return acquired;
+            BiFunction<Integer, Long, Boolean> fakeLimiter = (p, t) -> {
+                timeout = t;
+                double currentRate = invocations.get(TimeUnit.SECONDS);
+                return ((long) (currentRate / limitedRate)) <= TimeUnit.NANOSECONDS.toSeconds(timeoutInNanos);
+            };
+            
+            if (queueTime > 0)
+                // Simulate queue time by advancing time at the 3rd "nanoTime" call
+                // (this is implementation dependent, but that's the best we can do):
+                timeSource.autoAdvance(3, queueTime, TimeUnit.MILLISECONDS);
+            
+            return super.doRateLimit(fakeLimiter, limitedRate, timeoutInNanos)
+                .thenApply(v -> {
+                    acquired = v;
+                    applied = true;
+                    if (acquired)
+                        invocations.update(1);
+
+                    return v;
+                });
         }
 
         public boolean checkAcquired()
@@ -403,6 +485,11 @@ public class RateBasedBackPressureTest
             boolean checked = applied;
             applied = false;
             return checked;
+        }
+
+        public void setQueueTimeInMillis(long queueTime)
+        {
+            this.queueTime = queueTime;
         }
     }
 }

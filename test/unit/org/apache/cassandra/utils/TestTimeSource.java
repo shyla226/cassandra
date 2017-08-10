@@ -23,17 +23,30 @@ import java.util.concurrent.atomic.AtomicLong;
 public class TestTimeSource implements TimeSource
 {
     private final AtomicLong timeInMillis = new AtomicLong(System.currentTimeMillis());
+    private volatile int advanceCounter;
+    private volatile int advanceCalls;
+    private volatile long advanceTime;
 
     @Override
     public long currentTimeMillis()
     {
+        maybeAdvance();
         return timeInMillis.get();
     }
 
     @Override
     public long nanoTime()
     {
+        maybeAdvance();
         return timeInMillis.get() * 1_000_000;
+    }
+    
+    @Override
+    public void autoAdvance(int calls, long time, TimeUnit unit)
+    {
+        advanceCounter = 0;
+        advanceCalls = calls;
+        advanceTime = TimeUnit.NANOSECONDS.convert(time, unit);
     }
 
     @Override
@@ -68,5 +81,15 @@ public class TestTimeSource implements TimeSource
     public TimeSource sleepUninterruptibly(long sleepFor, TimeUnit unit)
     {
         return sleep(sleepFor, unit);
+    }
+    
+    private void maybeAdvance()
+    {
+        if (advanceCalls > 0 && ++advanceCounter == advanceCalls)
+        {
+            sleepUninterruptibly(advanceTime, TimeUnit.NANOSECONDS);
+            advanceCounter = 0;
+            advanceCalls = 0;
+        }
     }
 }

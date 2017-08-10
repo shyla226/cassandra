@@ -20,22 +20,29 @@ package org.apache.cassandra.net;
 import java.net.InetAddress;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiFunction;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
+import org.apache.cassandra.utils.ApproximateTimeSource;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
-import org.apache.cassandra.utils.SystemTimeSource;
 import org.apache.cassandra.utils.TimeSource;
 import org.apache.cassandra.utils.concurrent.IntervalLock;
 
@@ -68,6 +75,8 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
                     .executor(MoreExecutors.directExecutor())
                     .build();
 
+    private final ExecutorService executor;
+
     enum Flow
     {
         FAST,
@@ -84,11 +93,16 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
 
     public RateBasedBackPressure(Map<String, Object> args)
     {
-        this(args, new SystemTimeSource(), DatabaseDescriptor.getWriteRpcTimeout());
+        this(args,
+             Executors.newFixedThreadPool(
+                 Math.min(FBUtilities.getAvailableProcessors(), 32), 
+                 new ThreadFactoryBuilder().setDaemon(true).setNameFormat("BackPressure-thread-%d").build()),
+             new ApproximateTimeSource(), 
+             DatabaseDescriptor.getWriteRpcTimeout());
     }
 
     @VisibleForTesting
-    public RateBasedBackPressure(Map<String, Object> args, TimeSource timeSource, long windowSize)
+    public RateBasedBackPressure(Map<String, Object> args, ExecutorService executor, TimeSource timeSource, long windowSize)
     {
         if (args.size() != 3)
         {
@@ -120,6 +134,7 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
             throw new IllegalArgumentException("Back-pressure window size must be >= 10");
         }
 
+        this.executor = executor;
         this.timeSource = timeSource;
         this.windowSize = windowSize;
 
@@ -128,7 +143,7 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
     }
 
     @Override
-    public void apply(Set<RateBasedBackPressureState> states, long timeout, TimeUnit unit)
+    public CompletableFuture<Void> apply(Set<RateBasedBackPressureState> states, long timeout, TimeUnit unit)
     {
         // Go through the back-pressure states, try updating each of them and collect min/max rates:
         boolean isUpdated = false;
@@ -248,8 +263,13 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
             // response time computed from the incoming rate, to reduce the number of client timeouts by taking into
             // account how long it could take to process responses after back-pressure:
             long responseTimeInNanos = (long) (TimeUnit.NANOSECONDS.convert(1, TimeUnit.SECONDS) / minIncomingRate);
-            doRateLimit(rateLimiter.limiter, Math.max(0, TimeUnit.NANOSECONDS.convert(timeout, unit) - responseTimeInNanos));
+            return doRateLimit((p, t) -> rateLimiter.limiter.tryAcquire(p, t, TimeUnit.NANOSECONDS),
+                               rateLimiter.limiter.getRate(),
+                               Math.max(0, TimeUnit.NANOSECONDS.convert(timeout, unit) - responseTimeInNanos))
+                .thenAccept(u -> {});
         }
+
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override
@@ -266,18 +286,33 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
     }
 
     @VisibleForTesting
-    boolean doRateLimit(RateLimiter rateLimiter, long timeoutInNanos)
+    CompletableFuture<Boolean> doRateLimit(BiFunction<Integer, Long, Boolean> rateLimiter, double limitedRate, long timeoutInNanos)
     {
-        if (!rateLimiter.tryAcquire(1, timeoutInNanos, TimeUnit.NANOSECONDS))
+        // If we can acquire without waiting, execute synchronously:
+        if (rateLimiter.apply(1, 0L))
+            return CompletableFuture.completedFuture(true);
+
+        // If we have to wait (that is, actually apply backpressure), execute on a backpressure thread:
+        long queueTime = timeSource.nanoTime();
+        return CompletableFuture.supplyAsync(() -> 
         {
-            timeSource.sleepUninterruptibly(timeoutInNanos, TimeUnit.NANOSECONDS);
-            oneMinNoSpamLogger.info("Cannot apply {} due to exceeding write timeout, pausing {} nanoseconds instead.",
-                                    rateLimiter, timeoutInNanos);
+            // Account for items queued past timeout:
+            long elapsedTime = timeSource.nanoTime() - queueTime;
+            
+            if (elapsedTime >= timeoutInNanos)
+                return false;
+            
+            if (!rateLimiter.apply(1, timeoutInNanos - elapsedTime))
+            {
+                timeSource.sleepUninterruptibly(timeoutInNanos - elapsedTime, TimeUnit.NANOSECONDS);
+                oneMinNoSpamLogger.info("Cannot apply limited rate of {} due to exceeding write timeout, pausing {} nanoseconds instead.",
+                                        limitedRate, timeoutInNanos);
 
-            return false;
-        }
+                return false;
+            }
 
-        return true;
+            return true;
+        }, executor);
     }
 
     private static class IntervalRateLimiter extends IntervalLock
