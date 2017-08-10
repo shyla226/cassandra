@@ -3638,19 +3638,19 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         try
         {
             Set<ColumnFamilyStore> tablesToRepair = Sets.newHashSet(getValidColumnFamilies(false, false, keyspace, tables));
-            Set<String> baseOrViewsToRepair = tablesToRepair.stream().filter(c -> c.hasViews() || c.metadata.isView()).map(c -> c.name).collect(Collectors.toSet());
+            Set<String> tablesWithViewsOrCdc = tablesToRepair.stream().filter(c -> c.hasViews() || c.metadata.isView() || c.isCdcEnabled()).map(c -> c.name).collect(Collectors.toSet());
 
-            if (baseOrViewsToRepair.isEmpty())
+            if (tablesWithViewsOrCdc.isEmpty())
                 return false;
 
-            if (tablesToRepair.size() == baseOrViewsToRepair.size())
+            if (tablesToRepair.size() == tablesWithViewsOrCdc.size())
                 return true;
 
 
-            throw new IllegalArgumentException(String.format("Cannot run a single repair command on both MV and non-MV tables (%s) from keyspace %s " +
-                                                             "simultaneously because incremental repair is not supported on tables with materialized views: %s. " +
-                                                             "Please execute a separate command for repairing tables with and without MVs.", tablesToRepair,
-                                                             keyspace, baseOrViewsToRepair));
+            throw new IllegalArgumentException(String.format("Cannot run a single repair command on tables with CDC/MVs and non-MV/CDC tables (%s) from keyspace %s " +
+                                                             "simultaneously because incremental repair is not supported on tables with materialized views" +
+                                                             "or CDC: %s. Please execute a separate command for repairing tables with and without CDC/MVs.", tablesToRepair,
+                                                             keyspace, tablesWithViewsOrCdc));
         }
         catch (IOException e)
         {

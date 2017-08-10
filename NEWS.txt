@@ -26,7 +26,7 @@ Upgrading
      incremental repair was already run on the table/keyspace being repaired, to maintain
      backward compatibility. Incremental repair may be run on new tables by using the -inc option.
    - Full repairs will no longer run repair unless the --run-anticompaction option is specified
-   - Incremental repairs are no longer supported on tables with materialized views until
+   - Incremental repairs are no longer supported on tables with materialized views or CDC until
      its limitations are addressed. An incremental repair triggered on a base table or
      materialized view run a full repair instead. See CASSANDRA-12888 for details.
 

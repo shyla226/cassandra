@@ -146,29 +146,32 @@ public class Repair extends NodeToolCmd
             return tablesToRepair.keySet();
         }
 
-        Set<String> tablesWithViews = tablesToRepair.entrySet().stream().filter(e -> e.getValue().isOrHasView()).map(e -> e.getKey()).collect(Collectors.toSet());
-        if (incrementalOption || tablesToRepair.keySet().equals(tablesWithViews))
+        Set<String> tablesWithViewsOrCdc = tablesToRepair.entrySet().stream()
+                                                                    .filter(e -> e.getValue().isOrHasView() || e.getValue().isCdcEnabled)
+                                                                    .map(e -> e.getKey())
+                                                                    .collect(Collectors.toSet());
+        if (incrementalOption || tablesToRepair.keySet().equals(tablesWithViewsOrCdc))
         {
-            if (!tablesWithViews.isEmpty())
+            if (!tablesWithViewsOrCdc.isEmpty())
             {
-                System.out.println(String.format("WARN: Incremental repair is not supported on tables with Materialized Views. Running full repairs on table(s) %s.%s.",
-                                                 keyspace, tablesWithViews));
+                System.out.println(String.format("WARN: Incremental repair is not supported on tables with Materialized Views or CDC. Running full repairs on table(s) %s.%s.",
+                                                 keyspace, tablesWithViewsOrCdc));
             }
-            return tablesWithViews;
+            return tablesWithViewsOrCdc;
         }
 
         Set<String> wasNotIncrementallyRepaired = tablesToRepair.entrySet()
                                                                 .stream()
                                                                 .filter(e -> !e.getValue().wasIncrementallyRepaired)
                                                                 .map(e -> e.getKey()).collect(Collectors.toSet());
-        Set<String> tablesToFullRepair = Sets.union(tablesWithViews, wasNotIncrementallyRepaired);
+        Set<String> tablesToFullRepair = Sets.union(tablesWithViewsOrCdc, wasNotIncrementallyRepaired);
 
 
         if (!tablesToFullRepair.isEmpty() && probe.hasIncrementallyRepairedAnyTable())
         {
             //The idea is to never print this message on new clusters, just existing cluster that have ever ran incremental repair
             System.out.println(String.format("INFO: Neither --inc or --full repair options were provided. Running full repairs " +
-                                             "on tables with MVs or that were never incrementally repaired: %s", tablesToFullRepair));
+                                             "on tables with MVs, CDC or that were never incrementally repaired: %s", tablesToFullRepair));
         }
 
         return tablesToFullRepair;

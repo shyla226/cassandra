@@ -168,7 +168,7 @@ public class StreamReceiveTask extends StreamTask
                 }
                 cfs = Keyspace.open(kscf.left).getColumnFamilyStore(kscf.right);
                 hasViews = cfs.hasViews();
-                hasCDC = cfs.metadata.params.cdc;
+                hasCDC = cfs.isCdcEnabled();
 
                 Collection<SSTableReader> readers = task.sstables;
 
