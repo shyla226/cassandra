@@ -1,3 +1,11 @@
+DSE 5.0.x
+ * Improve Gossip Dissemination Time (DB-996)
+ * Use more intelligent level picking when we have a non-l0 file (DB-639)
+ * Keep sstable level for decommision, remove and move operations (DB-908)
+ * More quickly detect down nodes for batchlogs using the incoming connections (DB-809)
+ * Fixes for waitForGossiper (DB-671)
+
+
 DSE 5.0.12
  * Print heap histogram on OOM errors by default (DB-1489)
  * Support frozen collection list and set in stress (DB-1464)
