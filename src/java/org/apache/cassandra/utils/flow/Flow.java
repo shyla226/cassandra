@@ -60,7 +60,6 @@ import org.apache.cassandra.utils.LineNumberInference;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
-import org.psjava.algo.math.ThomasWangHash32Bit;
 
 /**
  * An asynchronous flow of items modelled similarly to Java 9's Flow and RxJava's Flowable with some simplifications.
@@ -379,7 +378,7 @@ public abstract class Flow<T>
         public void finalize()
         {
             if (state != State.CLOSED)
-                System.err.println("Unclosed flow in state " + state + "\n\t" + this);
+                logger.error("Unclosed flow in state {}\n\t{}", state, this);
         }
 
         public String toString()
