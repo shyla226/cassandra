@@ -243,7 +243,34 @@ public class PartitionRangeReadCommand extends ReadCommand
             return Flow.empty();
 
         // TODO: open and close when subscribed -- make sure no resource allocated on create
-        return FlowablePartitions.mergePartitions(iterators, nowInSec(), null);
+        if (cfs.isRowCacheEnabled())
+        {
+            return FlowablePartitions.mergePartitions(iterators, nowInSec(), null)
+                                     .map(partition ->
+                                          {
+                                              // Note that we rely on the fact that until we start iterating the partition no really costly operation is done.
+                                              DecoratedKey dk = partition.header.partitionKey;
+
+                                              // Check if this partition is in the rowCache and if it is, if  it covers our filter
+                                              CachedPartition cached = cfs.getRawCachedPartition(dk);
+                                              ClusteringIndexFilter filter = dataRange().clusteringIndexFilter(dk);
+
+                                              if (cached != null && cfs.isFilterFullyCoveredBy(filter, limits(), cached, nowInSec()))
+                                              {
+                                                  // The partition will not be used, so abort it.
+                                                  partition.unused();
+
+                                                  return filter.getFlowableUnfilteredPartition(columnFilter(), cached);
+                                              }
+
+                                              return partition;
+                                          });
+        }
+        else
+        {
+            return FlowablePartitions.mergePartitions(iterators, nowInSec(), null);
+        }
+
     }
 
     /**
@@ -266,36 +293,6 @@ public class PartitionRangeReadCommand extends ReadCommand
     protected int oldestUnrepairedTombstone()
     {
         return oldestUnrepairedTombstone;
-    }
-
-    // TODO - this used to be called by queryStorage() do we need to re-instate it?
-    private UnfilteredPartitionIterator checkCacheFilter(UnfilteredPartitionIterator iter, final ColumnFamilyStore cfs)
-    {
-        class CacheFilter extends Transformation
-        {
-            @Override
-            public BaseRowIterator applyToPartition(BaseRowIterator iter)
-            {
-                // Note that we rely on the fact that until we actually advance 'iter', no really costly operation is actually done
-                // (except for reading the partition key from the index file) due to the call to mergeLazily in queryStorage.
-                DecoratedKey dk = iter.partitionKey();
-
-                // Check if this partition is in the rowCache and if it is, if  it covers our filter
-                CachedPartition cached = cfs.getRawCachedPartition(dk);
-                ClusteringIndexFilter filter = dataRange().clusteringIndexFilter(dk);
-
-                if (cached != null && cfs.isFilterFullyCoveredBy(filter, limits(), cached, nowInSec()))
-                {
-                    // We won't use 'iter' so close it now.
-                    iter.close();
-
-                    return filter.getUnfilteredRowIterator(columnFilter(), cached);
-                }
-
-                return iter;
-            }
-        }
-        return Transformation.apply(iter, new CacheFilter());
     }
 
     protected void appendCQLWhereClause(StringBuilder sb)

@@ -108,4 +108,34 @@ public class RowCacheCQLTest extends CQLTester
                    row(2, 2, 2, 2),
                    row(2, 3, 2, 3));
     }
+
+    @Test
+    public void testPartitionRangeCaching() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, v int, PRIMARY KEY (pk, ck)) WITH caching = { 'keys': 'NONE', 'rows_per_partition': 'ALL' }");
+        execute("INSERT INTO %s (pk, ck, v) VALUES (?, ?, ?)", 1, 1, 1);
+        execute("INSERT INTO %s (pk, ck, v) VALUES (?, ?, ?)", 1, 2, 1);
+        execute("INSERT INTO %s (pk, ck, v) VALUES (?, ?, ?)", 1, 3, 1);
+        execute("INSERT INTO %s (pk, ck, v) VALUES (?, ?, ?)", 2, 1, 1);
+        execute("INSERT INTO %s (pk, ck, v) VALUES (?, ?, ?)", 2, 2, 1);
+        execute("INSERT INTO %s (pk, ck, v) VALUES (?, ?, ?)", 2, 3, 1);
+
+        // Warm-up cache
+        assertRows(execute("SELECT * FROM %s WHERE pk = ? and ck = ?", 1, 1),
+                   row(1,1,1));
+        assertRows(execute("SELECT * FROM %s WHERE pk = ? and ck = ?", 1, 2),
+                   row(1,2,1));
+        assertRows(execute("SELECT * FROM %s WHERE pk = ? and ck = ?", 1, 3),
+                   row(1,3,1));
+
+        beforeAndAfterFlush(() -> {
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
+                                    row(1,1,1),
+                                    row(1,2,1),
+                                    row(1,3,1),
+                                    row(2,1,1),
+                                    row(2,2,1),
+                                    row(2,3,1));
+        });
+    }
 }

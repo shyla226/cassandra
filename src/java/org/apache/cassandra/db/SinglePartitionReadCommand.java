@@ -393,7 +393,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             resetMutableState();
 
         if (cfs.isRowCacheEnabled())
-            return getThroughCache(cfs, executionController);       // tpc TODO: Not tested!
+            return getThroughCache(cfs, executionController);
         else
             return deferredQuery(cfs, executionController);
     }
