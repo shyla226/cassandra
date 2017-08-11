@@ -25,10 +25,8 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -37,14 +35,15 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.ThrottledUnfilteredIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
@@ -58,6 +57,8 @@ public class StreamReceiveTask extends StreamTask
     private static final Logger logger = LoggerFactory.getLogger(StreamReceiveTask.class);
 
     private static final ExecutorService executor = Executors.newCachedThreadPool(new NamedThreadFactory("StreamReceiveTask"));
+
+    private static final int MAX_ROWS_PER_BATCH = Integer.getInteger("cassandra.repair.mutation_repair_rows_per_batch", 100);
 
     // number of files to receive
     private final int totalFiles;
@@ -180,15 +181,13 @@ public class StreamReceiveTask extends StreamTask
                         for (SSTableReader reader : readers)
                         {
                             Keyspace ks = Keyspace.open(reader.getKeyspaceName());
-                            try (ISSTableScanner scanner = reader.getScanner())
+                            try (ISSTableScanner scanner = reader.getScanner();
+                                    CloseableIterator<UnfilteredRowIterator> throttledPartitions = ThrottledUnfilteredIterator.throttle(scanner, MAX_ROWS_PER_BATCH))
                             {
-                                while (scanner.hasNext())
-                                {
-                                    try (UnfilteredRowIterator rowIterator = scanner.next())
-                                    {
-                                        // MV *can* be applied unsafe as we flush below before transaction is done.
-                                        ks.apply(new Mutation(PartitionUpdate.fromIterator(rowIterator)), false, true, false);
-                                    }
+                                while (throttledPartitions.hasNext())
+                                { 
+                                    // MV *can* be applied unsafe as we flush below before transaction is done.
+                                    ks.apply(new Mutation(PartitionUpdate.fromIterator(throttledPartitions.next())), false, true, false); 
                                 }
                             }
                         }
