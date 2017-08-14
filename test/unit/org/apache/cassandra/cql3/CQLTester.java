@@ -43,6 +43,7 @@ import com.datastax.driver.core.*;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
 
+import io.reactivex.Single;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -978,16 +979,21 @@ public abstract class CQLTester
         return executeFormattedQuery(formatQuery(query), values);
     }
 
-    public UntypedResultSet executeFormattedQuery(String query, Object... values) throws Throwable
+    public Single<UntypedResultSet> executeAsync(String query, Object... values) throws Throwable
     {
-        UntypedResultSet rs;
+        return executeFormattedQueryAsync(formatQuery(query), values);
+    }
+
+    public Single<UntypedResultSet> executeFormattedQueryAsync(String query, Object... values) throws Throwable
+    {
+        Single<UntypedResultSet> rs;
         if (usePrepared)
         {
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {} with values {}", query, formatAllValues(values));
             if (reusePrepared)
             {
-                rs = QueryProcessor.executeInternal(query, transformValues(values));
+                rs = QueryProcessor.executeInternalAsync(query, transformValues(values));
 
                 // If a test uses a "USE ...", then presumably its statements use relative table. In that case, a USE
                 // change the meaning of the current keyspace, so we don't want a following statement to reuse a previously
@@ -998,7 +1004,7 @@ public abstract class CQLTester
             }
             else
             {
-                rs = QueryProcessor.executeOnceInternal(query, transformValues(values)).blockingGet();
+                rs = QueryProcessor.executeOnceInternal(query, transformValues(values));
             }
         }
         else
@@ -1006,8 +1012,14 @@ public abstract class CQLTester
             query = replaceValues(query, values);
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {}", query);
-            rs = QueryProcessor.executeOnceInternal(query).blockingGet();
+            rs = QueryProcessor.executeOnceInternal(query);
         }
+        return rs;
+    }
+
+    public UntypedResultSet executeFormattedQuery(String query, Object... values) throws Throwable
+    {
+        UntypedResultSet rs = executeFormattedQueryAsync(query, values).blockingGet();
         if (rs != null)
         {
             if (logger.isTraceEnabled())
