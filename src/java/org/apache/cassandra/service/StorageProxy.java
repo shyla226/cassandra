@@ -1484,7 +1484,7 @@ public class StorageProxy implements StorageProxyMBean
 
         Flow<FlowablePartition> retryOnDigestMismatch(DigestMismatchException ex) throws ReadFailureException, ReadTimeoutException
         {
-            Tracing.trace("Digest mismatch: {}", ex);
+            Tracing.trace("Digest mismatch: {}", ex.getMessage());
 
             ReadRepairMetrics.repairedBlocking.mark();
 

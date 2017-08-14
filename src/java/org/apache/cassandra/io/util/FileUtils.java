@@ -495,7 +495,7 @@ public final class FileUtils
         }
         catch (IOException e)
         {
-            logger.error("Error while getting {} folder size. {}", folder, e);
+            logger.error("Error while getting {} folder size. {}", folder, e.getMessage());
         }
         return sizeArr[0];
     }
