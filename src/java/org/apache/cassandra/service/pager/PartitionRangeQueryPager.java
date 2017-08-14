@@ -19,6 +19,7 @@ package org.apache.cassandra.service.pager;
 
 import java.util.Optional;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.rows.Row;
@@ -88,16 +89,15 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
                : new PagingState(lastKey.getKey(), lastRow, maxRemaining(), remainingInPartition(), inclusive);
     }
 
-    protected ReadCommand nextPageReadCommand(int pageSize)
+    protected ReadCommand nextPageReadCommand(DataLimits limits, PageSize pageSize)
     throws RequestExecutionException
     {
-        DataLimits limits;
         DataRange fullRange = command.dataRange();
         DataRange pageRange;
         if (lastReturnedKey == null)
         {
             pageRange = fullRange;
-            limits = command.limits().forPaging(pageSize);
+            limits = limits.forPaging(pageSize);
         }
         else
         {
@@ -107,12 +107,12 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
             if (includeLastKey)
             {
                 pageRange = fullRange.forPaging(bounds, command.metadata().comparator, lastReturnedRow.clustering(command.metadata()), inclusive);
-                limits = command.limits().forPaging(pageSize, lastReturnedKey.getKey(), remainingInPartition());
+                limits = limits.forPaging(pageSize, lastReturnedKey.getKey(), remainingInPartition());
             }
             else
             {
                 pageRange = fullRange.forSubRange(bounds);
-                limits = command.limits().forPaging(pageSize);
+                limits = limits.forPaging(pageSize);
             }
         }
 

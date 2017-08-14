@@ -50,6 +50,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.schema.Schema;
@@ -191,8 +192,13 @@ public class LocalSessions
     {
         Preconditions.checkArgument(!started, "LocalSessions.start can only be called once");
         Preconditions.checkArgument(sessions.isEmpty(), "No sessions should be added before start");
-        UntypedResultSet result = QueryProcessor.executeInternalWithPaging(String.format("SELECT * FROM %s.%s", keyspace, table), 1000);
+        
+        UntypedResultSet result = QueryProcessor.executeInternalWithPaging(
+            String.format("SELECT * FROM %s.%s", keyspace, table), 
+            PageSize.rowsSize(1000));
+        
         Map<UUID, LocalSession> loadedSessions = new HashMap<>();
+        
         TPCUtils.blockingAwait(result.rows().processToRxCompletable(row -> {
             try
             {

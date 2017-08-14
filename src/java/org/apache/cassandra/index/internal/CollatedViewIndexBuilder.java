@@ -20,6 +20,7 @@ package org.apache.cassandra.index.internal;
 import java.util.Set;
 import java.util.UUID;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.CompactionInfo;
@@ -61,7 +62,7 @@ public class CollatedViewIndexBuilder extends SecondaryIndexBuilder
     {
         try
         {
-            int pageSize = cfs.indexManager.calculateIndexingPageSize();
+            PageSize pageSize = cfs.indexManager.calculateIndexingPageSize();
             while (iter.hasNext())
             {
                 if (isStopRequested())

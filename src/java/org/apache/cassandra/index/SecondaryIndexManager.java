@@ -54,6 +54,7 @@ import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.statements.IndexTarget;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -131,8 +132,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 {
     private static final Logger logger = LoggerFactory.getLogger(SecondaryIndexManager.class);
 
-    // default page size (in rows) when rebuilding the index for a whole partition
-    public static final int DEFAULT_PAGE_SIZE = 10000;
+    // page size in rows when rebuilding the index for a whole partition
+    public static final int PAGE_SIZE_ROWS = 10000;
+
+    // page size in bytes when rebuilding the index for a whole partition
+    public static final int PAGE_SIZE_BYTES = 32 * 1024 * 1024;
 
     /**
      * All registered indexes.
@@ -282,8 +286,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      *
      * Note that we need to postpone the build until after all indexes
      * have been created because of a potential race between flushing the system
-     * index info tables (done by {@link #markIndexesBuilding(Set, boolean)} and
-     * indexing the partition (done by {@link #indexPartition(DecoratedKey, Set, int)}),
+     * index info tables (done by {@link #markIndexesBuilding(Set, boolean, boolean)} and
+     * indexing the partition (done by {@link #indexPartition(DecoratedKey, Set, PageSize)}),
      * see APOLLO-882 for more details.
      *
      * @param metadata - the table metadata that contains the metadata of the indexes to create and build
@@ -846,7 +850,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * When building an index against existing data in sstables, add the given partition to the index
      */
-    public void indexPartition(DecoratedKey key, Set<Index> indexes, int pageSize)
+    public void indexPartition(DecoratedKey key, Set<Index> indexes, PageSize pageSize)
     {
         if (logger.isTraceEnabled())
             logger.trace("Indexing partition {}", baseCfs.metadata().partitionKeyType.getString(key.getKey()));
@@ -863,8 +867,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             while (!pager.isExhausted())
             {
                 try (OpOrder.Group writeGroup = Keyspace.writeOrder.start();
-                     UnfilteredPartitionIterator page = FlowablePartitions.toPartitions(pager.fetchPageUnfiltered(pageSize),
-                                                                                        baseCfs.metadata()))
+                     UnfilteredPartitionIterator page = FlowablePartitions.toPartitions(
+                         pager.fetchPageUnfiltered(pageSize), baseCfs.metadata()))
                 {
                     if (!page.hasNext())
                         break;
@@ -931,39 +935,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * Return the page size used when indexing an entire partition
      */
-    public int calculateIndexingPageSize()
+    public PageSize calculateIndexingPageSize()
     {
+        // TODO - not sure if it still makes sense to support force_default_indexing_page_size, is should
+        // probably be renamed to something that says page size in rows at a minimum
         if (Boolean.getBoolean("cassandra.force_default_indexing_page_size"))
-            return DEFAULT_PAGE_SIZE;
+            return PageSize.rowsSize(PAGE_SIZE_ROWS);
 
-        double targetPageSizeInBytes = 32 * 1024 * 1024;
-        double meanPartitionSize = baseCfs.getMeanPartitionSize();
-        if (meanPartitionSize <= 0)
-            return DEFAULT_PAGE_SIZE;
-
-        int meanCellsPerPartition = baseCfs.getMeanColumns();
-        if (meanCellsPerPartition <= 0)
-            return DEFAULT_PAGE_SIZE;
-
-        int columnsPerRow = baseCfs.metadata().regularColumns().size();
-        if (columnsPerRow <= 0)
-            return DEFAULT_PAGE_SIZE;
-
-        int meanRowsPerPartition = meanCellsPerPartition / columnsPerRow;
-        double meanRowSize = meanPartitionSize / meanRowsPerPartition;
-
-        int pageSize = (int) Math.max(1, Math.min(DEFAULT_PAGE_SIZE, targetPageSizeInBytes / meanRowSize));
-
-        logger.trace("Calculated page size {} for indexing {}.{} ({}/{}/{}/{})",
-                     pageSize,
-                     baseCfs.metadata.keyspace,
-                     baseCfs.metadata.name,
-                     meanPartitionSize,
-                     meanCellsPerPartition,
-                     meanRowsPerPartition,
-                     meanRowSize);
-
-        return pageSize;
+        return PageSize.bytesSize(PAGE_SIZE_BYTES);
     }
 
     /**

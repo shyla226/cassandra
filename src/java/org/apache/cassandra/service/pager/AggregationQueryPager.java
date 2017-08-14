@@ -24,6 +24,7 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.GroupingState;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -37,12 +38,17 @@ import org.apache.cassandra.utils.flow.Flow;
  * <p>
  * For aggregation/group by queries, the user page size is in number of groups. But each group could be composed of very
  * many rows so to avoid running into OOMs, this pager will page internal queries into sub-pages. So each call to
- * {@link QueryPager#fetchPage(int, ReadContext)} may (transparently) yield multiple internal queries (sub-pages).
+ * {@link QueryPager#fetchPage(PageSize, ReadContext)} may (transparently) yield multiple internal queries (sub-pages).
+ * <p>
+ * Please note due to the fact the page size is used to compute the number of groups to page through, if the page size 
+ * unit is in bytes, a default number of groups is used.
  */
 public final class AggregationQueryPager implements QueryPager
 {
     private static final Logger logger = LoggerFactory.getLogger(AggregationQueryPager.class);
 
+    private static final int DEFAULT_GROUPS = 100;
+    
     private final DataLimits limits;
 
     // The sub-pager, used to retrieve the next sub-page.
@@ -55,7 +61,7 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     @Override
-    public Flow<FlowablePartition> fetchPage(int pageSize, ReadContext ctx)
+    public Flow<FlowablePartition> fetchPage(PageSize pageSize, ReadContext ctx)
     {
         if (limits.isGroupByLimit())
             return new GroupByPartitions(pageSize, ctx).partitions();
@@ -64,8 +70,8 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     @Override
-    public Flow<FlowablePartition> fetchPageInternal(int pageSize)
-    {
+    public Flow<FlowablePartition> fetchPageInternal(PageSize pageSize)
+    {        
         if (limits.isGroupByLimit())
             return new GroupByPartitions(pageSize, null).partitions();
 
@@ -107,9 +113,14 @@ public final class AggregationQueryPager implements QueryPager
     class GroupByPartitions
     {
         /**
+         * The original page size: not currently used as everything is computed in number of rows.
+         */
+        private final PageSize pageSize;
+        
+        /**
          * The top-level page size in number of groups.
          */
-        private final int pageSize;
+        private final int topPages;
 
         // For distributed and local queries, null for internal queries
         @Nullable
@@ -130,12 +141,13 @@ public final class AggregationQueryPager implements QueryPager
          */
         private int initialMaxRemaining;
 
-        GroupByPartitions(int pageSize, ReadContext ctx)
+        GroupByPartitions(PageSize pageSize, ReadContext ctx)
         {
-            this.pageSize = handlePagingOff(pageSize);
+            this.pageSize = pageSize;
+            this.topPages = handlePageSize(pageSize);
             this.ctx = ctx;
             if (logger.isTraceEnabled())
-                logger.trace("{} - created with page size={}, ctx={}", hashCode(), pageSize, ctx);
+                logger.trace("{} - created with page size={}, ctx={}", hashCode(), topPages, ctx);
         }
 
         /**
@@ -153,7 +165,7 @@ public final class AggregationQueryPager implements QueryPager
         Flow<FlowablePartition> partitions()
         {
             initialMaxRemaining = subPager.maxRemaining();
-            Flow<FlowablePartition> ret = fetchSubPage(pageSize);
+            Flow<FlowablePartition> ret = fetchSubPage(topPages);
 
             // the existing iterator based approach would merge partitions with the same key across two different pages
             // however it looks like we don't need to do this, because we create a new pager with a grouping state
@@ -180,11 +192,14 @@ public final class AggregationQueryPager implements QueryPager
             return row;
         }
 
-        private int handlePagingOff(int pageSize)
+        private int handlePageSize(PageSize pageSize)
         {
+            // If the page size unit is in bytes, resort to a default number:
+            int size = pageSize.isInBytes() ? DEFAULT_GROUPS : pageSize.rawSize();
+            
             // If the paging is off, the pageSize will be <= 0. So we need to replace
             // it by DataLimits.NO_LIMIT
-            return pageSize <= 0 ? DataLimits.NO_LIMIT : pageSize;
+            return size <= 0 ? DataLimits.NO_ROWS_LIMIT : size;
         }
 
         private Flow<FlowablePartition> moreContents()
@@ -199,17 +214,17 @@ public final class AggregationQueryPager implements QueryPager
                              counted);
 
 
-            if (isDone(pageSize, counted) || subPager.isExhausted())
+            if (isDone(topPages, counted) || subPager.isExhausted())
             {
                 if (logger.isTraceEnabled())
                     logger.trace("{} - moreContents() returns null: {}, {}, [{}] exhausted? {}",
-                                 hashCode(), counted, pageSize, subPager.hashCode(), subPager.isExhausted());
+                                 hashCode(), counted, topPages, subPager.hashCode(), subPager.isExhausted());
 
                 return null;
             }
 
             subPager = updatePagerLimit(subPager, limits, lastPartitionKey, lastClustering);
-            return fetchSubPage(computeSubPageSize(pageSize, counted));
+            return fetchSubPage(computeSubPageSize(topPages, counted));
         }
 
         protected boolean isDone(int pageSize, int counted)
@@ -249,7 +264,7 @@ public final class AggregationQueryPager implements QueryPager
         }
 
         /**
-         * Fetchs the next sub-page.
+         * Fetches the next sub-page.
          *
          * @param subPageSize the sub-page size in number of groups
          * @return the next sub-page
@@ -260,8 +275,8 @@ public final class AggregationQueryPager implements QueryPager
                 logger.trace("Fetching sub-page with consistency {}", ctx == null ? "<internal>" : ctx.consistencyLevel);
 
             return ctx == null
-                 ? subPager.fetchPageInternal(subPageSize)
-                 : subPager.fetchPage(subPageSize, ctx);
+                 ? subPager.fetchPageInternal(PageSize.rowsSize(subPageSize))
+                 : subPager.fetchPage(PageSize.rowsSize(subPageSize), ctx);
         }
     }
 
@@ -273,7 +288,7 @@ public final class AggregationQueryPager implements QueryPager
      */
     private final class AggregatedPartitions extends GroupByPartitions
     {
-        AggregatedPartitions(int pageSize, ReadContext ctx)
+        AggregatedPartitions(PageSize pageSize, ReadContext ctx)
         {
             super(pageSize, ctx);
         }

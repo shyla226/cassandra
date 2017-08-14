@@ -25,6 +25,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
@@ -36,8 +37,9 @@ public abstract class AbstractReadCommandBuilder
     protected final ColumnFamilyStore cfs;
     protected int nowInSeconds;
 
-    private int cqlLimit = -1;
-    private int pagingLimit = -1;
+    private int rowLimit = -1;
+    private int partitionLimit = -1;
+    private PageSize pagingLimit;
     protected boolean reversed = false;
 
     protected Set<ColumnIdentifier> columns;
@@ -114,11 +116,17 @@ public abstract class AbstractReadCommandBuilder
 
     public AbstractReadCommandBuilder withLimit(int newLimit)
     {
-        this.cqlLimit = newLimit;
+        this.rowLimit = newLimit;
+        return this;
+    }
+    
+    public AbstractReadCommandBuilder withPartitionLimit(int newLimit)
+    {
+        this.partitionLimit = newLimit;
         return this;
     }
 
-    public AbstractReadCommandBuilder withPagingLimit(int newLimit)
+    public AbstractReadCommandBuilder withPagingLimit(PageSize newLimit)
     {
         this.pagingLimit = newLimit;
         return this;
@@ -209,9 +217,17 @@ public abstract class AbstractReadCommandBuilder
 
     protected DataLimits makeLimits()
     {
-        DataLimits limits = cqlLimit < 0 ? DataLimits.NONE : DataLimits.cqlLimits(cqlLimit);
-        if (pagingLimit >= 0)
+        DataLimits limits = DataLimits.NONE;
+        if (rowLimit >= 0 && partitionLimit >= 0)
+            limits = DataLimits.cqlLimits(rowLimit, partitionLimit);
+        else if (rowLimit >= 0)
+            limits = DataLimits.cqlLimits(rowLimit);
+        else if (partitionLimit >= 0)
+            limits = DataLimits.cqlLimits(DataLimits.NO_ROWS_LIMIT, partitionLimit);
+            
+        if (pagingLimit != null)
             limits = limits.forPaging(pagingLimit);
+        
         return limits;
     }
 

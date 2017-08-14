@@ -19,11 +19,13 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.RateLimiter;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -49,7 +51,6 @@ import org.apache.cassandra.service.ReadRepairDecision;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.units.SizeUnit;
@@ -112,7 +113,7 @@ class Validator
 
     private final ValidationMetrics metrics = new ValidationMetrics();
     private final RateLimiter limiter;
-    private final int pageSize;
+    private final long pageSize;
 
     private final QueryPager pager;
     private final Observer observer;
@@ -142,8 +143,10 @@ class Validator
         this.segment = segment;
         this.startTime = startTime;
         this.limiter = service.config.rateLimiter;
-        long pageSizeInBytes = service.config.getPageSize(SizeUnit.BYTES) / TableRowSizeEstimator.instance.getAverageRowSize(segment.table);
-        this.pageSize = Math.max(1, (int)pageSizeInBytes);
+        this.pageSize = service.config.getPageSize(SizeUnit.BYTES);
+        
+        // Integer.MAX_VALUE is the max page size in bytes we support: 
+        assert pageSize <= Integer.MAX_VALUE : "page size cannot be bigger than Integer.MAX_VALUE";
 
         ReadCommand command = PartitionRangeReadCommand.fullRangeRead(table(),
                                                                       DataRange.forTokenRange(range()),
@@ -257,7 +260,7 @@ class Validator
         {
             observer.onNewPage();
             maybeRefreshLock();
-            return pager.fetchPage(pageSize, readContext)
+            return pager.fetchPage(new PageSize((int) pageSize, PageSize.PageUnit.BYTES), readContext)
                         .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), listener))
                         .concatWith(() -> moreContents(listener));
         }

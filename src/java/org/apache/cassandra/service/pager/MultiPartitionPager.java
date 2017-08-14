@@ -26,6 +26,7 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -52,7 +53,7 @@ public class MultiPartitionPager implements QueryPager
     private static final Logger logger = LoggerFactory.getLogger(MultiPartitionPager.class);
 
     private final SinglePartitionPager[] pagers;
-    private final DataLimits limit;
+    private final DataLimits limits;
 
     private final int nowInSec;
 
@@ -61,7 +62,7 @@ public class MultiPartitionPager implements QueryPager
 
     public MultiPartitionPager(SinglePartitionReadCommand.Group group, PagingState state, ProtocolVersion protocolVersion)
     {
-        this.limit = group.limits();
+        this.limits = group.limits();
         this.nowInSec = group.nowInSec();
 
         int i = 0;
@@ -81,23 +82,25 @@ public class MultiPartitionPager implements QueryPager
         pagers = new SinglePartitionPager[group.commands.size() - i];
         // 'i' is on the first non exhausted pager for the previous page (or the first one)
         SinglePartitionReadCommand command = group.commands.get(i);
+        // the propagated state will allow the command to properly set the "remaining" value
+        // see isExhausted() to see how such value is propagated to later commands
         pagers[0] = command.getPager(state, protocolVersion);
 
         // Following ones haven't been started yet
         for (int j = i + 1; j < group.commands.size(); j++)
             pagers[j - i] = group.commands.get(j).getPager(null, protocolVersion);
 
-        remaining = state == null ? limit.count() : state.remaining;
+        remaining = state == null ? limits.count() : state.remaining;
     }
 
     private MultiPartitionPager(SinglePartitionPager[] pagers,
-                                DataLimits limit,
+                                DataLimits limits,
                                 int nowInSec,
                                 int remaining,
                                 int current)
     {
         this.pagers = pagers;
-        this.limit = limit;
+        this.limits = limits;
         this.nowInSec = nowInSec;
         this.remaining = remaining;
         this.current = current;
@@ -143,59 +146,68 @@ public class MultiPartitionPager implements QueryPager
                 return false;
 
             if (logger.isTraceEnabled())
-                logger.trace("{}, current: {} -> {}", hashCode(), current, current+1);
+                logger.trace("{}, current: {} -> {}", hashCode(), current, current + 1);
+            
             current++;
+
+            if (current < pagers.length)
+            {
+                // update the next pager with the latest "remaining" value as the new limit count
+                DataLimits limits = pagers[current].limits().withCount(remaining);
+                pagers[current] = pagers[current].withUpdatedLimit(limits);
+            }
         }
         return true;
     }
 
-    public Flow<FlowablePartition> fetchPage(int pageSize, ReadContext ctx)
+    public Flow<FlowablePartition> fetchPage(PageSize pageSize, ReadContext ctx)
     throws RequestValidationException, RequestExecutionException
     {
-        int toQuery = Math.min(remaining, pageSize);
-        return new MultiPartitions(toQuery, ctx).partitions();
+        return new MultiPartitions(pageSize, ctx).partitions();
     }
 
-    public Flow<FlowablePartition> fetchPageInternal(int pageSize)
+    public Flow<FlowablePartition> fetchPageInternal(PageSize pageSize)
     throws RequestValidationException, RequestExecutionException
     {
-        int toQuery = Math.min(remaining, pageSize);
-        return new MultiPartitions(toQuery, null).partitions();
+        return new MultiPartitions(pageSize, null).partitions();
     }
 
     private class MultiPartitions
     {
-        private final int pageSize;
+        private final PageSize pageSize;
+        private PageSize toQuery;
+        
         // For distributed queries, will be null for internal ones
         @Nullable
         private final ReadContext ctx;
 
-        private int pagerMaxRemaining;
         private int counted;
 
-        private MultiPartitions(int pageSize,
+        private MultiPartitions(PageSize pageSize,
                                 ReadContext ctx)
         {
             this.pageSize = pageSize;
             this.ctx = ctx;
-            this.pagerMaxRemaining = pagers[current].maxRemaining();
         }
 
         private Flow<FlowablePartition> partitions()
         {
-            return fetchSubPage(pageSize).concatWith(this::moreContents)
+            return fetchSubPage(null).concatWith(this::moreContents)
                                          .doOnClose(this::close);
         }
 
         protected Flow<FlowablePartition> moreContents()
         {
-            counted += pagerMaxRemaining - pagers[current].maxRemaining();
-
+            DataLimits.Counter currentCounter = pagers[current].lastCounter;
+            
+            counted += currentCounter.counted();
+            remaining -= currentCounter.counted();
+            
             // We are done if we have reached the page size or in the case of GROUP BY if the current pager
             // is not exhausted.
-            boolean isDone = counted >= pageSize
-                             || (limit.isGroupByLimit() && !pagers[current].isExhausted());
-
+            boolean isDone = toQuery.isComplete(currentCounter.counted(), currentCounter.bytesCounted())
+                             || (limits.isGroupByLimit() && !pagers[current].isExhausted());
+            
             if (logger.isTraceEnabled())
                 logger.trace("{} - moreContents, current: {}, counted: {}, isDone: {}", MultiPartitionPager.this.hashCode(), current, counted, isDone);
 
@@ -203,14 +215,28 @@ public class MultiPartitionPager implements QueryPager
             if (isDone || isExhausted())
                 return null;
 
-            pagerMaxRemaining = pagers[current].maxRemaining();
-            int toQuery = pageSize - counted;
-            return fetchSubPage(toQuery);
-
+            return fetchSubPage(currentCounter);
         }
 
-        private Flow<FlowablePartition> fetchSubPage(int toQuery)
+        private Flow<FlowablePartition> fetchSubPage(DataLimits.Counter currentCounter)
         {
+            // update the page size based on the current counter
+            if (currentCounter != null)
+            {
+                if (pageSize.isInBytes())
+                    toQuery = PageSize.bytesSize(toQuery.rawSize() - currentCounter.bytesCounted());
+                else
+                    toQuery = PageSize.rowsSize(toQuery.rawSize() - currentCounter.counted());
+            }
+            else
+                toQuery = pageSize;
+            
+            if (logger.isTraceEnabled())
+                logger.trace("{} - fetchSubPage, subPager: [{}], pageSize: {} {}", 
+                             MultiPartitionPager.this.hashCode(), pagers[current].command, 
+                             toQuery.rawSize(), toQuery.isInRows() ? PageSize.PageUnit.ROWS : PageSize.PageUnit.BYTES);
+
+            // the current pager will now have an up-to-date value for both the remaining counter and the page size
             return ctx == null
                    ? pagers[current].fetchPageInternal(toQuery)
                    : pagers[current].fetchPage(toQuery, ctx);
@@ -218,8 +244,6 @@ public class MultiPartitionPager implements QueryPager
 
         private void close()
         {
-            remaining -= counted;
-
             if (logger.isTraceEnabled())
                 logger.trace("{} - closed, counted: {}, remaining: {}", MultiPartitionPager.this.hashCode(), counted, remaining);
         }
