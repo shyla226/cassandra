@@ -1,4 +1,5 @@
 DSE 5.0.10
+ * Revert CASSANDRA-11223 behavior in AbstractReadCommandBuilder (APOLLO-1010)
  * Simplify role-permissions handling (APOLLO-796)
  * Prevent marking remote SSTables shadowing compacted data as repaired (APOLLO-688)
  * fix completed rebuild logging always says 0 bytes (APOLLO-810)
