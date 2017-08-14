@@ -19,6 +19,8 @@ package org.apache.cassandra.service;
 
 import java.net.InetAddress;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -28,6 +30,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.metrics.AuthMetrics;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.transport.Server;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
  * Handles native transport server lifecycle and associated resources. Lazily initialized.
@@ -35,6 +38,8 @@ import org.apache.cassandra.transport.Server;
 public class NativeTransportService
 {
     private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
+
+    private final static int ON_CLOSE_WAIT_TIMEOUT_SECS = 5;
 
     private List<Server> servers = Collections.emptyList();
 
@@ -130,7 +135,21 @@ public class NativeTransportService
      */
     public void stop()
     {
-        servers.forEach(Server::stop);
+        try
+        {
+            stopAsync().get(ON_CLOSE_WAIT_TIMEOUT_SECS, TimeUnit.SECONDS);
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Failed to wait for native transport service to stop cleanly", t);
+        }
+
+    }
+
+    public CompletableFuture stopAsync()
+    {
+        return CompletableFuture.allOf(servers.stream().map(Server::stop).toArray(CompletableFuture[]::new));
     }
 
     /**

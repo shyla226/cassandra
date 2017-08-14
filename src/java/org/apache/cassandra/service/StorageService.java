@@ -370,7 +370,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return daemon.isNativeTransportRunning();
     }
 
-    public void stopTransports()
+    public CompletableFuture stopTransportsAsync()
     {
         if (isGossipActive())
         {
@@ -380,8 +380,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (isNativeTransportRunning())
         {
             logger.error("Stopping native transport");
-            stopNativeTransport();
+            return daemon.stopNativeTransportAsync();
         }
+
+        return CompletableFuture.completedFuture(null);
     }
 
     /**

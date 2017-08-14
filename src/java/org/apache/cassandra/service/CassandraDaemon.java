@@ -25,6 +25,7 @@ import java.net.InetAddress;
 import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -516,6 +517,7 @@ public class CassandraDaemon
         logger.info("Cassandra shutting down...");
         if (nativeTransportService != null)
             nativeTransportService.destroy();
+
         StorageService.instance.setRpcReady(false);
 
         // On windows, we need to stop the entire system as prunsrv doesn't have the jsvc hooks
@@ -651,6 +653,14 @@ public class CassandraDaemon
             nativeTransportService.stop();
     }
 
+    public CompletableFuture stopNativeTransportAsync()
+    {
+        if (nativeTransportService != null)
+            return nativeTransportService.stopAsync();
+
+        return CompletableFuture.completedFuture(null);
+    }
+
     public boolean isNativeTransportRunning()
     {
         return nativeTransportService != null ? nativeTransportService.isRunning() : false;
@@ -733,7 +743,7 @@ public class CassandraDaemon
          * This method should be able to stop server started through start().
          * Should throw a RuntimeException if the server cannot be stopped
          */
-        public void stop();
+        public CompletableFuture stop();
 
         /**
          * Returns whether the server is currently running.

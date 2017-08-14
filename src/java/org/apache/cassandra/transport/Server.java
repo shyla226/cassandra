@@ -54,7 +54,6 @@ import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.transport.messages.EventMessage;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 
 public class Server implements CassandraDaemon.Server
 {
@@ -89,10 +88,12 @@ public class Server implements CassandraDaemon.Server
         Schema.instance.registerListener(notifier);
     }
 
-    public void stop()
+    public CompletableFuture stop()
     {
         if (isRunning.compareAndSet(true, false))
-            close();
+            return close();
+
+        return CompletableFuture.completedFuture(null);
     }
 
     public boolean isRunning()
@@ -154,12 +155,12 @@ public class Server implements CassandraDaemon.Server
         return connectionTracker.getConnectedClients();
     }
 
-    private void close()
+    private CompletableFuture close()
     {
-        // Close opened connections
-        connectionTracker.closeAll();
-
         logger.info("Stop listening for CQL clients");
+
+        // Close opened connections
+        return connectionTracker.closeAll();
     }
 
     public static class Builder
@@ -213,12 +214,13 @@ public class Server implements CassandraDaemon.Server
 
     public static class ConnectionTracker implements Connection.Tracker
     {
-        private final static int ON_CLOSE_WAIT_TIMEOUT_SECS = 5;
-
         // TODO: should we be using the GlobalEventExecutor or defining our own?
         public final ChannelGroup allChannels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
         private final EnumMap<Event.Type, ChannelGroup> groups = new EnumMap<>(Event.Type.class);
-        private final List<CompletableFuture<?>> inFlightRequestsFutures = new ArrayList<>();
+
+        // this is set to non null when all channels are being closed on our end so we can wait
+        // on all the requests in-flight, see closeAll
+        private volatile BlockingQueue<CompletableFuture<?>> inFlightRequestsFutures = null;
 
         public ConnectionTracker()
         {
@@ -231,6 +233,11 @@ public class Server implements CassandraDaemon.Server
             allChannels.add(ch);
         }
 
+        /**
+         * Called when the channel gets closed, removes the connection from the tracker.
+         * @param ch - the channel being closed
+         * @param connection - the connection associated with the channel
+         */
         public void removeConnection(Channel ch, Connection connection)
         {
             if (logger.isTraceEnabled())
@@ -240,7 +247,8 @@ public class Server implements CassandraDaemon.Server
             assert connection instanceof ServerConnection : "Expected connection of type ServerConnection";
             ServerConnection serverConnection = (ServerConnection)connection;
 
-            inFlightRequestsFutures.add(serverConnection.waitForInFlightRequests());
+            if (inFlightRequestsFutures != null)
+                inFlightRequestsFutures.offer(serverConnection.waitForInFlightRequests());
         }
 
         public void register(Event.Type type, Channel ch)
@@ -253,26 +261,29 @@ public class Server implements CassandraDaemon.Server
             groups.get(event.type).writeAndFlush(new EventMessage(event));
         }
 
-        public void closeAll()
+        public CompletableFuture closeAll()
         {
             if (logger.isTraceEnabled())
                 logger.trace("Closing all channels");
-            allChannels.close().awaitUninterruptibly();
 
-            try
-            {
-                CompletableFuture.allOf(inFlightRequestsFutures.toArray(new CompletableFuture<?>[inFlightRequestsFutures.size()]))
-                                 .get(ON_CLOSE_WAIT_TIMEOUT_SECS, TimeUnit.SECONDS);
-            }
-            catch (Throwable t)
-            {
-                JVMStabilityInspector.inspectThrowable(t);
-                logger.warn("Failed to wait for in-flight requests when closing all connections ({})", t.getMessage());
-            }
+            if (allChannels.isEmpty())
+                return CompletableFuture.completedFuture(null);
 
+            assert inFlightRequestsFutures == null : "closeAll should only be called once";
+
+            // it is not entirely clear to me that we cannot have a race resulting in a new channel being added
+            // after the futures queue is created, and so I am making it an unbounded queue. Note that in this
+            // case this channel also risks not being closed, but this would be an existing issue that I don't want
+            // to tackle as part of this patch
+            inFlightRequestsFutures = new LinkedBlockingDeque<>();
+
+            CompletableFuture channelsFuture = new CompletableFuture();
+            allChannels.close().addListener(future -> channelsFuture.complete(null));
+
+            return channelsFuture.thenCompose(result -> CompletableFuture.allOf(inFlightRequestsFutures.toArray(new CompletableFuture<?>[0])));
         }
 
-        public int getConnectedClients()
+        int getConnectedClients()
         {
             /*
               - When server is running: allChannels contains all clients' connections (channels)

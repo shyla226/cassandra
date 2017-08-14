@@ -470,7 +470,7 @@ public class CommitLog implements CommitLogMBean
             // Needed here for unit tests to not fail on default assertion
             case die:
             case stop:
-                StorageService.instance.stopTransports();
+                StorageService.instance.stopTransportsAsync();
                 //$FALL-THROUGH$
             case stop_commit:
                 logger.error(String.format("%s. Commit disk failure policy is %s; terminating thread", message, DatabaseDescriptor.getCommitFailurePolicy()), t);
