@@ -2421,4 +2421,14 @@ public class DatabaseDescriptor
     {
         return conf.nodesync;
     }
+
+    public static int getRepairCommandPoolSize()
+    {
+        return conf.repair_command_pool_size;
+    }
+
+    public static Config.RepairCommandPoolFullStrategy getRepairCommandPoolFullStrategy()
+    {
+        return conf.repair_command_pool_full_strategy;
+    }
 }

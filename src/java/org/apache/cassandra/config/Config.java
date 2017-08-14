@@ -363,6 +363,9 @@ public class Config
 
     public NodeSyncConfig nodesync = new NodeSyncConfig();
 
+    public RepairCommandPoolFullStrategy repair_command_pool_full_strategy = RepairCommandPoolFullStrategy.queue;
+    public int repair_command_pool_size = concurrent_validations;
+
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}
      */
@@ -438,6 +441,12 @@ public class Config
     {
         ssd,
         spinning
+    }
+
+    public enum RepairCommandPoolFullStrategy
+    {
+        queue,
+        reject
     }
 
     private static final List<String> SENSITIVE_KEYS = new ArrayList<String>() {{

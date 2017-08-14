@@ -58,6 +58,7 @@ import ch.qos.logback.core.hook.DelayingShutdownHook;
 import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.auth.AuthSchemaChangeListener;
 import org.apache.cassandra.batchlog.BatchlogManager;
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
@@ -99,6 +100,7 @@ import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.streaming.*;
 import org.apache.cassandra.tracing.TraceKeyspace;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -124,8 +126,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public static final int RING_DELAY = getRingDelay(); // delay after which we assume ring has stablized
 
     private final JMXProgressSupport progressSupport = new JMXProgressSupport(this);
-
-    private static final AtomicInteger threadCounter = new AtomicInteger(1);
 
     private static int getRingDelay()
     {
@@ -3395,7 +3395,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         checkForNodeSyncEnabledTables(keyspace, option);
 
         int cmd = nextRepairCommand.incrementAndGet();
-        NamedThreadFactory.createThread(createRepairTask(cmd, keyspace, option), "Repair-Task-" + threadCounter.incrementAndGet()).start();
+        ActiveRepairService.repairCommandExecutor.execute(createRepairTask(cmd, keyspace, option));
         return cmd;
     }
 
@@ -3477,6 +3477,21 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         RepairRunnable task = new RepairRunnable(this, cmd, options, keyspace);
         task.addProgressListener(progressSupport);
+        if (options.isTraced())
+        {
+            Runnable r = () ->
+            {
+                try
+                {
+                    task.run();
+                }
+                finally
+                {
+                    ExecutorLocals.set(null);
+                }
+            };
+            return new FutureTask<>(r, null);
+        }
         return new FutureTask<>(task, null);
     }
 
