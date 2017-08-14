@@ -472,16 +472,20 @@ public abstract class Message
                 flushItems.add(item);
             }
 
+            void release()
+            {
+                for (FlushItem item : flushItems)
+                    item.sourceFrame.release();
+
+                flushItems.clear();
+            }
+
             boolean maybeFlush()
             {
                 if (runsSinceFlush > 2 || flushItems.size() > 50)
                 {
                     ctx.flush();
-                    for (FlushItem item : flushItems)
-                        item.sourceFrame.release();
-
-                    flushItems.clear();
-
+                    release();
                     runsSinceFlush = 0;
                     return true;
                 }
@@ -527,7 +531,10 @@ public abstract class Message
                     if (c.getKey().channel().isActive())
                         c.getValue().maybeFlush();
                     else
+                    {
+                        c.getValue().release();
                         finishedChannels.add(c.getKey());
+                    }
                 }
 
                 for (ChannelHandlerContext c : finishedChannels)
