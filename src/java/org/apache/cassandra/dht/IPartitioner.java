@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.dht;
 
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
@@ -113,5 +114,15 @@ public interface IPartitioner
     default Optional<Splitter> splitter()
     {
         return Optional.empty();
+    }
+
+    default boolean hasNumericTokens()
+    {
+        return false;
+    }
+
+    default BigInteger valueForToken(Token token)
+    {
+        throw new UnsupportedOperationException();
     }
 }

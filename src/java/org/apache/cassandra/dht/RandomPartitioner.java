@@ -270,4 +270,13 @@ public class RandomPartitioner implements IPartitioner
         return Optional.of(splitter);
     }
 
+    public boolean hasNumericTokens()
+    {
+        return true;
+    }
+
+    public BigInteger valueForToken(Token token)
+    {
+        return ((BigIntegerToken)token).token;
+    }
 }

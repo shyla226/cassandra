@@ -349,4 +349,14 @@ public class Murmur3Partitioner implements IPartitioner
     {
         return Optional.of(splitter);
     }
+
+    public boolean hasNumericTokens()
+    {
+        return true;
+    }
+
+    public BigInteger valueForToken(Token token)
+    {
+        return BigInteger.valueOf(((LongToken)token).token);
+    }
 }
