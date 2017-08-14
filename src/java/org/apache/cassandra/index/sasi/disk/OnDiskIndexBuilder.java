@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sasi.sa.TermIterator;
 import org.apache.cassandra.index.sasi.sa.SuffixSA;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -132,6 +133,7 @@ public class OnDiskIndexBuilder
 
     private static final SequentialWriterOption WRITER_OPTION = SequentialWriterOption.newBuilder()
                                                                                       .bufferSize(BLOCK_SIZE)
+                                                                                      .bufferType(BufferType.OFF_HEAP)
                                                                                       .build();
 
     private final List<MutableLevel<InMemoryPointerTerm>> levels = new ArrayList<>();

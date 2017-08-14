@@ -21,10 +21,13 @@ import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.Optional;
 
+import org.apache.cassandra.io.compress.BufferType;
+
 public class ChecksummedSequentialWriter extends SequentialWriter
 {
     private static final SequentialWriterOption CRC_WRITER_OPTION = SequentialWriterOption.newBuilder()
                                                                                           .bufferSize(8 * 1024)
+                                                                                          .bufferType(BufferType.OFF_HEAP)
                                                                                           .build();
 
     private final SequentialWriter crcWriter;

@@ -46,6 +46,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.io.sstable.format.*;
@@ -72,10 +73,11 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     private long lastEarlyOpenLength = 0;
     private final Optional<ChunkCache> chunkCache = Optional.ofNullable(ChunkCache.instance);
 
-    private final SequentialWriterOption writerOption = SequentialWriterOption.newBuilder()
-                                                        .trickleFsync(DatabaseDescriptor.getTrickleFsync())
-                                                        .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
-                                                        .build();
+    private static final SequentialWriterOption WRITER_OPTION = SequentialWriterOption.newBuilder()
+                                                                .trickleFsync(DatabaseDescriptor.getTrickleFsync())
+                                                                .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
+                                                                .bufferType(BufferType.OFF_HEAP)
+                                                                .build();
 
     public TrieIndexSSTableWriter(Descriptor descriptor,
                           long keyCount,
@@ -95,7 +97,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             dataFile = new CompressedSequentialWriter(new File(getFilename()),
                                              descriptor.filenameFor(Component.COMPRESSION_INFO),
                                              new File(descriptor.filenameFor(Component.DIGEST)),
-                                             writerOption,
+                                             WRITER_OPTION,
                                              metadata().params.compression,
                                              metadataCollector);
         }
@@ -104,7 +106,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             dataFile = new ChecksummedSequentialWriter(new File(getFilename()),
                     new File(descriptor.filenameFor(Component.CRC)),
                     new File(descriptor.filenameFor(Component.DIGEST)),
-                    writerOption);
+                    WRITER_OPTION);
         }
         dbuilder = new FileHandle.Builder(descriptor.filenameFor(Component.DATA)).compressed(compression)
                                                                                  .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap &&
@@ -389,7 +391,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     private void writeMetadata(Descriptor desc, Map<MetadataType, MetadataComponent> components)
     {
         File file = new File(desc.filenameFor(Component.STATS));
-        try (SequentialWriter out = new SequentialWriter(file, writerOption))
+        try (SequentialWriter out = new SequentialWriter(file, WRITER_OPTION))
         {
             desc.getMetadataSerializer().serialize(components, out, desc.version);
             out.finish();
@@ -431,9 +433,9 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         IndexWriter(long keyCount)
         {
-            rowIndexFile = new SequentialWriter(new File(descriptor.filenameFor(Component.ROW_INDEX)), writerOption);
+            rowIndexFile = new SequentialWriter(new File(descriptor.filenameFor(Component.ROW_INDEX)), WRITER_OPTION);
             rowIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, metadata(), Component.ROW_INDEX);
-            partitionIndexFile = new SequentialWriter(new File(descriptor.filenameFor(Component.PARTITION_INDEX)), writerOption);
+            partitionIndexFile = new SequentialWriter(new File(descriptor.filenameFor(Component.PARTITION_INDEX)), WRITER_OPTION);
             partitionIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, metadata(), Component.PARTITION_INDEX);
             partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder);
             bf = FilterFactory.getFilter(keyCount, metadata().params.bloomFilterFpChance, true);
