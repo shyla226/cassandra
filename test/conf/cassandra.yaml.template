@@ -94,3 +94,12 @@ enable_user_defined_functions: true
 disk_access_mode: ${state.diskAccessMode}
 #end
 otc_coalescing_strategy: DISABLED
+#if (${state.auditLogger})
+audit_logging_options:
+  enabled: true
+  logger: ${state.auditLogger}
+  excluded_keyspaces: ${state.excludedKeyspaces}
+  cassandra_audit_writer_options:
+    dropped_event_log: build/test/logs/dropped_audit_events.log
+    write_consistency: ONE
+#end
