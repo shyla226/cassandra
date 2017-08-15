@@ -22,13 +22,25 @@ import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
 import java.lang.reflect.Constructor;
-import java.net.*;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.nio.file.FileStore;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
-import java.util.concurrent.TimeUnit;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.Enumeration;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -40,6 +52,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.sun.management.OperatingSystemMXBean;
+import org.apache.cassandra.audit.AuditLogger;
+import org.apache.cassandra.audit.IAuditWriter;
 import org.apache.cassandra.auth.AllowAllInternodeAuthenticator;
 import org.apache.cassandra.auth.AuthConfig;
 import org.apache.cassandra.auth.IAuthenticator;
@@ -65,7 +79,6 @@ import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.service.CacheService.CacheType;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.LineNumberInference;
-import sun.misc.VM;
 
 import static org.apache.cassandra.io.util.FileUtils.ONE_GB;
 
@@ -131,6 +144,8 @@ public class DatabaseDescriptor
 
     private static final boolean disableSTCSInL0 = Boolean.getBoolean(Config.PROPERTY_PREFIX + "disable_stcs_in_l0");
     private static final boolean unsafeSystem = Boolean.getBoolean(Config.PROPERTY_PREFIX + "unsafesystem");
+    private static Class<? extends IAuditWriter> auditLoggerClass;
+    private static AuditLogger auditLogger;
 
     public static void daemonInitialization() throws ConfigurationException
     {
@@ -150,6 +165,9 @@ public class DatabaseDescriptor
         setConfig(loadConfig());
         applyAll();
         AuthConfig.applyAuth();
+
+        // this has to happen after auth has been set up
+        applyAuditLoggerConfig();
     }
 
     /**
@@ -332,6 +350,11 @@ public class DatabaseDescriptor
         applyEncryptionContext();
 
         conf.nodesync.validate();
+    }
+
+    private static void applyAuditLoggerConfig()
+    {
+        auditLogger = AuditLogger.getInstance();
     }
 
     private static void applySimpleConfig()
@@ -2602,5 +2625,28 @@ public class DatabaseDescriptor
     public static int getMaxHintsReceiveThreads()
     {
         return Integer.getInteger("cassandra.hints.max_receive_threads", DatabaseDescriptor.getMaxHintsDeliveryThreads());
+    }
+
+    public static void setAuditLoggerClass(Class<? extends IAuditWriter> auditLoggerClass)
+    {
+        DatabaseDescriptor.conf.audit_logging_options.logger = auditLoggerClass.getName();
+    }
+
+    /* For tests ONLY, don't use otherwise or all hell will break loose. Tests should restore value at the end. */
+    public static AuditLogger setAuditLoggerUnsafe(AuditLogger logger)
+    {
+        AuditLogger old = auditLogger;
+        auditLogger = logger;
+        return old;
+    }
+
+    public static Class<? extends IAuditWriter> getAuditLoggerClass()
+    {
+        return auditLoggerClass;
+    }
+
+    public static AuditLogger getAuditLogger()
+    {
+        return auditLogger;
     }
 }

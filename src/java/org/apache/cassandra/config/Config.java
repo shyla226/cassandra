@@ -20,6 +20,7 @@ package org.apache.cassandra.config;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,7 +29,6 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.Sets;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -347,6 +347,7 @@ public class Config
 
     /** How often histograms used by JMX metrics are updated, in milliseconds */
     public int metrics_histogram_update_interval_millis = 1000;
+    public AuditLoggingOptions audit_logging_options = new AuditLoggingOptions();
 
     public NodeSyncConfig nodesync = new NodeSyncConfig();
 
@@ -372,6 +373,71 @@ public class Config
     public static void setClientMode(boolean clientMode)
     {
         isClientMode = clientMode;
+    }
+
+    public Set<String> getAuditIncludedKeyspaces()
+    {
+        return commaSeparatedStrToSet(audit_logging_options.included_keyspaces);
+    }
+
+    public Set<String> getAuditExcludedKeyspaces()
+    {
+        return commaSeparatedStrToSet(audit_logging_options.excluded_keyspaces);
+    }
+
+    public Set<String> getAuditIncludedCategories()
+    {
+        return commaSeparatedStrToSet(audit_logging_options.included_categories);
+    }
+
+    public Set<String> getAuditExcludedCategories()
+    {
+        return commaSeparatedStrToSet(audit_logging_options.excluded_categories);
+    }
+
+    public boolean getAuditLoggingEnabled()
+    {
+        return audit_logging_options.enabled;
+    }
+
+    public String getAuditLoggerName()
+    {
+        return audit_logging_options.logger;
+    }
+
+    public int getAuditLoggerRetentionTime()
+    {
+        return audit_logging_options.retention_time;
+    }
+
+    public ConsistencyLevel getAuditCassConsistencyLevel()
+    {
+        return ConsistencyLevel.valueOf(audit_logging_options.cassandra_audit_writer_options.write_consistency);
+    }
+
+    public String getAuditLoggerCassMode()
+    {
+        return audit_logging_options.cassandra_audit_writer_options.mode;
+    }
+
+    public int getAuditLoggerCassAsyncQueueSize()
+    {
+        return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.queue_size);
+    }
+
+    public int getAuditLoggerNumCassLoggers()
+    {
+        return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.num_writers);
+    }
+
+    public int getAuditCassFlushTime()
+    {
+        return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.flush_time);
+    }
+
+    public int getAuditCassBatchSize()
+    {
+        return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.batch_size);
     }
 
     public enum CommitLogSync
@@ -471,5 +537,21 @@ public class Config
         }
 
         logger.info("Node configuration:[{}]", Joiner.on("; ").join(configMap.entrySet()));
+    }
+
+    private static Set<String> commaSeparatedStrToSet(String valueString)
+    {
+        if (valueString == null)
+            return new HashSet<>();
+
+        if (valueString.trim().length() == 0)
+            return new HashSet<>();
+
+        Set<String> values = new HashSet<>();
+        for (String value : valueString.split(","))
+            if (value.trim().length() > 0)
+                values.add(value.trim());
+
+        return values;
     }
 }

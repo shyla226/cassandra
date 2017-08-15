@@ -29,44 +29,65 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import io.reactivex.Scheduler;
-import io.reactivex.Single;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.MoreExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.schedulers.Schedulers;
-import org.antlr.runtime.*;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import io.reactivex.Completable;
+import io.reactivex.Scheduler;
+import io.reactivex.Single;
+import io.reactivex.SingleSource;
+import org.antlr.runtime.RecognitionException;
+import org.apache.cassandra.audit.AuditableEvent;
+import org.apache.cassandra.audit.AuditableEventType;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.cql3.statements.CFStatement;
+import org.apache.cassandra.cql3.statements.ModificationStatement;
+import org.apache.cassandra.cql3.statements.ParsedStatement;
+import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionIterators;
+import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.exceptions.CassandraException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.metrics.CQLMetrics;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.cql3.functions.FunctionName;
-import org.apache.cassandra.cql3.statements.*;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.partitions.PartitionIterators;
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.exceptions.*;
-import org.apache.cassandra.metrics.CQLMetrics;
-import org.apache.cassandra.service.*;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MD5Digest;
+import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.flow.RxThreads;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
@@ -90,6 +111,7 @@ public class QueryProcessor implements QueryHandler
     public static final CQLMetrics metrics = new CQLMetrics();
 
     private static final AtomicInteger lastMinuteEvictionsCount = new AtomicInteger(0);
+    public static CqlAuditLogger auditLogger = new CqlAuditLogger();
 
     static
     {
@@ -241,6 +263,15 @@ public class QueryProcessor implements QueryHandler
                                                                      });
                 return RxThreads.subscribeOnIo(single, TPCTaskType.EXECUTE_STATEMENT);
             }
+            catch (RequestValidationException|RequestExecutionException e)
+            {
+                AuditableEvent.Builder builder = AuditableEvent.Builder.fromClientState(clientState);
+                builder.type(AuditableEventType.REQUEST_FAILURE);
+                builder.operation(statement.toString());
+                auditLogger.logFailedQuery(Lists.newArrayList(builder.build()), e);
+                logger.trace("Unexpected exception when trying to process a statement: " + e.getMessage(), e);
+                throw e;
+            }
         });
 
         return scheduler == null ? ret : RxThreads.subscribeOn(ret, scheduler, TPCTaskType.EXECUTE_STATEMENT);
@@ -249,14 +280,14 @@ public class QueryProcessor implements QueryHandler
     public static Single<ResultMessage> process(String queryString, ConsistencyLevel cl, QueryState queryState, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        return instance.process(queryString, queryState, QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()),  queryStartNanoTime);
+        return instance.process(queryString, queryState, QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()), queryStartNanoTime);
     }
 
     public Single<ResultMessage> process(String query,
-                                                   QueryState state,
-                                                   QueryOptions options,
-                                                   Map<String, ByteBuffer> customPayload,
-                                                   long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+                                         QueryState state,
+                                         QueryOptions options,
+                                         Map<String, ByteBuffer> customPayload,
+                                         long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
     {
         return process(query, state, options, queryStartNanoTime);
     }
@@ -264,16 +295,42 @@ public class QueryProcessor implements QueryHandler
     public Single<ResultMessage> process(String queryString, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        ParsedStatement.Prepared p = getStatement(queryString, queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace()));
-        options.prepare(p.boundNames);
-        CQLStatement prepared = p.statement;
-        if (prepared.getBoundTerms() != options.getValues().size())
-            throw new InvalidRequestException("Invalid amount of bind variables");
+        try
+        {
+            ParsedStatement.Prepared p = getStatement(queryString, queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace()));
+            options.prepare(p.boundNames);
+            CQLStatement prepared = p.statement;
+            if (prepared.getBoundTerms() != options.getValues().size())
+                throw new InvalidRequestException("Invalid amount of bind variables");
 
-        if (!queryState.getClientState().isInternal)
-            metrics.regularStatementsExecuted.inc();
+            if (!queryState.getClientState().isInternal)
+                metrics.regularStatementsExecuted.inc();
 
-        return processStatement(prepared, queryState, options, queryStartNanoTime);
+            QueryOptions.PagingOptions pagingOptions = options.getPagingOptions();
+
+            List<AuditableEvent> events = null;
+            if (pagingOptions == null || pagingOptions.state() == null)
+            { // it's not a paging query, get events to log
+                events = auditLogger.getEvents(prepared, queryString, queryState,
+                                               options, p.boundNames);
+            }
+
+            Single<ResultMessage> executeAndMaybeAuditLogErrors = processStatement(prepared,
+                                                                                   queryState,
+                                                                                   options,
+                                                                                   queryStartNanoTime)
+                                                                  .onErrorResumeNext(maybeAuditLogErrors(events));
+            return maybeAuditLog(events).andThen(executeAndMaybeAuditLogErrors);
+        }
+        catch (RequestValidationException e)
+        {
+            AuditableEvent.Builder builder = AuditableEvent.Builder.fromClientState(queryState.getClientState());
+            builder.type(AuditableEventType.REQUEST_FAILURE);
+            builder.operation(queryString);
+            auditLogger.logFailedQuery(Lists.newArrayList(builder.build()), e);
+            logger.trace("Unexpected exception when trying to process a statement: " + e.getMessage(), e);
+            throw e;
+        }
     }
 
     public static ParsedStatement.Prepared parseStatement(String queryStr, ClientState clientState) throws RequestValidationException
@@ -483,16 +540,47 @@ public class QueryProcessor implements QueryHandler
 
     public static Single<ResultMessage.Prepared> prepare(String queryString, ClientState clientState)
     {
-        ResultMessage.Prepared existing = getStoredPreparedStatement(queryString, clientState.getRawKeyspace());
-        if (existing != null)
-            return Single.just(existing);
+        List<AuditableEvent> events = null;
+        try
+        {
+            ResultMessage.Prepared existing = getStoredPreparedStatement(queryString, clientState.getRawKeyspace());
 
-        ParsedStatement.Prepared prepared = getStatement(queryString, clientState);
-        prepared.rawCQLStatement = queryString;
-        validateBindingMarkers(prepared);
+            if (existing != null)
+                return Single.just(existing);
 
-        return storePreparedStatement(queryString, clientState.getRawKeyspace(), prepared);
+            ParsedStatement.Prepared prepared = getStatement(queryString, clientState);
+            prepared.rawCQLStatement = queryString;
+            validateBindingMarkers(prepared);
+
+            PreparedStatementCache.instance.addQueryInfo(prepared.statement,
+                                                         queryString,
+                                                         prepared.boundNames);
+            if (QueryProcessor.isAuditEnabled())
+            {
+                events = auditLogger.getEventsForPrepare(prepared.statement,
+                                                         queryString,
+                                                         clientState);
+            }
+
+            Single<ResultMessage.Prepared> executeAndMaybeAuditLogErrors = storePreparedStatement(queryString,
+                                                                                            clientState.getRawKeyspace(),
+                                                                                            prepared)
+                                                                     .onErrorResumeNext(maybeAuditLogErrors(events));
+
+            return maybeAuditLog(events).andThen(executeAndMaybeAuditLogErrors);
+        }
+        catch (RequestValidationException e)
+        {
+            // RequestValidationException can come out before the Single gets created, so we need the try/catch still.
+            AuditableEvent.Builder builder = AuditableEvent.Builder.fromClientState(clientState);
+            builder.type(AuditableEventType.REQUEST_FAILURE);
+            builder.operation(queryString);
+            auditLogger.logFailedQuery(Lists.newArrayList(builder.build()), e);
+            logger.trace("Unexpected exception when trying to prepare a statement: " + e.getMessage(), e);
+            throw e;
+        }
     }
+
 
     public static void validateBindingMarkers(ParsedStatement.Prepared prepared)
     {
@@ -535,6 +623,7 @@ public class QueryProcessor implements QueryHandler
                                                             queryString.substring(0, 200)));
         MD5Digest statementId = computeId(queryString, keyspace);
         preparedStatements.put(statementId, prepared);
+        PreparedStatementCache.instance.addQueryInfo(prepared.statement, queryString, prepared.boundNames);
         Single<UntypedResultSet> observable = SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
         return observable.map(resultSet -> new ResultMessage.Prepared(statementId, prepared));
     }
@@ -553,6 +642,7 @@ public class QueryProcessor implements QueryHandler
     throws RequestExecutionException, RequestValidationException
     {
         List<ByteBuffer> variables = options.getValues();
+
         // Check to see if there are any bound variables to verify
         if (!(variables.isEmpty() && (statement.getBoundTerms() == 0)))
         {
@@ -565,18 +655,32 @@ public class QueryProcessor implements QueryHandler
 
             if (logger.isTraceEnabled())
                 for (int i = 0; i < variables.size(); i++)
-                    logger.trace("[{}] '{}'", i+1, variables.get(i));
+                    logger.trace("[{}] '{}'", i + 1, variables.get(i));
         }
 
         metrics.preparedStatementsExecuted.inc();
-        return processStatement(statement, queryState, options, queryStartNanoTime);
+
+        Pair<String, List<ColumnSpecification>> queryInfo = PreparedStatementCache.instance.getQueryInfo(statement);
+        List<AuditableEvent> events = auditLogger.getEvents(statement,
+                                                            queryInfo.left,
+                                                            queryState,
+                                                            options,
+                                                            queryInfo.right);
+
+        Single<ResultMessage> executeAndMaybeAuditLogErrors = processStatement(statement,
+                                                                               queryState,
+                                                                               options,
+                                                                               queryStartNanoTime)
+                                                              .onErrorResumeNext(maybeAuditLogErrors(events));
+
+        return maybeAuditLog(events).andThen(executeAndMaybeAuditLogErrors);
     }
 
     public Single<ResultMessage> processBatch(BatchStatement statement,
-                                                        QueryState state,
-                                                        BatchQueryOptions options,
-                                                        Map<String, ByteBuffer> customPayload,
-                                                        long queryStartNanoTime)
+                                              QueryState state,
+                                              BatchQueryOptions options,
+                                              Map<String, ByteBuffer> customPayload,
+                                              long queryStartNanoTime)
     {
         return processBatch(statement, state, options, queryStartNanoTime);
     }
@@ -585,24 +689,36 @@ public class QueryProcessor implements QueryHandler
     {
         final ClientState clientState = queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace());
         return Single.defer(() -> {
+            List<AuditableEvent> events = auditLogger.getEvents(batch, queryState, options);
             try
             {
                 batch.checkAccess(clientState);
                 batch.validate();
                 batch.validate(clientState);
-                return batch.execute(queryState, options, queryStartNanoTime);
+                return auditLogger.logEvents(events).andThen(batch.execute(queryState, options, queryStartNanoTime)
+                                                                  .onErrorResumeNext(maybeAuditLogErrors(events)));
             }
             catch (TPCUtils.WouldBlockException ex)
             {
                 return RxThreads.subscribeOnIo(
-                    Single.defer(() -> {
-                        batch.checkAccess(clientState);
-                        batch.validate();
-                        batch.validate(clientState);
-                        return batch.execute(queryState, options, queryStartNanoTime);
-                    }),
-                    TPCTaskType.EXECUTE_STATEMENT
+                Single.defer(() -> {
+                    batch.checkAccess(clientState);
+                    batch.validate();
+                    batch.validate(clientState);
+                    return batch.execute(queryState, options, queryStartNanoTime);
+                }),
+                TPCTaskType.EXECUTE_STATEMENT
                 );
+            }
+            catch (UnauthorizedException e)
+            {
+                auditLogger.logUnauthorizedAttempt(events, e);
+                throw e;
+            }
+            catch (InvalidRequestException | RequestExecutionException e)
+            {
+                auditLogger.logFailedQuery(events, e);
+                throw e;
             }
         });
     }
@@ -637,6 +753,7 @@ public class QueryProcessor implements QueryHandler
             throw new IllegalArgumentException(e.getMessage(), e);
         }
     }
+
     public static ParsedStatement parseStatement(String queryStr) throws SyntaxException
     {
         try
@@ -830,5 +947,40 @@ public class QueryProcessor implements QueryHandler
         {
             removeInvalidPreparedStatementsForFunction(ksName, aggregateName);
         }
+    }
+
+    public static boolean isAuditEnabled()
+    {
+        return DatabaseDescriptor.getAuditLogger().isEnabled() || DatabaseDescriptor.getAuditLogger().forceAuditLogging();
+    }
+
+    public static <T extends ResultMessage> io.reactivex.functions.Function<Throwable, SingleSource<T>> maybeAuditLogErrors(List<AuditableEvent> events)
+    {
+        if (events == null)
+            return Single::error;
+
+        return e ->
+        {
+            if (e instanceof UnauthorizedException)
+            {
+                auditLogger.logUnauthorizedAttempt(events, (UnauthorizedException) e);
+            }
+            else if (e instanceof RequestExecutionException |
+                     e instanceof RequestValidationException |
+                     e instanceof UnavailableException)
+            {
+                auditLogger.logFailedQuery(events, (CassandraException) e);
+                logger.trace("Unexpected exception when trying to execute a statement: " + e.getMessage(), e);
+            }
+            return Single.error(e);
+        };
+    }
+
+    public static Completable maybeAuditLog(List<AuditableEvent> events)
+    {
+        if (events == null)
+            return Completable.complete();
+
+        return auditLogger.logEvents(events);
     }
 }
