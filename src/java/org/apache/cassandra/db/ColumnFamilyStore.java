@@ -579,7 +579,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         latencyCalculator.cancel(false);
         compactionStrategyManager.shutdown();
-        SystemKeyspace.removeTruncationRecord(metadata.id);
+        TPCUtils.blockingAwait(SystemKeyspace.maybeRemoveTruncationRecord(metadata.id));
 
         data.dropSSTables();
         LifecycleTransaction.waitForDeletions();
@@ -1026,7 +1026,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public CommitLogPosition forceBlockingFlush()
     {
-        return forceFlush().blockingGet();
+        return TPCUtils.blockingGet(forceFlush());
     }
 
     /**
@@ -2276,7 +2276,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 indexManager.truncateAllIndexesBlocking(truncatedAt);
                 viewManager.truncateBlocking(replayAfter, truncatedAt);
 
-                SystemKeyspace.saveTruncationRecord(ColumnFamilyStore.this, truncatedAt, replayAfter);
+                TPCUtils.blockingAwait(SystemKeyspace.saveTruncationRecord(ColumnFamilyStore.this, truncatedAt, replayAfter));
                 logger.trace("cleaning out row cache");
                 invalidateCaches();
             }
@@ -2580,7 +2580,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public List<String> getBuiltIndexes()
     {
-       return indexManager.getBuiltIndexNames();
+       return indexManager.getBuiltIndexNamesBlocking();
     }
 
     public int getUnleveledSSTables()

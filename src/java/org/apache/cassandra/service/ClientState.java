@@ -62,7 +62,7 @@ public class ClientState
     {
         // We want these system cfs to be always readable to authenticated users since many tools rely on them
         // (nodetool, cqlsh, bulkloader, etc.)
-        for (String cf : Arrays.asList(SystemKeyspace.LOCAL, SystemKeyspace.PEERS))
+        for (String cf : SystemKeyspace.readableSystemResources())
             READABLE_SYSTEM_RESOURCES.add(DataResource.table(SchemaConstants.SYSTEM_KEYSPACE_NAME, cf));
 
         SchemaKeyspace.ALL.forEach(table -> READABLE_SYSTEM_RESOURCES.add(DataResource.table(SchemaConstants.SCHEMA_KEYSPACE_NAME, table)));

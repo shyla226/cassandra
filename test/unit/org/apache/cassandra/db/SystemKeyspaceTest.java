@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -25,14 +26,17 @@ import java.util.*;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.Pair;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -43,18 +47,33 @@ public class SystemKeyspaceTest
     public static void prepSnapshotTracker()
     {
         DatabaseDescriptor.daemonInitialization();
+        cleanDataDirs();
 
         if (FBUtilities.isWindows)
             WindowsFailedSnapshotTracker.deleteOldSnapshots();
+
+        SystemKeyspace.finishStartupBlocking();
+    }
+
+    private static void cleanDataDirs()
+    {
+        for (String dirName : DatabaseDescriptor.getAllDataFileLocations())
+        {
+            File dir = new File(dirName);
+            if (dir.exists())
+                FileUtils.deleteRecursive(dir);
+
+            FileUtils.createDirectory(dir);
+        }
     }
 
     @Test
     public void testLocalTokens()
     {
         // Remove all existing tokens
-        Collection<Token> current = SystemKeyspace.loadTokens().asMap().get(FBUtilities.getLocalAddress());
+        Collection<Token> current = TPCUtils.blockingGet(SystemKeyspace.loadTokens()).asMap().get(FBUtilities.getLocalAddress());
         if (current != null && !current.isEmpty())
-            SystemKeyspace.updateTokens(current);
+            TPCUtils.blockingAwait(SystemKeyspace.updateTokens(current));
 
         List<Token> tokens = new ArrayList<Token>()
         {{
@@ -62,10 +81,10 @@ public class SystemKeyspaceTest
                 add(new Murmur3Partitioner.LongToken(i));
         }};
 
-        SystemKeyspace.updateTokens(tokens);
+        TPCUtils.blockingAwait(SystemKeyspace.updateTokens(tokens));
         int count = 0;
 
-        for (Token tok : SystemKeyspace.getSavedTokens())
+        for (Token tok : TPCUtils.blockingGet(SystemKeyspace.getSavedTokens()))
             assert tokens.get(count++).equals(tok);
     }
 
@@ -74,18 +93,91 @@ public class SystemKeyspaceTest
     {
         Murmur3Partitioner.LongToken token = new Murmur3Partitioner.LongToken(3);
         InetAddress address = InetAddress.getByName("127.0.0.2");
-        SystemKeyspace.updateTokens(address, Collections.<Token>singletonList(token));
-        assert SystemKeyspace.loadTokens().get(address).contains(token);
-        SystemKeyspace.removeEndpoint(address);
-        assert !SystemKeyspace.loadTokens().containsValue(token);
+
+        TPCUtils.blockingAwait(SystemKeyspace.updateTokens(address, Collections.singletonList(token)));
+        assert TPCUtils.blockingGet(SystemKeyspace.loadTokens()).get(address).contains(token);
+
+        TPCUtils.blockingAwait(SystemKeyspace.removeEndpoint(address));
+        assert !TPCUtils.blockingGet(SystemKeyspace.loadTokens()).containsValue(token);
     }
 
     @Test
     public void testLocalHostID()
     {
-        UUID firstId = SystemKeyspace.setLocalHostIdBlocking();
+        UUID firstId = TPCUtils.blockingGet(SystemKeyspace.setLocalHostId());
         UUID secondId = SystemKeyspace.getLocalHostId();
         assert firstId.equals(secondId) : String.format("%s != %s%n", firstId.toString(), secondId.toString());
+    }
+
+    private static List<String> getBuiltIndexes(String keyspace)
+    {
+        return TPCUtils.blockingGet(SystemKeyspace.getBuiltIndexes(keyspace));
+    }
+
+    @Test
+    public void testIndexesBuilt()
+    {
+        final String keyspace1 = "keyspace1";
+        final String keyspace2 = "keyspace12";
+
+        final String index1 = "index1";
+        final String index2 = "index2";
+
+        assertTrue(getBuiltIndexes(keyspace1).isEmpty());
+        assertTrue(getBuiltIndexes(keyspace2).isEmpty());
+
+        TPCUtils.blockingAwait(SystemKeyspace.setIndexBuilt(keyspace1, index1));
+        assertEquals(index1, getBuiltIndexes(keyspace1).get(0));
+        assertTrue(getBuiltIndexes(keyspace2).isEmpty());
+
+        TPCUtils.blockingAwait(SystemKeyspace.setIndexBuilt(keyspace2, index2));
+        assertEquals(index1, getBuiltIndexes(keyspace1).get(0));
+        assertEquals(index2, getBuiltIndexes(keyspace2).get(0));
+
+        TPCUtils.blockingAwait(SystemKeyspace.setIndexRemoved(keyspace1, index1));
+        TPCUtils.blockingAwait(SystemKeyspace.setIndexRemoved(keyspace2, index2));
+
+        assertTrue(getBuiltIndexes(keyspace1).isEmpty());
+        assertTrue(getBuiltIndexes(keyspace2).isEmpty());
+    }
+
+    @Test
+    public void testGetPreferredIp() throws UnknownHostException
+    {
+        final InetAddress peer = InetAddress.getByName("127.0.0.2");
+        final InetAddress preferredId = InetAddress.getByName("127.0.0.3");
+
+        assertEquals(peer, SystemKeyspace.getPreferredIP(peer));
+
+        TPCUtils.blockingAwait(SystemKeyspace.updatePreferredIP(peer, preferredId));
+        assertEquals(preferredId, SystemKeyspace.getPreferredIP(peer));
+    }
+
+    @Test
+    public void testUpdatePeerInfo() throws UnknownHostException
+    {
+        final InetAddress peer = InetAddress.getByName("127.0.0.2");
+
+        final List<Pair<String, String>> dcRacks = new ArrayList<>(2);
+        dcRacks.add(Pair.create("dc1", "rack1"));
+        dcRacks.add(Pair.create("dc2", "rack2"));
+
+        assertEquals(0, SystemKeyspace.loadDcRackInfo().size());
+
+        for (Pair<String, String> pair : dcRacks)
+        {
+            TPCUtils.blockingAwait(SystemKeyspace.updatePeerInfo(peer, "rack", pair.right));
+            TPCUtils.blockingAwait(SystemKeyspace.updatePeerInfo(peer, "data_center", pair.left));
+
+            Map<InetAddress, Map<String, String>> ret = SystemKeyspace.loadDcRackInfo();
+            assertEquals(1, ret.size());
+
+            assertEquals(pair.left, ret.get(peer).get("data_center"));
+            assertEquals(pair.right, ret.get(peer).get("rack"));
+        }
+
+        TPCUtils.blockingAwait(SystemKeyspace.removeEndpoint(peer));
+        assertEquals(0, SystemKeyspace.loadDcRackInfo().size());
     }
 
     private void assertDeletedOrDeferred(int expectedCount)
@@ -120,7 +212,7 @@ public class SystemKeyspaceTest
 
         int baseline = getDeferredDeletionCount();
 
-        SystemKeyspace.snapshotOnVersionChange();
+        TPCUtils.blockingAwait(SystemKeyspace.snapshotOnVersionChange());
         assertDeletedOrDeferred(baseline);
 
         // now setup system.local as if we're upgrading from a previous version
@@ -129,7 +221,7 @@ public class SystemKeyspaceTest
         assertDeletedOrDeferred(baseline);
 
         // Compare versions again & verify that snapshots were created for all tables in the system ks
-        SystemKeyspace.snapshotOnVersionChange();
+        TPCUtils.blockingAwait(SystemKeyspace.snapshotOnVersionChange());
         assertEquals(SystemKeyspace.metadata().tables.size(), getSystemSnapshotFiles().size());
 
         // clear out the snapshots & set the previous recorded version equal to the latest, we shouldn't
@@ -137,7 +229,7 @@ public class SystemKeyspaceTest
         Keyspace.clearSnapshot(null, SchemaConstants.SYSTEM_KEYSPACE_NAME);
         setupReleaseVersion(FBUtilities.getReleaseVersionString());
 
-        SystemKeyspace.snapshotOnVersionChange();
+        TPCUtils.blockingAwait(SystemKeyspace.snapshotOnVersionChange());
 
         // snapshotOnVersionChange for upgrade case will open a SSTR when the CFS is flushed. On Windows, we won't be
         // able to delete hard-links to that file while segments are memory-mapped, so they'll be marked for deferred deletion.

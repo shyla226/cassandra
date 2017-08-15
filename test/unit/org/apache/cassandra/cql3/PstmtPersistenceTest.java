@@ -89,7 +89,7 @@ public class PstmtPersistenceTest extends CQLTester
             Assert.assertNull(handler.getPrepared(stmtId));
 
         // load prepared statements and validate that these still execute fine
-        QueryProcessor.preloadPreparedStatement();
+        QueryProcessor.preloadPreparedStatementBlocking();
         validatePstmts(stmtIds, handler);
 
 

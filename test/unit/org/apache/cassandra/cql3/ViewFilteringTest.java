@@ -19,9 +19,7 @@
 package org.apache.cassandra.cql3;
 
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
-import com.google.common.util.concurrent.Uninterruptibles;
 import io.reactivex.*;
 import org.junit.After;
 import org.junit.AfterClass;
@@ -34,8 +32,6 @@ import com.datastax.driver.core.exceptions.InvalidQueryException;
 import junit.framework.Assert;
 
 import org.apache.cassandra.batchlog.BatchlogManager;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -485,12 +481,12 @@ public class ViewFilteringTest extends CQLTester
                               "WHERE \"theKey\" = 1 AND \"theClustering\" = 1 AND \"the\"\"Value\" IS NOT NULL " +
                               "PRIMARY KEY (\"theKey\", \"theClustering\")");
 
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+        while (!isViewBuiltBlocking(keyspace(), "mv_test"))
             Thread.sleep(10);
         createView("mv_test2", "CREATE MATERIALIZED VIEW %s AS SELECT \"theKey\", \"theClustering\", \"the\"\"Value\" FROM %%s " +
                                "WHERE \"theKey\" = 1 AND \"theClustering\" = 1 AND \"the\"\"Value\" IS NOT NULL " +
                                "PRIMARY KEY (\"theKey\", \"theClustering\")");
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test2"))
+        while (!isViewBuiltBlocking(keyspace(), "mv_test2"))
             Thread.sleep(10);
 
         for (String mvname : Arrays.asList("mv_test", "mv_test2"))
@@ -527,7 +523,7 @@ public class ViewFilteringTest extends CQLTester
                               "WHERE a = blobAsInt(intAsBlob(1)) AND b IS NOT NULL " +
                               "PRIMARY KEY (a, b)");
 
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+        while (!isViewBuiltBlocking(keyspace(), "mv_test"))
             Thread.sleep(10);
 
         assertRows(execute("SELECT a, b, c FROM mv_test"),
@@ -560,7 +556,7 @@ public class ViewFilteringTest extends CQLTester
                               "WHERE a = (int) 1 AND b IS NOT NULL " +
                               "PRIMARY KEY (a, b)");
 
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+        while (!isViewBuiltBlocking(keyspace(), "mv_test"))
             Thread.sleep(10);
 
         assertRows(execute("SELECT a, b, c FROM mv_test"),
@@ -776,7 +772,7 @@ public class ViewFilteringTest extends CQLTester
 
     private static void waitForView(String keyspace, String view) throws InterruptedException
     {
-        while (!SystemKeyspace.isViewBuilt(keyspace, view))
+        while (!isViewBuiltBlocking(keyspace, view))
             Thread.sleep(10);
     }
 
@@ -803,7 +799,7 @@ public class ViewFilteringTest extends CQLTester
             // only accept rows where a = 1
             createView("mv_test" + i, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = 1 AND b IS NOT NULL AND c IS NOT NULL PRIMARY KEY " + mvPrimaryKeys.get(i));
 
-            while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test" + i))
+            while (!isViewBuiltBlocking(keyspace(), "mv_test" + i))
                 Thread.sleep(10);
 
             assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
@@ -906,7 +902,7 @@ public class ViewFilteringTest extends CQLTester
             // only accept rows where a = 1 and b = 1
             createView("mv_test" + i, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = 1 AND b = 1 AND c IS NOT NULL PRIMARY KEY " + mvPrimaryKeys.get(i));
 
-            while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test" + i))
+            while (!isViewBuiltBlocking(keyspace(), "mv_test" + i))
                 Thread.sleep(10);
 
             assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
@@ -992,7 +988,7 @@ public class ViewFilteringTest extends CQLTester
         // only accept rows where a = 1 and b = 1, don't include column d in the selection
         createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT a, b, c FROM %%s WHERE a = 1 AND b = 1 AND c IS NOT NULL PRIMARY KEY ((a, b), c)");
 
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+        while (!isViewBuiltBlocking(keyspace(), "mv_test"))
             Thread.sleep(10);
 
         assertRows(execute("SELECT * FROM mv_test"),
@@ -1083,7 +1079,7 @@ public class ViewFilteringTest extends CQLTester
             // only accept rows where b = 1
             createView("mv_test" + i, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b = 1 AND c IS NOT NULL PRIMARY KEY " + mvPrimaryKeys.get(i));
 
-            while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test" + i))
+            while (!isViewBuiltBlocking(keyspace(), "mv_test" + i))
                 Thread.sleep(10);
 
             assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
@@ -1191,7 +1187,7 @@ public class ViewFilteringTest extends CQLTester
 
             createView("mv_test" + i, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b >= 1 AND c IS NOT NULL PRIMARY KEY " + mvPrimaryKeys.get(i));
 
-            while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test" + i))
+            while (!isViewBuiltBlocking(keyspace(), "mv_test" + i))
                 Thread.sleep(10);
 
             assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
@@ -1301,7 +1297,7 @@ public class ViewFilteringTest extends CQLTester
             // only accept rows where b = 1
             createView("mv_test" + i, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IN (1, 2) AND c IS NOT NULL PRIMARY KEY " + mvPrimaryKeys.get(i));
 
-            while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test" + i))
+            while (!isViewBuiltBlocking(keyspace(), "mv_test" + i))
                 Thread.sleep(10);
 
             assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
@@ -1418,7 +1414,7 @@ public class ViewFilteringTest extends CQLTester
             // only accept rows where b = 1
             createView("mv_test" + i, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND (b, c) >= (1, 0) PRIMARY KEY " + mvPrimaryKeys.get(i));
 
-            while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test" + i))
+            while (!isViewBuiltBlocking(keyspace(), "mv_test" + i))
                 Thread.sleep(10);
 
             assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
@@ -1531,7 +1527,7 @@ public class ViewFilteringTest extends CQLTester
             // only accept rows where b = 1
             createView("mv_test" + i, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c = 1 PRIMARY KEY " + mvPrimaryKeys.get(i));
 
-            while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test" + i))
+            while (!isViewBuiltBlocking(keyspace(), "mv_test" + i))
                 Thread.sleep(10);
 
             assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
@@ -1656,7 +1652,7 @@ public class ViewFilteringTest extends CQLTester
             // only accept rows where b = 1
             createView("mv_test" + i, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = 1 AND b IS NOT NULL AND c = 1 PRIMARY KEY " + mvPrimaryKeys.get(i));
 
-            while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test" + i))
+            while (!isViewBuiltBlocking(keyspace(), "mv_test" + i))
                 Thread.sleep(10);
 
             assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
@@ -1875,7 +1871,7 @@ public class ViewFilteringTest extends CQLTester
         // only accept rows where c = 1
         createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND c = 1 PRIMARY KEY (a, b, c)");
 
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+        while (!isViewBuiltBlocking(keyspace(), "mv_test"))
             Thread.sleep(10);
 
         BatchlogManager.instance.forceBatchlogReplay();

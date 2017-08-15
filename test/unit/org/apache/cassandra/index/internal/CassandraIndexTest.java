@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.internal;
 
+import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -26,6 +27,7 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.*;
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -39,7 +41,6 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -512,16 +513,18 @@ public class CassandraIndexTest extends CQLTester
         createIndex(String.format("CREATE INDEX %s ON %%s(c)", indexName));
         waitForIndex(KEYSPACE, tableName, indexName);
         // check that there are no other rows in the built indexes table
-        assertRows(execute(String.format("SELECT * FROM %s.\"%s\"", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BUILT_INDEXES)),
-                   row(KEYSPACE, indexName));
+        List<String> indexes = TPCUtils.blockingGet(SystemKeyspace.getBuiltIndexes(KEYSPACE));
+        assertEquals(1, indexes.size());
+        assertEquals(indexName, indexes.get(0));
 
         // rebuild the index and verify the built status table
         getCurrentColumnFamilyStore().rebuildSecondaryIndex(indexName);
         waitForIndex(KEYSPACE, tableName, indexName);
 
         // check that there are no other rows in the built indexes table
-        assertRows(execute(String.format("SELECT * FROM %s.\"%s\"", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BUILT_INDEXES)),
-                   row(KEYSPACE, indexName));
+        indexes = TPCUtils.blockingGet(SystemKeyspace.getBuiltIndexes(KEYSPACE));
+        assertEquals(1, indexes.size());
+        assertEquals(indexName, indexes.get(0));
     }
 
 
@@ -822,7 +825,7 @@ public class CassandraIndexTest extends CQLTester
             ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
             long maxWaitMillis = 10000;
             long startTime = System.currentTimeMillis();
-            while (! cfs.indexManager.getBuiltIndexNames().contains(indexName))
+            while (!cfs.indexManager.getBuiltIndexNamesBlocking().contains(indexName))
             {
                 Thread.sleep(100);
                 long wait = System.currentTimeMillis() - startTime;

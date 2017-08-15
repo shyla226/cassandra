@@ -99,12 +99,12 @@ public class ViewSchemaTest extends CQLTester
                               "WHERE \"theKey\" IS NOT NULL AND \"theClustering\" IS NOT NULL AND \"theValue\" IS NOT NULL " +
                               "PRIMARY KEY (\"theKey\", \"theClustering\")");
 
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+        while (!isViewBuiltBlocking(keyspace(), "mv_test"))
             Thread.sleep(10);
         createView("mv_test2", "CREATE MATERIALIZED VIEW %s AS SELECT \"theKey\", \"theClustering\", \"theValue\" FROM %%s " +
                                "WHERE \"theKey\" IS NOT NULL AND \"theClustering\" IS NOT NULL AND \"theValue\" IS NOT NULL " +
                                "PRIMARY KEY (\"theKey\", \"theClustering\")");
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test2"))
+        while (!isViewBuiltBlocking(keyspace(), "mv_test2"))
             Thread.sleep(10);
 
         for (String mvname : Arrays.asList("mv_test", "mv_test2"))

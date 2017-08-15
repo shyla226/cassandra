@@ -21,7 +21,6 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterators;
@@ -479,10 +478,8 @@ public class RangeTombstoneTest
             MigrationManager.announceTableUpdate(updated, true).blockingAwait();
         }
 
-        Future<?> rebuild = cfs.indexManager.addIndex(indexDef, false);
-        // If rebuild there is, wait for the rebuild to finish so it doesn't race with the following insertions
-        if (rebuild != null)
-            rebuild.get();
+        // wait for the rebuild to finish so it doesn't race with the following insertions
+        cfs.indexManager.addIndex(indexDef, false);
 
         StubIndex index = (StubIndex)cfs.indexManager.listIndexes()
                                                      .stream()
@@ -585,10 +582,8 @@ public class RangeTombstoneTest
             MigrationManager.announceTableUpdate(updated, true).blockingAwait();
         }
 
-        Future<?> rebuild = cfs.indexManager.addIndex(indexDef, false);
-        // If rebuild there is, wait for the rebuild to finish so it doesn't race with the following insertions
-        if (rebuild != null)
-            rebuild.get();
+        // wait for the rebuild to finish so it doesn't race with the following insertions
+        cfs.indexManager.addIndex(indexDef, false);
 
         StubIndex index = (StubIndex)cfs.indexManager.getIndexByName("test_index");
         index.reset();

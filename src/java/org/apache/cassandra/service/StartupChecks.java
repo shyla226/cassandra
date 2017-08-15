@@ -374,7 +374,7 @@ public class StartupChecks
 
             try
             {
-                SystemKeyspace.checkHealth();
+                TPCUtils.blockingAwait(SystemKeyspace.checkHealth());
             }
             catch (ConfigurationException e)
             {
@@ -389,7 +389,7 @@ public class StartupChecks
         {
             if (!Boolean.getBoolean("cassandra.ignore_dc"))
             {
-                String storedDc = SystemKeyspace.getDatacenter();
+                String storedDc = TPCUtils.blockingGet(SystemKeyspace.getDatacenter());
                 if (storedDc != null)
                 {
                     String currentDc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
@@ -411,7 +411,7 @@ public class StartupChecks
         {
             if (!Boolean.getBoolean("cassandra.ignore_rack"))
             {
-                String storedRack = SystemKeyspace.getRack();
+                String storedRack = TPCUtils.blockingGet(SystemKeyspace.getRack());
                 if (storedRack != null)
                 {
                     String currentRack = DatabaseDescriptor.getEndpointSnitch().getRack(FBUtilities.getBroadcastAddress());

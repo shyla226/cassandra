@@ -56,7 +56,6 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.cql3.statements.IndexTarget.CUSTOM_INDEX_OPTION_NAME;
 import static org.junit.Assert.assertEquals;
@@ -869,7 +868,10 @@ public class CustomIndexTest extends CQLTester
 
         public Callable<?> getMetadataReloadTask(IndexMetadata indexMetadata)
         {
-            return reloads::incrementAndGet;
+            return () -> {
+                reloads.incrementAndGet();
+                return null;
+            };
         }
     }
 

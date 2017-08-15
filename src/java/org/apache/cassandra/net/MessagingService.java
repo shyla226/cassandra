@@ -648,7 +648,8 @@ public final class MessagingService implements MessagingServiceMBean
                 if (!DatabaseDescriptor.getInternodeAuthenticator().authenticate(to, OutboundTcpConnectionPool.portFor(to)))
                     return null;
 
-                OutboundTcpConnectionPool np = new OutboundTcpConnectionPool(to, backPressure.newState(to));
+                InetAddress preferredIp = SystemKeyspace.getPreferredIP(to);
+                OutboundTcpConnectionPool np = new OutboundTcpConnectionPool(to, preferredIp, backPressure.newState(to));
                 OutboundTcpConnectionPool existingPool = connectionManagers.putIfAbsent(to, np);
                 if (existingPool != null)
                     np = existingPool;

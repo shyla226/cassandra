@@ -163,7 +163,7 @@ public class OutboundTcpConnectionTest
     private OutboundTcpConnection getOutboundTcpConnectionForLocalhost() throws UnknownHostException
     {
         InetAddress lo = InetAddress.getByName("127.0.0.1");
-        OutboundTcpConnectionPool otcPool = new OutboundTcpConnectionPool(lo, null);
+        OutboundTcpConnectionPool otcPool = new OutboundTcpConnectionPool(lo, lo, null);
         OutboundTcpConnection otc = new OutboundTcpConnection(otcPool, "lo-OutboundTcpConnectionTest");
         return otc;
     }

@@ -26,6 +26,7 @@ import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -53,6 +54,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -222,18 +224,20 @@ public class CassandraDaemon
             exitOrFail(e.returnCode, e.getMessage(), e.getCause());
         }
 
-        try
-        {
-            SystemKeyspace.snapshotOnVersionChange();
-        }
-        catch (IOException e)
-        {
-            exitOrFail(3, e.getMessage(), e.getCause());
-        }
+        TPCUtils.blockingAwait(SystemKeyspace.snapshotOnVersionChange()
+                                                 .whenComplete((v, e) -> {
+                                                     if (e != null)
+                                                     {
+                                                         if (e instanceof CompletionException && e.getCause() != null)
+                                                             e = e.getCause();
+                                                         if (e instanceof IOException)
+                                                            exitOrFail(3, e.getMessage(), e.getCause());
+                                                     }
+                                                 }));
 
         // We need to persist this as soon as possible after startup checks.
         // This should be the first write to SystemKeyspace (CASSANDRA-11742)
-        SystemKeyspace.persistLocalMetadata();
+        TPCUtils.blockingAwait(SystemKeyspace.persistLocalMetadata());
 
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler()
         {
@@ -333,11 +337,11 @@ public class CassandraDaemon
             }
         }
 
-        SystemKeyspace.finishStartup();
+        SystemKeyspace.finishStartupBlocking();
         ActiveRepairService.instance.start();
 
         // Prepared statements
-        QueryProcessor.preloadPreparedStatement();
+        QueryProcessor.preloadPreparedStatementBlocking();
 
         // Metrics
         String metricsReporterConfigFile = System.getProperty("cassandra.metricsReporterConfigFile");

@@ -21,19 +21,22 @@ import java.io.*;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
+
 import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.TabularData;
 
 import com.google.common.collect.*;
 import com.google.common.io.ByteStreams;
+
 import io.reactivex.Single;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPC;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -61,11 +64,11 @@ import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.concurrent.ExecutableLock;
 
 import static java.lang.String.format;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
-import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternalAsync;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
 
@@ -80,8 +83,8 @@ public final class SystemKeyspace
     public static final String BATCHES = "batches";
     public static final String PAXOS = "paxos";
     public static final String BUILT_INDEXES = "IndexInfo";
-    public static final String LOCAL = "local";
-    public static final String PEERS = "peers";
+    private static final String LOCAL = "local";
+    private static final String PEERS = "peers";
     public static final String PEER_EVENTS = "peer_events";
     public static final String RANGE_XFERS = "range_xfers";
     public static final String COMPACTION_HISTORY = "compaction_history";
@@ -327,12 +330,28 @@ public final class SystemKeyspace
               + "PRIMARY KEY (parent_id))").build();
 
 
+    /** A semaphore for global synchronization on SystemKeyspace static methods */
+    private static final ExecutableLock GLOBAL_LOCK = new ExecutableLock();
+
+    /** Set to true when {@link #finishStartupBlocking()} has been called */
+    private static boolean startupCompleted = false;
+
     /**
      * The local host id.
      *
      * Set during start-up and only changed when replacing a node, again during startup.
-     * */
+     */
     private static UUID localHostId = null;
+
+    /**
+     * The bootstrap state.
+     *
+     * Set during start-up, see {@link #finishStartupBlocking()}.
+     */
+    private static volatile BootstrapState bootstrapState = BootstrapState.NEEDS_BOOTSTRAP;
+
+    /** Cache for information read from System PEERS, available after {@link #finishStartupBlocking()} is called. */
+    private static volatile ConcurrentMap<InetAddress, PeerInfo> peers = null;
 
     private static TableMetadata.Builder parse(String table, String description, String cql)
     {
@@ -386,7 +405,16 @@ public final class SystemKeyspace
                         .build();
     }
 
-    private static volatile Map<TableId, Pair<CommitLogPosition, Long>> truncationRecords;
+    /**
+     * @return  a list of tables names that should always be readable to authenticated users
+     *          (since they are used by many tools such as nodetool, cqlsh, bulkloader).
+     */
+    public static List<String> readableSystemResources()
+    {
+        return Arrays.asList(SystemKeyspace.LOCAL, SystemKeyspace.PEERS);
+    }
+
+    private static ConcurrentMap<TableId, Pair<CommitLogPosition, Long>> truncationRecords = null;
 
     public enum BootstrapState
     {
@@ -396,12 +424,23 @@ public final class SystemKeyspace
         DECOMMISSIONED
     }
 
-    public static void finishStartup()
+    public static void finishStartupBlocking()
     {
-        SchemaKeyspace.saveSystemKeyspacesSchema();
+        TPCUtils.withLockBlocking(GLOBAL_LOCK, () -> {
+            if (startupCompleted)
+                return null;
+
+            SchemaKeyspace.saveSystemKeyspacesSchema();
+
+            peers = TPCUtils.blockingGet(readPeerInfo());
+            truncationRecords = TPCUtils.blockingGet(readTruncationRecords());
+            bootstrapState = TPCUtils.blockingGet(loadBootstrapState());
+            startupCompleted = true;
+            return null;
+        });
     }
 
-    public static void persistLocalMetadata()
+    public static CompletableFuture<Void> persistLocalMetadata()
     {
         String req = "INSERT INTO system.%s (" +
                      "key," +
@@ -422,173 +461,219 @@ public final class SystemKeyspace
                      "jmx_port" +
                      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
-        // TODO make async
-        executeOnceInternal(format(req, LOCAL),
-                            LOCAL,
-                            DatabaseDescriptor.getClusterName(),
-                            FBUtilities.getReleaseVersionString(),
-                            QueryProcessor.CQL_VERSION.toString(),
-                            String.valueOf(ProtocolVersion.CURRENT.asInt()),
-                            snitch.getDatacenter(FBUtilities.getBroadcastAddress()),
-                            snitch.getRack(FBUtilities.getBroadcastAddress()),
-                            DatabaseDescriptor.getPartitioner().getClass().getName(),
-                            DatabaseDescriptor.getRpcAddress(),
-                            FBUtilities.getBroadcastAddress(),
-                            FBUtilities.getLocalAddress(),
-                            DatabaseDescriptor.getNativeTransportPort(),
-                            DatabaseDescriptor.getNativeTransportPortSSL(),
-                            DatabaseDescriptor.getStoragePort(),
-                            DatabaseDescriptor.getSSLStoragePort(),
-                            DatabaseDescriptor.getJMXPort().orElse(null)).blockingGet();
+        return TPCUtils.toFutureVoid(executeOnceInternal(format(req, LOCAL),
+                                                         LOCAL,
+                                                         DatabaseDescriptor.getClusterName(),
+                                                         FBUtilities.getReleaseVersionString(),
+                                                         QueryProcessor.CQL_VERSION.toString(),
+                                                         String.valueOf(ProtocolVersion.CURRENT.asInt()),
+                                                         snitch.getDatacenter(FBUtilities.getBroadcastAddress()),
+                                                         snitch.getRack(FBUtilities.getBroadcastAddress()),
+                                                         DatabaseDescriptor.getPartitioner().getClass().getName(),
+                                                         DatabaseDescriptor.getRpcAddress(),
+                                                         FBUtilities.getBroadcastAddress(),
+                                                         FBUtilities.getLocalAddress(),
+                                                         DatabaseDescriptor.getNativeTransportPort(),
+                                                         DatabaseDescriptor.getNativeTransportPortSSL(),
+                                                         DatabaseDescriptor.getStoragePort(),
+                                                         DatabaseDescriptor.getSSLStoragePort(),
+                                                         DatabaseDescriptor.getJMXPort().orElse(null)));
     }
 
-    public static void updateCompactionHistory(String ksname,
-                                               String cfname,
-                                               long compactedAt,
-                                               long bytesIn,
-                                               long bytesOut,
-                                               Map<Integer, Long> rowsMerged)
+    public static CompletableFuture<Void> updateCompactionHistory(String ksname,
+                                                                              String cfname,
+                                                                              long compactedAt,
+                                                                              long bytesIn,
+                                                                              long bytesOut,
+                                                                              Map<Integer, Long> rowsMerged)
     {
         // don't write anything when the history table itself is compacted, since that would in turn cause new compactions
         if (ksname.equals("system") && cfname.equals(COMPACTION_HISTORY))
-            return;
+            return TPCUtils.completedFuture();
+
         String req = "INSERT INTO system.%s (id, keyspace_name, columnfamily_name, compacted_at, bytes_in, bytes_out, rows_merged) VALUES (?, ?, ?, ?, ?, ?, ?)";
-        // TODO make async
-        executeInternal(format(req, COMPACTION_HISTORY),
-                        UUIDGen.getTimeUUID(),
-                        ksname,
-                        cfname,
-                        ByteBufferUtil.bytes(compactedAt),
-                        bytesIn,
-                        bytesOut,
-                        rowsMerged);
+        return TPCUtils.toFutureVoid(executeInternalAsync(format(req, COMPACTION_HISTORY),
+                                                          UUIDGen.getTimeUUID(),
+                                                          ksname,
+                                                          cfname,
+                                                          ByteBufferUtil.bytes(compactedAt),
+                                                          bytesIn,
+                                                          bytesOut,
+                                                          rowsMerged));
     }
 
-    public static TabularData getCompactionHistory() throws OpenDataException
+    public static CompletableFuture<TabularData> getCompactionHistory()
     {
-        // TODO make async
-        UntypedResultSet queryResultSet = executeInternal(format("SELECT * from system.%s", COMPACTION_HISTORY));
-        return CompactionHistoryTabularData.from(queryResultSet);
+        return TPCUtils.toFuture(executeInternalAsync(format("SELECT * from system.%s", COMPACTION_HISTORY)))
+                       .thenApply(resultSet-> {
+                           try
+                           {
+                               return CompactionHistoryTabularData.from(resultSet);
+                           }
+                           catch (OpenDataException ex)
+                           {
+                               throw new CompletionException(ex);
+                           }
+                       });
     }
 
-    public static boolean isViewBuilt(String keyspaceName, String viewName)
+    public static CompletableFuture<Boolean> isViewBuilt(String keyspaceName, String viewName)
     {
         String req = "SELECT view_name FROM %s.\"%s\" WHERE keyspace_name=? AND view_name=?";
-        // TODO make async
-        UntypedResultSet result = executeInternal(format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS), keyspaceName, viewName);
-        return !result.isEmpty();
+        return TPCUtils.toFuture(executeInternalAsync(format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS), keyspaceName, viewName))
+                       .thenApply(result -> !result.isEmpty());
     }
 
-    public static boolean isViewStatusReplicated(String keyspaceName, String viewName)
+    public static CompletableFuture<Boolean> isViewStatusReplicated(String keyspaceName, String viewName)
     {
         String req = "SELECT status_replicated FROM %s.\"%s\" WHERE keyspace_name=? AND view_name=?";
-        // TODO make async
-        UntypedResultSet result = executeInternal(format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS), keyspaceName, viewName);
+        return TPCUtils.toFuture(executeInternalAsync(format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS), keyspaceName, viewName))
+                       .thenApply(result -> {
+                           if (result.isEmpty())
+                               return false;
 
-        if (result.isEmpty())
-            return false;
-        UntypedResultSet.Row row = result.one();
-        return row.has("status_replicated") && row.getBoolean("status_replicated");
+                           UntypedResultSet.Row row = result.one();
+                           return row.has("status_replicated") && row.getBoolean("status_replicated");
+                       });
     }
 
-    public static void setViewBuilt(String keyspaceName, String viewName, boolean replicated)
+    public static CompletableFuture<Void> setViewBuilt(String keyspaceName, String viewName, boolean replicated)
     {
-        if (isViewBuilt(keyspaceName, viewName) && isViewStatusReplicated(keyspaceName, viewName) == replicated)
-            return;
-
-        String req = "INSERT INTO %s.\"%s\" (keyspace_name, view_name, status_replicated) VALUES (?, ?, ?)";
-        executeInternal(format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS), keyspaceName, viewName, replicated);
-        forceBlockingFlush(BUILT_VIEWS);
+        return isViewBuilt(keyspaceName, viewName)
+               .thenCompose(built -> {
+                   if (built)
+                       return isViewStatusReplicated(keyspaceName, viewName)
+                              .thenCompose(replicatedResult -> {
+                                  if (replicatedResult == replicated)
+                                      return TPCUtils.completedFuture();
+                                  else
+                                      return doSetViewBuilt(keyspaceName, viewName, replicated);
+                       });
+                   else
+                       return doSetViewBuilt(keyspaceName, viewName, replicated);
+               });
     }
 
-    public static void setViewRemoved(String keyspaceName, String viewName)
+    private static CompletableFuture<Void> doSetViewBuilt(String keyspaceName, String viewName, boolean replicated)
+    {
+        String req = "INSERT INTO %s.\"%s\" (keyspace_name, view_name, status_replicated) VALUES (?, ?, ?)";
+        return TPCUtils.toFuture(executeInternalAsync(format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS), keyspaceName, viewName, replicated))
+                       .thenCompose(resultSet -> forceFlush(BUILT_VIEWS));
+    }
+
+    public static CompletableFuture<Void> setViewRemoved(String keyspaceName, String viewName)
     {
         String buildReq = "DELETE FROM %S.%s WHERE keyspace_name = ? AND view_name = ? IF EXISTS";
-        executeInternal(String.format(buildReq, SchemaConstants.SYSTEM_KEYSPACE_NAME, VIEWS_BUILDS_IN_PROGRESS), keyspaceName, viewName);
-        forceBlockingFlush(VIEWS_BUILDS_IN_PROGRESS);
-
-        String builtReq = "DELETE FROM %s.\"%s\" WHERE keyspace_name = ? AND view_name = ? IF EXISTS";
-        executeInternal(String.format(builtReq, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS), keyspaceName, viewName);
-        forceBlockingFlush(BUILT_VIEWS);
+        return TPCUtils.toFuture(executeInternalAsync(String.format(buildReq, SchemaConstants.SYSTEM_KEYSPACE_NAME, VIEWS_BUILDS_IN_PROGRESS),
+                                                      keyspaceName,
+                                                      viewName))
+                       .thenCompose(r1 -> forceFlush(VIEWS_BUILDS_IN_PROGRESS))
+                       .thenCompose(r2 -> {
+                           String builtReq = "DELETE FROM %s.\"%s\" WHERE keyspace_name = ? AND view_name = ? IF EXISTS";
+                           return TPCUtils.toFuture(executeInternalAsync(String.format(builtReq, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS),
+                                                                         keyspaceName,
+                                                                         viewName));})
+                       .thenCompose(r3 -> forceFlush(BUILT_VIEWS));
     }
 
-    public static void beginViewBuild(String ksname, String viewName, int generationNumber)
+    public static CompletableFuture<Void> beginViewBuild(String ksname, String viewName, int generationNumber)
     {
-        // TODO make async
-        executeInternal(format("INSERT INTO system.%s (keyspace_name, view_name, generation_number) VALUES (?, ?, ?)", VIEWS_BUILDS_IN_PROGRESS),
-                        ksname,
-                        viewName,
-                        generationNumber);
+        String req = "INSERT INTO system.%s (keyspace_name, view_name, generation_number) VALUES (?, ?, ?)";
+        return TPCUtils.toFutureVoid(executeInternalAsync(format(req, VIEWS_BUILDS_IN_PROGRESS), ksname, viewName, generationNumber));
     }
 
-    public static void finishViewBuildStatus(String ksname, String viewName)
+    public static CompletableFuture<Void> finishViewBuildStatus(String ksname, String viewName)
     {
         // We flush the view built first, because if we fail now, we'll restart at the last place we checkpointed
         // view build.
         // If we flush the delete first, we'll have to restart from the beginning.
         // Also, if writing to the built_view succeeds, but the view_builds_in_progress deletion fails, we will be able
         // to skip the view build next boot.
-        setViewBuilt(ksname, viewName, false);
-        executeInternal(String.format("DELETE FROM system.%s WHERE keyspace_name = ? AND view_name = ? IF EXISTS", VIEWS_BUILDS_IN_PROGRESS), ksname, viewName);
-        forceBlockingFlush(VIEWS_BUILDS_IN_PROGRESS);
+        String req = "DELETE FROM system.%s WHERE keyspace_name = ? AND view_name = ? IF EXISTS";
+        return setViewBuilt(ksname, viewName, false)
+               .thenCompose(r1 -> TPCUtils.toFuture(executeInternalAsync(String.format(req, VIEWS_BUILDS_IN_PROGRESS), ksname, viewName)))
+               .thenCompose(r2 -> forceFlush(VIEWS_BUILDS_IN_PROGRESS));
     }
 
-    public static void setViewBuiltReplicated(String ksname, String viewName)
+    public static CompletableFuture<Void> setViewBuiltReplicated(String ksname, String viewName)
     {
-        setViewBuilt(ksname, viewName, true);
+        return setViewBuilt(ksname, viewName, true);
     }
 
-    public static void updateViewBuildStatus(String ksname, String viewName, Token token)
+    public static CompletableFuture<Void> updateViewBuildStatus(String ksname, String viewName, Token token)
     {
         String req = "INSERT INTO system.%s (keyspace_name, view_name, last_token) VALUES (?, ?, ?)";
         Token.TokenFactory factory = ViewsBuildsInProgress.partitioner.getTokenFactory();
-        executeInternal(format(req, VIEWS_BUILDS_IN_PROGRESS), ksname, viewName, factory.toString(token));
+        return TPCUtils.toFutureVoid(executeInternalAsync(format(req, VIEWS_BUILDS_IN_PROGRESS), ksname, viewName, factory.toString(token)));
     }
 
-    public static Pair<Integer, Token> getViewBuildStatus(String ksname, String viewName)
+    public static CompletableFuture<Pair<Integer, Token>> getViewBuildStatus(String ksname, String viewName)
     {
         String req = "SELECT generation_number, last_token FROM system.%s WHERE keyspace_name = ? AND view_name = ?";
-        // TODO make async
-        UntypedResultSet queryResultSet = executeInternal(format(req, VIEWS_BUILDS_IN_PROGRESS), ksname, viewName);
-        if (queryResultSet == null || queryResultSet.isEmpty())
-            return null;
+        return TPCUtils.toFuture(executeInternalAsync(format(req, VIEWS_BUILDS_IN_PROGRESS), ksname, viewName))
+                       .thenApply(queryResultSet -> {
+                           if (queryResultSet == null || queryResultSet.isEmpty())
+                               return null;
 
-        UntypedResultSet.Row row = queryResultSet.one();
+                           UntypedResultSet.Row row = queryResultSet.one();
 
-        Integer generation = null;
-        Token lastKey = null;
-        if (row.has("generation_number"))
-            generation = row.getInt("generation_number");
-        if (row.has("last_key"))
-        {
-            Token.TokenFactory factory = ViewsBuildsInProgress.partitioner.getTokenFactory();
-            lastKey = factory.fromString(row.getString("last_key"));
-        }
+                           Integer generation = null;
+                           Token lastKey = null;
+                           if (row.has("generation_number"))
+                               generation = row.getInt("generation_number");
+                           if (row.has("last_key"))
+                           {
+                               Token.TokenFactory factory = ViewsBuildsInProgress.partitioner.getTokenFactory();
+                               lastKey = factory.fromString(row.getString("last_key"));
+                           }
 
-        return Pair.create(generation, lastKey);
+                           return Pair.create(generation, lastKey);
+                       });
     }
 
-    public static synchronized void saveTruncationRecord(ColumnFamilyStore cfs, long truncatedAt, CommitLogPosition position)
+    public static CompletableFuture<Void> saveTruncationRecord(ColumnFamilyStore cfs, long truncatedAt, CommitLogPosition position)
     {
-        String req = "UPDATE system.%s SET truncated_at = truncated_at + ? WHERE key = '%s'";
-        executeInternal(format(req, LOCAL, LOCAL), truncationAsMapEntry(cfs, truncatedAt, position));
-        truncationRecords = null;
-        forceBlockingFlush(LOCAL);
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            String req = "UPDATE system.%s SET truncated_at = truncated_at + ? WHERE key = '%s'";
+            return TPCUtils.toFuture(executeInternalAsync(format(req, LOCAL, LOCAL), truncationAsMapEntry(cfs, truncatedAt, position)))
+                           .thenCompose(resultSet -> {
+                               if (truncationRecords != null)
+                                   truncationRecords.put(cfs.metadata.id, Pair.create(position, truncatedAt));
+                               return forceFlush(LOCAL);
+                           });
+        });
     }
 
     /**
-     * This method is used to remove information about truncation time for specified column family
+     * This method is used to remove information about truncation time for specified column family,
+     * if a truncation record is found. This is called when invalidating a CFS. The truncation records
+     * must be available, that is {@link #finishStartupBlocking()} must have been called, which is done
+     * immediately after replaying the CL at startup.
      */
-    public static synchronized void removeTruncationRecord(TableId id)
+    public static CompletableFuture<Void> maybeRemoveTruncationRecord(TableId id)
     {
-        Pair<CommitLogPosition, Long> truncationRecord = getTruncationRecord(id);
-        if (truncationRecord == null)
-            return;
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            Pair<CommitLogPosition, Long> truncationRecord = getTruncationRecords().get(id);
+            if (truncationRecord == null)
+                return TPCUtils.completedFuture();
+            else
+                return removeTruncationRecord(id);
+      });
+    }
 
+    /**
+     * This removes the truncation record for a table and assumes that such record exists on disk.
+     * This is called during CL reply, before the truncation records are loaded into memory.
+     */
+    public static CompletableFuture<Void> removeTruncationRecord(TableId id)
+    {
         String req = "DELETE truncated_at[?] from system.%s WHERE key = '%s'";
-        executeInternal(String.format(req, LOCAL, LOCAL), id.asUUID());
-        truncationRecords = null;
-        forceBlockingFlush(LOCAL);
+        return TPCUtils.toFuture(executeInternalAsync(String.format(req, LOCAL, LOCAL), id.asUUID()))
+                       .thenCompose(resultSet -> {
+                           if (truncationRecords != null)
+                               truncationRecords.remove(id);
+                           return forceFlush(LOCAL);
+                       });
     }
 
     private static Map<UUID, ByteBuffer> truncationAsMapEntry(ColumnFamilyStore cfs, long truncatedAt, CommitLogPosition position)
@@ -605,40 +690,38 @@ public final class SystemKeyspace
         }
     }
 
-    public static CommitLogPosition getTruncatedPosition(TableId id)
-    {
-        Pair<CommitLogPosition, Long> record = getTruncationRecord(id);
-        return record == null ? null : record.left;
-    }
-
     public static long getTruncatedAt(TableId id)
     {
         Pair<CommitLogPosition, Long> record = getTruncationRecord(id);
         return record == null ? Long.MIN_VALUE : record.right;
     }
 
-    private static synchronized Pair<CommitLogPosition, Long> getTruncationRecord(TableId id)
+    private static Pair<CommitLogPosition, Long> getTruncationRecord(TableId id)
     {
-        if (truncationRecords == null)
-            truncationRecords = readTruncationRecords();
-        return truncationRecords.get(id);
+        return getTruncationRecords().get(id);
     }
 
-    private static Map<TableId, Pair<CommitLogPosition, Long>> readTruncationRecords()
+    private static Map<TableId, Pair<CommitLogPosition, Long>> getTruncationRecords()
     {
-        // TODO make async
-        UntypedResultSet rows = executeInternal(format("SELECT truncated_at FROM system.%s WHERE key = '%s'", LOCAL, LOCAL));
+        assert truncationRecords != null : "truncation records not yet available, call SK.finishStartupBlocking() first";
+        return truncationRecords;
+    }
 
-        Map<TableId, Pair<CommitLogPosition, Long>> records = new HashMap<>();
+    public static CompletableFuture<ConcurrentMap<TableId, Pair<CommitLogPosition, Long>>> readTruncationRecords()
+    {
+        return TPCUtils.toFuture(executeInternalAsync(format("SELECT truncated_at FROM system.%s WHERE key = '%s'", LOCAL, LOCAL)))
+                       .thenApply(rows -> {
+                           ConcurrentMap<TableId, Pair<CommitLogPosition, Long>> records = new ConcurrentHashMap<>();
 
-        if (!rows.isEmpty() && rows.one().has("truncated_at"))
-        {
-            Map<UUID, ByteBuffer> map = rows.one().getMap("truncated_at", UUIDType.instance, BytesType.instance);
-            for (Map.Entry<UUID, ByteBuffer> entry : map.entrySet())
-                records.put(TableId.fromUUID(entry.getKey()), truncationRecordFromBlob(entry.getValue()));
-        }
+                           if (!rows.isEmpty() && rows.one().has("truncated_at"))
+                           {
+                               Map<UUID, ByteBuffer> map = rows.one().getMap("truncated_at", UUIDType.instance, BytesType.instance);
+                               for (Map.Entry<UUID, ByteBuffer> entry : map.entrySet())
+                                   records.put(TableId.fromUUID(entry.getKey()), truncationRecordFromBlob(entry.getValue()));
+                           }
 
-        return records;
+                           return records;
+                       });
     }
 
     private static Pair<CommitLogPosition, Long> truncationRecordFromBlob(ByteBuffer bytes)
@@ -656,47 +739,78 @@ public final class SystemKeyspace
     /**
      * Record tokens being used by another node
      */
-    public static synchronized void updateTokens(InetAddress ep, Collection<Token> tokens)
+    public static CompletableFuture<Void> updateTokens(InetAddress ep, Collection<Token> tokens)
     {
-        if (ep.equals(FBUtilities.getBroadcastAddress()))
-            return;
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            if (ep.equals(FBUtilities.getBroadcastAddress()))
+                return TPCUtils.completedFuture();
 
-        String req = "INSERT INTO system.%s (peer, tokens) VALUES (?, ?)";
-        logger.debug("PEERS TOKENS for {} = {}", ep, tokensAsSet(tokens));
-        executeInternal(format(req, PEERS), ep, tokensAsSet(tokens));
+            String req = "INSERT INTO system.%s (peer, tokens) VALUES (?, ?)";
+            logger.debug("PEERS TOKENS for {} = {}", ep, tokensAsSet(tokens));
+            return TPCUtils.toFutureVoid(executeInternalAsync(format(req, PEERS), ep, tokensAsSet(tokens)));
+        });
     }
 
-    public static synchronized void updatePreferredIP(InetAddress ep, InetAddress preferred_ip)
+    private static CompletableFuture<ConcurrentMap<InetAddress, PeerInfo>> readPeerInfo()
     {
-        if (getPreferredIP(ep) == preferred_ip)
-            return;
-
-        String req = "INSERT INTO system.%s (peer, preferred_ip) VALUES (?, ?)";
-        executeInternal(format(req, PEERS), ep, preferred_ip);
-        forceBlockingFlush(PEERS);
+        String req = "SELECT * from system." + PEERS;
+        return TPCUtils.toFuture(executeInternalAsync(req))
+                       .thenApply(results -> {
+                           ConcurrentMap<InetAddress, PeerInfo> ret = new ConcurrentHashMap<>();
+                           for (UntypedResultSet.Row row : results)
+                               ret.put(row.getInetAddress("peer"), new PeerInfo(row));
+                           return ret;
+                       });
     }
 
-    public static synchronized void updatePeerInfo(InetAddress ep, String columnName, Object value)
+    public static CompletableFuture<Void> updatePreferredIP(InetAddress ep, InetAddress preferred_ip)
     {
-        if (ep.equals(FBUtilities.getBroadcastAddress()))
-            return;
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            InetAddress current = getPreferredIP(ep);
+            if (current == preferred_ip)
+                return TPCUtils.completedFuture();
 
-        String req = "INSERT INTO system.%s (peer, %s) VALUES (?, ?)";
-        executeInternal(format(req, PEERS, columnName), ep, value);
+            String req = "INSERT INTO system.%s (peer, preferred_ip) VALUES (?, ?)";
+            return TPCUtils.toFuture(executeInternalAsync(format(req, PEERS), ep, preferred_ip))
+                           .thenCompose(r ->
+                                        {
+                                            if (peers != null)
+                                                peers.computeIfAbsent(ep, key -> new PeerInfo()).setPreferredIp(preferred_ip);
+                                            return forceFlush(PEERS);
+                                        });
+        });
     }
 
-    public static synchronized void updateHintsDropped(InetAddress ep, UUID timePeriod, int value)
+    public static CompletableFuture<Void> updatePeerInfo(InetAddress ep, String columnName, Object value)
     {
-        // with 30 day TTL
-        String req = "UPDATE system.%s USING TTL 2592000 SET hints_dropped[ ? ] = ? WHERE peer = ?";
-        executeInternal(format(req, PEER_EVENTS), timePeriod, value, ep);
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            if (ep.equals(FBUtilities.getBroadcastAddress()))
+                return TPCUtils.completedFuture();
+
+            String req = "INSERT INTO system.%s (peer, %s) VALUES (?, ?)";
+            return TPCUtils.toFuture(executeInternalAsync(format(req, PEERS, columnName), ep, value))
+                           .thenAccept(resultSet -> {
+                               if (peers != null)
+                                   peers.computeIfAbsent(ep, key -> new PeerInfo()).setValue(columnName, value);
+                           });
+        });
     }
 
-    // TODO need proper synchronization for async version
-    public static synchronized void updateSchemaVersion(UUID version)
+    public static CompletableFuture<Void> updateHintsDropped(InetAddress ep, UUID timePeriod, int value)
     {
-        String req = "INSERT INTO system.%s (key, schema_version) VALUES ('%s', ?)";
-        executeInternal(format(req, LOCAL, LOCAL), version);
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            // with 30 day TTL
+            String req = "UPDATE system.%s USING TTL 2592000 SET hints_dropped[ ? ] = ? WHERE peer = ?";
+            return TPCUtils.toFutureVoid(executeInternalAsync(format(req, PEER_EVENTS), timePeriod, value, ep));
+        });
+    }
+
+    public static CompletableFuture<Void> updateSchemaVersion(UUID version)
+    {
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            final String req = "INSERT INTO system.%s (key, schema_version) VALUES ('%s', ?)";
+            return TPCUtils.toFutureVoid(executeInternalAsync(format(req, LOCAL, LOCAL), version));
+        });
     }
 
     private static Set<String> tokensAsSet(Collection<Token> tokens)
@@ -722,69 +836,76 @@ public final class SystemKeyspace
     /**
      * Remove stored tokens being used by another node
      */
-    public static synchronized void removeEndpoint(InetAddress ep)
+    public static CompletableFuture<Void> removeEndpoint(InetAddress ep)
     {
-        String req = "DELETE FROM system.%s WHERE peer = ?";
-        executeInternal(format(req, PEERS), ep);
-        forceBlockingFlush(PEERS);
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            String req = "DELETE FROM system.%s WHERE peer = ?";
+            return TPCUtils.toFuture(executeInternalAsync(format(req, PEERS), ep))
+                           .thenCompose(resultSet -> {
+                               if (peers != null)
+                                   peers.remove(ep);
+                               return forceFlush(PEERS);
+                           });
+        });
     }
 
     /**
      * This method is used to update the System Keyspace with the new tokens for this node
     */
-    public static synchronized void updateTokens(Collection<Token> tokens)
+    public static CompletableFuture<Void> updateTokens(Collection<Token> tokens)
     {
         assert !tokens.isEmpty() : "removeEndpoint should be used instead";
+        return TPCUtils.withLock(GLOBAL_LOCK, () ->
+            getSavedTokens().thenCompose(savedTokens -> {
+                if (tokens.containsAll(savedTokens) && tokens.size() == savedTokens.size())
+                    return TPCUtils.completedFuture();
 
-        Collection<Token> savedTokens = getSavedTokens();
-        if (tokens.containsAll(savedTokens) && tokens.size() == savedTokens.size())
-            return;
-
-        String req = "INSERT INTO system.%s (key, tokens) VALUES ('%s', ?)";
-        executeInternal(format(req, LOCAL, LOCAL), tokensAsSet(tokens));
-        forceBlockingFlush(LOCAL);
+                String req = "INSERT INTO system.%s (key, tokens) VALUES ('%s', ?)";
+                return TPCUtils.toFuture(executeInternalAsync(format(req, LOCAL, LOCAL), tokensAsSet(tokens)))
+                               .thenCompose(resultSet -> forceFlush(LOCAL));
+            })
+        );
     }
 
-    public static void forceBlockingFlush(String cfname)
+    private static CompletableFuture<Void> forceFlush(String cfname)
     {
         if (!DatabaseDescriptor.isUnsafeSystem())
-            Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(cfname).forceBlockingFlush();
+            return TPCUtils.toFutureVoid(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)
+                                                 .getColumnFamilyStore(cfname)
+                                                 .forceFlush());
+
+        return CompletableFuture.completedFuture(null);
     }
 
     /**
      * Return a map of stored tokens to IP addresses
-     *
      */
-    public static SetMultimap<InetAddress, Token> loadTokens()
+    public static CompletableFuture<SetMultimap<InetAddress, Token>> loadTokens()
     {
-        SetMultimap<InetAddress, Token> tokenMap = HashMultimap.create();
-        // TODO make async
-        for (UntypedResultSet.Row row : executeInternal("SELECT peer, tokens FROM system." + PEERS))
-        {
-            InetAddress peer = row.getInetAddress("peer");
-            if (row.has("tokens"))
-                tokenMap.putAll(peer, deserializeTokens(row.getSet("tokens", UTF8Type.instance)));
-        }
-
-        return tokenMap;
+        return TPCUtils.toFuture(executeInternalAsync("SELECT peer, tokens FROM system." + PEERS))
+                       .thenApply(resultSet -> {
+                           SetMultimap<InetAddress, Token> tokenMap = HashMultimap.create();
+                           for (UntypedResultSet.Row row : resultSet)
+                           {
+                               InetAddress peer = row.getInetAddress("peer");
+                               if (row.has("tokens"))
+                                   tokenMap.putAll(peer, deserializeTokens(row.getSet("tokens", UTF8Type.instance)));
+                           }
+                           return tokenMap;
+                         });
     }
 
     /**
-     * Return a map of store host_ids to IP addresses
-     *
+     * Return a map of stored host_ids to IP addresses
      */
-    public static Map<InetAddress, UUID> loadHostIds()
+    public static Map<InetAddress, UUID> getHostIds()
     {
+        assert peers != null : "Peers not yet available, loadPeerInfoBlocking() called?";
         Map<InetAddress, UUID> hostIdMap = new HashMap<>();
-        // TODO make async
-        for (UntypedResultSet.Row row : executeInternal("SELECT peer, host_id FROM system." + PEERS))
-        {
-            InetAddress peer = row.getInetAddress("peer");
-            if (row.has("host_id"))
-            {
-                hostIdMap.put(peer, row.getUUID("host_id"));
-            }
-        }
+
+        for (Map.Entry<InetAddress, PeerInfo> entry : peers.entrySet())
+            hostIdMap.put(entry.getKey(), entry.getValue().hostId);
+
         return hostIdMap;
     }
 
@@ -796,12 +917,9 @@ public final class SystemKeyspace
      */
     public static InetAddress getPreferredIP(InetAddress ep)
     {
-        String req = "SELECT preferred_ip FROM system.%s WHERE peer=?";
-        // TODO make async
-        UntypedResultSet result = executeInternal(format(req, PEERS), ep);
-        if (!result.isEmpty() && result.one().has("preferred_ip"))
-            return result.one().getInetAddress("preferred_ip");
-        return ep;
+        assert peers != null : "Peers not yet available, loadPeerInfoBlocking() called?";
+        PeerInfo info = peers.get(ep);
+        return info == null || info.preferredIp == null ? ep : info.preferredIp;
     }
 
     /**
@@ -809,19 +927,20 @@ public final class SystemKeyspace
      */
     public static Map<InetAddress, Map<String,String>> loadDcRackInfo()
     {
+        assert peers != null : "Peers not yet available, loadPeerInfoBlocking() called?";
         Map<InetAddress, Map<String, String>> result = new HashMap<>();
-        // TODO make async
-        for (UntypedResultSet.Row row : executeInternal("SELECT peer, data_center, rack from system." + PEERS))
+
+        for (Map.Entry<InetAddress, PeerInfo> entry : peers.entrySet())
         {
-            InetAddress peer = row.getInetAddress("peer");
-            if (row.has("data_center") && row.has("rack"))
+            if (entry.getValue().rack != null && entry.getValue().dc != null)
             {
                 Map<String, String> dcRack = new HashMap<>();
-                dcRack.put("data_center", row.getString("data_center"));
-                dcRack.put("rack", row.getString("rack"));
-                result.put(peer, dcRack);
+                dcRack.put("data_center", entry.getValue().dc);
+                dcRack.put("rack", entry.getValue().rack);
+                result.put(entry.getKey(), dcRack);
             }
         }
+
         return result;
     }
 
@@ -834,27 +953,13 @@ public final class SystemKeyspace
      */
     public static CassandraVersion getReleaseVersion(InetAddress ep)
     {
-        try
-        {
-            if (FBUtilities.getBroadcastAddress().equals(ep))
-            {
-                return new CassandraVersion(FBUtilities.getReleaseVersionString());
-            }
-            String req = "SELECT release_version FROM system.%s WHERE peer=?";
-            // TODO make async
-            UntypedResultSet result = executeInternal(format(req, PEERS), ep);
-            if (result != null && result.one().has("release_version"))
-            {
-                return new CassandraVersion(result.one().getString("release_version"));
-            }
-            // version is unknown
-            return null;
-        }
-        catch (IllegalArgumentException e)
-        {
-            // version string cannot be parsed
-            return null;
-        }
+        assert peers != null : "Peers not yet available, loadPeerInfoBlocking() called?";
+
+        if (FBUtilities.getBroadcastAddress().equals(ep))
+            return new CassandraVersion(FBUtilities.getReleaseVersionString());
+
+        PeerInfo info = peers.get(ep);
+        return info == null ? null : info.version;
     }
 
     /**
@@ -864,7 +969,7 @@ public final class SystemKeyspace
      * 3. files are present but you can't read them: bad
      * @throws ConfigurationException
      */
-    public static void checkHealth() throws ConfigurationException
+    public static CompletableFuture<Void> checkHealth() throws ConfigurationException
     {
         Keyspace keyspace;
         try
@@ -881,83 +986,85 @@ public final class SystemKeyspace
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(LOCAL);
 
         String req = "SELECT cluster_name FROM system.%s WHERE key='%s'";
-        // TODO make async
-        UntypedResultSet result = executeInternal(format(req, LOCAL, LOCAL));
+        return TPCUtils.toFuture(executeInternalAsync(format(req, LOCAL, LOCAL)))
+                       .thenAccept(result -> {
+                           if (result.isEmpty() || !result.one().has("cluster_name"))
+                           {
+                               // this is a brand new node
+                               if (!cfs.getLiveSSTables().isEmpty())
+                                   throw new ConfigurationException("Found system keyspace files, but they couldn't be loaded!");
 
-        if (result.isEmpty() || !result.one().has("cluster_name"))
-        {
-            // this is a brand new node
-            if (!cfs.getLiveSSTables().isEmpty())
-                throw new ConfigurationException("Found system keyspace files, but they couldn't be loaded!");
+                               // no system files.  this is a new node.
+                               return;
+                           }
 
-            // no system files.  this is a new node.
-            return;
-        }
-
-        String savedClusterName = result.one().getString("cluster_name");
-        if (!DatabaseDescriptor.getClusterName().equals(savedClusterName))
-            throw new ConfigurationException("Saved cluster name " + savedClusterName + " != configured name " + DatabaseDescriptor.getClusterName());
+                           String savedClusterName = result.one().getString("cluster_name");
+                           if (!DatabaseDescriptor.getClusterName().equals(savedClusterName))
+                               throw new ConfigurationException("Saved cluster name " + savedClusterName + " != configured name " + DatabaseDescriptor.getClusterName());
+                       });
     }
 
-    public static Collection<Token> getSavedTokens()
+    public static CompletableFuture<Collection<Token>> getSavedTokens()
     {
         String req = "SELECT tokens FROM system.%s WHERE key='%s'";
-        // TODO make async
-        UntypedResultSet result = executeInternal(format(req, LOCAL, LOCAL));
-        return result.isEmpty() || !result.one().has("tokens")
-             ? Collections.<Token>emptyList()
-             : deserializeTokens(result.one().getSet("tokens", UTF8Type.instance));
+        return TPCUtils.toFuture(executeInternalAsync(format(req, LOCAL, LOCAL)))
+                       .thenApply(result -> result.isEmpty() || !result.one().has("tokens")
+                                            ? Collections.<Token>emptyList()
+                                            : deserializeTokens(result.one().getSet("tokens", UTF8Type.instance)));
     }
 
-    public static int incrementAndGetGeneration()
+    public static CompletableFuture<Integer> incrementAndGetGeneration()
     {
         String req = "SELECT gossip_generation FROM system.%s WHERE key='%s'";
-        // TODO make async
-        UntypedResultSet result = executeInternal(format(req, LOCAL, LOCAL));
+        return TPCUtils.toFuture(executeInternalAsync(format(req, LOCAL, LOCAL)))
+                       .thenCompose(result -> {
+                           int generation;
+                           if (result.isEmpty() || !result.one().has("gossip_generation"))
+                           {
+                               // seconds-since-epoch isn't a foolproof new generation
+                               // (where foolproof is "guaranteed to be larger than the last one seen at this ip address"),
+                               // but it's as close as sanely possible
+                               generation = (int) (System.currentTimeMillis() / 1000);
+                           }
+                           else
+                           {
+                               // Other nodes will ignore gossip messages about a node that have a lower generation than previously seen.
+                               final int storedGeneration = result.one().getInt("gossip_generation") + 1;
+                               final int now = (int) (System.currentTimeMillis() / 1000);
+                               if (storedGeneration >= now)
+                               {
+                                   logger.warn("Using stored Gossip Generation {} as it is greater than current system time {}.  See CASSANDRA-3654 if you experience problems",
+                                               storedGeneration, now);
+                                   generation = storedGeneration;
+                               }
+                               else
+                               {
+                                   generation = now;
+                               }
+                           }
 
-        int generation;
-        if (result.isEmpty() || !result.one().has("gossip_generation"))
-        {
-            // seconds-since-epoch isn't a foolproof new generation
-            // (where foolproof is "guaranteed to be larger than the last one seen at this ip address"),
-            // but it's as close as sanely possible
-            generation = (int) (System.currentTimeMillis() / 1000);
-        }
-        else
-        {
-            // Other nodes will ignore gossip messages about a node that have a lower generation than previously seen.
-            final int storedGeneration = result.one().getInt("gossip_generation") + 1;
-            final int now = (int) (System.currentTimeMillis() / 1000);
-            if (storedGeneration >= now)
-            {
-                logger.warn("Using stored Gossip Generation {} as it is greater than current system time {}.  See CASSANDRA-3654 if you experience problems",
-                            storedGeneration, now);
-                generation = storedGeneration;
-            }
-            else
-            {
-                generation = now;
-            }
-        }
+                           String insert = "INSERT INTO system.%s (key, gossip_generation) VALUES ('%s', ?)";
+                           return TPCUtils.toFuture(executeInternalAsync(format(insert, LOCAL, LOCAL), generation))
+                                          .thenCompose(r -> forceFlush(LOCAL))
+                                          .thenApply(r -> generation);
+                      });
+    }
 
-        req = "INSERT INTO system.%s (key, gossip_generation) VALUES ('%s', ?)";
-        // TODO make async?
-        executeInternal(format(req, LOCAL, LOCAL), generation);
-        forceBlockingFlush(LOCAL);
-
-        return generation;
+    private static CompletableFuture<BootstrapState> loadBootstrapState()
+    {
+        String req = "SELECT bootstrapped FROM system.%s WHERE key='%s'";
+        return TPCUtils.toFuture(executeInternalAsync(format(req, LOCAL, LOCAL)))
+                       .thenApply(result -> {
+                           if (result.isEmpty() || !result.one().has("bootstrapped"))
+                               return BootstrapState.NEEDS_BOOTSTRAP;
+                           else
+                               return BootstrapState.valueOf(result.one().getString("bootstrapped"));
+        });
     }
 
     public static BootstrapState getBootstrapState()
     {
-        String req = "SELECT bootstrapped FROM system.%s WHERE key='%s'";
-        // TODO make async
-        UntypedResultSet result = executeInternal(format(req, LOCAL, LOCAL));
-
-        if (result.isEmpty() || !result.one().has("bootstrapped"))
-            return BootstrapState.NEEDS_BOOTSTRAP;
-
-        return BootstrapState.valueOf(result.one().getString("bootstrapped"));
+        return bootstrapState;
     }
 
     public static boolean bootstrapComplete()
@@ -975,52 +1082,86 @@ public final class SystemKeyspace
         return getBootstrapState() == BootstrapState.DECOMMISSIONED;
     }
 
-    public static void setBootstrapState(BootstrapState state)
+    public static CompletableFuture<Void> setBootstrapState(BootstrapState state)
     {
-        if (getBootstrapState() == state)
-            return;
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            if (getBootstrapState() == state)
+                return TPCUtils.completedFuture();
 
-        String req = "INSERT INTO system.%s (key, bootstrapped) VALUES ('%s', ?)";
-        // TODO make async?
-        executeInternal(format(req, LOCAL, LOCAL), state.name());
-        forceBlockingFlush(LOCAL);
+            String req = "INSERT INTO system.%s (key, bootstrapped) VALUES ('%s', ?)";
+            return TPCUtils.toFuture(executeInternalAsync(format(req, LOCAL, LOCAL), state.name()))
+                           .thenCompose(resultSet -> {
+                               bootstrapState = state;
+                               return forceFlush(LOCAL);
+                           });
+        });
     }
 
-    public static boolean isIndexBuilt(String keyspaceName, String indexName)
+    public static CompletableFuture<Boolean> isIndexBuilt(String keyspaceName, String indexName)
     {
         String req = "SELECT index_name FROM %s.\"%s\" WHERE table_name=? AND index_name=?";
-        // TODO make async
-        UntypedResultSet result = executeInternal(format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, indexName);
-        return !result.isEmpty();
+        return TPCUtils.toFuture(executeInternalAsync(format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, indexName))
+                       .thenApply(result -> !result.isEmpty());
     }
 
-    public static void setIndexBuilt(String keyspaceName, String indexName)
+    public static CompletableFuture<Void> setIndexBuilt(String keyspaceName, String indexName)
     {
         String req = "INSERT INTO %s.\"%s\" (table_name, index_name) VALUES (?, ?) IF NOT EXISTS;";
-        executeInternal(String.format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, indexName);
-        forceBlockingFlush(BUILT_INDEXES);
+        return TPCUtils.toFuture(executeInternalAsync(String.format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, indexName))
+               .thenCompose(resultSet -> forceFlush(BUILT_INDEXES));
     }
 
-    public static void setIndexRemoved(String keyspaceName, String indexName)
+    public static CompletableFuture<Void> setIndexRemoved(String keyspaceName, String indexName)
     {
-        String req = "DELETE FROM %s.\"%s\" WHERE table_name = ? AND index_name = ? IF EXISTS";
-        executeInternal(String.format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, indexName);
-        forceBlockingFlush(BUILT_INDEXES);
-    }
+        return isIndexBuilt(keyspaceName, indexName).thenCompose(built -> {
+           if (!built)
+               return TPCUtils.completedFuture(); // index was not built
 
-    public static List<String> getBuiltIndexes(String keyspaceName, Set<String> indexNames)
-    {
-        List<String> names = new ArrayList<>(indexNames);
-        String req = "SELECT index_name from %s.\"%s\" WHERE table_name=? AND index_name IN ?";
-        // TODO make async
-        UntypedResultSet results = executeInternal(format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, names);
-        return StreamSupport.stream(results.spliterator(), false)
-                            .map(r -> r.getString("index_name"))
-                            .collect(Collectors.toList());
+            String req = "DELETE FROM %s.\"%s\" WHERE table_name = ? AND index_name = ? IF EXISTS";
+            return TPCUtils.toFuture(executeInternalAsync(String.format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, indexName))
+                           .thenCompose(resultSet -> forceFlush(BUILT_INDEXES));
+        });
     }
 
     /**
-     * Retrieve the local host id from a cached value that was set when calling {@link #setLocalHostIdBlocking()}
+     * Return all indexes built for this specific keyspace.
+     *
+     * @param keyspaceName - the keyspace
+     * @return a list of indexes built for the keyspace specified
+     */
+    public static CompletableFuture<List<String>> getBuiltIndexes(String keyspaceName)
+    {
+        String req = "SELECT table_name, index_name from %s.\"%s\" WHERE table_name=?";
+        return TPCUtils.toFuture(executeInternalAsync(format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName))
+                       .thenApply(results ->
+                           StreamSupport.stream(results.spliterator(), false)
+                                        .map(r -> r.getString("index_name"))
+                                        .collect(Collectors.toList())
+                       );
+    }
+
+    /**
+     * Return all indexes built for this specific keyspace and whose name is in the
+     * set specified by {@code indexNames}.
+     *
+     * @param keyspaceName - the keyspace
+     * @param indexNames  - the indexes to include
+     * @return a list of indexes built for the keyspace specified and matching the names specified
+     */
+    public static CompletableFuture<List<String>> getBuiltIndexes(String keyspaceName, Set<String> indexNames)
+    {
+        List<String> names = new ArrayList<>(indexNames);
+        String req = "SELECT index_name from %s.\"%s\" WHERE table_name=? AND index_name IN ?";
+        return TPCUtils.toFuture(executeInternalAsync(format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, names))
+               .thenApply(results ->
+                          StreamSupport.stream(results.spliterator(), false)
+                                       .map(r -> r.getString("index_name"))
+                                       .collect(Collectors.toList())
+               );
+    }
+
+    /**
+     * Retrieve the local host id from a cached value that was set when calling {@link #setLocalHostId()}
      * during start-up.
      */
     public static UUID getLocalHostId()
@@ -1033,122 +1174,118 @@ public final class SystemKeyspace
      * Read the host ID from the system keyspace, creating (and storing) one if
      * none exists.
      * <p>
-     * It is safe to call this method multiple times but it will throw
-     * {@link org.apache.cassandra.concurrent.TPCUtils.WouldBlockException} if called from
-     * a TPC thread and if the host id is not yet set.
+     * It is safe to call this method multiple times.
      * <p>
      * This is currently called during startup to ensure the host id is available without blocking when
      * calling {@link #getLocalHostId()}.
      *
      * @return the local host id
-     * @throws org.apache.cassandra.concurrent.TPCUtils.WouldBlockException when called from a TPC thread
      */
-    public static UUID setLocalHostIdBlocking()
+    public static CompletableFuture<UUID> setLocalHostId()
     {
         return localHostId == null
-               ? setLocalHostIdBlocking(initialLocalHostIdBlocking())
-               : localHostId;
+               ? initialLocalHostId().thenCompose(hostId -> setLocalHostId(hostId))
+               : TPCUtils.completedFuture(localHostId);
     }
 
-    private static UUID initialLocalHostIdBlocking()
+    private static CompletableFuture<UUID> initialLocalHostId()
     {
         String req = "SELECT host_id FROM system.%s WHERE key='%s'";
-        UntypedResultSet result = executeInternal(format(req, LOCAL, LOCAL));
+        return TPCUtils.toFuture(executeInternalAsync(format(req, LOCAL, LOCAL)))
+                       .thenApply(result -> {
+                           // Look up the Host UUID (return it if found)
+                           if (!result.isEmpty() && result.one().has("host_id"))
+                               return result.one().getUUID("host_id");
 
-        // Look up the Host UUID (return it if found)
-        if (!result.isEmpty() && result.one().has("host_id"))
-            return result.one().getUUID("host_id");
+                           // ID not found, generate a new one, persist, and then return it.
+                           UUID hostId = UUID.randomUUID();
+                           logger.warn("No host ID found, created {} (Note: This should happen exactly once per node).", hostId);
+                           return hostId;
+                       });
 
-        // ID not found, generate a new one, persist, and then return it.
-        UUID hostId = UUID.randomUUID();
-        logger.warn("No host ID found, created {} (Note: This should happen exactly once per node).", hostId);
-        return hostId;
     }
 
     /**
      * Sets the local host ID explicitly.  Should only be called outside of SystemKeyspace when replacing a node.
      *
-     * @return the host id
-     * @throws org.apache.cassandra.concurrent.TPCUtils.WouldBlockException when called from a TPC thread
+     * @return a future that will complete with the host id that was set, or the same host id if it could not be changed
      */
-    public synchronized static UUID setLocalHostIdBlocking(UUID hostId)
+    public static CompletableFuture<UUID> setLocalHostId(UUID hostId)
     {
-        if (TPC.isTPCThread())
-            throw new TPCUtils.WouldBlockException("Calling setLocalHostIdBlocking would block a TPC thread");
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            UUID old = localHostId;
+            localHostId = hostId;
 
-        UUID old = localHostId;
-        localHostId = hostId;
-
-        try
-        {
             String req = "INSERT INTO system.%s (key, host_id) VALUES ('%s', ?)";
-            executeInternal(format(req, LOCAL, LOCAL), hostId);
-        }
-        catch (Throwable t)
-        {
-            logger.error("Failed to change local host id from {} to {}", old, hostId, t);
-            localHostId = old;
-            throw t;
-        }
+            return TPCUtils.toFuture(executeInternalAsync(format(req, LOCAL, LOCAL), hostId))
+                           .handle((result, error) -> {
+                               if (error != null)
+                               {
+                                   logger.error("Failed to change local host id from {} to {}", localHostId, hostId, error);
+                                   localHostId = old;
+                               }
 
-        return localHostId;
+                               return localHostId;
+                           });
+        });
     }
 
     /**
      * Gets the stored rack for the local node, or null if none have been set yet.
      */
-    public static String getRack()
+    public static CompletableFuture<String> getRack()
     {
         String req = "SELECT rack FROM system.%s WHERE key='%s'";
-        // TODO make async
-        UntypedResultSet result = executeInternal(format(req, LOCAL, LOCAL));
+        return TPCUtils.toFuture(executeInternalAsync(format(req, LOCAL, LOCAL)))
+                       .thenApply(result -> {
+                           // Look up the Rack (return it if found)
+                           if (!result.isEmpty() && result.one().has("rack"))
+                               return result.one().getString("rack");
 
-        // Look up the Rack (return it if found)
-        if (!result.isEmpty() && result.one().has("rack"))
-            return result.one().getString("rack");
-
-        return null;
+                           return null;
+                       });
     }
 
     /**
      * Gets the stored data center for the local node, or null if none have been set yet.
      */
-    public static String getDatacenter()
+    public static CompletableFuture<String> getDatacenter()
     {
         String req = "SELECT data_center FROM system.%s WHERE key='%s'";
-        // TODO make async
-        UntypedResultSet result = executeInternal(format(req, LOCAL, LOCAL));
+        return TPCUtils.toFuture(executeInternalAsync(format(req, LOCAL, LOCAL)))
+                       .thenApply(result -> {
+                           // Look up the Data center (return it if found)
+                           if (!result.isEmpty() && result.one().has("data_center"))
+                               return result.one().getString("data_center");
 
-        // Look up the Data center (return it if found)
-        if (!result.isEmpty() && result.one().has("data_center"))
-            return result.one().getString("data_center");
-
-        return null;
+                           return null;
+                       });
     }
 
-    public static PaxosState loadPaxosState(DecoratedKey key, TableMetadata metadata, int nowInSec)
+    public static CompletableFuture<PaxosState> loadPaxosState(DecoratedKey key, TableMetadata metadata, int nowInSec)
     {
         String req = "SELECT * FROM system.%s WHERE row_key = ? AND cf_id = ?";
-        // TODO make async
-        UntypedResultSet results = QueryProcessor.executeInternalWithNow(nowInSec, System.nanoTime(), format(req, PAXOS), key.getKey(), metadata.id.asUUID()).blockingGet();
-        if (results.isEmpty())
-            return new PaxosState(key, metadata);
-        UntypedResultSet.Row row = results.one();
+        return TPCUtils.toFuture(QueryProcessor.executeInternalWithNow(nowInSec, System.nanoTime(), format(req, PAXOS), key.getKey(), metadata.id.asUUID()))
+                       .thenApply(results -> {
+                           if (results.isEmpty())
+                               return new PaxosState(key, metadata);
+                           UntypedResultSet.Row row = results.one();
 
-        Commit promised = row.has("in_progress_ballot")
-                        ? new Commit(row.getUUID("in_progress_ballot"), new PartitionUpdate(metadata, key, metadata.regularAndStaticColumns(), 1))
-                        : Commit.emptyCommit(key, metadata);
-        // either we have both a recently accepted ballot and update or we have neither
-        Commit accepted = row.has("proposal_version") && row.has("proposal")
-                        ? new Commit(row.getUUID("proposal_ballot"),
-                                     PartitionUpdate.fromBytes(row.getBytes("proposal"), getVersion(row, "proposal_version")))
-                        : Commit.emptyCommit(key, metadata);
-        // either most_recent_commit and most_recent_commit_at will both be set, or neither
-        Commit mostRecent = row.has("most_recent_commit_version") && row.has("most_recent_commit")
-                          ? new Commit(row.getUUID("most_recent_commit_at"),
-                                       PartitionUpdate.fromBytes(row.getBytes("most_recent_commit"), getVersion(row, "most_recent_commit_version")))
-                          : Commit.emptyCommit(key, metadata);
-        return new PaxosState(promised, accepted, mostRecent);
+                           Commit promised = row.has("in_progress_ballot")
+                                             ? new Commit(row.getUUID("in_progress_ballot"), new PartitionUpdate(metadata, key, metadata.regularAndStaticColumns(), 1))
+                                             : Commit.emptyCommit(key, metadata);
+                           // either we have both a recently accepted ballot and update or we have neither
+                           Commit accepted = row.has("proposal_version") && row.has("proposal")
+                                             ? new Commit(row.getUUID("proposal_ballot"),
+                                                          PartitionUpdate.fromBytes(row.getBytes("proposal"), getVersion(row, "proposal_version")))
+                                             : Commit.emptyCommit(key, metadata);
+                           // either most_recent_commit and most_recent_commit_at will both be set, or neither
+                           Commit mostRecent = row.has("most_recent_commit_version") && row.has("most_recent_commit")
+                                               ? new Commit(row.getUUID("most_recent_commit_at"),
+                                                            PartitionUpdate.fromBytes(row.getBytes("most_recent_commit"), getVersion(row, "most_recent_commit_version")))
+                                               : Commit.emptyCommit(key, metadata);
+                           return new PaxosState(promised, accepted, mostRecent);
+                       });
     }
 
     private static EncodingVersion getVersion(UntypedResultSet.Row row, String name)
@@ -1158,27 +1295,28 @@ public final class SystemKeyspace
         return version.<WriteVersion>groupVersion(Verbs.Group.WRITES).encodingVersion;
     }
 
-    public static void savePaxosPromise(Commit promise)
+    public static CompletableFuture<Void> savePaxosPromise(Commit promise)
     {
         String req = "UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET in_progress_ballot = ? WHERE row_key = ? AND cf_id = ?";
-        executeInternal(format(req, PAXOS),
-                        UUIDGen.microsTimestamp(promise.ballot),
-                        paxosTtlSec(promise.update.metadata()),
-                        promise.ballot,
-                        promise.update.partitionKey().getKey(),
-                        promise.update.metadata().id.asUUID());
+        return TPCUtils.toFutureVoid(executeInternalAsync(format(req, PAXOS),
+                                                          UUIDGen.microsTimestamp(promise.ballot),
+                                                          paxosTtlSec(promise.update.metadata()),
+                                                          promise.ballot,
+                                                          promise.update.partitionKey().getKey(),
+                                                          promise.update.metadata().id.asUUID()));
     }
 
-    public static void savePaxosProposal(Commit proposal)
+    public static CompletableFuture<Void> savePaxosProposal(Commit proposal)
     {
-        executeInternal(format("UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET proposal_ballot = ?, proposal = ?, proposal_version = ? WHERE row_key = ? AND cf_id = ?", PAXOS),
-                        UUIDGen.microsTimestamp(proposal.ballot),
-                        paxosTtlSec(proposal.update.metadata()),
-                        proposal.ballot,
-                        PartitionUpdate.toBytes(proposal.update, MessagingService.current_version.<WriteVersion>groupVersion(Verbs.Group.WRITES).encodingVersion),
-                        MessagingService.current_version.protocolVersion().handshakeVersion,
-                        proposal.update.partitionKey().getKey(),
-                        proposal.update.metadata().id.asUUID());
+        String req = "UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET proposal_ballot = ?, proposal = ?, proposal_version = ? WHERE row_key = ? AND cf_id = ?";
+        return TPCUtils.toFutureVoid(executeInternalAsync(format(req, PAXOS),
+                                                          UUIDGen.microsTimestamp(proposal.ballot),
+                                                          paxosTtlSec(proposal.update.metadata()),
+                                                          proposal.ballot,
+                                                          PartitionUpdate.toBytes(proposal.update, MessagingService.current_version.<WriteVersion>groupVersion(Verbs.Group.WRITES).encodingVersion),
+                                                          MessagingService.current_version.protocolVersion().handshakeVersion,
+                                                          proposal.update.partitionKey().getKey(),
+                                                          proposal.update.metadata().id.asUUID()));
     }
 
     public static int paxosTtlSec(TableMetadata metadata)
@@ -1187,19 +1325,19 @@ public final class SystemKeyspace
         return Math.max(3 * 3600, metadata.params.gcGraceSeconds);
     }
 
-    public static void savePaxosCommit(Commit commit)
+    public static CompletableFuture<Void> savePaxosCommit(Commit commit)
     {
         // We always erase the last proposal (with the commit timestamp to no erase more recent proposal in case the commit is old)
         // even though that's really just an optimization  since SP.beginAndRepairPaxos will exclude accepted proposal older than the mrc.
         String cql = "UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET proposal_ballot = null, proposal = null, most_recent_commit_at = ?, most_recent_commit = ?, most_recent_commit_version = ? WHERE row_key = ? AND cf_id = ?";
-        executeInternal(format(cql, PAXOS),
-                        UUIDGen.microsTimestamp(commit.ballot),
-                        paxosTtlSec(commit.update.metadata()),
-                        commit.ballot,
-                        PartitionUpdate.toBytes(commit.update, MessagingService.current_version.<WriteVersion>groupVersion(Verbs.Group.WRITES).encodingVersion),
-                        MessagingService.current_version.protocolVersion().handshakeVersion,
-                        commit.update.partitionKey().getKey(),
-                        commit.update.metadata().id.asUUID());
+        return TPCUtils.toFutureVoid(executeInternalAsync(format(cql, PAXOS),
+                                                          UUIDGen.microsTimestamp(commit.ballot),
+                                                          paxosTtlSec(commit.update.metadata()),
+                                                          commit.ballot,
+                                                          PartitionUpdate.toBytes(commit.update, MessagingService.current_version.<WriteVersion>groupVersion(Verbs.Group.WRITES).encodingVersion),
+                                                          MessagingService.current_version.protocolVersion().handshakeVersion,
+                                                          commit.update.partitionKey().getKey(),
+                                                          commit.update.metadata().id.asUUID()));
     }
 
     /**
@@ -1209,49 +1347,49 @@ public final class SystemKeyspace
      * @param table the table the sstable belongs to
      * @param generation the generation number for the sstable
      */
-    public static RestorableMeter getSSTableReadMeter(String keyspace, String table, int generation)
+    public static CompletableFuture<RestorableMeter> getSSTableReadMeter(String keyspace, String table, int generation)
     {
         String cql = "SELECT * FROM system.%s WHERE keyspace_name=? and columnfamily_name=? and generation=?";
-        // TODO make async
-        UntypedResultSet results = executeInternal(format(cql, SSTABLE_ACTIVITY), keyspace, table, generation);
+        return TPCUtils.toFuture(executeInternalAsync(format(cql, SSTABLE_ACTIVITY), keyspace, table, generation))
+                       .thenApply(results -> {
+                           if (results.isEmpty())
+                               return new RestorableMeter();
 
-        if (results.isEmpty())
-            return new RestorableMeter();
-
-        UntypedResultSet.Row row = results.one();
-        double m15rate = row.getDouble("rate_15m");
-        double m120rate = row.getDouble("rate_120m");
-        return new RestorableMeter(m15rate, m120rate);
+                           UntypedResultSet.Row row = results.one();
+                           double m15rate = row.getDouble("rate_15m");
+                           double m120rate = row.getDouble("rate_120m");
+                           return new RestorableMeter(m15rate, m120rate);
+                       });
     }
 
     /**
      * Writes the current read rates for a given SSTable to system.sstable_activity
      */
-    public static void persistSSTableReadMeter(String keyspace, String table, int generation, RestorableMeter meter)
+    public static CompletableFuture<Void> persistSSTableReadMeter(String keyspace, String table, int generation, RestorableMeter meter)
     {
         // Store values with a one-day TTL to handle corner cases where cleanup might not occur
         String cql = "INSERT INTO system.%s (keyspace_name, columnfamily_name, generation, rate_15m, rate_120m) VALUES (?, ?, ?, ?, ?) USING TTL 864000";
-        executeInternal(format(cql, SSTABLE_ACTIVITY),
-                        keyspace,
-                        table,
-                        generation,
-                        meter.fifteenMinuteRate(),
-                        meter.twoHourRate());
+        return TPCUtils.toFutureVoid(executeInternalAsync(format(cql, SSTABLE_ACTIVITY),
+                                                          keyspace,
+                                                          table,
+                                                          generation,
+                                                          meter.fifteenMinuteRate(),
+                                                          meter.twoHourRate()));
     }
 
     /**
      * Clears persisted read rates from system.sstable_activity for SSTables that have been deleted.
      */
-    public static void clearSSTableReadMeter(String keyspace, String table, int generation)
+    public static CompletableFuture<Void> clearSSTableReadMeter(String keyspace, String table, int generation)
     {
         String cql = "DELETE FROM system.%s WHERE keyspace_name=? AND columnfamily_name=? and generation=?";
-        executeInternal(format(cql, SSTABLE_ACTIVITY), keyspace, table, generation);
+        return TPCUtils.toFutureVoid(executeInternalAsync(format(cql, SSTABLE_ACTIVITY), keyspace, table, generation));
     }
 
     /**
      * Writes the current partition count and size estimates into SIZE_ESTIMATES_CF
      */
-    public static void updateSizeEstimates(String keyspace, String table, Map<Range<Token>, Pair<Long, Long>> estimates)
+    public static CompletableFuture<Void> updateSizeEstimates(String keyspace, String table, Map<Range<Token>, Pair<Long, Long>> estimates)
     {
         long timestamp = FBUtilities.timestampMicros();
         PartitionUpdate update = new PartitionUpdate(SizeEstimates, UTF8Type.instance.decompose(keyspace), SizeEstimates.regularAndStaticColumns(), estimates.size());
@@ -1273,66 +1411,76 @@ public final class SystemKeyspace
                            .build());
         }
 
-        mutation.apply();
+        return TPCUtils.toFuture(mutation.applyAsync());
     }
 
     /**
      * Clears size estimates for a table (on table drop)
      */
-    public static void clearSizeEstimates(String keyspace, String table)
+    public static CompletableFuture<Void> clearSizeEstimates(String keyspace, String table)
     {
         String cql = format("DELETE FROM %s WHERE keyspace_name = ? AND table_name = ?", SizeEstimates.toString());
-        executeInternal(cql, keyspace, table);
+        return TPCUtils.toFutureVoid(executeInternalAsync(cql, keyspace, table));
     }
 
-    public static synchronized void updateAvailableRanges(String keyspace, Collection<Range<Token>> completedRanges)
+    public static CompletableFuture<Void> updateAvailableRanges(String keyspace, Collection<Range<Token>> completedRanges)
     {
-        String cql = "UPDATE system.%s SET ranges = ranges + ? WHERE keyspace_name = ?";
-        executeInternal(String.format(cql, AVAILABLE_RANGES), rangesToUpdate(completedRanges), keyspace);
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            String cql = "UPDATE system.%s SET ranges = ranges + ? WHERE keyspace_name = ?";
+            return TPCUtils.toFutureVoid(executeInternalAsync(String.format(cql, AVAILABLE_RANGES),
+                                                              rangesToUpdate(completedRanges),
+                                                              keyspace));
+        });
     }
 
-    public static synchronized Set<Range<Token>> getAvailableRanges(String keyspace, IPartitioner partitioner)
+    public static CompletableFuture<Set<Range<Token>>> getAvailableRanges(String keyspace, IPartitioner partitioner)
     {
-        Set<Range<Token>> result = new HashSet<>();
-        String query = "SELECT * FROM system.%s WHERE keyspace_name=?";
-        // TODO make async
-        UntypedResultSet rs = executeInternal(format(query, AVAILABLE_RANGES), keyspace);
-        for (UntypedResultSet.Row row : rs)
-        {
-            Set<ByteBuffer> rawRanges = row.getSet("ranges", BytesType.instance);
-            for (ByteBuffer rawRange : rawRanges)
-            {
-                result.add(byteBufferToRange(rawRange, partitioner));
-            }
-        }
-        return ImmutableSet.copyOf(result);
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            String query = "SELECT * FROM system.%s WHERE keyspace_name=?";
+            return TPCUtils.toFuture(executeInternalAsync(format(query, AVAILABLE_RANGES), keyspace))
+                           .thenApply(rs -> {
+                               Set<Range<Token>> result = new HashSet<>();
+                               for (UntypedResultSet.Row row : rs)
+                               {
+                                   Set<ByteBuffer> rawRanges = row.getSet("ranges", BytesType.instance);
+                                   for (ByteBuffer rawRange : rawRanges)
+                                   {
+                                       result.add(byteBufferToRange(rawRange, partitioner));
+                                   }
+                               }
+                               return ImmutableSet.copyOf(result);
+                           });
+        });
     }
 
-    public static void resetAvailableRanges(String keyspace)
+    public static CompletableFuture<Void> resetAvailableRanges(String keyspace)
     {
         String cql = "UPDATE system.%s SET ranges = null WHERE keyspace_name = ?";
-        executeInternal(format(cql, AVAILABLE_RANGES), keyspace);
+        return TPCUtils.toFutureVoid(executeInternalAsync(format(cql, AVAILABLE_RANGES), keyspace));
     }
 
-    public static void resetAvailableRanges(String keyspace, Collection<Range<Token>> ranges)
+    public static CompletableFuture<Void> resetAvailableRanges(String keyspace, Collection<Range<Token>> ranges)
     {
         String cql = "UPDATE system.%s SET ranges = ranges - ? WHERE keyspace_name = ?";
-        executeInternal(format(cql, AVAILABLE_RANGES), rangesToUpdate(ranges), keyspace);
+        return TPCUtils.toFutureVoid(executeInternalAsync(format(cql, AVAILABLE_RANGES), rangesToUpdate(ranges), keyspace));
     }
 
-    public static void resetAvailableRanges()
+    public static void resetAvailableRangesBlocking()
     {
         ColumnFamilyStore availableRanges = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(AVAILABLE_RANGES);
         availableRanges.truncateBlocking();
     }
 
-    public static synchronized void updateTransferredRanges(StreamOperation streamOperation,
-                                                         InetAddress peer,
-                                                         String keyspace,
-                                                         Collection<Range<Token>> streamedRanges)
+    public static CompletableFuture<Void> updateTransferredRanges(StreamOperation streamOperation,
+                                               InetAddress peer,
+                                               String keyspace,
+                                               Collection<Range<Token>> streamedRanges)
     {
-        String cql = "UPDATE system.%s SET ranges = ranges + ? WHERE operation = ? AND peer = ? AND keyspace_name = ?";
-        executeInternal(format(cql, TRANSFERRED_RANGES), rangesToUpdate(streamedRanges), streamOperation.getDescription(), peer, keyspace);
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            String cql = "UPDATE system.%s SET ranges = ranges + ? WHERE operation = ? AND peer = ? AND keyspace_name = ?";
+            return TPCUtils.toFutureVoid(executeInternalAsync(format(cql, TRANSFERRED_RANGES),
+                                                              rangesToUpdate(streamedRanges), streamOperation.getDescription(), peer, keyspace));
+        });
     }
 
     private static Set<ByteBuffer> rangesToUpdate(Collection<Range<Token>> ranges)
@@ -1342,24 +1490,29 @@ public final class SystemKeyspace
                      .collect(Collectors.toSet());
     }
 
-    public static synchronized Map<InetAddress, Set<Range<Token>>> getTransferredRanges(String description, String keyspace, IPartitioner partitioner)
+    public static CompletableFuture<Map<InetAddress, Set<Range<Token>>>> getTransferredRanges(String description,
+                                                                                              String keyspace,
+                                                                                              IPartitioner partitioner)
     {
-        Map<InetAddress, Set<Range<Token>>> result = new HashMap<>();
-        String query = "SELECT * FROM system.%s WHERE operation = ? AND keyspace_name = ?";
-        // TODO make async
-        UntypedResultSet rs = executeInternal(format(query, TRANSFERRED_RANGES), description, keyspace);
-        for (UntypedResultSet.Row row : rs)
-        {
-            InetAddress peer = row.getInetAddress("peer");
-            Set<ByteBuffer> rawRanges = row.getSet("ranges", BytesType.instance);
-            Set<Range<Token>> ranges = Sets.newHashSetWithExpectedSize(rawRanges.size());
-            for (ByteBuffer rawRange : rawRanges)
-            {
-                ranges.add(byteBufferToRange(rawRange, partitioner));
-            }
-            result.put(peer, ranges);
-        }
-        return ImmutableMap.copyOf(result);
+        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
+            String query = "SELECT * FROM system.%s WHERE operation = ? AND keyspace_name = ?";
+            return TPCUtils.toFuture(executeInternalAsync(format(query, TRANSFERRED_RANGES), description, keyspace))
+                           .thenApply(rs -> {
+                               Map<InetAddress, Set<Range<Token>>> result = new HashMap<>();
+                               for (UntypedResultSet.Row row : rs)
+                               {
+                                   InetAddress peer = row.getInetAddress("peer");
+                                   Set<ByteBuffer> rawRanges = row.getSet("ranges", BytesType.instance);
+                                   Set<Range<Token>> ranges = Sets.newHashSetWithExpectedSize(rawRanges.size());
+                                   for (ByteBuffer rawRange : rawRanges)
+                                   {
+                                       ranges.add(byteBufferToRange(rawRange, partitioner));
+                                   }
+                                   result.put(peer, ranges);
+                               }
+                               return ImmutableMap.copyOf(result);
+            });
+        });
     }
 
     /**
@@ -1368,37 +1521,48 @@ public final class SystemKeyspace
      * This is intended to be called at startup to create a backup of the system tables
      * during an upgrade.
      */
-    public static void snapshotOnVersionChange() throws IOException
+    public static CompletableFuture<Void> snapshotOnVersionChange()
     {
-        UntypedResultSet result = executeInternal(format("SELECT release_version FROM %s.%s WHERE key='%s'",
-                                                         SchemaConstants.SYSTEM_KEYSPACE_NAME, LOCAL, LOCAL));
-        String previous = (result != null && !result.isEmpty() && result.one().has("release_version"))
-                          ? result.one().getString("release_version")
-                          : null;
-        String current = FBUtilities.getReleaseVersionString();
+        return TPCUtils.toFuture(executeInternalAsync(format("SELECT release_version FROM %s.%s WHERE key='%s'",
+                                                             SchemaConstants.SYSTEM_KEYSPACE_NAME, LOCAL, LOCAL))
+                                 .observeOn(Schedulers.io()))
+                       .thenAccept(result -> {
+                           String previous = (result != null && !result.isEmpty() && result.one().has("release_version"))
+                                             ? result.one().getString("release_version")
+                                             : null;
+                           String current = FBUtilities.getReleaseVersionString();
 
-        if (previous == null)
-        {
-            logger.info("No version in {}.{}. Current version is {}",
-                        SchemaConstants.SYSTEM_KEYSPACE_NAME, LOCAL, current);
-        }
-        else if (current.equals(previous))
-        {
-            logger.info("Detected current release version {} in {}.{}",
-                        current, SchemaConstants.SYSTEM_KEYSPACE_NAME, LOCAL);
-        }
-        else
-        {
-            logger.info("Detected version upgrade from {} to {}, snapshotting {} and {} keyspaces.",
-                        previous, current, SchemaConstants.SYSTEM_KEYSPACE_NAME, SchemaConstants.SCHEMA_KEYSPACE_NAME);
-            String snapshotName = Keyspace.getTimestampedSnapshotName(format("upgrade-%s-%s",
-                                                                             previous,
-                                                                             current));
-            Keyspace ks = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME);
-            ks.snapshot(snapshotName, null);
-            ks = Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME);
-            ks.snapshot(snapshotName, null);
-        }
+                           if (previous == null)
+                           {
+                               logger.info("No version in {}.{}. Current version is {}",
+                                           SchemaConstants.SYSTEM_KEYSPACE_NAME, LOCAL, current);
+                           }
+                           else if (current.equals(previous))
+                           {
+                               logger.info("Detected current release version {} in {}.{}",
+                                           current, SchemaConstants.SYSTEM_KEYSPACE_NAME, LOCAL);
+                           }
+                           else
+                           {
+                               logger.info("Detected version upgrade from {} to {}, snapshotting {} and {} keyspaces.",
+                                           previous, current, SchemaConstants.SYSTEM_KEYSPACE_NAME, SchemaConstants.SCHEMA_KEYSPACE_NAME);
+                               String snapshotName = Keyspace.getTimestampedSnapshotName(format("upgrade-%s-%s",
+                                                                                                previous,
+                                                                                                current));
+                               Keyspace ks = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME);
+                               try
+                               {
+                                   ks.snapshot(snapshotName, null);
+                                   ks = Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME);
+                                   ks.snapshot(snapshotName, null);
+                               }
+                               catch (IOException ex)
+                               {
+                                   throw new CompletionException(ex);
+                               }
+                           }
+                       });
+
     }
 
     private static ByteBuffer rangeToBytes(Range<Token> range)
@@ -1443,27 +1607,27 @@ public final class SystemKeyspace
                 loggedKeyspace, key.byteBuffer(), cql);
     }
 
-    public static void removePreparedStatement(MD5Digest key)
+    public static CompletableFuture<Void> removePreparedStatement(MD5Digest key)
     {
-        executeInternal(format("DELETE FROM %s WHERE prepared_id = ?", PreparedStatements.toString()),
-                        key.byteBuffer());
+        return TPCUtils.toFutureVoid(executeInternalAsync(format("DELETE FROM %s WHERE prepared_id = ?", PreparedStatements.toString()),
+                                                          key.byteBuffer()));
     }
 
-    public static void resetPreparedStatements()
+    public static void resetPreparedStatementsBlocking()
     {
-        ColumnFamilyStore availableRanges = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(PREPARED_STATEMENTS);
-        availableRanges.truncateBlocking();
+        ColumnFamilyStore preparedStatements = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(PREPARED_STATEMENTS);
+        preparedStatements.truncateBlocking();
     }
 
-    public static List<Pair<String, String>> loadPreparedStatements()
+    public static CompletableFuture<List<Pair<String, String>>> loadPreparedStatements()
     {
         String query = format("SELECT logged_keyspace, query_string FROM %s", PreparedStatements.toString());
-        // TODO make async
-        UntypedResultSet resultSet = executeOnceInternal(query).blockingGet();
-        List<Pair<String, String>> r = new ArrayList<>();
-        for (UntypedResultSet.Row row : resultSet)
-            r.add(Pair.create(row.has("logged_keyspace") ? row.getString("logged_keyspace") : null,
-                              row.getString("query_string")));
-        return r;
+        return TPCUtils.toFuture(executeOnceInternal(query)).thenApply(resultSet -> {
+            List<Pair<String, String>> r = new ArrayList<>();
+            for (UntypedResultSet.Row row : resultSet)
+                r.add(Pair.create(row.has("logged_keyspace") ? row.getString("logged_keyspace") : null,
+                                  row.getString("query_string")));
+            return r;
+        });
     }
 }

@@ -34,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
@@ -318,7 +319,7 @@ class LogTransaction extends Transactional.AbstractTransactional implements Tran
         public void run()
         {
             if (tracker != null && !tracker.isDummy())
-                SystemKeyspace.clearSSTableReadMeter(desc.ksname, desc.cfname, desc.generation);
+                TPCUtils.blockingAwait(SystemKeyspace.clearSSTableReadMeter(desc.ksname, desc.cfname, desc.generation));
 
             try
             {

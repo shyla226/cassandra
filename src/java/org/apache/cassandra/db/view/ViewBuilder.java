@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionManager;
@@ -104,16 +105,16 @@ public class ViewBuilder extends CompactionInfo.Holder
         UUID localHostId = SystemKeyspace.getLocalHostId();
         String ksname = baseCfs.metadata.keyspace, viewName = view.name;
 
-        if (SystemKeyspace.isViewBuilt(ksname, viewName))
+        if (TPCUtils.blockingGet(SystemKeyspace.isViewBuilt(ksname, viewName)))
         {
             logger.debug("View already marked built for {}.{}", baseCfs.metadata.keyspace, view.name);
-            if (!SystemKeyspace.isViewStatusReplicated(ksname, viewName))
+            if (!TPCUtils.blockingGet(SystemKeyspace.isViewStatusReplicated(ksname, viewName)))
                 updateDistributed(ksname, viewName, localHostId);
             return;
         }
 
         Iterable<Range<Token>> ranges = StorageService.instance.getLocalRanges(baseCfs.metadata.keyspace);
-        final Pair<Integer, Token> buildStatus = SystemKeyspace.getViewBuildStatus(ksname, viewName);
+        final Pair<Integer, Token> buildStatus = TPCUtils.blockingGet(SystemKeyspace.getViewBuildStatus(ksname, viewName));
         Token lastToken;
         Function<org.apache.cassandra.db.lifecycle.View, Iterable<SSTableReader>> function;
         if (buildStatus == null)
@@ -125,7 +126,7 @@ public class ViewBuilder extends CompactionInfo.Holder
             //restarted the max generation filter may yield no sstables due to compactions.
             //We only care about max generation *during* a build, not across builds.
             //see CASSANDRA-13405
-            SystemKeyspace.beginViewBuild(ksname, viewName, 0);
+            TPCUtils.blockingAwait(SystemKeyspace.beginViewBuild(ksname, viewName, 0));
         }
         else
         {
@@ -141,7 +142,7 @@ public class ViewBuilder extends CompactionInfo.Holder
         try (Refs<SSTableReader> sstables = baseCfs.selectAndReference(function).refs;
              ReducingKeyIterator iter = new ReducingKeyIterator(sstables))
         {
-            SystemDistributedKeyspace.startViewBuild(ksname, viewName, localHostId);
+            TPCUtils.blockingAwait(SystemDistributedKeyspace.startViewBuild(ksname, viewName, localHostId));
             while (!isStopped && iter.hasNext())
             {
                 DecoratedKey key = iter.next();
@@ -157,7 +158,7 @@ public class ViewBuilder extends CompactionInfo.Holder
 
                             if (prevToken == null || prevToken.compareTo(token) != 0)
                             {
-                                SystemKeyspace.updateViewBuildStatus(ksname, viewName, key.getToken());
+                                TPCUtils.blockingAwait(SystemKeyspace.updateViewBuildStatus(ksname, viewName, key.getToken()));
                                 prevToken = token;
                             }
                         }
@@ -170,7 +171,7 @@ public class ViewBuilder extends CompactionInfo.Holder
             if (!isStopped)
             {
                 logger.debug("Marking view({}.{}) as built covered {} keys ", ksname, viewName, keysBuilt);
-                SystemKeyspace.finishViewBuildStatus(ksname, viewName);
+                TPCUtils.blockingAwait(SystemKeyspace.finishViewBuildStatus(ksname, viewName));
                 updateDistributed(ksname, viewName, localHostId);
             }
             else
@@ -191,8 +192,8 @@ public class ViewBuilder extends CompactionInfo.Holder
     {
         try
         {
-            SystemDistributedKeyspace.successfulViewBuild(ksname, viewName, localHostId);
-            SystemKeyspace.setViewBuiltReplicated(ksname, viewName);
+            TPCUtils.blockingAwait(SystemDistributedKeyspace.successfulViewBuild(ksname, viewName, localHostId));
+            TPCUtils.blockingAwait(SystemKeyspace.setViewBuiltReplicated(ksname, viewName));
         }
         catch (Exception e)
         {

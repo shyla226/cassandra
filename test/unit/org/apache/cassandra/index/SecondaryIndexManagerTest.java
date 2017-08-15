@@ -21,6 +21,7 @@ import java.io.FileNotFoundException;
 import java.net.SocketException;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -29,6 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.After;
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SystemKeyspace;
@@ -37,7 +39,6 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 import org.apache.cassandra.utils.concurrent.Refs;
@@ -49,10 +50,6 @@ import static org.junit.Assert.fail;
 
 public class SecondaryIndexManagerTest extends CQLTester
 {
-
-    private static final String builtIndexesQuery = String.format("SELECT * FROM %s.\"%s\"",
-                                                                  SchemaConstants.SYSTEM_KEYSPACE_NAME,
-                                                                  SystemKeyspace.BUILT_INDEXES);
 
     @After
     public void after()
@@ -553,12 +550,15 @@ public class SecondaryIndexManagerTest extends CQLTester
 
     private void assertMarkedAsBuilt(String indexName) throws Throwable
     {
-        assertRows(execute(builtIndexesQuery), row(KEYSPACE, indexName));
+        List<String> indexes = TPCUtils.blockingGet(SystemKeyspace.getBuiltIndexes(KEYSPACE));
+        assertEquals(1, indexes.size());
+        assertEquals(indexName, indexes.get(0));
     }
 
     private void assertNotMarkedAsBuilt() throws Throwable
     {
-        assertEmpty(execute(builtIndexesQuery));
+        List<String> indexes = TPCUtils.blockingGet(SystemKeyspace.getBuiltIndexes(KEYSPACE));
+        assertTrue(indexes.isEmpty());
     }
 
     private boolean tryRebuild(String indexName, boolean wait) throws Throwable
@@ -648,7 +648,7 @@ public class SecondaryIndexManagerTest extends CQLTester
             failedBuildTrowable = null;
         }
 
-        public Callable<?> getInitializationTask()
+        public Callable<Void> getInitializationTask()
         {
             return () ->
             {

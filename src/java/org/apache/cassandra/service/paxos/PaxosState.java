@@ -24,6 +24,7 @@ import java.util.concurrent.locks.Lock;
 
 import com.google.common.util.concurrent.Striped;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
@@ -71,11 +72,11 @@ public class PaxosState
                 // amount of re-submit will fix this (because the node on which the commit has expired will have a
                 // tombstone that hides any re-submit). See CASSANDRA-12043 for details.
                 int nowInSec = UUIDGen.unixTimestampInSec(toPrepare.ballot);
-                PaxosState state = SystemKeyspace.loadPaxosState(toPrepare.update.partitionKey(), toPrepare.update.metadata(), nowInSec);
+                PaxosState state = TPCUtils.blockingGet(SystemKeyspace.loadPaxosState(toPrepare.update.partitionKey(), toPrepare.update.metadata(), nowInSec));
                 if (toPrepare.isAfter(state.promised))
                 {
                     Tracing.trace("Promising ballot {}", toPrepare.ballot);
-                    SystemKeyspace.savePaxosPromise(toPrepare);
+                    TPCUtils.blockingAwait(SystemKeyspace.savePaxosPromise(toPrepare));
                     return new PrepareResponse(true, state.accepted, state.mostRecentCommit);
                 }
                 else
@@ -107,11 +108,11 @@ public class PaxosState
             try
             {
                 int nowInSec = UUIDGen.unixTimestampInSec(proposal.ballot);
-                PaxosState state = SystemKeyspace.loadPaxosState(proposal.update.partitionKey(), proposal.update.metadata(), nowInSec);
+                PaxosState state = TPCUtils.blockingGet(SystemKeyspace.loadPaxosState(proposal.update.partitionKey(), proposal.update.metadata(), nowInSec));
                 if (proposal.hasBallot(state.promised.ballot) || proposal.isAfter(state.promised))
                 {
                     Tracing.trace("Accepting proposal {}", proposal);
-                    SystemKeyspace.savePaxosProposal(proposal);
+                    TPCUtils.blockingAwait(SystemKeyspace.savePaxosProposal(proposal));
                     return true;
                 }
                 else
@@ -148,14 +149,14 @@ public class PaxosState
             {
                 Tracing.trace("Committing proposal {}", proposal);
                 Mutation mutation = proposal.makeMutation();
-                Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true).blockingAwait();
+                TPCUtils.blockingAwait(Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true));
             }
             else
             {
                 Tracing.trace("Not committing proposal {} as ballot timestamp predates last truncation time", proposal);
             }
             // We don't need to lock, we're just blindly updating
-            SystemKeyspace.savePaxosCommit(proposal);
+            TPCUtils.blockingAwait(SystemKeyspace.savePaxosCommit(proposal));
         }
         finally
         {

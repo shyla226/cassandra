@@ -39,6 +39,7 @@ import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Memtable;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -78,6 +79,7 @@ public class TrackerTest
     {
         DatabaseDescriptor.daemonInitialization();
         MockSchema.cleanup();
+        SystemKeyspace.finishStartupBlocking();
     }
 
     @Test

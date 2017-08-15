@@ -34,6 +34,7 @@ import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -356,7 +357,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                 UUID schemaVersion = Schema.instance.getVersion();
                 if (schemaVersion == null)
                 {
-                    Schema.instance.updateVersion();
+                    TPCUtils.blockingAwait(Schema.instance.updateVersion());
                     schemaVersion = Schema.instance.getVersion();
                 }
                 writer.writeLong(schemaVersion.getMostSignificantBits());

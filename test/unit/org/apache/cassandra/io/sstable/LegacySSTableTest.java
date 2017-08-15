@@ -22,6 +22,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
@@ -35,6 +36,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -50,7 +52,6 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Type;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.StreamPlan;
@@ -381,8 +382,8 @@ public class LegacySSTableTest
             boolean verified = false;
             for (int j = 0; j < 10; j++)
             {
-                UntypedResultSet result = QueryProcessor.executeInternal(String.format("SELECT * FROM %s.\"%s\" WHERE table_name='%s' AND index_name='%s'", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BUILT_INDEXES, keyspace, index));
-                verified = !result.isEmpty();
+                List<String> indexes = TPCUtils.blockingGet(SystemKeyspace.getBuiltIndexes(keyspace, Collections.singleton(index)));
+                verified = indexes.size() == 1 && indexes.get(0).equals(index);
                 if (verified)
                     break;
                 else

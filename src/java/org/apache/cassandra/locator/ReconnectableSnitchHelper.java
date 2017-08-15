@@ -24,9 +24,9 @@ import java.util.concurrent.CompletableFuture;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.OutboundTcpConnectionPool;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,20 +65,25 @@ public class ReconnectableSnitchHelper implements IEndpointStateChangeSubscriber
     @VisibleForTesting
     static CompletableFuture<Void> reconnect(InetAddress publicAddress, InetAddress localAddress, IEndpointSnitch snitch, String localDc)
     {
-        return MessagingService.instance().getConnectionPool(publicAddress).thenAccept(cp -> {
+        return MessagingService.instance().getConnectionPool(publicAddress).thenCompose(cp -> {
             //InternodeAuthenticator said don't connect
             if (cp == null)
             {
                 logger.debug("InternodeAuthenticator said don't reconnect to {} on {}", publicAddress, localAddress);
-                return;
+                return CompletableFuture.completedFuture(null);
             }
 
             if (snitch.getDatacenter(publicAddress).equals(localDc)
                 && !cp.endPoint().equals(localAddress))
             {
-                cp.reset(localAddress);
-                logger.debug("Initiated reconnect to an Internal IP {} for the {}", localAddress, publicAddress);
+                return SystemKeyspace.updatePreferredIP(publicAddress, localAddress)
+                                     .thenAccept(r -> {
+                                         cp.reset(localAddress);
+                                         logger.debug("Initiated reconnect to an Internal IP {} for the {}", localAddress, publicAddress);
+                                     });
             }
+
+            return CompletableFuture.completedFuture(null);
         });
     }
 

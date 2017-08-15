@@ -23,6 +23,7 @@ import java.util.*;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.*;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -340,7 +341,8 @@ public class RangeStreamer
             Collection<Range<Token>> ranges = entry.getValue().getValue();
 
             // filter out already streamed ranges
-            Set<Range<Token>> availableRanges = stateStore.getAvailableRanges(keyspace, StorageService.instance.getTokenMetadata().partitioner);
+            IPartitioner partitioner = StorageService.instance.getTokenMetadata().partitioner;
+            Set<Range<Token>> availableRanges = TPCUtils.blockingGet(stateStore.getAvailableRanges(keyspace, partitioner));
             if (ranges.removeAll(availableRanges))
             {
                 logger.info("Some ranges of {} are already available. Skipping streaming those ranges.", availableRanges);

@@ -258,9 +258,7 @@ public class Mutation implements IMutation, Scheduleable
 
     public CompletableFuture<?> applyFuture()
     {
-        CompletableFuture<?> ret = new CompletableFuture<>();
-        applyAsync().subscribe(()-> ret.complete(null), ret::completeExceptionally);
-        return ret;
+        return TPCUtils.toFuture(applyAsync());
     }
 
     public Completable applyAsync()

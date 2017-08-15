@@ -51,10 +51,10 @@ public class OutboundTcpConnectionPool
     // back-pressure state linked to this connection:
     private final BackPressureState backPressureState;
 
-    OutboundTcpConnectionPool(InetAddress remoteEp, BackPressureState backPressureState)
+    OutboundTcpConnectionPool(InetAddress remoteEp, InetAddress preferredIp, BackPressureState backPressureState)
     {
         id = remoteEp;
-        resetEndpoint = SystemKeyspace.getPreferredIP(remoteEp);
+        resetEndpoint = preferredIp;
         started = new CountDownLatch(1);
 
         connectionByKind = new EnumMap<>(Message.Kind.class);
@@ -106,7 +106,6 @@ public class OutboundTcpConnectionPool
      */
     public void reset(InetAddress remoteEP)
     {
-        SystemKeyspace.updatePreferredIP(id, remoteEP);
         resetEndpoint = remoteEP;
         for (OutboundTcpConnection conn : connectionByKind.values())
             conn.softCloseSocket();
