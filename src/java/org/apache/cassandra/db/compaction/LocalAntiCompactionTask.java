@@ -160,11 +160,7 @@ public class LocalAntiCompactionTask implements Runnable
                             parentSessionId, sstablesToAntiCompact.size(), antiCompactedSSTableCount);
             }
 
-            // All remote SSTables must be fully contained in repaired range - since we don't anti-compact remote SSTables
             Set<SSTableReader> remoteToMarkRepaired = remoteSSTablesTxns.stream().flatMap(r -> r.originals().stream()).collect(Collectors.toSet());
-            assert remoteToMarkRepaired.stream().allMatch(s -> normalizedRanges.stream().anyMatch(r -> r.contains(s.getRange())))
-                                : String.format("Some remote SSTables %s are not fully contained in repaired range %s.", remoteToMarkRepaired, ranges);
-
             // Mark as repaired remote SSTables or local SSTables fully contained in repaired range
             Set<SSTableReader> markRepairedSet = Sets.union(localSSTablesFullyContainedInRepairedRange, remoteToMarkRepaired);
             if (!markRepairedSet.isEmpty())
