@@ -35,6 +35,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.apollo.audit.AuditLogger;
+import com.datastax.apollo.audit.AuditLoggingOptions;
 import com.sun.management.OperatingSystemMXBean;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.config.Config.CommitLogSync;
@@ -118,6 +120,8 @@ public class DatabaseDescriptor
 
     private static final boolean disableSTCSInL0 = Boolean.getBoolean(Config.PROPERTY_PREFIX + "disable_stcs_in_l0");
     private static final boolean unsafeSystem = Boolean.getBoolean(Config.PROPERTY_PREFIX + "unsafesystem");
+    private static AuditLogger auditLogger;
+    private static AuditLoggingOptions auditLoggerConfig = new AuditLoggingOptions();
 
     public static void daemonInitialization() throws ConfigurationException
     {
@@ -137,6 +141,9 @@ public class DatabaseDescriptor
         setConfig(loadConfig());
         applyAll();
         AuthConfig.applyAuth();
+
+        // this has to happen after auth has been set up
+        applyAuditLoggerConfig();
     }
 
     /**
@@ -319,6 +326,11 @@ public class DatabaseDescriptor
         applyEncryptionContext();
 
         conf.nodesync.validate();
+    }
+
+    private static void applyAuditLoggerConfig()
+    {
+        auditLogger = AuditLogger.getInstance();
     }
 
     private static void applySimpleConfig()
@@ -2722,5 +2734,23 @@ public class DatabaseDescriptor
     public static int getMaxHintsReceiveThreads()
     {
         return Integer.getInteger("cassandra.hints.max_receive_threads", DatabaseDescriptor.getMaxHintsDeliveryThreads());
+    }
+
+    /* For tests ONLY, don't use otherwise or all hell will break loose. Tests should restore value at the end. */
+    public static AuditLogger setAuditLoggerUnsafe(AuditLogger logger)
+    {
+        AuditLogger old = auditLogger;
+        auditLogger = logger;
+        return old;
+    }
+
+    public static AuditLogger getAuditLogger()
+    {
+        return auditLogger;
+    }
+
+    public static AuditLoggingOptions getAuditLoggingOptions()
+    {
+        return auditLoggerConfig;
     }
 }
