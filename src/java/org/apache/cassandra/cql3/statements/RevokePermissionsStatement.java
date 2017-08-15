@@ -23,6 +23,9 @@ import java.util.stream.Collectors;
 
 import io.reactivex.Single;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.GrantMode;
 import org.apache.cassandra.auth.IAuthorizer;
 import org.apache.cassandra.auth.IResource;
@@ -30,8 +33,6 @@ import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.auth.enums.PartitionedEnum;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
-import org.apache.cassandra.exceptions.RequestExecutionException;
-import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -49,7 +50,14 @@ public class RevokePermissionsStatement extends PermissionsManagementStatement
         return grantMode.revokeOperationName();
     }
 
-    public Single<ResultMessage> execute(QueryState state) throws RequestValidationException, RequestExecutionException
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.REVOKE;
+    }
+
+    @Override
+    public Single<ResultMessage> execute(QueryState state)
     {
         return Single.fromCallable(() -> {
 

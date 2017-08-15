@@ -38,7 +38,6 @@ import org.junit.runners.Parameterized.Parameter;
 import org.junit.runners.Parameterized.Parameters;
 
 import org.apache.cassandra.cql3.BatchQueryOptions;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -418,7 +417,7 @@ public class MessagePayloadTest extends CQLTester
                                           });
         }
 
-        public Single<ResultMessage> processPrepared(CQLStatement statement,
+        public Single<ResultMessage> processPrepared(ParsedStatement.Prepared prepared,
                                                      QueryState state,
                                                      QueryOptions options,
                                                      Map<String, ByteBuffer> customPayload,
@@ -428,7 +427,7 @@ public class MessagePayloadTest extends CQLTester
             if (customPayload != null)
                 requestPayload = customPayload;
 
-            return QueryProcessor.instance.processPrepared(statement, state, options, customPayload, queryStartNanoTime)
+            return QueryProcessor.instance.processPrepared(prepared, state, options, customPayload, queryStartNanoTime)
                                           .map(result -> {
                                               if (customPayload != null)
                                               {

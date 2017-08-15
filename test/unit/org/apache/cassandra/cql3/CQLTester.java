@@ -976,7 +976,7 @@ public abstract class CQLTester
             state.setKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME);
             QueryState queryState = new QueryState(state, UserRolesAndPermissions.SYSTEM);
 
-            ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(query, queryState);
+            ParsedStatement.Prepared prepared = QueryProcessor.getStatement(query, queryState);
             prepared.statement.validate(queryState);
 
             QueryOptions options = QueryOptions.forInternalCalls(Collections.<ByteBuffer>emptyList());
@@ -1001,14 +1001,14 @@ public abstract class CQLTester
         return Schema.instance.getTableMetadata(ks, name);
     }
 
-    protected com.datastax.driver.core.ResultSet executeNet(String query, Object... values) throws Throwable
-    {
-        return sessionNet(ProtocolVersion.CURRENT).execute(formatQuery(query), values);
-    }
-
     protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, String query, Object... values) throws Throwable
     {
         return sessionNet(protocolVersion).execute(formatQuery(query), values);
+    }
+
+    protected com.datastax.driver.core.ResultSet executeNet(String query, Object... values) throws Throwable
+    {
+        return executeNet(getDefaultVersion(), query, values);
     }
 
     protected com.datastax.driver.core.PreparedStatement prepareNet(ProtocolVersion protocolVersion, String query)
@@ -1016,12 +1016,22 @@ public abstract class CQLTester
         return sessionNet(protocolVersion).prepare(query);
     }
 
-    protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, BoundStatement statement)
+    protected com.datastax.driver.core.PreparedStatement prepareNet(String query)
+    {
+        return prepareNet(getDefaultVersion(), query);
+    }
+
+    protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, Statement statement)
     {
         return sessionNet(protocolVersion).execute(statement);
     }
 
-    protected com.datastax.driver.core.ResultSetFuture executeNetAsync(ProtocolVersion protocolVersion, BoundStatement statement)
+    protected com.datastax.driver.core.ResultSet executeNet(Statement statement)
+    {
+        return executeNet(getDefaultVersion(), statement);
+    }
+
+    protected com.datastax.driver.core.ResultSetFuture executeNetAsync(ProtocolVersion protocolVersion, Statement statement)
     {
         return sessionNet(protocolVersion).executeAsync(statement);
     }

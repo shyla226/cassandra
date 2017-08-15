@@ -128,7 +128,7 @@ public class PstmtPersistenceTest extends CQLTester
     {
         ParsedStatement.Prepared prepared = handler.getPrepared(stmtId);
         assertNotNull(prepared);
-        handler.processPrepared(prepared.statement, QueryState.forInternalCalls(), options, Collections.emptyMap(), System.nanoTime());
+        handler.processPrepared(prepared, QueryState.forInternalCalls(), options, Collections.emptyMap(), System.nanoTime());
     }
 
     @Test

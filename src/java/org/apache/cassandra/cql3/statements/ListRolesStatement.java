@@ -24,18 +24,19 @@ import java.util.Set;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import io.reactivex.Single;
 
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
@@ -71,7 +72,14 @@ public class ListRolesStatement extends AuthorizationStatement
         this.recursive = recursive;
     }
 
-    public void validate(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.LIST_ROLES;
+    }
+
+    @Override
+    public void validate(QueryState state)
     {
     }
 

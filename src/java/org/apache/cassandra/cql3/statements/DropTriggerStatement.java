@@ -22,6 +22,9 @@ import io.reactivex.Maybe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -48,6 +51,12 @@ public class DropTriggerStatement extends SchemaAlteringStatement
         super(name);
         this.triggerName = triggerName;
         this.ifExists = ifExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.DROP_TRIGGER;
     }
 
     @Override

@@ -28,45 +28,42 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import javax.annotation.Nullable;
-import javax.management.*;
+import javax.management.JMX;
+import javax.management.MBeanServer;
+import javax.management.NotificationBroadcasterSupport;
+import javax.management.ObjectName;
 import javax.management.openmbean.TabularData;
 import javax.management.openmbean.TabularDataSupport;
+
+import io.reactivex.Completable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
-import com.google.common.util.concurrent.*;
-import com.datastax.bdp.db.nodesync.NodeSyncService;
-import com.datastax.bdp.db.utils.concurrent.CompletableFutures;
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.Uninterruptibles;
 
-import io.reactivex.Completable;
 import org.apache.commons.lang3.StringUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import ch.qos.logback.classic.LoggerContext;
-import ch.qos.logback.classic.jmx.JMXConfiguratorMBean;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.Appender;
-import ch.qos.logback.core.hook.DelayingShutdownHook;
+import com.datastax.bdp.db.nodesync.NodeSyncService;
+import com.datastax.bdp.db.utils.concurrent.CompletableFutures;
+
 import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.auth.AuthSchemaChangeListener;
 import org.apache.cassandra.batchlog.BatchlogManager;
-import org.apache.cassandra.concurrent.ExecutorLocals;
-import org.apache.cassandra.concurrent.NamedThreadFactory;
-import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.concurrent.TPCUtils;
-import org.apache.cassandra.concurrent.ParkedThreadsMonitor;
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -78,28 +75,24 @@ import org.apache.cassandra.db.mos.MemoryOnlyStatusMXBean;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token.TokenFactory;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.AlreadyExistsException;
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.hints.HintsService;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.SSTableLoader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.*;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.*;
-import org.apache.cassandra.repair.*;
+import org.apache.cassandra.repair.RepairRunnable;
+import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.repair.messages.RepairOption;
+import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
-import org.apache.cassandra.schema.KeyspaceMetadata;
-import org.apache.cassandra.schema.MigrationManager;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.Tables;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.schema.Types;
-import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.streaming.*;
 import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -111,8 +104,15 @@ import org.apache.cassandra.utils.progress.jmx.JMXProgressSupport;
 
 import static java.util.Arrays.asList;
 import static java.util.stream.Collectors.toList;
+
 import static org.apache.cassandra.index.SecondaryIndexManager.getIndexName;
 import static org.apache.cassandra.index.SecondaryIndexManager.isIndexColumnFamily;
+
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.jmx.JMXConfiguratorMBean;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.Appender;
+import ch.qos.logback.core.hook.DelayingShutdownHook;
 
 /**
  * This abstraction contains the token/identifier of this node
@@ -671,6 +671,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 Gossiper.instance.addLocalApplicationStates(states);
             }
             TPCUtils.blockingAwait(doAuthSetup());
+            TPCUtils.blockingAwait(doAuditLoggingSetup());
             logger.info("Not joining ring as requested. Use JMX (StorageService->joinRing()) to initiate ring joining");
         }
 
@@ -1082,6 +1083,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         assert tokenMetadata.sortedTokens().size() > 0;
         TPCUtils.blockingAwait(doAuthSetup());
+        TPCUtils.blockingAwait(doAuditLoggingSetup());
     }
 
     private Completable doAuthSetup()
@@ -1102,6 +1104,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public boolean isAuthSetupComplete()
     {
         return authSetupComplete;
+    }
+
+    private Completable doAuditLoggingSetup()
+    {
+        // The setUp is blocking so once it is done everything is ready.
+        DatabaseDescriptor.getAuditLogger().setup();
+        return Completable.complete();
     }
 
     private Completable maybeAddKeyspace(KeyspaceMetadata ksm)

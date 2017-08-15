@@ -20,17 +20,22 @@ package org.apache.cassandra.cql3.statements;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.regex.Pattern;
+
+import io.reactivex.Maybe;
+
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 
-import io.reactivex.Maybe;
 import org.apache.commons.lang3.StringUtils;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
 
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.config.*;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.CompactTables;
 import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.*;
@@ -70,6 +75,12 @@ public class CreateTableStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
         this.staticColumns = staticColumns;
         this.id = id;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.ADD_CF;
     }
 
     @Override

@@ -24,6 +24,9 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import io.reactivex.*;
 
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -74,6 +77,12 @@ public class CreateViewStatement extends SchemaAlteringStatement
         this.partitionKeys = partitionKeys;
         this.clusteringKeys = clusteringKeys;
         this.ifNotExists = ifNotExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.CREATE_VIEW;
     }
 
     @Override

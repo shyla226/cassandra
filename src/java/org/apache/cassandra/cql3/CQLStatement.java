@@ -20,6 +20,10 @@ package org.apache.cassandra.cql3;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.concurrent.StagedScheduler;
+import io.reactivex.Single;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+
 import org.apache.cassandra.concurrent.TPCUtils.WouldBlockException;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -27,14 +31,18 @@ import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
-import io.reactivex.Single;
-
 public interface CQLStatement
 {
     public default String keyspace()
     {
         return null;
     }
+
+    /**
+     * Returns the type of Audit events associated to this statement.
+     * @return the type of Audit events associated to this statement.
+     */
+    public AuditableEventType getAuditEventType();
 
     /**
      * Returns the number of bound terms in this statement.
