@@ -1194,3 +1194,85 @@ max_memory_to_lock_fraction: 0.20
 nodesync:
     # The (maximum) rate (in kilobytes per second) for data validation.
     rate_in_kb: 1024
+
+##########################
+# Audit logging options
+# audit_logging_options:
+#     enabled: false
+
+#     # The logger used for logging audit information
+#     # Available loggers are:
+#     #   CassandraAuditWriter - logs audit info to a cassandra table. This logger can be run either synchronously, or
+#     #                          asynchronously. Audit logs are stored in the cassandra_audit.audit_log table.
+#     #                          When run synchronously, a query will not execute until it has been written
+#     #                          to the audit log table successfully. If there is a failure between when an audit event is
+#     #                          written, and it's query is executed, the audit logs may contain queries that were never
+#     #                          executed.
+#     #   SLF4JAuditWriter -     logs audit info to an slf4j logger. The logger name is `SLF4JAuditWriter`,
+#     #                          and can be configured in the logback.xml file.
+#     logger: SLF4JAuditWriter
+
+#     # Comma separated list of audit event categories to be included or excluded from the audit log.
+#     # Defaults to including all categories and keyspaces.
+#     # Categories are: QUERY, DML, DDL, DCL, AUTH, ADMIN, ERROR
+#     # Specify either included or excluded categories. Specifying both is an error
+#     included_categories:
+#     excluded_categories:
+
+#     # Comma separated list of keyspaces to be included or excluded from the audit log.
+#     # Specify either included or excluded keyspaces. Specifying both is an error
+#     included_keyspaces:
+#     excluded_keyspaces:
+
+#     # The amount of time, in hours, audit events are retained by supporting loggers
+#     # Currently, only the CassandraAuditWriter supports retention time
+#     # values of 0 or less retain events forever
+#     retention_time: 0
+
+#     cassandra_audit_writer_options:
+#         # Sets the mode the writer runs in.
+#         #
+#         # When run synchronously, a query is not executed until the audit event is successfully written.
+#         #
+#         # When run asynchronously, audit events are queued for writing to the audit table, but are
+#         # not necessarily logged before the query executes. A pool of writer threads consumes the
+#         # audit events from the queue, and writes them to the audit table in batch queries. While
+#         # this substantially improves performance under load, if there is a failure between when
+#         # a query is executed, and it's audit event is written to the table, the audit table may
+#         # be missing entries for queries that were executed.
+#         # valid options are 'sync' and 'async'
+#         mode: sync
+
+#         # The maximum number of events the writer will dequeue before writing them out to the table.
+#         # If you're seeing warnings in your logs about batches being too large, decrease this value.
+#         # Increasing batch_size_warn_threshold_in_kb in cassandra.yaml is also an option, but make sure you understand
+#         # the implications before doing so.
+#         #
+#         # Only used in async mode. Must be >0
+#         batch_size: 50
+
+#         # The maximum amount of time in milliseconds an event will be dequeued by a writer before being written out. This
+#         # prevents events from waiting too long before being written to the table when there's not a lot of queries happening.
+#         #
+#         # Only used in async mode. Must be >0
+#         flush_time: 500
+
+#         # The number of worker threads asynchronously logging events to the CassandraAuditWriter.
+#         #
+#         # Only used in async mode. Must be >0
+#         num_writers: 10
+
+#         # The size of the queue feeding the asynchronous audit log writer threads. When there are more events being
+#         # produced than the writers can write out, the queue will fill up, and newer queries will block until there
+#         # is space on the queue.
+#         # If a value of 0 is used, the queue size will be unbounded, which can lead to resource exhaustion under
+#         # heavy query load.
+#         queue_size: 10000
+
+#         # the consistency level used to write audit events
+#         write_consistency: QUORUM
+
+#         # Where dropped events are logged
+#         dropped_event_log: /var/log/cassandra/dropped_audit_events.log
+#         # Partition days into hours by default
+#         day_partition_millis: 3600000

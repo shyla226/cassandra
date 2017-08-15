@@ -65,13 +65,13 @@ public class CustomPayloadMirroringQueryHandler implements QueryHandler
         return queryProcessor.getPrepared(id);
     }
 
-    public Single<ResultMessage> processPrepared(CQLStatement statement,
+    public Single<ResultMessage> processPrepared(ParsedStatement.Prepared prepared,
                                                  QueryState state,
                                                  QueryOptions options,
                                                  Map<String, ByteBuffer> customPayload,
                                                  long queryStartNanoTime)
     {
-        return queryProcessor.processPrepared(statement, state, options, customPayload, queryStartNanoTime)
+        return queryProcessor.processPrepared(prepared, state, options, customPayload, queryStartNanoTime)
                              .map(result -> {
                                  result.setCustomPayload(customPayload);
                                  return result;

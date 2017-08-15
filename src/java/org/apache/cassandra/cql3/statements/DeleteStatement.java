@@ -19,6 +19,9 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.List;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.cql3.conditions.Conditions;
@@ -47,6 +50,12 @@ public class DeleteStatement extends ModificationStatement
                             Attributes attrs)
     {
         super(StatementType.DELETE, boundTerms, cfm, operations, restrictions, conditions, attrs);
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.CQL_DELETE;
     }
 
     @Override

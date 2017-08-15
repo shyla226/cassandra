@@ -28,10 +28,10 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.Sets;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.bdp.db.audit.AuditLoggingOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
 
 /**
@@ -358,6 +358,7 @@ public class Config
 
     /** How often histograms used by JMX metrics are updated, in milliseconds */
     public int metrics_histogram_update_interval_millis = 1000;
+    public AuditLoggingOptions audit_logging_options = new AuditLoggingOptions();
 
     public NodeSyncConfig nodesync = new NodeSyncConfig();
 
@@ -383,6 +384,37 @@ public class Config
     public static void setClientMode(boolean clientMode)
     {
         isClientMode = clientMode;
+    }
+
+
+    public ConsistencyLevel getAuditCassConsistencyLevel()
+    {
+        return ConsistencyLevel.valueOf(audit_logging_options.cassandra_audit_writer_options.write_consistency);
+    }
+
+    public String getAuditLoggerCassMode()
+    {
+        return audit_logging_options.cassandra_audit_writer_options.mode;
+    }
+
+    public int getAuditLoggerCassAsyncQueueSize()
+    {
+        return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.queue_size);
+    }
+
+    public int getAuditLoggerNumCassLoggers()
+    {
+        return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.num_writers);
+    }
+
+    public int getAuditCassFlushTime()
+    {
+        return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.flush_time);
+    }
+
+    public int getAuditCassBatchSize()
+    {
+        return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.batch_size);
     }
 
     public enum CommitLogSync

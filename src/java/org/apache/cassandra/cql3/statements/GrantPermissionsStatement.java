@@ -23,6 +23,9 @@ import java.util.stream.Collectors;
 
 import io.reactivex.Single;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.GrantMode;
 import org.apache.cassandra.auth.IAuthorizer;
 import org.apache.cassandra.auth.IResource;
@@ -46,6 +49,12 @@ public class GrantPermissionsStatement extends PermissionsManagementStatement
     protected String operation()
     {
         return grantMode.grantOperationName();
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.GRANT;
     }
 
     public Single<ResultMessage> execute(QueryState state) throws RequestValidationException, RequestExecutionException

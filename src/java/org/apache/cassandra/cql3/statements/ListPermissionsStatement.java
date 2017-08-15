@@ -22,6 +22,9 @@ import java.util.*;
 
 import io.reactivex.Single;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.BooleanType;
@@ -62,7 +65,14 @@ public class ListPermissionsStatement extends AuthorizationStatement
         this.grantee = grantee.hasName() ? RoleResource.role(grantee.getName()) : null;
     }
 
-    public void validate(QueryState state) throws RequestValidationException
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.LIST_PERMISSIONS;
+    }
+
+    @Override
+    public void validate(QueryState state)
     {
         if (!DatabaseDescriptor.getAuthorizer().requireAuthorization())
             throw invalidRequest(String.format("LIST PERMISSIONS operation is not supported by the %s if it is not enabled",
