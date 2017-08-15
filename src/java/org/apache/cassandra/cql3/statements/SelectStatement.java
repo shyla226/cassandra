@@ -29,6 +29,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Single;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
@@ -166,6 +170,12 @@ public class SelectStatement implements CQLStatement
         this.parameters = parameters;
         this.limit = limit;
         this.perPartitionLimit = perPartitionLimit;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.CQL_SELECT;
     }
 
     /**

@@ -26,7 +26,6 @@ import io.reactivex.Single;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -121,7 +120,6 @@ public class ExecuteMessage extends Message.Request
                 throw new PreparedQueryNotFoundException(statementId);
 
             options.prepare(prepared.boundNames);
-            CQLStatement statement = prepared.statement;
 
             final UUID tracingID = setUpTracing(prepared);
 
@@ -135,7 +133,7 @@ public class ExecuteMessage extends Message.Request
                 {
                     checkIsLoggedIn(s);
 
-                    return handler.processPrepared(statement, s, queryOptions, getCustomPayload(), queryStartNanoTime)
+                    return handler.processPrepared(prepared, s, queryOptions, getCustomPayload(), queryStartNanoTime)
                                   .map(response -> {
 
                                       if (response instanceof ResultMessage.Rows)
@@ -149,7 +147,7 @@ public class ExecuteMessage extends Message.Request
                                               // For LWTs, always send a resultset metadata but avoid setting a metadata changed flag. This way
                                               // Client will always receive fresh metadata, but will avoid caching and reusing it. See CASSANDRA-13992
                                               // for details.
-                                              if (!statement.hasConditions())
+                                              if (!prepared.statement.hasConditions())
                                               {
                                                   // Starting with V5 we can rely on the result metadata id coming with execute message in order to
                                                   // check if there was a change, comparing it with metadata that's about to be returned to client.

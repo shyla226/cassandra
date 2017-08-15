@@ -21,6 +21,9 @@ import java.util.regex.Pattern;
 
 import io.reactivex.Maybe;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -56,6 +59,12 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
         this.name = name;
         this.attrs = attrs;
         this.ifNotExists = ifNotExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.ADD_KS;
     }
 
     @Override

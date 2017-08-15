@@ -27,6 +27,9 @@ import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -69,6 +72,12 @@ public class CreateIndexStatement extends SchemaAlteringStatement
         this.rawTargets = targets;
         this.properties = properties;
         this.ifNotExists = ifNotExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.CREATE_INDEX;
     }
 
     @Override

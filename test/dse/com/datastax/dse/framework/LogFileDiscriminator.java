@@ -6,13 +6,13 @@
 
 package com.datastax.dse.framework;
 
-
 import java.util.Deque;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.TimeUnit;
 
-import org.slf4j.LoggerFactory;
+import com.google.common.util.concurrent.Uninterruptibles;
+import org.junit.runner.Description;
 
-import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 
 /**
@@ -20,10 +20,10 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
  */
 public class LogFileDiscriminator
 {
+    public final static String DEFAULT_LOG_FILE = "system.log";
+    public final static String TEST_LOG_FILE_PROPERTY = "TEST_LOG_FILE";
 
-    private static final String DEFAULT_LOG_FILE = "system.log";
-
-    public static final String TEST_LOG_FILE_KEY = "TEST_LOG_FILE";
+    private final static String defaultLogFile = System.getProperty(TEST_LOG_FILE_PROPERTY, DEFAULT_LOG_FILE);
 
     private static class ActiveLogFile
     {
@@ -49,27 +49,55 @@ public class LogFileDiscriminator
 
     private static Deque<ActiveLogFile> activeLogFiles = new ConcurrentLinkedDeque<>();
 
-    static
+    private static String normalizeTestName(String originalTestName)
     {
-        Runtime.getRuntime().addShutdownHook(new Thread(() ->
-                                                        {
-                                                            // stop the logger context on shutdown so that log files could be successfully flushed
-                                                            ((LoggerContext) LoggerFactory.getILoggerFactory()).stop();
-                                                        }));
+        return originalTestName.replaceAll("\\s+", "_").replaceAll("/", "_");
+    }
 
-        if (System.getProperty(TEST_LOG_FILE_KEY) != null)
-        {
-            activeLogFiles.push(new ActiveLogFile(System.currentTimeMillis(), System.getProperty(TEST_LOG_FILE_KEY)));
-        }
+    public static String getLogFileNameForTest(Description description)
+    {
+        return getLogFileNameForTest(description.getClassName(), description.getMethodName());
+    }
+
+    public static String getLogFileNameForTest(String testClassName, String testMethodName)
+    {
+        return testClassName + "/" + normalizeTestName(testMethodName) + ".log";
+    }
+
+    public static void logToFile(Description description)
+    {
+        logToFile(getLogFileNameForTest(description));
+    }
+
+    public static String getLogFileNameForBefore(String testClassName)
+    {
+        return getLogFileNameForTest(testClassName, "before");
+    }
+
+    public static void logToBeforeFile(String testClassName)
+    {
+        logToFile(getLogFileNameForBefore(testClassName));
+    }
+
+    public static String getLogFileNameForAfter(String testClassName)
+    {
+        return getLogFileNameForTest(testClassName, "after");
+    }
+
+    public static void logToAfterFile(String testClassName)
+    {
+        logToFile(getLogFileNameForAfter(testClassName));
     }
 
     /**
      * Start writing all log statements to the given log file
-     *
      * @param fileName the file where to log statements relative to test log folder (build/test/logs)
      */
     public static void logToFile(String fileName)
     {
+        // Due to millisecond accuracy of log event timestamps, we need to break here for 1 ms
+        // so that the logs from subsequent tests are not confused.
+        Uninterruptibles.sleepUninterruptibly(1, TimeUnit.MILLISECONDS);
         activeLogFiles.push(new ActiveLogFile(System.currentTimeMillis(), fileName));
     }
 
@@ -78,7 +106,7 @@ public class LogFileDiscriminator
      */
     public static void logToDefaultFile()
     {
-        logToFile("system.log");
+        logToFile(defaultLogFile);
     }
 
     public static String getDiscriminatingValue(ILoggingEvent event)
@@ -91,6 +119,7 @@ public class LogFileDiscriminator
                 return alf.getFileName();
             }
         }
-        return DEFAULT_LOG_FILE;
+        return defaultLogFile;
     }
+
 }

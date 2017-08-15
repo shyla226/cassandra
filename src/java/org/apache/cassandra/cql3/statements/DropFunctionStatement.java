@@ -23,6 +23,9 @@ import java.util.List;
 
 import com.google.common.base.Joiner;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import io.reactivex.Maybe;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.CQL3Type;
@@ -61,6 +64,12 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
     }
 
     @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.DROP_FUNCTION;
+    }
+
+    @Override
     public Prepared prepare() throws InvalidRequestException
     {
         if (Schema.instance.getKeyspaceMetadata(functionName.keyspace) != null)
@@ -93,6 +102,13 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
             throw new InvalidRequestException("Functions must be fully qualified with a keyspace name if a keyspace is not set for the session");
 
         Schema.validateKeyspaceNotSystem(functionName.keyspace);
+    }
+
+    @Override
+    public String keyspace()
+    {
+        assert functionName.hasKeyspace() : "The statement hasn't be prepared correctly";
+        return functionName.keyspace;
     }
 
     @Override

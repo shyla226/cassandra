@@ -21,7 +21,9 @@ import io.reactivex.Maybe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.auth.user.UserRolesAndPermissions;
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -51,6 +53,12 @@ public class CreateTriggerStatement extends SchemaAlteringStatement
         this.triggerName = triggerName;
         this.triggerClass = clazz;
         this.ifNotExists = ifNotExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.CREATE_TRIGGER;
     }
 
     @Override

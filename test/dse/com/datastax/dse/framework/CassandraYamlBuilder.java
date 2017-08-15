@@ -21,6 +21,7 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 
+import com.datastax.bdp.db.audit.IAuditWriter;
 import org.apache.cassandra.auth.CassandraRoleManager;
 import org.apache.cassandra.locator.GossipingPropertyFileSnitch;
 import org.apache.cassandra.locator.IEndpointSnitch;
@@ -157,6 +158,8 @@ public class CassandraYamlBuilder
     public String clusterName = "Test Cluster";
     public boolean cdcEnabled = false;
     public String cdcRawDirectory;
+    public String auditLogger;
+    public String excludedKeyspaces = "";
 
     public static CassandraYamlBuilder newInstance()
     {
@@ -268,6 +271,23 @@ public class CassandraYamlBuilder
         this.authenticator = authenticator;
         return this;
     }
+
+    public CassandraYamlBuilder withAuditLogger(Class<? extends IAuditWriter> klass)
+    {
+        auditLogger = klass.getName();
+        return this;
+    }
+
+    /**
+     * Disable some keyspaces from being audited (assuming use of the audit logger).
+     * @param excludedKeyspaces keyspace names
+     */
+    public CassandraYamlBuilder withAuditLogExcludedKeyspaces(String... excludedKeyspaces)
+    {
+        this.excludedKeyspaces = StringUtils.join(excludedKeyspaces, ',');
+        return this;
+    }
+
 
     public CassandraYamlBuilder withPartitioner(String partitioner)
     {

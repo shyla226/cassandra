@@ -20,6 +20,10 @@ package org.apache.cassandra.cql3.statements;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -33,6 +37,12 @@ public class UseStatement extends ParsedStatement implements CQLStatement
     public UseStatement(String keyspace)
     {
         this.keyspace = keyspace;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.SET_KS;
     }
 
     public int getBoundTerms()

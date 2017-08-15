@@ -22,6 +22,9 @@ import java.util.stream.Collectors;
 
 import io.reactivex.Maybe;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -47,6 +50,12 @@ public class CreateTypeStatement extends SchemaAlteringStatement
         super();
         this.name = name;
         this.ifNotExists = ifNotExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.CREATE_TYPE;
     }
 
     @Override
