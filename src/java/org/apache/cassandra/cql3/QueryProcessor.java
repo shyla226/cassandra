@@ -394,16 +394,19 @@ public class QueryProcessor implements QueryHandler
         return prepare(queryString, cState);
     }
 
-    public static ResultMessage.Prepared prepare(ParsedStatement parsed, String queryString, ClientState clientState)
+    public static ResultMessage.Prepared prepare(String queryString, ClientState clientState)
     {
         ResultMessage.Prepared existing = getStoredPreparedStatement(queryString, clientState.getRawKeyspace());
         if (existing != null)
             return existing;
 
-        ParsedStatement.Prepared prepared = null;
-        prepared = parsed == null ? getStatement(queryString, clientState) : getStatement(queryString, parsed, clientState);
+        ParsedStatement.Prepared prepared = getStatement(queryString, clientState);
         prepared.rawCQLStatement = queryString;
-        validateBindingMarkers(prepared);
+        int boundTerms = prepared.statement.getBoundTerms();
+        if (boundTerms > FBUtilities.MAX_UNSIGNED_SHORT)
+            throw new InvalidRequestException(String.format("Too many markers(?). %d markers exceed the allowed maximum of %d", boundTerms, FBUtilities.MAX_UNSIGNED_SHORT));
+        assert boundTerms == prepared.boundNames.size();
+
         return storePreparedStatement(queryString, clientState.getRawKeyspace(), prepared);
     }
 
@@ -413,11 +416,6 @@ public class QueryProcessor implements QueryHandler
         if (boundTerms > FBUtilities.MAX_UNSIGNED_SHORT)
             throw new InvalidRequestException(String.format("Too many markers(?). %d markers exceed the allowed maximum of %d", boundTerms, FBUtilities.MAX_UNSIGNED_SHORT));
         assert boundTerms == prepared.boundNames.size();
-    }
-    
-    public static ResultMessage.Prepared prepare(String queryString, ClientState clientState)
-    {
-        return prepare(null, queryString, clientState);
     }
 
     private static MD5Digest computeId(String queryString, String keyspace)
