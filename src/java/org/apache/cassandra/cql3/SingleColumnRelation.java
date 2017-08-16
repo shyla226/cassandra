@@ -41,14 +41,14 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
  * a value (term). For example, {@code <key> > "start" or "colname1" = "somevalue"}.
  *
  */
-public final class SingleColumnRelation extends Relation
+public class SingleColumnRelation extends Relation
 {
     private final ColumnMetadata.Raw entity;
     private final Term.Raw mapKey;
     private final Term.Raw value;
     private final List<Term.Raw> inValues;
 
-    private SingleColumnRelation(ColumnMetadata.Raw entity, Term.Raw mapKey, Operator type, Term.Raw value, List<Term.Raw> inValues)
+    protected SingleColumnRelation(ColumnMetadata.Raw entity, Term.Raw mapKey, Operator type, Term.Raw value, List<Term.Raw> inValues)
     {
         this.entity = entity;
         this.mapKey = mapKey;
@@ -246,7 +246,7 @@ public final class SingleColumnRelation extends Relation
      * @return the receivers for the specified relation.
      * @throws InvalidRequestException if the relation is invalid
      */
-    private List<? extends ColumnSpecification> toReceivers(ColumnMetadata columnDef) throws InvalidRequestException
+    protected List<? extends ColumnSpecification> toReceivers(ColumnMetadata columnDef) throws InvalidRequestException
     {
         ColumnSpecification receiver = columnDef;
 
@@ -302,7 +302,7 @@ public final class SingleColumnRelation extends Relation
         return Collections.singletonList(receiver);
     }
 
-    private static ColumnSpecification makeCollectionReceiver(ColumnSpecification receiver, boolean forKey)
+    protected static ColumnSpecification makeCollectionReceiver(ColumnSpecification receiver, boolean forKey)
     {
         return ((CollectionType<?>) receiver.type).makeCollectionReceiver(receiver, forKey);
     }

@@ -342,8 +342,8 @@ public interface Selectable extends AssignmentTestable
 
         public static class Raw extends Selectable.Raw
         {
-            private final FunctionName functionName;
-            private final List<Selectable.Raw> args;
+            public final FunctionName functionName;
+            public final List<Selectable.Raw> args;
 
             public Raw(FunctionName functionName, List<Selectable.Raw> args)
             {

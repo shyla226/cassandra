@@ -480,12 +480,17 @@ public class QueryProcessor implements QueryHandler
 
         ParsedStatement.Prepared prepared = getStatement(queryString, clientState);
         prepared.rawCQLStatement = queryString;
+        validateBindingMarkers(prepared);
+
+        return storePreparedStatement(queryString, clientState.getRawKeyspace(), prepared);
+    }
+
+    public static void validateBindingMarkers(ParsedStatement.Prepared prepared)
+    {
         int boundTerms = prepared.statement.getBoundTerms();
         if (boundTerms > FBUtilities.MAX_UNSIGNED_SHORT)
             throw new InvalidRequestException(String.format("Too many markers(?). %d markers exceed the allowed maximum of %d", boundTerms, FBUtilities.MAX_UNSIGNED_SHORT));
         assert boundTerms == prepared.boundNames.size();
-
-        return storePreparedStatement(queryString, clientState.getRawKeyspace(), prepared);
     }
 
     private static MD5Digest computeId(String queryString, String keyspace)
@@ -494,7 +499,7 @@ public class QueryProcessor implements QueryHandler
         return MD5Digest.compute(toHash);
     }
 
-    private static ResultMessage.Prepared getStoredPreparedStatement(String queryString, String keyspace)
+    public static ResultMessage.Prepared getStoredPreparedStatement(String queryString, String keyspace)
     throws InvalidRequestException
     {
         MD5Digest statementId = computeId(queryString, keyspace);
@@ -507,7 +512,7 @@ public class QueryProcessor implements QueryHandler
         return new ResultMessage.Prepared(statementId, existing);
     }
 
-    private static Single<ResultMessage.Prepared> storePreparedStatement(String queryString, String keyspace, ParsedStatement.Prepared prepared)
+    public static Single<ResultMessage.Prepared> storePreparedStatement(String queryString, String keyspace, ParsedStatement.Prepared prepared)
     throws InvalidRequestException
     {
         // Concatenate the current keyspace so we don't mix prepared statements between keyspace (#5352).

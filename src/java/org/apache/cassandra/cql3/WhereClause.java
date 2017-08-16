@@ -24,7 +24,7 @@ import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.cql3.restrictions.CustomIndexExpression;
 
-public final class WhereClause
+public class WhereClause
 {
 
     private static final WhereClause EMPTY = new WhereClause(new Builder());
@@ -32,11 +32,10 @@ public final class WhereClause
     public final List<Relation> relations;
     public final List<CustomIndexExpression> expressions;
 
-    private WhereClause(Builder builder)
+    protected WhereClause(Builder builder)
     {
         this.relations = builder.relations.build();
         this.expressions = builder.expressions.build();
-
     }
 
     public static WhereClause empty()

@@ -641,7 +641,7 @@ public class OperationTest extends SchemaLoader
         }
 
         @Override
-        protected Kind kind()
+        public Kind kind()
         {
             return Kind.SIMPLE;
         }

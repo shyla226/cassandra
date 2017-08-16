@@ -121,9 +121,9 @@ public abstract class SingleColumnRestriction implements SingleRestriction
      */
     protected abstract boolean isSupportedBy(Index index);
 
-    public static final class EQRestriction extends SingleColumnRestriction
+    public static class EQRestriction extends SingleColumnRestriction
     {
-        private final Term value;
+        protected final Term value;
 
         public EQRestriction(ColumnMetadata columnDef, Term value)
         {
@@ -222,7 +222,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        protected final boolean isSupportedBy(Index index)
+        protected boolean isSupportedBy(Index index)
         {
             return index.supportsExpression(columnDef, Operator.IN);
         }
@@ -308,7 +308,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
     public static class SliceRestriction extends SingleColumnRestriction
     {
-        private final TermSlice slice;
+        protected final TermSlice slice;
 
         public SliceRestriction(ColumnMetadata columnDef, Bound bound, boolean inclusive, Term term)
         {
@@ -404,7 +404,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             return String.format("SLICE%s", slice);
         }
 
-        private SliceRestriction(ColumnMetadata columnDef, TermSlice slice)
+        protected SliceRestriction(ColumnMetadata columnDef, TermSlice slice)
         {
             super(columnDef);
             this.slice = slice;
@@ -412,7 +412,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     }
 
     // This holds CONTAINS, CONTAINS_KEY, and map[key] = value restrictions because we might want to have any combination of them.
-    public static final class ContainsRestriction extends SingleColumnRestriction
+    public static class ContainsRestriction extends SingleColumnRestriction
     {
         private List<Term> values = new ArrayList<>(); // for CONTAINS
         private List<Term> keys = new ArrayList<>(); // for CONTAINS_KEY
@@ -575,7 +575,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
          * @param from the <code>Contains</code> to copy from
          * @param to the <code>Contains</code> to copy to
          */
-        private static void copyKeysAndValues(ContainsRestriction from, ContainsRestriction to)
+        protected static void copyKeysAndValues(ContainsRestriction from, ContainsRestriction to)
         {
             to.values.addAll(from.values);
             to.keys.addAll(from.keys);
@@ -583,13 +583,13 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             to.entryValues.addAll(from.entryValues);
         }
 
-        private ContainsRestriction(ColumnMetadata columnDef)
+        protected ContainsRestriction(ColumnMetadata columnDef)
         {
             super(columnDef);
         }
     }
 
-    public static final class IsNotNullRestriction extends SingleColumnRestriction
+    public static class IsNotNullRestriction extends SingleColumnRestriction
     {
         public IsNotNullRestriction(ColumnMetadata columnDef)
         {
@@ -646,11 +646,11 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
     }
 
-    public static final class LikeRestriction extends SingleColumnRestriction
+    public static class LikeRestriction extends SingleColumnRestriction
     {
         private static final ByteBuffer LIKE_WILDCARD = ByteBufferUtil.bytes("%");
-        private final Operator operator;
-        private final Term value;
+        protected final Operator operator;
+        protected final Term value;
 
         public LikeRestriction(ColumnMetadata columnDef, Operator operator, Term value)
         {
@@ -738,7 +738,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
          * @param value the bound value for the LIKE operation
          * @return  Pair containing the inferred LIKE subtype and the value with wildcards removed
          */
-        private static Pair<Operator, ByteBuffer> makeSpecific(ByteBuffer value)
+        protected static Pair<Operator, ByteBuffer> makeSpecific(ByteBuffer value)
         {
             Operator operator;
             int beginIndex = value.position();

@@ -45,7 +45,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
 /**
  * The restrictions corresponding to the relations specified on the where-clause of CQL query.
  */
-public final class StatementRestrictions
+public class StatementRestrictions
 {
     public static final String REQUIRES_ALLOW_FILTERING_MESSAGE =
             "Cannot execute this query as it might involve data filtering and " +
@@ -65,7 +65,7 @@ public final class StatementRestrictions
     /**
      * Restrictions on partitioning columns
      */
-    private final PartitionKeyRestrictions partitionKeyRestrictions;
+    protected final PartitionKeyRestrictions partitionKeyRestrictions;
 
     /**
      * Restrictions on clustering columns
@@ -87,12 +87,12 @@ public final class StatementRestrictions
     /**
      * <code>true</code> if the secondary index need to be queried, <code>false</code> otherwise
      */
-    private boolean usesSecondaryIndexing;
+    protected boolean usesSecondaryIndexing;
 
     /**
      * Specify if the query will return a range of partition keys.
      */
-    private boolean isKeyRange;
+    protected boolean isKeyRange;
 
     /**
      * <code>true</code> if nonPrimaryKeyRestrictions contains restriction on a regular column,
@@ -457,7 +457,7 @@ public final class StatementRestrictions
      * @param kind the column type
      * @return the <code>Restrictions</code> for the specified type of columns
      */
-    private Restrictions getRestrictions(ColumnMetadata.Kind kind)
+    protected Restrictions getRestrictions(ColumnMetadata.Kind kind)
     {
         switch (kind)
         {
@@ -477,7 +477,7 @@ public final class StatementRestrictions
         return this.usesSecondaryIndexing;
     }
 
-    private void processPartitionKeyRestrictions(boolean hasQueriableIndex, boolean allowFiltering, boolean forView)
+    protected void processPartitionKeyRestrictions(boolean hasQueriableIndex, boolean allowFiltering, boolean forView)
     {
         if (!type.allowPartitionKeyRanges())
         {
@@ -880,7 +880,7 @@ public final class StatementRestrictions
                         && nonPrimaryKeyRestrictions.hasMultipleContains());
     }
 
-    private void validateSecondaryIndexSelections(boolean selectsOnlyStaticColumns)
+    protected void validateSecondaryIndexSelections(boolean selectsOnlyStaticColumns)
     {
         checkFalse(keyIsInRelation(),
                    "Select on indexed columns and with IN clause for the PRIMARY KEY are not supported");

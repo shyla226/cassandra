@@ -341,9 +341,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         // and this is why we have some UNUSEDX for values we don't use anymore
         // (we could clean those on a major protocol update, but it's not worth
         // the trouble for now)
-        protected enum Kind { SIMPLE, MAP_EQUALITY, UNUSED1, CUSTOM, USER }
+        public enum Kind { SIMPLE, MAP_EQUALITY, UNUSED1, CUSTOM, USER }
 
-        protected abstract Kind kind();
+        public abstract Kind kind();
         protected final ColumnMetadata column;
         protected final Operator operator;
         protected final ByteBuffer value;
@@ -724,7 +724,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         @Override
-        protected Kind kind()
+        public Kind kind()
         {
             return Kind.SIMPLE;
         }
@@ -818,7 +818,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         @Override
-        protected Kind kind()
+        public Kind kind()
         {
             return Kind.MAP_EQUALITY;
         }
@@ -868,7 +868,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                                          .customExpressionValueType());
         }
 
-        protected Kind kind()
+        public Kind kind()
         {
             return Kind.CUSTOM;
         }
@@ -965,7 +965,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             super(column, operator, value);
         }
 
-        protected Kind kind()
+        public Kind kind()
         {
             return Kind.USER;
         }
