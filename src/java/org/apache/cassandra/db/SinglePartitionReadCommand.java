@@ -1099,7 +1099,13 @@ public class SinglePartitionReadCommand extends ReadCommand
         {
             return false;
         }
-
+        
+        @Override
+        public ReadContext.Builder applyDefaults(ReadContext.Builder ctx)
+        {
+            return commands.get(0).applyDefaults(ctx);
+        }
+        
         @Override
         public boolean selectsFullPartition()
         {

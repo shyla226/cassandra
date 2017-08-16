@@ -37,7 +37,7 @@ import java.util.function.Supplier;
 public abstract class DeferredFlow<T> extends Flow<T>
 {
     /** Called when the source flow is available */
-    public abstract void onSource(Flow<T> value);
+    public abstract boolean onSource(Flow<T> value);
 
     /** Indicates if the source flow is available */
     public abstract boolean hasSource();
@@ -51,7 +51,7 @@ public abstract class DeferredFlow<T> extends Flow<T>
      *
      * @return a deferred flow implementation
      */
-    public static <T> DeferredFlow<T> createWithTimeout(long timeoutNanos)
+    static <T> DeferredFlow<T> createWithTimeout(long timeoutNanos)
     {
         return create(System.nanoTime() + timeoutNanos, () -> Flow.error(new TimeoutException()));
     }

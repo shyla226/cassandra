@@ -165,9 +165,11 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
      * timeout is expired. The source will contain any errors.
      * <p>
      * Disable the timer task if any, and try to subscribe unless already closed.
+     *
+     * @return true if the source was accepted, false otherwise (in case of a race)
      **/
     @Override
-    public void onSource(Flow<T> value)
+    public boolean onSource(Flow<T> value)
     {
         if (this.source.compareAndSet(null, value))
         {
@@ -175,13 +177,14 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
                 logger.trace("{} - got source", DeferredFlowImpl.this.hashCode());
 
             maybeSubscribe();
+            return true;
         }
-        // else
-        // {
-        // TODO - Are we at risk of resource leaks if a timeout beats a real source? We shouldn't be, since Flow
-        // is not closeable and therefore implementors should not allocate resources until there is a subscription
-        // but we should probably review the code at some point and possibly merge Flow and FlowSubscription.
-        // }
+        else
+        {
+            // TODO - We are at risk of resource leaks, once APOLLO-970 is merged, if Flow becomes closeable,
+            // we should close the flow here.
+            return false;
+        }
     }
 
     /**

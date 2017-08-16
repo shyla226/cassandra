@@ -22,10 +22,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import org.apache.commons.lang3.StringUtils;
@@ -67,7 +67,6 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
     private final AtomicInteger failures = new AtomicInteger(0);
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
 
-    private final AtomicBoolean responsesProcessed = new AtomicBoolean(false);
     private final DeferredFlow<T> result;
 
     private ReadCallback(ResponseResolver<T> resolver, List<InetAddress> endpoints)
@@ -185,12 +184,14 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
         resolver.preprocess(message);
         int n = waitingFor(message.from()) ? received.incrementAndGet() : received.get();
 
-        if (n >= blockfor && resolver.isDataPresent() && responsesProcessed.compareAndSet(false, true))
+        if (n >= blockfor && resolver.isDataPresent())
         {
-            result.onSource(generateFlowOnSuccess(n));
+            if (result.onSource(generateFlowOnSuccess(n)))
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Read: {} ms.", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - queryStartNanos()));
+            }
 
-            if (logger.isTraceEnabled())
-                logger.trace("Read: {} ms.", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - queryStartNanos()));
 
             // kick off a background digest comparison if this is a result that (may have) arrived after
             // the original resolve that get() kicks off as soon as the condition is signaled
@@ -201,7 +202,6 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
                     traceState.trace("Initiating read-repair");
                 if (logger.isTraceEnabled())
                     logger.trace("Initiating read-repair");
-
                 StageManager.getStage(Stage.READ_REPAIR).execute(new AsyncRepairRunner(traceState));
             }
         }
@@ -244,21 +244,32 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
             {
                 resolver.compareResponses().blockingAwait();
             }
-            catch (DigestMismatchException e)
+            catch (Throwable e)
             {
-                assert resolver instanceof DigestResolver;
+                if (e instanceof RuntimeException && e.getCause() != null)
+                    e = e.getCause();
 
-                if (traceState != null)
-                    traceState.trace("Digest mismatch: {}", e.toString());
-                if (logger.isDebugEnabled())
-                    logger.debug("Digest mismatch:", e);
-
-                ReadRepairMetrics.repairedBackground.mark();
-
-                final DataResolver repairResolver = new DataResolver(command(), readContext(), endpoints.size());
-                AsyncRepairCallback repairHandler = new AsyncRepairCallback(repairResolver, endpoints.size());
-                MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command()), repairHandler);
+                if (e instanceof DigestMismatchException)
+                    retryOnDigestMismatch((DigestMismatchException) e);
+                else
+                    throw Throwables.propagate(e);
             }
+        }
+
+        private void retryOnDigestMismatch(DigestMismatchException e)
+        {
+            assert resolver instanceof DigestResolver;
+
+            if (traceState != null)
+                traceState.trace("Digest mismatch: {}", e.toString());
+            if (logger.isDebugEnabled())
+                logger.debug("Digest mismatch:", e);
+
+            ReadRepairMetrics.repairedBackground.mark();
+
+            final DataResolver repairResolver = new DataResolver(command(), readContext(), endpoints.size());
+            AsyncRepairCallback repairHandler = new AsyncRepairCallback(repairResolver, endpoints.size());
+            MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command()), repairHandler);
         }
     }
 
@@ -272,12 +283,12 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
 
         failureReasonByEndpoint.put(failureResponse.from(), failureResponse.reason());
 
-        if (blockfor + n > endpoints.size() && responsesProcessed.compareAndSet(false, true))
+        if (blockfor + n > endpoints.size() && !result.hasSource())
             result.onSource(Flow.error(new ReadFailureException(consistency(),
-                                                                received.get(),
-                                                                blockfor,
-                                                                resolver.isDataPresent(),
-                                                                failureReasonByEndpoint)));
+                                                                      received.get(),
+                                                                      blockfor,
+                                                                      resolver.isDataPresent(),
+                                                                      failureReasonByEndpoint)));
     }
 
     private void onError(Throwable error)
