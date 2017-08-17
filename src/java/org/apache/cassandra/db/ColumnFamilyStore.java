@@ -76,6 +76,7 @@ import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.TableInfo;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.TopKSampler.SamplerResult;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -2661,5 +2662,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         if (notify)
             getTracker().notifySSTableRepairedStatusChanged(changedStatus);
         return changedStatus.size();
+    }
+
+    public boolean hasViews()
+    {
+        return !viewManager.isEmpty();
+    }
+
+    public TableInfo getTableInfo()
+    {
+        return new TableInfo(hasViews(), metadata.isView(), getLiveSSTables().stream().anyMatch(s -> s.isRepaired()));
     }
 }

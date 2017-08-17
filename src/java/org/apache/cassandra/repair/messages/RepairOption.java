@@ -47,6 +47,7 @@ public class RepairOption
     public static final String TRACE_KEY = "trace";
     public static final String SUB_RANGE_REPAIR_KEY = "sub_range_repair";
     public static final String PULL_REPAIR_KEY = "pullRepair";
+    public static final String RUN_ANTI_COMPACTION_KEY = "runAntiCompaction";
 
     // we don't want to push nodes too much for repair
     public static final int MAX_JOB_THREADS = 4;
@@ -123,6 +124,11 @@ public class RepairOption
      *             This is only allowed if exactly 2 hosts are specified along with a token range that they share.</td>
      *             <td>false</td>
      *         </tr>
+     *         <tr>
+     *             <td>runAntiCompaction</td>
+     *             <td>"true" if anticompaction should be performed after full repair</td>
+     *             <td>false</td>
+     *         </tr>
      *     </tbody>
      * </table>
      *
@@ -138,6 +144,7 @@ public class RepairOption
         boolean incremental = Boolean.parseBoolean(options.get(INCREMENTAL_KEY));
         boolean trace = Boolean.parseBoolean(options.get(TRACE_KEY));
         boolean pullRepair = Boolean.parseBoolean(options.get(PULL_REPAIR_KEY));
+        boolean runAntiCompaction = Boolean.parseBoolean(options.get(RUN_ANTI_COMPACTION_KEY));
 
         int jobThreads = 1;
         if (options.containsKey(JOB_THREADS_KEY))
@@ -175,7 +182,8 @@ public class RepairOption
             }
         }
 
-        RepairOption option = new RepairOption(parallelism, primaryRange, incremental, trace, jobThreads, ranges, !ranges.isEmpty(), pullRepair);
+        RepairOption option = new RepairOption(parallelism, primaryRange, incremental, trace, jobThreads, ranges,
+                                               !ranges.isEmpty(), pullRepair, runAntiCompaction);
 
         // data centers
         String dataCentersStr = options.get(DATACENTERS_KEY);
@@ -246,18 +254,19 @@ public class RepairOption
 
     private final RepairParallelism parallelism;
     private final boolean primaryRange;
-    private final boolean incremental;
+    private boolean incremental;
     private final boolean trace;
     private final int jobThreads;
     private final boolean isSubrangeRepair;
     private final boolean pullRepair;
+    private final boolean runAntiCompaction;
 
     private final Collection<String> columnFamilies = new HashSet<>();
     private final Collection<String> dataCenters = new HashSet<>();
     private final Collection<String> hosts = new HashSet<>();
     private final Collection<Range<Token>> ranges = new HashSet<>();
 
-    public RepairOption(RepairParallelism parallelism, boolean primaryRange, boolean incremental, boolean trace, int jobThreads, Collection<Range<Token>> ranges, boolean isSubrangeRepair, boolean pullRepair)
+    public RepairOption(RepairParallelism parallelism, boolean primaryRange, boolean incremental, boolean trace, int jobThreads, Collection<Range<Token>> ranges, boolean isSubrangeRepair, boolean pullRepair, boolean runAntiCompaction)
     {
         if (FBUtilities.isWindows &&
             (DatabaseDescriptor.getDiskAccessMode() != Config.DiskAccessMode.standard || DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard) &&
@@ -276,6 +285,7 @@ public class RepairOption
         this.ranges.addAll(ranges);
         this.isSubrangeRepair = isSubrangeRepair;
         this.pullRepair = pullRepair;
+        this.runAntiCompaction = runAntiCompaction;
     }
 
     public RepairParallelism getParallelism()
@@ -330,7 +340,7 @@ public class RepairOption
 
     public boolean isGlobal()
     {
-        return dataCenters.isEmpty() && hosts.isEmpty() && !isSubrangeRepair();
+        return dataCenters.isEmpty() && hosts.isEmpty() && !isSubrangeRepair() && (isIncremental() || runAntiCompaction);
     }
 
     public boolean isSubrangeRepair()
@@ -340,6 +350,11 @@ public class RepairOption
 
     public boolean isInLocalDCOnly() {
         return dataCenters.size() == 1 && dataCenters.contains(DatabaseDescriptor.getLocalDataCenter());
+    }
+
+    public void setIncremental(boolean incremental)
+    {
+        this.incremental = incremental;
     }
 
     @Override
@@ -353,6 +368,7 @@ public class RepairOption
                        ", ColumnFamilies: " + columnFamilies +
                        ", dataCenters: " + dataCenters +
                        ", hosts: " + hosts +
+                       ", runAntiCompaction: " + runAntiCompaction +
                        ", # of ranges: " + ranges.size() +
                        ", pull repair: " + pullRepair +
                        ')';

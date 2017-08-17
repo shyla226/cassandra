@@ -167,7 +167,7 @@ public class StreamReceiveTask extends StreamTask
                     return;
                 }
                 cfs = Keyspace.open(kscf.left).getColumnFamilyStore(kscf.right);
-                hasViews = !Iterables.isEmpty(View.findAll(kscf.left, kscf.right));
+                hasViews = cfs.hasViews();
                 hasCDC = cfs.metadata.params.cdc;
 
                 Collection<SSTableReader> readers = task.sstables;
