@@ -26,16 +26,19 @@ public class TableInfo
     public static final String HAS_VIEWS = "hasViews";
     public static final String IS_VIEW = "isView";
     public static final String WAS_INCREMENTALLY_REPAIRED = "wasIncrementallyRepaired";
+    public static final String IS_CDC_ENABLED = "isCdcEnabled";
 
     public final boolean hasViews;
     public final boolean isView;
     public final boolean wasIncrementallyRepaired;
+    public final boolean isCdcEnabled;
 
-    public TableInfo(boolean hasViews, boolean isView, boolean wasIncrementallyRepaired)
+    public TableInfo(boolean hasViews, boolean isView, boolean wasIncrementallyRepaired, boolean isCdcEnabled)
     {
         this.hasViews = hasViews;
         this.isView = isView;
         this.wasIncrementallyRepaired = wasIncrementallyRepaired;
+        this.isCdcEnabled = isCdcEnabled;
     }
 
     public Map<String, String> asMap()
@@ -44,6 +47,7 @@ public class TableInfo
         tableInfo.put(HAS_VIEWS, new Boolean(hasViews).toString());
         tableInfo.put(IS_VIEW, new Boolean(isView).toString());
         tableInfo.put(WAS_INCREMENTALLY_REPAIRED, new Boolean(wasIncrementallyRepaired).toString());
+        tableInfo.put(IS_CDC_ENABLED, new Boolean(isCdcEnabled).toString());
         return tableInfo;
     }
 
@@ -52,7 +56,8 @@ public class TableInfo
         boolean hasViews = Boolean.parseBoolean(tableInfo.get(HAS_VIEWS));
         boolean isView = Boolean.parseBoolean(tableInfo.get(IS_VIEW));
         boolean hasIncrementallyRepaired = Boolean.parseBoolean(tableInfo.get(WAS_INCREMENTALLY_REPAIRED));
-        return new TableInfo(hasViews, isView, hasIncrementallyRepaired);
+        boolean isCdcEnabled = Boolean.parseBoolean(tableInfo.get(IS_CDC_ENABLED));
+        return new TableInfo(hasViews, isView, hasIncrementallyRepaired, isCdcEnabled);
     }
 
     public boolean isOrHasView()
@@ -66,6 +71,7 @@ public class TableInfo
                "hasViews=" + hasViews +
                ", isView=" + isView +
                ", wasIncrementallyRepaired=" + wasIncrementallyRepaired +
+               ", isCdcEnabled=" + isCdcEnabled +
                '}';
     }
 }

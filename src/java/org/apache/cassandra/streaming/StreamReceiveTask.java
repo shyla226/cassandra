@@ -163,12 +163,7 @@ public class StreamReceiveTask extends StreamTask
          * can be archived by the CDC process on discard.
          */
         private boolean requiresWritePath(ColumnFamilyStore cfs) {
-            return hasCDC(cfs) || (task.session.streamOperation().requiresViewBuild() && cfs.hasViews());
-        }
-
-        private boolean hasCDC(ColumnFamilyStore cfs)
-        {
-            return cfs.metadata().params.cdc;
+            return cfs.isCdcEnabled() || (task.session.streamOperation().requiresViewBuild() && cfs.hasViews());
         }
 
         Mutation createMutation(ColumnFamilyStore cfs, UnfilteredRowIterator rowIterator)
@@ -177,7 +172,6 @@ public class StreamReceiveTask extends StreamTask
         }
 
         private void sendThroughWritePath(ColumnFamilyStore cfs, Collection<SSTableReader> readers) {
-            boolean hasCdc = hasCDC(cfs);
             List<Completable> writes = new ArrayList<>();
             for (SSTableReader reader : readers)
             {
@@ -193,7 +187,7 @@ public class StreamReceiveTask extends StreamTask
                             //
                             // If the CFS has CDC, however, these updates need to be written to the CommitLog
                             // so they get archived into the cdc_raw folder
-                            writes.add(ks.apply(createMutation(cfs, rowIterator), hasCdc, true, false));
+                            writes.add(ks.apply(createMutation(cfs, rowIterator), cfs.isCdcEnabled(), true, false));
                         }
                     }
                 }

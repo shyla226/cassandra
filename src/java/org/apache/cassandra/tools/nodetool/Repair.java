@@ -159,19 +159,22 @@ public class Repair extends NodeToolCmd
             return tablesToRepair.keySet();
         }
 
-        Set<String> tablesWithViews = tablesToRepair.entrySet().stream().filter(e -> e.getValue().isOrHasView()).map(e -> e.getKey()).collect(Collectors.toSet());
-        if (!fullRepair || tablesToRepair.keySet().equals(tablesWithViews))
+        Set<String> tablesWithViewsOrCdc = tablesToRepair.entrySet().stream()
+                                                                    .filter(e -> e.getValue().isOrHasView() || e.getValue().isCdcEnabled)
+                                                                    .map(e -> e.getKey())
+                                                                    .collect(Collectors.toSet());
+        if (!fullRepair || tablesToRepair.keySet().equals(tablesWithViewsOrCdc))
         {
-            if (!tablesWithViews.isEmpty())
+            if (!tablesWithViewsOrCdc.isEmpty())
             {
-                System.out.println(String.format("WARN: Incremental repair is not supported on tables with Materialized Views. Running full repairs on table(s) %s.%s.",
-                                                 keyspace, tablesWithViews));
+                System.out.println(String.format("WARN: Incremental repair is not supported on tables with Materialized Views or CDC. Running full repairs on table(s) %s.%s.",
+                                                 keyspace, tablesWithViewsOrCdc));
             }
 
-            return tablesWithViews;
+            return tablesWithViewsOrCdc;
         }
 
-        return tablesWithViews;
+        return tablesWithViewsOrCdc;
     }
 
     private void runRepair(NodeProbe probe, String keyspace, String[] cfnames, boolean isIncremental)

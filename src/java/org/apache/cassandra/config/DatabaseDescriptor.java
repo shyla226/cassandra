@@ -2229,7 +2229,7 @@ public class DatabaseDescriptor
     {
         conf.otc_backlog_expiration_interval_ms = intervalInMillis;
     }
- 
+
     public static int getWindowsTimerInterval()
     {
         return conf.windows_timer_interval;
@@ -2430,5 +2430,10 @@ public class DatabaseDescriptor
     public static Config.RepairCommandPoolFullStrategy getRepairCommandPoolFullStrategy()
     {
         return conf.repair_command_pool_full_strategy;
+    }
+
+    public static void setCDCEnabled(boolean cdcEnabled)
+    {
+        conf.cdc_enabled = cdcEnabled;
     }
 }

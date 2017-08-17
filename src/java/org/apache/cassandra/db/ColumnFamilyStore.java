@@ -2737,8 +2737,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return !viewManager.isEmpty();
     }
 
+    public boolean isCdcEnabled()
+    {
+        return metadata.get().params.cdc;
+    }
+
     public TableInfo getTableInfo()
     {
-        return new TableInfo(hasViews(), metadata.get().isView(), getLiveSSTables().stream().anyMatch(s -> s.isRepaired()));
+        return new TableInfo(hasViews(), metadata.get().isView(), getLiveSSTables().stream().anyMatch(s -> s.isRepaired()), isCdcEnabled());
     }
 }
