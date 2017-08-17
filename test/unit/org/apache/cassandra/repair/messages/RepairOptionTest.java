@@ -53,7 +53,7 @@ public class RepairOptionTest
         Token.TokenFactory tokenFactory = partitioner.getTokenFactory();
 
         // parse with empty options
-        RepairOption option = RepairOption.parse(new HashMap<String, String>(), partitioner);
+        RepairOption option = RepairOption.parse(new HashMap<>(), partitioner);
 
         if (FBUtilities.isWindows && (DatabaseDescriptor.getDiskAccessMode() != Config.DiskAccessMode.standard || DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard))
             assertTrue(option.getParallelism() == RepairParallelism.PARALLEL);

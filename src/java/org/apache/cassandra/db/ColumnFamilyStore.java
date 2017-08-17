@@ -82,6 +82,7 @@ import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.TableInfo;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.TopKSampler.SamplerResult;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -2729,5 +2730,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return StreamSupport.stream(data.getView().getAllMemtables().spliterator(), false)
                             .mapToLong(Memtable::getLiveDataSize)
                             .sum();
+    }
+
+    public boolean hasViews()
+    {
+        return !viewManager.isEmpty();
+    }
+
+    public TableInfo getTableInfo()
+    {
+        return new TableInfo(hasViews(), metadata.get().isView(), getLiveSSTables().stream().anyMatch(s -> s.isRepaired()));
     }
 }

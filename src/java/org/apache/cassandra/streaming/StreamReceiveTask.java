@@ -163,12 +163,7 @@ public class StreamReceiveTask extends StreamTask
          * can be archived by the CDC process on discard.
          */
         private boolean requiresWritePath(ColumnFamilyStore cfs) {
-            return hasCDC(cfs) || (task.session.streamOperation().requiresViewBuild() && hasViews(cfs));
-        }
-
-        private boolean hasViews(ColumnFamilyStore cfs)
-        {
-            return !Iterables.isEmpty(View.findAll(cfs.metadata.keyspace, cfs.getTableName()));
+            return hasCDC(cfs) || (task.session.streamOperation().requiresViewBuild() && cfs.hasViews());
         }
 
         private boolean hasCDC(ColumnFamilyStore cfs)

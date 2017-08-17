@@ -3396,6 +3396,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (option.getRanges().isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor() < 2)
             return 0;
 
+        if (option.isIncremental() && shouldFallBackToFullRepair(keyspace, option.getColumnFamilies().toArray(new String[option.getColumnFamilies().size()])))
+        {
+            logger.info("Incremental repair is not supported on tables{} from keyspace {} with materialized views. " +
+                        "Running full repairs instead.", option.getColumnFamilies().isEmpty()? "" : " " + option.getColumnFamilies(), keyspace);
+            option.setIncremental(false);
+        }
+
         // We reject any repair that targets a table on which NodeSync is enabled.
         checkForNodeSyncEnabledTables(keyspace, option);
 
@@ -3427,6 +3434,31 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // Called by getValidColumnFamilies when the keyspace is unknown (?!?!) but we shouldn't get here in that
             // case since we'd have break in repairAsync at the Keyspace.open() call.
             throw new RuntimeException(e);
+        }
+    }
+
+    protected boolean shouldFallBackToFullRepair(String keyspace, String[] tables)
+    {
+        try
+        {
+            Set<ColumnFamilyStore> tablesToRepair = Sets.newHashSet(getValidColumnFamilies(false, false, keyspace, tables));
+            Set<String> baseOrViewsToRepair = tablesToRepair.stream().filter(c -> c.hasViews() || c.metadata.get().isView()).map(c -> c.name).collect(Collectors.toSet());
+
+            if (baseOrViewsToRepair.isEmpty())
+                return false;
+
+            if (tablesToRepair.size() == baseOrViewsToRepair.size())
+                return true;
+
+
+            throw new IllegalArgumentException(String.format("Cannot run a single repair command on both MV and non-MV tables (%s) from keyspace %s " +
+                                                             "simultaneously because incremental repair is not supported on tables with materialized views: %s. " +
+                                                             "Please execute a separate command for repairing tables with and without MVs.", tablesToRepair,
+                                                             keyspace, baseOrViewsToRepair));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Could not fetch tables for repair.", e);
         }
     }
 
@@ -4763,6 +4795,22 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public List<String> getNonLocalStrategyKeyspaces()
     {
         return Collections.unmodifiableList(Schema.instance.getNonLocalStrategyKeyspaces());
+    }
+
+    public Map<String, Map<String, String>> getTableInfos(String keyspace, String... tables)
+    {
+        Map<String, Map<String, String>> tableInfos = new HashMap<>();
+
+        try
+        {
+            getValidColumnFamilies(false, false, keyspace, tables).forEach(cfs -> tableInfos.put(cfs.name, cfs.getTableInfo().asMap()));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(String.format("Could not retrieve info for keyspace %s and table(s) %s.", keyspace, tables), e);
+        }
+
+        return tableInfos;
     }
 
     public Map<String,List<String>> getKeyspacesAndViews()

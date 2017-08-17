@@ -28,10 +28,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.service.TableInfo;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.messages.RepairOption;
@@ -125,46 +127,89 @@ public class Repair extends NodeToolCmd
 
         for (String keyspace : keyspaces)
         {
+            Map<String, TableInfo> tablesToRepair = probe.getTableInfos(keyspace, cfnames);
+
             // avoid repairing system_distributed by default (CASSANDRA-9621)
             if ((args == null || args.isEmpty()) && ONLY_EXPLICITLY_REPAIRED.contains(keyspace))
                 continue;
 
-            Map<String, String> options = new HashMap<>();
-            RepairParallelism parallelismDegree = RepairParallelism.PARALLEL;
-            if (sequential)
-                parallelismDegree = RepairParallelism.SEQUENTIAL;
-            else if (dcParallel)
-                parallelismDegree = RepairParallelism.DATACENTER_AWARE;
-            options.put(RepairOption.PARALLELISM_KEY, parallelismDegree.getName());
-            options.put(RepairOption.PRIMARY_RANGE_KEY, Boolean.toString(primaryRange));
-            options.put(RepairOption.INCREMENTAL_KEY, Boolean.toString(!fullRepair));
-            options.put(RepairOption.JOB_THREADS_KEY, Integer.toString(numJobThreads));
-            options.put(RepairOption.TRACE_KEY, Boolean.toString(trace));
-            options.put(RepairOption.COLUMNFAMILIES_KEY, StringUtils.join(cfnames, ","));
-            options.put(RepairOption.PULL_REPAIR_KEY, Boolean.toString(pullRepair));
-            options.put(RepairOption.FORCE_REPAIR_KEY, Boolean.toString(force));
-            options.put(RepairOption.PREVIEW, getPreviewKind().toString());
+            Set<String> tablesToRunFullRepair = getTablesToRunFullRepair(keyspace, tablesToRepair);
+            Set<String> tablesToRunIncRepair = Sets.difference(tablesToRepair.keySet(), tablesToRunFullRepair);
 
-            if (!startToken.isEmpty() || !endToken.isEmpty())
+            if (tablesToRunFullRepair.isEmpty())
             {
-                options.put(RepairOption.RANGES_KEY, startToken + ":" + endToken);
+                runRepair(probe, keyspace, cfnames, true);
             }
-            if (localDC)
+            else if (tablesToRunIncRepair.isEmpty())
             {
-                options.put(RepairOption.DATACENTERS_KEY, StringUtils.join(newArrayList(probe.getDataCenter()), ","));
+                runRepair(probe, keyspace, cfnames, false);
             }
             else
             {
-                options.put(RepairOption.DATACENTERS_KEY, StringUtils.join(specificDataCenters, ","));
+                runRepair(probe, keyspace, tablesToRunIncRepair.toArray(new String[tablesToRunIncRepair.size()]), true);
+                runRepair(probe, keyspace, tablesToRunFullRepair.toArray(new String[tablesToRunFullRepair.size()]), false);
             }
-            options.put(RepairOption.HOSTS_KEY, StringUtils.join(specificHosts, ","));
-            try
+        }
+    }
+
+    private Set<String> getTablesToRunFullRepair(String keyspace, Map<String, TableInfo> tablesToRepair)
+    {
+        if (fullRepair)
+        {
+            return tablesToRepair.keySet();
+        }
+
+        Set<String> tablesWithViews = tablesToRepair.entrySet().stream().filter(e -> e.getValue().isOrHasView()).map(e -> e.getKey()).collect(Collectors.toSet());
+        if (!fullRepair || tablesToRepair.keySet().equals(tablesWithViews))
+        {
+            if (!tablesWithViews.isEmpty())
             {
-                probe.repairAsync(System.out, keyspace, options);
-            } catch (Exception e)
-            {
-                throw new RuntimeException("Error occurred during repair", e);
+                System.out.println(String.format("WARN: Incremental repair is not supported on tables with Materialized Views. Running full repairs on table(s) %s.%s.",
+                                                 keyspace, tablesWithViews));
             }
+
+            return tablesWithViews;
+        }
+
+        return tablesWithViews;
+    }
+
+    private void runRepair(NodeProbe probe, String keyspace, String[] cfnames, boolean isIncremental)
+    {
+        Map<String, String> options = new HashMap<>();
+        RepairParallelism parallelismDegree = RepairParallelism.PARALLEL;
+        if (sequential)
+            parallelismDegree = RepairParallelism.SEQUENTIAL;
+        else if (dcParallel)
+            parallelismDegree = RepairParallelism.DATACENTER_AWARE;
+        options.put(RepairOption.PARALLELISM_KEY, parallelismDegree.getName());
+        options.put(RepairOption.PRIMARY_RANGE_KEY, Boolean.toString(primaryRange));
+        options.put(RepairOption.INCREMENTAL_KEY, Boolean.toString(!fullRepair));
+        options.put(RepairOption.JOB_THREADS_KEY, Integer.toString(numJobThreads));
+        options.put(RepairOption.TRACE_KEY, Boolean.toString(trace));
+        options.put(RepairOption.COLUMNFAMILIES_KEY, StringUtils.join(cfnames, ","));
+        options.put(RepairOption.PULL_REPAIR_KEY, Boolean.toString(pullRepair));
+        options.put(RepairOption.FORCE_REPAIR_KEY, Boolean.toString(force));
+        options.put(RepairOption.PREVIEW, getPreviewKind().toString());
+        if (!startToken.isEmpty() || !endToken.isEmpty())
+        {
+            options.put(RepairOption.RANGES_KEY, startToken + ":" + endToken);
+        }
+        if (localDC)
+        {
+            options.put(RepairOption.DATACENTERS_KEY, StringUtils.join(newArrayList(probe.getDataCenter()), ","));
+        }
+        else
+        {
+            options.put(RepairOption.DATACENTERS_KEY, StringUtils.join(specificDataCenters, ","));
+        }
+        options.put(RepairOption.HOSTS_KEY, StringUtils.join(specificHosts, ","));
+        try
+        {
+            probe.repairAsync(System.out, keyspace, options);
+        } catch (Exception e)
+        {
+            throw new RuntimeException("Error occurred during repair", e);
         }
     }
 }

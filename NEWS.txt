@@ -29,6 +29,9 @@ Upgrading
 
    - The table system_auth.resource_role_permissons_index is no longer used and should be dropped
      after all nodes are on 6.0.
+   - Incremental repairs are no longer supported on tables with materialized views until
+     its limitations are addressed. An incremental repair triggered on a base table or
+     materialized view run a full repair instead. See CASSANDRA-12888 for details.
 
 
 4.0

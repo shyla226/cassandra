@@ -84,6 +84,7 @@ import org.apache.cassandra.service.GCInspectorMXBean;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageProxyMBean;
 import org.apache.cassandra.service.StorageServiceMBean;
+import org.apache.cassandra.service.TableInfo;
 import org.apache.cassandra.streaming.StreamManagerMBean;
 import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.streaming.management.StreamStateCompositeData;
@@ -889,6 +890,14 @@ public class NodeProbe implements AutoCloseable
     public List<String> getKeyspaces()
     {
         return ssProxy.getKeyspaces();
+    }
+
+    public Map<String, TableInfo> getTableInfos(String keyspace, String... tables)
+    {
+        Map<String, Map<String, String>> tableInfosAsMap = ssProxy.getTableInfos(keyspace, tables);
+        Map<String, TableInfo> tableInfo = new HashMap<>();
+        tableInfosAsMap.entrySet().stream().forEach(e -> tableInfo.put(e.getKey(), TableInfo.fromMap(e.getValue())));
+        return tableInfo;
     }
 
     public Map<String, List<String>> getKeyspacesAndViews()
