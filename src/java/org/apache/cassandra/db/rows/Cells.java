@@ -25,6 +25,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.Conflicts;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
+import org.apache.cassandra.utils.NumberUtil;
 
 /**
  * Static methods to work on cells.
@@ -97,7 +98,7 @@ public abstract class Cells
         Cell reconciled = reconcile(existing, update, nowInSec);
         builder.addCell(reconciled);
 
-        return Math.abs(existing.timestamp() - update.timestamp());
+        return NumberUtil.consistentAbs(existing.timestamp() - update.timestamp());
     }
 
     /**

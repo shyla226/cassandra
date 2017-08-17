@@ -22,12 +22,12 @@ import java.util.*;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 
-import io.reactivex.Single;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.NumberUtil;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.WrappedInt;
 
@@ -277,10 +277,7 @@ public abstract class Rows
         LivenessInfo updateInfo = update.primaryKeyLivenessInfo();
         LivenessInfo mergedInfo = existingInfo.supersedes(updateInfo) ? existingInfo : updateInfo;
 
-        long timeDelta = Math.abs(existingInfo.timestamp() - mergedInfo.timestamp());
-        // Math.abs(MIN - 0) = MIN
-        if (timeDelta == Long.MIN_VALUE)
-            timeDelta = Long.MAX_VALUE;
+        long timeDelta = NumberUtil.consistentAbs(existingInfo.timestamp() - mergedInfo.timestamp());
 
         Row.Deletion rowDeletion = existing.deletion().supersedes(update.deletion()) ? existing.deletion() : update.deletion();
 

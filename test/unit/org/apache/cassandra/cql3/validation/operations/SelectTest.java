@@ -4839,4 +4839,13 @@ public class SelectTest extends CQLTester
         }
     }
 
+    @Test
+    public void negativeTimestampDeltaTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, v int, PRIMARY KEY (k))");
+        execute("UPDATE %s SET v = 2 WHERE k = 2 ;");
+        execute("INSERT INTO %s (k, v) VALUES (2, 1) USING TIMESTAMP 0;");
+        assertRowsIgnoringOrder(execute("select * from %s"),
+                                row(2, 2));
+    }
 }

@@ -96,8 +96,6 @@ final class DecayingEstimatedHistogram extends Histogram
      * (at the keyspace or global level). */
     private final Recorder recorder;
 
-
-
     DecayingEstimatedHistogram(boolean considerZeroes, long maxTrackableValue, int updateTimeMillis, Clock clock)
     {
         BucketProperties bucketProperties = new BucketProperties(considerZeroes, maxTrackableValue);
@@ -282,7 +280,7 @@ final class DecayingEstimatedHistogram extends Histogram
         }
 
         /**
-         * Given a valud, return the index of the bucket where this value is located.
+         * Given a value, return the index of the bucket where this value is located.
          */
         @Inline
         final int getIndex(final long value) {
@@ -716,7 +714,7 @@ final class DecayingEstimatedHistogram extends Histogram
         }
 
         /**
-         * Update a valud in the buffer. When lazy is true, this assumes the
+         * Update a value in the buffer. When lazy is true, this assumes the
          * same thread is doing the lazy updates and so we can rely on a get long volatile.
          * @param value - the value to set
          * @param lazy - whether lazy updates are OK (single updating thread)
