@@ -511,17 +511,9 @@ public class QueryProcessor implements QueryHandler
     public static ParsedStatement.Prepared getStatement(String queryStr, ClientState clientState)
     throws RequestValidationException
     {
-        return getStatement(queryStr, null, clientState);
-    }
-    
-    public static ParsedStatement.Prepared getStatement(String queryStr, ParsedStatement statement, ClientState clientState)
-    throws RequestValidationException
-    {
-        if (statement == null)
-        {
-            Tracing.trace("Parsing {}", queryStr);
-            statement = parseStatement(queryStr);
-        }
+        Tracing.trace("Parsing {}", queryStr);
+        ParsedStatement statement = parseStatement(queryStr);
+
         // Set keyspace for statement that require login
         if (statement instanceof CFStatement)
             ((CFStatement)statement).prepareKeyspace(clientState);
