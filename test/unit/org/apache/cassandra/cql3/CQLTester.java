@@ -106,7 +106,7 @@ public abstract class CQLTester
     protected static final int nativePort;
     protected static final InetAddress nativeAddr;
     private static final Map<ProtocolVersion, Cluster> clusters = new HashMap<>();
-    private static final Map<ProtocolVersion, Session> sessions = new HashMap<>();
+    protected static final Map<ProtocolVersion, Session> sessions = new HashMap<>();
 
     private enum ServerStatus
     {
@@ -504,14 +504,19 @@ public abstract class CQLTester
 
     public static Cluster createClientCluster(ProtocolVersion version, String clusterName, NettyOptions nettyOptions)
     {
-        return Cluster.builder()
-                      .addContactPoints(nativeAddr)
-                      .withClusterName(clusterName)
-                      .withPort(nativePort)
-                      .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt())).withoutMetrics()
-                      .withNettyOptions(nettyOptions)
-                      .withoutMetrics()
-                      .build();
+        Cluster.Builder builder = Cluster.builder()
+                                         .addContactPoints(nativeAddr)
+                                         .withClusterName(clusterName)
+                                         .withPort(nativePort)
+                                         .withNettyOptions(nettyOptions)
+                                         .withoutMetrics();
+
+        if (version.isBeta())
+            builder = builder.allowBetaProtocolVersion();
+        else
+            builder = builder.withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt()));
+
+        return builder.build();
     }
 
     public static void closeClientCluster(Cluster cluster)

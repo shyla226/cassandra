@@ -214,7 +214,7 @@ public class MessagePayloadTest extends CQLTester
                 payloadEquals(reqMap, requestPayload);
                 payloadEquals(respMap, prepareResponse.getCustomPayload());
 
-                ExecuteMessage executeMessage = new ExecuteMessage(prepareResponse.statementId, QueryOptions.DEFAULT);
+                ExecuteMessage executeMessage = new ExecuteMessage(prepareResponse.statementId, prepareResponse.resultMetadataId, QueryOptions.DEFAULT);
                 reqMap = Collections.singletonMap("foo", bytes(44));
                 responsePayload = respMap = Collections.singletonMap("bar", bytes(44));
                 executeMessage.setCustomPayload(reqMap);
@@ -297,7 +297,7 @@ public class MessagePayloadTest extends CQLTester
                 prepareMessage.setCustomPayload(null);
                 ResultMessage.Prepared prepareResponse = (ResultMessage.Prepared) client.execute(prepareMessage);
 
-                ExecuteMessage executeMessage = new ExecuteMessage(prepareResponse.statementId, QueryOptions.DEFAULT);
+                ExecuteMessage executeMessage = new ExecuteMessage(prepareResponse.statementId, prepareResponse.resultMetadataId, QueryOptions.DEFAULT);
                 reqMap = Collections.singletonMap("foo", bytes(44));
                 responsePayload = Collections.singletonMap("bar", bytes(44));
                 executeMessage.setCustomPayload(reqMap);

@@ -24,7 +24,6 @@ import java.util.List;
 import org.junit.Before;
 import org.junit.Test;
 
-import junit.framework.Assert;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -77,16 +76,16 @@ public class PstmtPersistenceTest extends CQLTester
         assertEquals(5, stmtIds.size());
         assertEquals(5, QueryProcessor.preparedStatementsCount());
 
-        Assert.assertEquals(5, numberOfStatementsOnDisk());
+        assertEquals(5, numberOfStatementsOnDisk());
 
         QueryHandler handler = ClientState.getCQLQueryHandler();
         validatePstmts(stmtIds, handler);
 
         // clear prepared statements cache
         QueryProcessor.clearPreparedStatements(true);
-        Assert.assertEquals(0, QueryProcessor.preparedStatementsCount());
+        assertEquals(0, QueryProcessor.preparedStatementsCount());
         for (MD5Digest stmtId : stmtIds)
-            Assert.assertNull(handler.getPrepared(stmtId));
+            assertNull(handler.getPrepared(stmtId));
 
         // load prepared statements and validate that these still execute fine
         QueryProcessor.preloadPreparedStatementBlocking();
@@ -99,7 +98,7 @@ public class PstmtPersistenceTest extends CQLTester
         {
             MD5Digest digest = MD5Digest.wrap(ByteBufferUtil.getArray(row.getBytes("prepared_id")));
             ParsedStatement.Prepared prepared = QueryProcessor.instance.getPrepared(digest);
-            Assert.assertNotNull(prepared);
+            assertNotNull(prepared);
         }
 
         // add anther prepared statement and sync it to table

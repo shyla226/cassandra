@@ -18,6 +18,8 @@
 package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.*;
 
 import io.netty.buffer.ByteBuf;
@@ -25,6 +27,8 @@ import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.cql3.selection.ResultBuilder;
 import org.apache.cassandra.cql3.selection.Selection;
 import org.apache.cassandra.cql3.selection.SelectionColumns;
+import org.apache.cassandra.cql3.statements.ParsedStatement;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
@@ -35,6 +39,8 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.*;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MD5Digest;
 
 public class ResultSet
 {
@@ -44,9 +50,9 @@ public class ResultSet
     public final ResultMetadata metadata;
     public final List<List<ByteBuffer>> rows;
 
-    public ResultSet(List<ColumnSpecification> metadata)
+    public ResultSet(ResultMetadata metadata)
     {
-        this(new ResultMetadata(metadata), new ArrayList<>(INITIAL_ROWS_CAPACITY));
+        this(metadata, new ArrayList<>(INITIAL_ROWS_CAPACITY));
     }
 
     public ResultSet(ResultMetadata metadata, List<List<ByteBuffer>> rows)
@@ -243,7 +249,7 @@ public class ResultSet
     {
         public static final CBCodec<ResultMetadata> codec = new Codec();
 
-        public static final ResultMetadata EMPTY = new ResultMetadata(EnumSet.of(Flag.NO_METADATA), null, 0, PagingResult.NONE);
+        public static final ResultMetadata EMPTY = new ResultMetadata(MD5Digest.compute(new byte[0]), EnumSet.of(Flag.NO_METADATA), null, 0, PagingResult.NONE);
 
         private final EnumSet<Flag> flags;
         // Please note that columnCount can actually be smaller than names, even if names is not null. This is
@@ -253,16 +259,23 @@ public class ResultSet
         public final List<ColumnSpecification> names;
         private final int columnCount;
         private PagingResult pagingResult;
+        private final MD5Digest resultMetadataId;
 
         public ResultMetadata(List<ColumnSpecification> names)
         {
-            this(EnumSet.noneOf(Flag.class), names, names.size(), PagingResult.NONE);
+            this(computeResultMetadataId(names), EnumSet.noneOf(Flag.class), names, names.size(), PagingResult.NONE);
+        }
+
+        public ResultMetadata(MD5Digest digest, List<ColumnSpecification> names)
+        {
+            this(digest, EnumSet.noneOf(Flag.class), names, names.size(), PagingResult.NONE);
             if (!names.isEmpty() && ColumnSpecification.allInSameTable(names))
                 flags.add(Flag.GLOBAL_TABLES_SPEC);
         }
 
-        private ResultMetadata(EnumSet<Flag> flags, List<ColumnSpecification> names, int columnCount, PagingResult pagingResult)
+        private ResultMetadata(MD5Digest digest, EnumSet<Flag> flags, List<ColumnSpecification> names, int columnCount, PagingResult pagingResult)
         {
+            this.resultMetadataId = digest;
             this.flags = flags;
             this.names = names;
             this.columnCount = columnCount;
@@ -271,7 +284,9 @@ public class ResultSet
 
         public ResultMetadata copy()
         {
-            return new ResultMetadata(EnumSet.copyOf(flags), names, columnCount, pagingResult);
+
+
+            return new ResultMetadata(resultMetadataId, EnumSet.copyOf(flags), names, columnCount, pagingResult);
         }
 
         /**
@@ -329,6 +344,26 @@ public class ResultSet
             flags.add(Flag.NO_METADATA);
         }
 
+        public void setMetadataChanged()
+        {
+            flags.add(Flag.METADATA_CHANGED);
+        }
+
+        public MD5Digest getResultMetadataId()
+        {
+            return resultMetadataId;
+        }
+
+        public static ResultMetadata fromPrepared(ParsedStatement.Prepared prepared)
+        {
+            CQLStatement statement = prepared.statement;
+
+            if (!(statement instanceof SelectStatement))
+                return ResultSet.ResultMetadata.EMPTY;
+
+            return ((SelectStatement)statement).getResultMetadata();
+        }
+
         @Override
         public boolean equals(Object other)
         {
@@ -380,6 +415,25 @@ public class ResultSet
             return sb.toString();
         }
 
+        public static MD5Digest computeResultMetadataId(List<ColumnSpecification> columnSpecifications)
+        {
+            MessageDigest md = FBUtilities.threadLocalMD5Digest();
+
+            if (columnSpecifications != null)
+            {
+                for (ColumnSpecification cs : columnSpecifications)
+                {
+                    md.update(cs.name.bytes.duplicate());
+                    md.update((byte) 0);
+                    md.update(cs.type.toString().getBytes(StandardCharsets.UTF_8));
+                    md.update((byte) 0);
+                    md.update((byte) 0);
+                }
+            }
+
+            return MD5Digest.wrap(md.digest());
+        }
+
         private static class Codec implements CBCodec<ResultMetadata>
         {
             public ResultMetadata decode(ByteBuf body, ProtocolVersion version)
@@ -394,12 +448,21 @@ public class ResultSet
                                     ? PagingState.deserialize(CBUtil.readValueNoCopy(body), version)
                                     : null;
 
+                MD5Digest resultMetadataId = null;
+                if (flags.contains(Flag.METADATA_CHANGED))
+                {
+                    assert version.isGreaterOrEqualTo(ProtocolVersion.V5, ProtocolVersion.DSE_V2) : "MetadataChanged flag is not supported before native protocol v5";
+                    assert !flags.contains(Flag.NO_METADATA) : "MetadataChanged and NoMetadata are mutually exclusive flags";
+
+                    resultMetadataId = MD5Digest.wrap(CBUtil.readBytes(body));
+                }
+
                 PagingResult pagingResult = flags.contains(Flag.CONTINUOUS_PAGING)
                                             ? new PagingResult(state, body.readInt(), flags.contains(Flag.LAST_CONTINOUS_PAGE))
                                             : state == null ? PagingResult.NONE : new PagingResult(state);
 
                 if (flags.contains(Flag.NO_METADATA))
-                    return new ResultMetadata(flags, null, columnCount, pagingResult);
+                    return new ResultMetadata(null, flags, null, columnCount, pagingResult);
 
                 boolean globalTablesSpec = flags.contains(Flag.GLOBAL_TABLES_SPEC);
 
@@ -421,7 +484,7 @@ public class ResultSet
                     AbstractType type = DataType.toType(DataType.codec.decodeOne(body, version));
                     names.add(new ColumnSpecification(ksName, cfName, colName, type));
                 }
-                return new ResultMetadata(flags, names, names.size(), pagingResult);
+                return new ResultMetadata(resultMetadataId, flags, names, names.size(), pagingResult);
             }
 
             public void encode(ResultMetadata m, ByteBuf dest, ProtocolVersion version)
@@ -430,6 +493,7 @@ public class ResultSet
                 boolean globalTablesSpec = m.flags.contains(Flag.GLOBAL_TABLES_SPEC);
                 boolean hasMorePages = m.flags.contains(Flag.HAS_MORE_PAGES);
                 boolean continuousPaging = m.flags.contains(Flag.CONTINUOUS_PAGING);
+                boolean metadataChanged = m.flags.contains(Flag.METADATA_CHANGED);
 
                 assert version.isGreaterThan(ProtocolVersion.V1) || (!hasMorePages && !noMetadata)
                     : "version = " + version + ", flags = " + m.flags;
@@ -439,6 +503,12 @@ public class ResultSet
 
                 if (hasMorePages)
                     CBUtil.writeValue(m.pagingResult.state.serialize(version), dest);
+
+                if (version.isGreaterOrEqualTo(ProtocolVersion.V5, ProtocolVersion.DSE_V2) && metadataChanged)
+                {
+                    assert !noMetadata : "MetadataChanged and NoMetadata are mutually exclusive flags";
+                    CBUtil.writeBytes(m.getResultMetadataId().bytes, dest);
+                }
 
                 if (continuousPaging)
                 {
@@ -475,6 +545,7 @@ public class ResultSet
                 boolean globalTablesSpec = m.flags.contains(Flag.GLOBAL_TABLES_SPEC);
                 boolean hasMorePages = m.flags.contains(Flag.HAS_MORE_PAGES);
                 boolean continuousPaging = m.flags.contains(Flag.CONTINUOUS_PAGING);
+                boolean metadataChanged = m.flags.contains(Flag.METADATA_CHANGED);
 
                 int size = 8;
                 if (hasMorePages)
@@ -482,6 +553,9 @@ public class ResultSet
 
                 if (continuousPaging)
                     size += 4;
+
+                if (version.isGreaterOrEqualTo(ProtocolVersion.V5, ProtocolVersion.DSE_V2) && metadataChanged)
+                    size += CBUtil.sizeOfBytes(m.getResultMetadataId().bytes);
 
                 if (!noMetadata)
                 {
@@ -582,6 +656,11 @@ public class ResultSet
             }
             sb.append("]");
             return sb.toString();
+        }
+
+        public static PreparedMetadata fromPrepared(ParsedStatement.Prepared prepared)
+        {
+            return new PreparedMetadata(prepared.boundNames, prepared.partitionKeyBindIndexes);
         }
 
         private static class Codec implements CBCodec<PreparedMetadata>
@@ -702,6 +781,7 @@ public class ResultSet
         GLOBAL_TABLES_SPEC(0),
         HAS_MORE_PAGES(1),
         NO_METADATA(2),
+        METADATA_CHANGED(3),
 
         // private flags
         CONTINUOUS_PAGING(30),

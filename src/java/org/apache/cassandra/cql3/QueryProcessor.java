@@ -35,8 +35,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Iterators;
+import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.MoreExecutors;
 import org.slf4j.Logger;
@@ -518,7 +517,8 @@ public class QueryProcessor implements QueryHandler
 
         checkTrue(queryString.equals(existing.rawCQLStatement),
                 String.format("MD5 hash collision: query with the same MD5 hash was already prepared. \n Existing: '%s'", existing.rawCQLStatement));
-        return new ResultMessage.Prepared(statementId, existing);
+
+        return new ResultMessage.Prepared(statementId, existing.resultMetadataId, existing);
     }
 
     public static Single<ResultMessage.Prepared> storePreparedStatement(String queryString, String keyspace, ParsedStatement.Prepared prepared)
@@ -535,8 +535,10 @@ public class QueryProcessor implements QueryHandler
                                                             queryString.substring(0, 200)));
         MD5Digest statementId = computeId(queryString, keyspace);
         preparedStatements.put(statementId, prepared);
+
+        ResultSet.ResultMetadata resultMetadata = ResultSet.ResultMetadata.fromPrepared(prepared);
         Single<UntypedResultSet> observable = SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
-        return observable.map(resultSet -> new ResultMessage.Prepared(statementId, prepared));
+        return observable.map(resultSet -> new ResultMessage.Prepared(statementId, resultMetadata.getResultMetadataId(), prepared));
     }
 
     public Single<ResultMessage> processPrepared(CQLStatement statement,

@@ -147,6 +147,8 @@ public class Client extends SimpleClient
             try
             {
                 byte[] id = Hex.hexToBytes(iter.next());
+                byte[] preparedStatementId = Hex.hexToBytes(iter.next());
+
                 List<ByteBuffer> values = new ArrayList<ByteBuffer>();
                 while(iter.hasNext())
                 {
@@ -163,7 +165,7 @@ public class Client extends SimpleClient
                     }
                     values.add(bb);
                 }
-                return new ExecuteMessage(MD5Digest.wrap(id), QueryOptions.forInternalCalls(ConsistencyLevel.ONE, values));
+                return new ExecuteMessage(MD5Digest.wrap(id), MD5Digest.wrap(preparedStatementId), QueryOptions.forInternalCalls(ConsistencyLevel.ONE, values));
             }
             catch (Exception e)
             {
