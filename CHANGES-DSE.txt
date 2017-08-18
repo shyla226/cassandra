@@ -1,4 +1,5 @@
 dse 6.0.0
+ * Corrects improper use of Flow.close() for cancellation (APOLLO-1031)
  * TPC counterpart to thread pool statistics (APOLLO-712)
  * Improvements to trie index size (APOLLO-759)
  * Use shaded mobility-rpc jar to fix DSE build issues (APOLLO-839)

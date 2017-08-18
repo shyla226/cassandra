@@ -25,7 +25,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -77,8 +76,9 @@ public abstract class Flow<T>
      * The subscriber is expected to call request() on the returned subscription; in response, it will receive an
      * onNext(item), onComplete(), or onError(throwable). To get further items, the subscriber must call request()
      * again _after_ receiving the onNext (usually before returning from the call).
+     *
      * When done with the content (regardless of whether onComplete or onError was received), the subscriber must
-     * close the subscription.
+     * close the subscription. Closing cannot be done concurrently with any requests.
      */
     abstract public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception;
 
@@ -1054,8 +1054,8 @@ public abstract class Flow<T>
     {
         final BiFunction<O, T, O> reducer;
         O current;
-        private StackTraceElement[] stackTrace;
-        private FlowSubscription source;
+        private final StackTraceElement[] stackTrace;
+        final FlowSubscription source;
 
         ReduceSubscriber(O seed, Flow<T> source, BiFunction<O, T, O> reducer) throws Exception
         {
@@ -1117,6 +1117,7 @@ public abstract class Flow<T>
 
     /**
      * Reduce the flow, blocking until the operation completes.
+     * Note: The reduced value must not hold resources, because it is lost if an exception occurs.
      *
      * @param seed Initial value for the reduction.
      * @param reducer Called repeatedly with the reduced value (starting with seed and continuing with the result
@@ -1160,13 +1161,14 @@ public abstract class Flow<T>
 
     /**
      * Reduce the flow, returning a completable future that is completed when the operations complete.
+     * Note: The reduced value must not hold resources, because it is lost if an exception occurs.
      *
      * @param seed Initial value for the reduction.
      * @param reducer Called repeatedly with the reduced value (starting with seed and continuing with the result
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
      */
-    public <O> Future<O> reduceToFuture(O seed, ReduceFunction<O, T> reducer)
+    public <O> CompletableFuture<O> reduceToFuture(O seed, ReduceFunction<O, T> reducer)
     {
         Future<O> future = new Future<>();
         class ReduceToFutureSubscription extends ReduceSubscriber<T, O>
@@ -1176,13 +1178,63 @@ public abstract class Flow<T>
                 super(seed, source, reducer);
             }
 
+            @Override   // onNext is overridden to enable cancellation
+            public void onNext(T item)
+            {
+                // We may be already cancelled, but we prefer to first pass current to the reducer who may know how to
+                // release a resource.
+                try
+                {
+                    current = reducer.apply(current, item);
+                }
+                catch (Throwable t)
+                {
+                    onError(t);
+                    return;
+                }
+
+                if (future.isCancelled())
+                {
+                    try
+                    {
+                        close();
+                    }
+                    catch (Throwable t)
+                    {
+                        logger.error("Error closing flow after cancellation", t);
+                    }
+                    return;
+                }
+
+                requestInLoop(source);
+            }
+
             public void onComplete()
             {
+                try
+                {
+                    close();
+                }
+                catch (Throwable t)
+                {
+                    future.completeExceptionallyInternal(t);
+                    return;
+                }
+
                 future.completeInternal(current);
             }
 
             protected void onErrorInternal(Throwable t)
             {
+                try
+                {
+                    close();
+                }
+                catch (Throwable t2)
+                {
+                    t.addSuppressed(t2);
+                }
+
                 future.completeExceptionallyInternal(t);
             }
         }
@@ -1198,7 +1250,6 @@ public abstract class Flow<T>
             return future;
         }
 
-        future.sub = s;
         s.request();
 
         return future;
@@ -1210,19 +1261,10 @@ public abstract class Flow<T>
      * This extends and behave like a {@link CompletableFuture}, with the exception that one cannot call the
      * {@link #complete(Object)} and {@link #completeExceptionally(Throwable)} (they throw {@link UnsupportedOperationException}):
      * those are called when the flow this is future on completes. It is however possible to cancel() this future, which
-     * will close the underlying flow.
+     * will stop the underlying flow at the next request.
      */
-    // Implementation note: the initial reason why this sub-class exists (versus using CompletableFuture directly) is
-    // to handle cancellation properly. But adding a new class also allows to protect against misuses by disabling the
-    // completion methods, which is nice.
     public static class Future<T> extends CompletableFuture<T>
     {
-        // Note: we have a chicken-and-egg problem with the underlying subscription: the subscription needs to signal
-        // the future on completion, but the future needs to know the subscription. So one has to be created before
-        // the other and we create the Future first, after which the subscription is manually set. Which is why the
-        // field is not final.
-        private FlowSubscription sub;
-
         @Override
         public boolean complete(T t)
         {
@@ -1237,58 +1279,12 @@ public abstract class Flow<T>
 
         private void completeInternal(T t)
         {
-            try
-            {
-
-                sub.close();
-                super.complete(t);
-            }
-            catch (Exception e)
-            {
-                super.completeExceptionally(e);
-            }
+            super.complete(t);
         }
 
         private void completeExceptionallyInternal(Throwable throwable)
         {
-            try
-            {
-                // In general, we rely on sub before set first thing and thus not being null, but we do call this
-                // without sub being set in case of an error creating the subscription.
-                if (sub != null)
-                    sub.close();
-            }
-            catch (Throwable e)
-            {
-                throwable = Throwables.merge(throwable, e);
-            }
             super.completeExceptionally(throwable);
-        }
-
-        @Override
-        public boolean cancel(boolean b)
-        {
-            if (isDone())
-                return false;
-
-            try
-            {
-                sub.close();
-                return super.cancel(b);
-            }
-            catch (Exception e)
-            {
-                super.completeExceptionally(new ErrorDuringCancellationException(e));
-                return false;
-            }
-        }
-
-        private static class ErrorDuringCancellationException extends RuntimeException
-        {
-            private ErrorDuringCancellationException(Exception e)
-            {
-                super(e);
-            }
         }
     }
 
@@ -1395,6 +1391,7 @@ public abstract class Flow<T>
 
     /**
      * Reduce the flow, returning a completable future that is completed when the operations complete.
+     * Note: The reduced value must not hold resources, because it is lost if an exception occurs.
      *
      * @param seed Initial value for the reduction.
      * @param reducerToSingle Called repeatedly with the reduced value (starting with seed and continuing with the result
@@ -1530,7 +1527,7 @@ public abstract class Flow<T>
      *
      * @return a future on the completion of this this flow.
      */
-    public Future<Void> processToFuture()
+    public CompletableFuture<Void> processToFuture()
     {
         return reduceToFuture(null, (v, t) -> null);
     }

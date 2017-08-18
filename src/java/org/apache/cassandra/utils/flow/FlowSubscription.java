@@ -27,6 +27,9 @@ public interface FlowSubscription extends AutoCloseable
      * Requests exactly one item from the subscription.
      * In response to this call, exactly one onNext/onComplete or onError call must be made.
      *
+     * It is an error to call request() or close() while another request is still active (i.e. before an onX has been
+     * received; it would typically be called within/at the end of that onX call).
+     *
      * This call implies that all resources held by the previous item are no longer in use.
      */
     void request();
@@ -34,6 +37,10 @@ public interface FlowSubscription extends AutoCloseable
     /**
      * Stop issuing any more items and close resources. Must be called also when the flow is done (due to completion or error).
      * Stashed exceptions may be thrown.
+     *
+     * It is an error to call request() or close() while another request is still active (i.e. before an onX has been
+     * received; it would typically be called within/at the end of that onX call). This implies that close cannot be
+     * used as a means of externally cancelling a flow.
      *
      * This call implies that all resources held by any outstanding item are no longer in use.
      */
