@@ -285,7 +285,7 @@ public class SchemaLoader
 
     public static void createKeyspace(String name, KeyspaceParams params, Tables tables, Types types)
     {
-        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables, Views.none(), types, Functions.none()), true);
+        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables, Views.none(), types, Functions.none()), true).blockingGet();
     }
 
     public static void createKeyspace(String name, KeyspaceParams params, TableMetadata[] tables, Iterable<ViewMetadata> views)
