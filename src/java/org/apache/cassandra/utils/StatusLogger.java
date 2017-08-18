@@ -53,7 +53,7 @@ public class StatusLogger
         MBeanServer server = ManagementFactory.getPlatformMBeanServer();
 
         // everything from o.a.c.concurrent
-        String headerFormat = "%-" + (TpStatsPrinter.longestStrLength(Arrays.asList(TPCTaskType.values())) + 5) + "s%10s%10s%15s%10s%18s%n";
+        String headerFormat = "%-" + (TpStatsPrinter.longestStrLength(Arrays.asList((Object[])TPCTaskType.values())) + 5) + "s%10s%10s%15s%10s%18s%n";
         logger.info(String.format(headerFormat, "Pool Name", "Active", "Pending", "Completed", "Blocked", "All Time Blocked"));
 
         Multimap<String, String> jmxThreadPools = ThreadPoolMetrics.getJmxThreadPools(server);

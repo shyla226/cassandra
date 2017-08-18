@@ -49,7 +49,7 @@ public class TpStatsPrinter
         {
             Map<String, Object> convertData = data.convert2Map();
 
-            String headerFormat = "%-" + (longestStrLength(Arrays.asList(TPCTaskType.values())) + 5) + "s%10s%10s%15s%10s%18s%n";
+            String headerFormat = "%-" + (longestStrLength(Arrays.asList((Object[])TPCTaskType.values())) + 5) + "s%10s%10s%15s%10s%18s%n";
             out.printf(headerFormat, "Pool Name", "Active", "Pending", "Completed", "Blocked", "All time blocked");
 
             Map<Object, Object> threadPools = convertData.get("ThreadPools") instanceof Map<?, ?> ? (Map)convertData.get("ThreadPools") : Collections.emptyMap();
