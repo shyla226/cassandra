@@ -407,7 +407,7 @@ public class BulkLoader
         public int storagePort;
         public int sslStoragePort;
         public ITransportFactory transportFactory = new TFramedTransportFactory();
-        public EncryptionOptions encOptions = new EncryptionOptions.ClientEncryptionOptions();
+        public EncryptionOptions.ClientEncryptionOptions clientEncOptions = new EncryptionOptions.ClientEncryptionOptions();
         public int connectionsPerHost = 1;
         public EncryptionOptions.ServerEncryptionOptions serverEncOptions = new EncryptionOptions.ServerEncryptionOptions();
 
@@ -536,7 +536,7 @@ public class BulkLoader
                 opts.sslStoragePort = config.ssl_storage_port;
                 opts.throttle = config.stream_throughput_outbound_megabits_per_sec;
                 opts.interDcThrottle = config.inter_dc_stream_throughput_outbound_megabits_per_sec;
-                opts.encOptions = config.client_encryption_options;
+                opts.clientEncOptions = config.client_encryption_options;
                 opts.serverEncOptions = config.server_encryption_options;
 
                 if (cmd.hasOption(THROTTLE_MBITS))
@@ -549,46 +549,52 @@ public class BulkLoader
                     opts.interDcThrottle = Integer.parseInt(cmd.getOptionValue(INTER_DC_THROTTLE_MBITS));
                 }
 
+                if (cmd.hasOption(SSL_TRUSTSTORE) || cmd.hasOption(SSL_TRUSTSTORE_PW) ||
+                    cmd.hasOption(SSL_KEYSTORE) || cmd.hasOption(SSL_KEYSTORE_PW))
+                {
+                    opts.clientEncOptions.enabled = true;
+                }
+
                 if (cmd.hasOption(SSL_TRUSTSTORE))
                 {
-                    opts.encOptions.truststore = cmd.getOptionValue(SSL_TRUSTSTORE);
+                    opts.clientEncOptions.truststore = cmd.getOptionValue(SSL_TRUSTSTORE);
                 }
 
                 if (cmd.hasOption(SSL_TRUSTSTORE_PW))
                 {
-                    opts.encOptions.truststore_password = cmd.getOptionValue(SSL_TRUSTSTORE_PW);
+                    opts.clientEncOptions.truststore_password = cmd.getOptionValue(SSL_TRUSTSTORE_PW);
                 }
 
                 if (cmd.hasOption(SSL_KEYSTORE))
                 {
-                    opts.encOptions.keystore = cmd.getOptionValue(SSL_KEYSTORE);
+                    opts.clientEncOptions.keystore = cmd.getOptionValue(SSL_KEYSTORE);
                     // if a keystore was provided, lets assume we'll need to use it
-                    opts.encOptions.require_client_auth = true;
+                    opts.clientEncOptions.require_client_auth = true;
                 }
 
                 if (cmd.hasOption(SSL_KEYSTORE_PW))
                 {
-                    opts.encOptions.keystore_password = cmd.getOptionValue(SSL_KEYSTORE_PW);
+                    opts.clientEncOptions.keystore_password = cmd.getOptionValue(SSL_KEYSTORE_PW);
                 }
 
                 if (cmd.hasOption(SSL_PROTOCOL))
                 {
-                    opts.encOptions.protocol = cmd.getOptionValue(SSL_PROTOCOL);
+                    opts.clientEncOptions.protocol = cmd.getOptionValue(SSL_PROTOCOL);
                 }
 
                 if (cmd.hasOption(SSL_ALGORITHM))
                 {
-                    opts.encOptions.algorithm = cmd.getOptionValue(SSL_ALGORITHM);
+                    opts.clientEncOptions.algorithm = cmd.getOptionValue(SSL_ALGORITHM);
                 }
 
                 if (cmd.hasOption(SSL_STORE_TYPE))
                 {
-                    opts.encOptions.store_type = cmd.getOptionValue(SSL_STORE_TYPE);
+                    opts.clientEncOptions.store_type = cmd.getOptionValue(SSL_STORE_TYPE);
                 }
 
                 if (cmd.hasOption(SSL_CIPHER_SUITES))
                 {
-                    opts.encOptions.cipher_suites = cmd.getOptionValue(SSL_CIPHER_SUITES).split(",");
+                    opts.clientEncOptions.cipher_suites = cmd.getOptionValue(SSL_CIPHER_SUITES).split(",");
                 }
 
                 if (cmd.hasOption(TRANSPORT_FACTORY))
@@ -628,20 +634,20 @@ public class BulkLoader
             Map<String, String> options = new HashMap<>();
             // If the supplied factory supports the same set of options as our SSL impl, set those 
             if (transportFactory.supportedOptions().contains(SSLTransportFactory.TRUSTSTORE))
-                options.put(SSLTransportFactory.TRUSTSTORE, opts.encOptions.truststore);
+                options.put(SSLTransportFactory.TRUSTSTORE, opts.clientEncOptions.truststore);
             if (transportFactory.supportedOptions().contains(SSLTransportFactory.TRUSTSTORE_PASSWORD))
-                options.put(SSLTransportFactory.TRUSTSTORE_PASSWORD, opts.encOptions.truststore_password);
+                options.put(SSLTransportFactory.TRUSTSTORE_PASSWORD, opts.clientEncOptions.truststore_password);
             if (transportFactory.supportedOptions().contains(SSLTransportFactory.PROTOCOL))
-                options.put(SSLTransportFactory.PROTOCOL, opts.encOptions.protocol);
+                options.put(SSLTransportFactory.PROTOCOL, opts.clientEncOptions.protocol);
             if (transportFactory.supportedOptions().contains(SSLTransportFactory.CIPHER_SUITES))
-                options.put(SSLTransportFactory.CIPHER_SUITES, Joiner.on(',').join(opts.encOptions.cipher_suites));
+                options.put(SSLTransportFactory.CIPHER_SUITES, Joiner.on(',').join(opts.clientEncOptions.cipher_suites));
 
             if (transportFactory.supportedOptions().contains(SSLTransportFactory.KEYSTORE)
-                    && opts.encOptions.require_client_auth)
-                options.put(SSLTransportFactory.KEYSTORE, opts.encOptions.keystore);
+                    && opts.clientEncOptions.require_client_auth)
+                options.put(SSLTransportFactory.KEYSTORE, opts.clientEncOptions.keystore);
             if (transportFactory.supportedOptions().contains(SSLTransportFactory.KEYSTORE_PASSWORD)
-                    && opts.encOptions.require_client_auth)
-                options.put(SSLTransportFactory.KEYSTORE_PASSWORD, opts.encOptions.keystore_password);
+                    && opts.clientEncOptions.require_client_auth)
+                options.put(SSLTransportFactory.KEYSTORE_PASSWORD, opts.clientEncOptions.keystore_password);
 
             // Now check if any of the factory's supported options are set as system properties
             for (String optionKey : transportFactory.supportedOptions())
