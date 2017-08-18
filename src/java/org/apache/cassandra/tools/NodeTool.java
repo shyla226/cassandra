@@ -174,7 +174,8 @@ public class NodeTool
                 FailureDetectorInfo.class,
                 RefreshSizeEstimates.class,
                 RelocateSSTables.class,
-                ViewBuildStatus.class
+                ViewBuildStatus.class,
+                MarkUnrepaired.class
         );
 
         if (withSequence)

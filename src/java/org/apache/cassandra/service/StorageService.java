@@ -38,6 +38,7 @@ import javax.management.openmbean.TabularData;
 import javax.management.openmbean.TabularDataSupport;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Joiner;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
@@ -5383,5 +5384,25 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             diskBoundaries.add(boundaries.get(i).maxKeyBound());
         diskBoundaries.add(partitioner.getMaximumToken().maxKeyBound());
         return diskBoundaries;
+    }
+
+    public int forceMarkAllSSTablesAsUnrepaired(String keyspace, String... tables) throws IOException
+    {
+        int marked = 0;
+        for (ColumnFamilyStore cfs : getValidColumnFamilies(false, false, keyspace, tables))
+        {
+            try
+            {
+                marked += cfs.forceMarkAllSSTablesAsUnrepaired();
+            } catch (Throwable t)
+            {
+                logger.error("Error while marking all SSTables from table {}.{} as unrepaired. Please trigger operation again " +
+                             "or manually mark SSTables as unrepaired otherwise rows already purged on other replicas may be " +
+                             "propagated to other replicas during incremental repair without their respectives tombstones.",
+                             keyspace, cfs.name, t);
+                throw new RuntimeException(t);
+            }
+        }
+        return marked;
     }
 }
