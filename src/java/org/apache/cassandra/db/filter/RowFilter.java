@@ -149,19 +149,18 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      * @param nowInSec the current time in seconds (to know what is live and what isn't).
      * @return {@code true} if {@code row} in partition {@code partitionKey} satisfies this row filter.
      */
-    public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, int nowInSec)
+    public Flow<Boolean> isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, int nowInSec)
     {
         // We purge all tombstones as the expressions isSatisfiedBy methods expects it
         Row purged = row.purge(DeletionPurger.PURGE_ALL, nowInSec);
         if (purged == null)
-            return expressions.isEmpty();
+            return Flow.just(expressions.isEmpty());
 
-        for (Expression e : expressions)
-        {
-            if (!e.isSatisfiedBy(metadata, partitionKey, purged))
-                return false;
-        }
-        return true;
+        return Flow.fromIterable(expressions)
+                   .flatMap(e -> e.isSatisfiedBy(metadata, partitionKey, purged))
+                   .takeWhile(satisfied -> satisfied)
+                   .reduce(0, (val, satisfied) -> ++val)
+                   .map(val -> val == expressions.size());  //all true
     }
 
     /**
@@ -283,30 +282,40 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 DecoratedKey pk = partition.header.partitionKey;
 
                 // Short-circuit all partitions that won't match based on static and partition keys
-                for (Expression e : partitionLevelExpressions)
-                    if (!e.isSatisfiedBy(metadata, pk, partition.staticRow))
-                    {
-                        partition.unused();
-                        return Flow.empty();
-                    }
+                return Flow.fromIterable(partitionLevelExpressions)
+                           .flatMap(e -> e.isSatisfiedBy(metadata, pk, partition.staticRow))
+                           .takeWhile(satisfied -> satisfied)
+                           .reduce(0, (val, satisfied) -> ++val)
+                           .map(val -> val == partitionLevelExpressions.size()) //all true
+                           .skippingMap(allSatisfied -> allSatisfied ? partition : null);
+
+            }).flatMap(
+            p -> {
+                //Need this cast to keep eclipse warnings happy
+                FlowableUnfilteredPartition partition = (FlowableUnfilteredPartition)p;
+                DecoratedKey pk = partition.partitionKey();
 
                 // TODO: This method has some odd behavior. It purges deletions when they are on their own
                 // but leaves them in if they are together with a live cell, leading to potential changes in content
                 // before and after compacting data.
-                Flow<Unfiltered> content = partition.content.skippingMap(unfiltered ->
+                Flow<Unfiltered> content = partition.content.flatMap(unfiltered ->
                 {
                     if (unfiltered.isRow())
                     {
                         Row purged = ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec);
                         if (purged == null)
-                            return null;
+                            return Flow.empty();
 
-                        for (Expression e : rowLevelExpressions)
-                            if (!e.isSatisfiedBy(metadata, pk, purged))
-                                return null;
+
+                        return Flow.fromIterable(rowLevelExpressions)
+                                   .flatMap(e -> e.isSatisfiedBy(metadata, pk, purged))
+                                   .takeWhile(satisfied -> satisfied)
+                                   .reduce(0, (val, satisfied) -> ++val)
+                                   .map(val -> val == rowLevelExpressions.size()) //all true
+                                   .skippingMap(allSatisfied -> allSatisfied ? unfiltered : null);
                     }
 
-                    return unfiltered;
+                    return Flow.just(unfiltered);
                 });
 
                 // TODO: We reject a partition here if it does not have rows and filterNonStaticColumns is true
@@ -429,7 +438,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
          * (i.e. it should come from a RowIterator).
          * @return whether the row is satisfied by this expression.
          */
-        public abstract boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row);
+        public abstract Flow<Boolean> isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row);
 
         protected ByteBuffer getValue(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
@@ -589,7 +598,12 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             super(column, operator, value);
         }
 
-        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        public Flow<Boolean> isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        {
+            return Flow.just(isSatisfiedByInternal(metadata, partitionKey, row));
+        }
+
+        private boolean isSatisfiedByInternal(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
             // We support null conditions for LWT (in ColumnCondition) but not for RowFilter.
             // TODO: we should try to merge both code someday.
@@ -760,7 +774,12 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             return CompositeType.build(key, value);
         }
 
-        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        public Flow<Boolean> isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        {
+            return Flow.just(isSatisfiedByInternal(metadata, partitionKey, row));
+        }
+
+        private boolean isSatisfiedByInternal(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
             assert key != null;
             // We support null conditions for LWT (in ColumnCondition) but not for RowFilter.
@@ -874,9 +893,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         // Filtering by custom expressions isn't supported yet, so just accept any row
-        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        public Flow<Boolean> isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
-            return true;
+            return Flow.just(true);
         }
     }
 
