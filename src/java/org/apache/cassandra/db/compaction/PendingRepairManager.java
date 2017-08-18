@@ -427,12 +427,7 @@ class PendingRepairManager
             boolean completed = false;
             try
             {
-                logger.debug("Setting repairedAt to {} on {} for {}", repairedAt, transaction.originals(), sessionID);
-                for (SSTableReader sstable : transaction.originals())
-                {
-                    sstable.descriptor.getMetadataSerializer().mutateRepaired(sstable.descriptor, repairedAt, ActiveRepairService.NO_PENDING_REPAIR);
-                    sstable.reloadSSTableMetadata();
-                }
+                cfs.mutateRepairedAt(transaction.originals(), repairedAt, ActiveRepairService.NO_PENDING_REPAIR);
                 completed = true;
             }
             finally

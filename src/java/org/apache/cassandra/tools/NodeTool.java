@@ -182,7 +182,8 @@ public class NodeTool
                 RefreshSizeEstimates.class,
                 RelocateSSTables.class,
                 ViewBuildStatus.class,
-                InMemoryStatus.class
+                InMemoryStatus.class,
+                MarkUnrepaired.class
         );
 
         if (withSequence)

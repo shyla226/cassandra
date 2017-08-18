@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.StreamSupport;
+import java.util.stream.Collectors;
 import javax.management.*;
 import javax.management.openmbean.*;
 
@@ -80,6 +81,7 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TableMetrics.Sampler;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.TableInfo;
@@ -2745,5 +2747,35 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public TableInfo getTableInfo()
     {
         return new TableInfo(hasViews(), metadata.get().isView(), getLiveSSTables().stream().anyMatch(s -> s.isRepaired()), isCdcEnabled());
+    }
+
+    public int mutateRepairedAt(Collection<SSTableReader> sstables, long repairedAt, UUID pendingRepair) throws IOException
+    {
+        Set<SSTableReader> changedStatus = new HashSet<>(sstables.size());
+        for (SSTableReader sstable : sstables)
+        {
+            assert metadata.get().id.equals(sstable.metadata().id);
+            Pair<Long, UUID> previousStatus = Pair.create(sstable.getSSTableMetadata().repairedAt, sstable.getSSTableMetadata().pendingRepair);
+            logger.info("Setting repaired at to {} and {}", repairedAt, pendingRepair);
+            sstable.descriptor.getMetadataSerializer().mutateRepaired(sstable.descriptor, repairedAt, pendingRepair);
+            sstable.reloadSSTableMetadata();
+            if (!previousStatus.equals(Pair.create(sstable.getSSTableMetadata().repairedAt, sstable.getSSTableMetadata().pendingRepair)))
+            {
+                changedStatus.add(sstable);
+            }
+        }
+        getTracker().notifySSTableRepairedStatusChanged(changedStatus);
+        return changedStatus.size();
+    }
+
+    public int forceMarkAllSSTablesAsUnrepaired()
+    {
+        return runWithCompactionsDisabled(() ->
+                                   {
+                                       Set<SSTableReader> repairedSSTables = getLiveSSTables().stream().filter(SSTableReader::isRepaired).collect(Collectors.toSet());
+                                       int mutated = mutateRepairedAt(repairedSSTables, ActiveRepairService.UNREPAIRED_SSTABLE, null);
+                                       logger.debug("Marked {} sstables from table {}.{} as repaired.", mutated, keyspace.getName(), name);
+                                   return mutated;
+                                   }, true, true);
     }
 }

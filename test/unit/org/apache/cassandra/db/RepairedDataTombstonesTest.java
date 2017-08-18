@@ -308,8 +308,6 @@ public class RepairedDataTombstonesTest extends CQLTester
 
     public static void repair(ColumnFamilyStore cfs, SSTableReader sstable) throws IOException
     {
-        sstable.descriptor.getMetadataSerializer().mutateRepaired(sstable.descriptor, 1, null);
-        sstable.reloadSSTableMetadata();
-        cfs.getTracker().notifySSTableRepairedStatusChanged(Collections.singleton(sstable));
+        cfs.mutateRepairedAt(Collections.singleton(sstable), 1, null);
     }
 }

@@ -90,6 +90,7 @@ import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.streaming.management.StreamStateCompositeData;
 
 import com.google.common.base.Function;
+import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
@@ -1655,6 +1656,18 @@ public class NodeProbe implements AutoCloseable
     public void cancelUserValidation(String idStr)
     {
         nodeSyncProxy.cancelUserValidation(idStr);
+    }
+
+    public void markAllSSTablesAsUnrepaired(PrintStream out, String keyspace, String[] tables) throws IOException
+    {
+        int marked = ssProxy.forceMarkAllSSTablesAsUnrepaired(keyspace, tables);
+        if (marked == 0)
+        {
+            out.println(String.format("No repaired SSTables to mark as unrepaired.", marked));
+        } else
+        {
+            out.println(String.format("Marked %d SSTable(s) as unrepaired.", marked));
+        }
     }
 }
 
