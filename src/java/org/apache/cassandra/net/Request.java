@@ -18,16 +18,13 @@
 package org.apache.cassandra.net;
 
 import java.net.InetAddress;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -279,7 +276,10 @@ public class Request<P, Q> extends Message<P>
 
         static List<Forward> from(List<InetAddress> hosts)
         {
-            return Lists.transform(hosts, Forward::new);
+            List<Forward> r = new ArrayList<>(hosts.size());
+            for (InetAddress host : hosts)
+                r.add(new Forward(host));
+            return r;
         }
     }
 
