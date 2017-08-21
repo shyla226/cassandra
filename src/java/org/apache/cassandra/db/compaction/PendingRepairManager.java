@@ -300,6 +300,9 @@ class PendingRepairManager
             sessions.add(entry.getKey());
         }
 
+        if (sessions.isEmpty())
+            return null;
+
         // we want the session with the most compactions at the head of the list
         sessions.sort((o1, o2) -> numTasks.get(o2) - numTasks.get(o1));
 
@@ -393,6 +396,11 @@ class PendingRepairManager
     public boolean hasStrategy(AbstractCompactionStrategy strategy)
     {
         return strategies.values().contains(strategy);
+    }
+
+    public synchronized boolean hasDataForSession(UUID sessionID)
+    {
+        return strategies.keySet().contains(sessionID);
     }
 
     public Collection<AbstractCompactionTask> createUserDefinedTasks(List<SSTableReader> sstables, int gcBefore)

@@ -32,7 +32,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-
+import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -45,7 +45,6 @@ import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -261,8 +260,15 @@ public class LocalSessions
                 }
                 else if (shouldDelete(session, now))
                 {
-                    logger.debug("Auto deleting repair session {}", session);
-                    deleteSession(session.sessionID);
+                    if (!sessionHasData(session))
+                    {
+                        logger.debug("Auto deleting repair session {}", session);
+                        deleteSession(session.sessionID);
+                    }
+                    else
+                    {
+                        logger.warn("Skipping delete of LocalSession {} because it still contains sstables", session.sessionID);
+                    }
                 }
                 else if (shouldCheckStatus(session, now))
                 {
@@ -733,6 +739,17 @@ public class LocalSessions
     {
         LocalSession session = getSession(sessionID);
         return session != null && session.getState() != FINALIZED && session.getState() != FAILED;
+    }
+
+    @VisibleForTesting
+    protected boolean sessionHasData(LocalSession session)
+    {
+        Predicate<TableId> predicate = tid -> {
+            ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(tid);
+            return cfs != null && cfs.getCompactionStrategyManager().hasDataForPendingRepair(session.sessionID);
+
+        };
+        return Iterables.any(session.tableIds, predicate::test);
     }
 
     /**

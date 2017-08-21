@@ -1,4 +1,7 @@
 4.0
+ * Add bytes repaired/unrepaired to nodetool tablestats (CASSANDRA-13774)
+ * Don't delete incremental repair sessions if they still have sstables (CASSANDRA-13758)
+ * Fix pending repair manager index out of bounds check (CASSANDRA-13769)
  * Don't use RangeFetchMapCalculator when RF=1 (CASSANDRA-13576)
  * Don't optimise trivial ranges in RangeFetchMapCalculator (CASSANDRA-13664)
  * Use an ExecutorService for repair commands instead of new Thread(..).start() (CASSANDRA-13594)
