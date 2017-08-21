@@ -20,6 +20,7 @@ package org.apache.cassandra.config;
 import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
+import java.lang.management.RuntimeMXBean;
 import java.lang.reflect.Constructor;
 import java.net.*;
 import java.nio.file.FileStore;
@@ -64,6 +65,7 @@ import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.service.CacheService.CacheType;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.LineNumberInference;
+import sun.misc.VM;
 
 import static org.apache.cassandra.io.util.FileUtils.ONE_GB;
 
@@ -397,8 +399,38 @@ public class DatabaseDescriptor
 
         if (conf.file_cache_size_in_mb == null)
         {
-            OperatingSystemMXBean bean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
-            conf.file_cache_size_in_mb = (int) (bean.getTotalPhysicalMemorySize() / (3 * 1048576));
+            RuntimeMXBean bean = ManagementFactory.getRuntimeMXBean();
+            String directMemSizeParam = "-XX:MaxDirectMemorySize=";
+            for (String s : bean.getInputArguments())
+            {
+                if (s.contains(directMemSizeParam))
+                {
+
+                    String arg = s.replace(directMemSizeParam, "").trim().toLowerCase();
+                    int multiplier;
+                    if (arg.endsWith("k"))
+                        multiplier = 1024;
+                    else if (arg.endsWith("m"))
+                        multiplier = 1024 * 1024;
+                    else if (arg.endsWith("g"))
+                        multiplier = 1024 * 1024 * 1024;
+                    else
+                        throw new ConfigurationException("Can't parse direct memory param: '" + arg + "'");
+                    int memSize = Integer.parseInt(arg.replaceAll("\\D+",""));
+
+                    conf.file_cache_size_in_mb = (int) (0.33 * memSize * multiplier / 1024 / 1024);
+                    logger.info("Using file cache of {}MB", conf.file_cache_size_in_mb);
+                    break;
+                }
+            }
+
+            if (conf.file_cache_size_in_mb == null)
+            {
+                OperatingSystemMXBean osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+                conf.file_cache_size_in_mb = (int) (osBean.getTotalPhysicalMemorySize() / (3 * 1048576));
+                logger.warn("Falling back to default file_cache_size_in_mb calculation. file_cache_size_in_mb is set to {}. Set `-DMaxDirectMemorySize` for " +
+                            "a more precise calculation", conf.file_cache_size_in_mb);
+            }
         }
 
         if (conf.memtable_offheap_space_in_mb == null)

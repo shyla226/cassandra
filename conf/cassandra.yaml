@@ -422,10 +422,12 @@ seed_provider:
 # Maximum memory to use for sstable chunk cache and buffer pooling.
 # 32MB of this are reserved for pooling buffers, the rest is used as an
 # cache that holds uncompressed sstable chunks.
-# Defaults to 1/3 of total system memory. This pool is allocated off-heap,
-# so is in addition to the memory allocated for heap. The cache also has on-heap
-# overhead which is roughly 128 bytes per chunk (i.e. 0.2% of the reserved size
-# if the default 64k chunk size is used).
+# Defaults to 1/3 of max direct memory (by default, max direct memory
+# is up to total system memory).
+# This pool is allocated off-heap, so is in addition to the memory allocated
+# for heap. The cache also has on-heap overhead which is roughly 128 bytes
+# per chunk (i.e. 0.2% of the reserved size if the default 64k chunk size is
+# used).
 # Memory is only allocated when needed.
 # file_cache_size_in_mb: 4096
 

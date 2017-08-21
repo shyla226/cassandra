@@ -14,8 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-calculate_heap_sizes()
+calculate_system_memory_sizes()
 {
+    if [ "$system_memory_sizes_calculated" = true ] ; then
+        return
+    fi
+
     case "`uname`" in
         Linux)
             system_memory_in_mb=`free -m | awk '/:/ {print $2;exit}'`
@@ -70,6 +74,14 @@ calculate_heap_sizes()
     else
         max_heap_size_in_mb="$quarter_system_memory_in_mb"
     fi
+
+    system_memory_sizes_calculated=true
+}
+
+calculate_system_memory_sizes
+
+calculate_heap_sizes()
+{
     MAX_HEAP_SIZE="${max_heap_size_in_mb}M"
 
     # Young gen: min(max_sensible_per_modern_cpu_core * num_cores, 1/4 * heap size)
@@ -174,6 +186,11 @@ elif [ "x$MAX_HEAP_SIZE" = "x" ] ||  [ "x$HEAP_NEWSIZE" = "x" -a $USING_G1 -ne 0
     echo "please set or unset MAX_HEAP_SIZE and HEAP_NEWSIZE in pairs when using CMS GC (see cassandra-env.sh)"
     exit 1
 fi
+
+# Allow all system memory to be taken as off-heap
+MAX_DIRECT_MEMORY="${system_memory_in_mb}M"
+
+JVM_OPTS="$JVM_OPTS -XX:MaxDirectMemorySize=$MAX_DIRECT_MEMORY"
 
 if [ "x$MALLOC_ARENA_MAX" = "x" ] ; then
     export MALLOC_ARENA_MAX=4
