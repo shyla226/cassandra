@@ -135,7 +135,7 @@ public abstract class TrieNode
 
         int bitsPerPointerIndex = 0;
         long delta = node.maxPositionDelta(nodePosition);
-        while (!singles[bitsPerPointerIndex].fits(delta))
+        while (!singles[bitsPerPointerIndex].fits(-delta))
             ++bitsPerPointerIndex;
 
         if (c == 1)
@@ -366,7 +366,7 @@ public abstract class TrieNode
         @Override
         boolean fits(long delta)
         {
-            return delta < 0 && delta >= -0xF;
+            return delta > 0 && delta <= 0xF;
         }
 
         @Override
@@ -436,7 +436,7 @@ public abstract class TrieNode
         @Override
         boolean fits(long delta)
         {
-            return delta < 0 && delta >= -0xFFF;
+            return delta > 0 && delta <= 0xFFF;
         }
 
         @Override

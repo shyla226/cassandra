@@ -17,18 +17,21 @@
  */
 package org.apache.cassandra.io.sstable.format.trieindex;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import com.google.common.base.Optional;
+import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Lists;
-
+import com.google.common.collect.Multiset;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -40,10 +43,18 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
-import org.apache.cassandra.io.util.*;
+import org.apache.cassandra.io.tries.TrieNode;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.SequentialWriter;
+import org.apache.cassandra.io.util.SequentialWriterOption;
+import org.apache.cassandra.io.util.WrappingRebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.Pair;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class PartitionIndexTest
 {
@@ -512,9 +523,16 @@ public class PartitionIndexTest
             long root = builder.complete();
 
             try (FileHandle fh = fhBuilder.complete();
-                 PartitionIndex index = new PartitionIndexJumping(fh, root, COUNT, null, null, cutoffsAndOffsets))
+                 PartitionIndex index = new PartitionIndexJumping(fh, root, COUNT, null, null, cutoffsAndOffsets);
+                 Analyzer analyzer = new Analyzer(index))
             {
                 checkIteration(list, list.size(), index);
+
+                analyzer.run();
+                if (analyzer.countPerType.elementSet().size() < 7)
+                {
+                    Assert.fail("Expecting at least 7 different node types, got " + analyzer.countPerType.elementSet().size() + "\n" + analyzer.countPerType);
+                }
             }
         }
         catch (IOException e)
@@ -523,6 +541,39 @@ public class PartitionIndexTest
         }
         }
     }
+
+    public static class Analyzer extends PartitionIndex.Reader
+    {
+        Multiset<TrieNode> countPerType = HashMultiset.create();
+
+        public Analyzer(PartitionIndex index)
+        {
+            super(index, Rebufferer.ReaderConstraint.NONE);
+        }
+
+        public void run()
+        {
+            run(root);
+        }
+
+        void run(long node)
+        {
+            go(node);
+
+            countPerType.add(nodeType);
+
+            int tr = transitionRange();
+            for (int i = 0; i < tr; ++i)
+            {
+                long child = transition(i);
+                if (child == -1)
+                    continue;
+                run(child);
+                go(node);
+            }
+        }
+    }
+
 
     private Pair<List<DecoratedKey>, PartitionIndex> generateRandomIndex(int size) throws IOException
     {
