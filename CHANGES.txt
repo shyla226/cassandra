@@ -123,6 +123,7 @@
  * Duplicate the buffer before passing it to analyser in SASI operation (CASSANDRA-13512)
  * Properly evict pstmts from prepared statements cache (CASSANDRA-13641)
 Merged from 3.0:
+ * Don't let stress write warmup data if n=0 (CASSANDRA-13773)
  * Randomize batchlog endpoint selection with only 1 or 2 racks (CASSANDRA-12884)
  * Fix digest calculation for counter cells (CASSANDRA-13750)
  * Fix ColumnDefinition.cellValueType() for non-frozen collection and change SSTabledump to use type.toJSONString() (CASSANDRA-13573)
@@ -143,6 +144,7 @@ Merged from 3.0:
  * Nodetool listsnapshots output is missing a newline, if there are no snapshots (CASSANDRA-13568)
  * sstabledump reports incorrect usage for argument order (CASSANDRA-13532)
 Merged from 2.2:
+ * Uncaught exceptions in Netty pipeline (CASSANDRA-13649)
  * Prevent integer overflow on exabyte filesystems (CASSANDRA-13067)
  * Fix queries with LIMIT and filtering on clustering columns (CASSANDRA-11223)
  * Fix potential NPE when resume bootstrap fails (CASSANDRA-13272)

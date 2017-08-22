@@ -692,10 +692,14 @@ public abstract class Message
                 throw new RuntimeException("Backpressure");
             flusher.start();
         }
+    }
+
+    @ChannelHandler.Sharable
+    public static final class ExceptionHandler extends ChannelInboundHandlerAdapter
+    {
 
         @Override
         public void exceptionCaught(final ChannelHandlerContext ctx, Throwable cause)
-        throws Exception
         {
             // Provide error message to client in case channel is still open
             UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), false);
