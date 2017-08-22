@@ -175,7 +175,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
         private SingleCoreEventLoop(EpollTPCEventLoopGroup parent, TPCThread.TPCThreadsCreator executor)
         {
-            super(parent, executor, 0,  DefaultSelectStrategyFactory.INSTANCE.newSelectStrategy(), RejectedExecutionHandlers.reject());
+            super(parent, executor, 0,  DefaultSelectStrategyFactory.INSTANCE.newSelectStrategy(), RejectedExecutionHandlers.reject(), true);
 
             this.parent = parent;
             this.externalQueue = new MpscArrayQueue<>(1 << 16);
