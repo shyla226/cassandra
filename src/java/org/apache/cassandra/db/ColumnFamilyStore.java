@@ -43,7 +43,6 @@ import com.google.common.util.concurrent.*;
 
 import io.reactivex.Completable;
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subjects.BehaviorSubject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1201,26 +1200,28 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     if (flushNonCf2i)
                         indexManager.flushAllNonCFSBackedIndexesBlocking();
 
+                    flushResults = Lists.newArrayList(FBUtilities.waitOnFutures(futures));
+
                 }
                 catch (Throwable t)
                 {
                     logger.error("Flushing {} failed with error", memtable.toString(), t);
                     if (flushRunnables != null)
-                        flushRunnables.stream().forEach(Memtable.FlushRunnable::abort);
+                    {
+                        for (Memtable.FlushRunnable runnable : flushRunnables)
+                            t = runnable.abort(t);
+                    }
 
+                    // wait for any flush runnables that were submitted (after aborting they should complete immediately)
+                    // this ensures that the writers are aborted by FlushRunnable.writeSortedContents(), in the worst
+                    // case we'll repeat the same exception twice if the initial exception was thrown whilst waiting
+                    // on a future
                     t = perform(t, () -> FBUtilities.waitOnFutures(futures));
-                    t = txn.abort(t);
-                    Throwables.propagate(t);
-                }
 
-                try
-                {
-                    flushResults = Lists.newArrayList(FBUtilities.waitOnFutures(futures));
-                }
-                catch (Throwable t)
-                {
-                    logger.error("Flushing {} failed when waiting for flush runnables", memtable.toString(), t);
+                    //finally abort the transaction
                     t = txn.abort(t);
+
+                    // and re-throw
                     Throwables.propagate(t);
                 }
 

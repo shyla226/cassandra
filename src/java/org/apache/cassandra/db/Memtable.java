@@ -436,14 +436,14 @@ public class Memtable implements Comparable<Memtable>
         if (!cfs.getPartitioner().splitter().isPresent() || localRanges.isEmpty())
             return Collections.singletonList(createFlushRunnable(txn));
 
-        return createFlushRunnables(localRanges, txn);
+        return createFlushRunnables(localRanges, cfs.getDirectories().getWriteableLocations(), txn);
     }
 
-    private List<FlushRunnable> createFlushRunnables(List<Range<Token>> localRanges, LifecycleTransaction txn)
+    @VisibleForTesting
+    List<FlushRunnable> createFlushRunnables(List<Range<Token>> localRanges, Directories.DataDirectory[] locations, LifecycleTransaction txn)
     {
         assert cfs.getPartitioner().splitter().isPresent();
 
-        Directories.DataDirectory[] locations = cfs.getDirectories().getWriteableLocations();
         List<PartitionPosition> boundaries = StorageService.getDiskBoundaries(localRanges, cfs.getPartitioner(), locations);
         List<FlushRunnable> runnables = new ArrayList<>(boundaries.size());
         PartitionPosition rangeStart = cfs.getPartitioner().getMinimumToken().minKeyBound();
@@ -459,7 +459,9 @@ public class Memtable implements Comparable<Memtable>
         }
         catch (Throwable e)
         {
-            runnables.forEach(FlushRunnable::abort);
+            for (Memtable.FlushRunnable runnable : runnables)
+                e = runnable.abort(e);
+
             throw Throwables.propagate(e);
         }
     }
@@ -524,6 +526,22 @@ public class Memtable implements Comparable<Memtable>
         }
     }
 
+    /**
+     * The valid states for {@link FlushRunnable} writers. The thread writing the contents
+     * will transition from IDLE -> RUNNING and back to IDLE when finished using the writer
+     * or from ABORTING -> ABORTED if another thread has transitioned from RUNNING -> ABORTING.
+     * We can also transition directly from IDLE -> ABORTED. Whichever threads transitions
+     * to ABORTED is responsible to abort the writer.
+     */
+    @VisibleForTesting
+    enum FlushRunnableWriterState
+    {
+        IDLE, // the runnable is idle, either not yet started or completed but with the writer waiting to be committed
+        RUNNING, // the runnable is executing, therefore the writer cannot be aborted or else a SEGV may ensue
+        ABORTING, // an abort request has been issued, this only happens if abort() is called whilst RUNNING
+        ABORTED  // the writer has been aborted, no resources will be leaked
+    }
+
     class FlushRunnable implements Callable<SSTableMultiWriter>
     {
         private final long estimatedSize;
@@ -536,8 +554,7 @@ public class Memtable implements Comparable<Memtable>
         private final PartitionPosition from;
         private final PartitionPosition to;
 
-        private volatile boolean aborted;
-        private volatile boolean started;
+        private final AtomicReference<FlushRunnableWriterState> state;
 
         private FlushRunnable(List<SortedMap<PartitionPosition, AtomicBTreePartition>> toFlush,
                               final RegularAndStaticColumns columns,
@@ -583,6 +600,8 @@ public class Memtable implements Comparable<Memtable>
 
                 writer = createFlushWriter(txn, cfs.newSSTableDescriptor(flushTableDir), columns, stats);
             }
+
+            state = new AtomicReference<>(FlushRunnableWriterState.IDLE);
         }
 
         private List<Set<PartitionPosition>> keysToFlush()
@@ -602,7 +621,15 @@ public class Memtable implements Comparable<Memtable>
 
         private void writeSortedContents()
         {
-            logger.debug("Writing {}, flushed range = ({}, {}]", Memtable.this.toString(), from, to);
+            if (!state.compareAndSet(FlushRunnableWriterState.IDLE, FlushRunnableWriterState.RUNNING))
+            {
+                logger.debug("Failed to write {}, flushed range = ({}, {}], state: {}",
+                             Memtable.this.toString(), from, to, state);
+                return;
+            }
+
+            logger.debug("Writing {}, flushed range = ({}, {}], state: {}",
+                         Memtable.this.toString(), from, to, state);
 
             try
             {
@@ -639,12 +666,12 @@ public class Memtable implements Comparable<Memtable>
                 //  since the memtable is being used for queries in the "pending flush" category)
                 for (Iterator<AtomicBTreePartition> partitionSet : partitions)
                 {
-                    if (aborted)
+                    if (state.get() == FlushRunnableWriterState.ABORTING)
                         break;
 
                     while (partitionSet.hasNext())
                     {
-                        if (aborted)
+                        if (state.get() == FlushRunnableWriterState.ABORTING)
                             break;
 
                         AtomicBTreePartition partition = partitionSet.next();
@@ -674,32 +701,50 @@ public class Memtable implements Comparable<Memtable>
             }
             finally
             {
-                if (aborted)
+                while (true)
                 {
-                    logger.debug("Flushing of {} aborted", writer.getFilename());
-                    maybeFail(writer.abort(null));
-                }
-                else
-                {
-                    long bytesFlushed = writer.getFilePointer();
-                    logger.debug("Completed flushing {} ({}) for commitlog position {}",
-                                 writer.getFilename(),
-                                 FBUtilities.prettyPrintMemory(bytesFlushed),
-                                 commitLogUpperBound);
-                    // Update the metrics
-                    cfs.metric.bytesFlushed.inc(bytesFlushed);
+                    if (state.compareAndSet(FlushRunnableWriterState.RUNNING, FlushRunnableWriterState.IDLE))
+                    {
+                        long bytesFlushed = writer.getFilePointer();
+                        logger.debug("Completed flushing {} ({}) for commitlog position {}",
+                                     writer.getFilename(),
+                                     FBUtilities.prettyPrintMemory(bytesFlushed),
+                                     commitLogUpperBound);
+                        // Update the metrics
+                        cfs.metric.bytesFlushed.inc(bytesFlushed);
+                        break;
+                    }
+                    else if (state.compareAndSet(FlushRunnableWriterState.ABORTING, FlushRunnableWriterState.ABORTED))
+                    {
+                        logger.debug("Flushing of {} aborted", writer.getFilename());
+                        maybeFail(writer.abort(null));
+                        break;
+                    }
                 }
             }
         }
 
-        public void abort()
+        public Throwable abort(Throwable throwable)
         {
-            this.aborted = true;
-            if (!started)
+            while (true)
             {
-                logger.debug("Unstared flushing of {} aborted", writer.getFilename());
-                maybeFail(writer.abort(null));
+                if (state.compareAndSet(FlushRunnableWriterState.IDLE, FlushRunnableWriterState.ABORTED))
+                {
+                    logger.debug("Flushing of {} aborted", writer.getFilename());
+                    return writer.abort(throwable);
+                }
+                else if (state.compareAndSet(FlushRunnableWriterState.RUNNING, FlushRunnableWriterState.ABORTING))
+                {
+                    // thread currently executing writeSortedContents() will take care of aborting and throw any exceptions
+                    return throwable;
+                }
             }
+        }
+
+        @VisibleForTesting
+        FlushRunnableWriterState state()
+        {
+            return state.get();
         }
 
         public SSTableMultiWriter createFlushWriter(LifecycleTransaction txn,
@@ -721,7 +766,6 @@ public class Memtable implements Comparable<Memtable>
         @Override
         public SSTableMultiWriter call()
         {
-            started = true;
             writeSortedContents();
             return writer;
         }
