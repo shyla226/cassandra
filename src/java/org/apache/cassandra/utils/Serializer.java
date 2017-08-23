@@ -18,8 +18,10 @@
 package org.apache.cassandra.utils;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 
 /**

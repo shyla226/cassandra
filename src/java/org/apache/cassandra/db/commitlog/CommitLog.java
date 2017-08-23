@@ -39,7 +39,6 @@ import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
-import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.CommitLogMetrics;
@@ -50,7 +49,6 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
-import static org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.CommitLogSegmentFileComparator;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.ENTRY_OVERHEAD_SIZE;
 import static org.apache.cassandra.utils.FBUtilities.updateChecksum;
@@ -245,53 +243,46 @@ public class CommitLog implements CommitLogMBean
     {
         assert mutation != null;
 
-        try (DataOutputBuffer dob = DataOutputBuffer.RECYCLER.get())
+        ByteBuffer serializedMutation = Mutation.rawSerializers.get(CommitLogDescriptor.current_version.encodingVersion).serializedBuffer(mutation);
+        int size = serializedMutation.remaining();
+
+        int totalSize = size + ENTRY_OVERHEAD_SIZE;
+        if (totalSize > MAX_MUTATION_SIZE)
         {
-            Mutation.rawSerializers.get(CommitLogDescriptor.current_version.encodingVersion).serialize(mutation, dob);
-            int size = dob.getLength();
+            return Single.error(
+            new IllegalArgumentException(String.format("Mutation of %s is too large for the maximum size of %s",
+                                                       FBUtilities.prettyPrintMemory(totalSize),
+                                                       FBUtilities.prettyPrintMemory(MAX_MUTATION_SIZE))));
+        }
 
-            int totalSize = size + ENTRY_OVERHEAD_SIZE;
-            if (totalSize > MAX_MUTATION_SIZE)
-            {
-                return Single.error(
-                new IllegalArgumentException(String.format("Mutation of %s is too large for the maximum size of %s",
-                                                           FBUtilities.prettyPrintMemory(totalSize),
-                                                           FBUtilities.prettyPrintMemory(MAX_MUTATION_SIZE))));
-            }
-
-            return segmentManager.allocate(mutation, totalSize)
-                                 .flatMap(alloc ->
+        return segmentManager.allocate(mutation, totalSize)
+                             .flatMap(alloc ->
+                                      {
+                                          CRC32 checksum = new CRC32();
+                                          final ByteBuffer buffer = alloc.getBuffer();
+                                          try (BufferedDataOutputStreamPlus dos = new DataOutputBufferFixed(buffer))
                                           {
-                                              CRC32 checksum = new CRC32();
-                                              final ByteBuffer buffer = alloc.getBuffer();
-                                              try (BufferedDataOutputStreamPlus dos = new DataOutputBufferFixed(buffer))
-                                              {
-                                                  // checksummed length
-                                                  dos.writeInt(size);
-                                                  updateChecksumInt(checksum, size);
-                                                  buffer.putInt((int) checksum.getValue());
+                                              // checksummed length
+                                              dos.writeInt(size);
+                                              updateChecksumInt(checksum, size);
+                                              buffer.putInt((int) checksum.getValue());
 
-                                                  // checksummed mutation
-                                                  dos.write(dob.getData(), 0, size);
-                                                  updateChecksum(checksum, buffer, buffer.position() - size, size);
-                                                  buffer.putInt((int) checksum.getValue());
-                                              }
-                                              catch (Exception e)
-                                              {
-                                                  return Single.error(new FSWriteError(e, alloc.getSegment().getPath()));
-                                              }
-                                              finally
-                                              {
-                                                  alloc.markWritten();
-                                              }
+                                              // checksummed mutation
+                                              dos.write(serializedMutation);
+                                              updateChecksum(checksum, buffer, buffer.position() - size, size);
+                                              buffer.putInt((int) checksum.getValue());
+                                          }
+                                          catch (Exception e)
+                                          {
+                                              return Single.error(new FSWriteError(e, alloc.getSegment().getPath()));
+                                          }
+                                          finally
+                                          {
+                                              alloc.markWritten();
+                                          }
 
-                                              return executor.finishWriteFor(alloc).toSingle(alloc::getCommitLogPosition);
-                                          }).doFinally(dob::recycle);
-        }
-        catch (IOException e)
-        {
-            return Single.error(new FSWriteError(e, segmentManager.allocatingFrom().getPath()));
-        }
+                                          return executor.finishWriteFor(alloc).toSingle(alloc::getCommitLogPosition);
+                                      });
     }
 
     /**

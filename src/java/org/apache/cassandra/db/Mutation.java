@@ -18,8 +18,10 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.TPCTaskType;
@@ -36,6 +38,7 @@ import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
@@ -77,6 +80,12 @@ public class Mutation implements IMutation, Scheduleable
     public long viewLockAcquireStart = 0;
 
     private boolean cdcEnabled = false;
+
+    // Contains serialized representations of this mutation.
+    // Note: there is no functionality to clear/remove serialized instances, because a mutation must never
+    // be modified (e.g. calling add(PartitionUpdate)) when it's being serialized.
+    private static final int CACHED_SERIALIZATIONS = EncodingVersion.values().length;
+    private final AtomicReferenceArray<ByteBuffer> cachedSerializations = new AtomicReferenceArray<>(CACHED_SERIALIZATIONS);
 
     public Mutation(String keyspaceName, DecoratedKey key)
     {
@@ -393,23 +402,74 @@ public class Mutation implements IMutation, Scheduleable
 
     public static class MutationSerializer extends VersionDependent<EncodingVersion> implements Serializer<Mutation>
     {
-        private final PartitionUpdate.PartitionUpdateSerializer partitionUpdateSerializer;
+        private final PartitionUpdate.PartitionUpdateSerializer serializer;
 
         private MutationSerializer(EncodingVersion version)
         {
             super(version);
-            this.partitionUpdateSerializer = PartitionUpdate.serializers.get(version);
+            this.serializer = PartitionUpdate.serializers.get(version);
         }
 
         public void serialize(Mutation mutation, DataOutputPlus out) throws IOException
         {
+            // no need to duplicate the ByteBuffer, because of the contract of
+            // org.apache.cassandra.io.util.DataOutputPlus.write(java.nio.ByteBuffer)
+            out.write(cachedSerialization(mutation));
+        }
+
+        public ByteBuffer serializedBuffer(Mutation mutation)
+        {
+            return cachedSerialization(mutation).duplicate();
+        }
+
+        public long serializedSize(Mutation mutation)
+        {
+            return cachedSerialization(mutation).remaining();
+        }
+
+        private ByteBuffer cachedSerialization(Mutation mutation)
+        {
+            int versionIndex = version.ordinal();
+
+            // Retrieves the cached version, or build+cache it if it's not cached already. The point is to avoid
+            // serializing multiple times since it can be expensive, especially for larger ones, so make sure this
+            // doesn't happen even under concurrent calls (which may and will happen).
+            ByteBuffer cachedSerialization = mutation.cachedSerializations.get(versionIndex);
+            if (cachedSerialization == null)
+            {
+                synchronized (this)
+                {
+                    // check again under the lock
+                    cachedSerialization = mutation.cachedSerializations.get(versionIndex);
+                    if (cachedSerialization == null)
+                    {
+                        try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
+                        {
+                            serializeInternal(mutation, dob);
+                            cachedSerialization = dob.asNewBuffer();
+                        }
+                        catch (IOException e)
+                        {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                    mutation.cachedSerializations.set(versionIndex, cachedSerialization);
+                }
+            }
+            return cachedSerialization;
+        }
+
+        private void serializeInternal(Mutation mutation, DataOutputPlus out) throws IOException
+        {
+            Map<TableId, PartitionUpdate> modifications = mutation.modifications;
+
             /* serialize the modifications in the mutation */
-            int size = mutation.modifications.size();
+            int size = modifications.size();
             out.writeUnsignedVInt(size);
 
             assert size > 0;
-            for (Map.Entry<TableId, PartitionUpdate> entry : mutation.modifications.entrySet())
-                partitionUpdateSerializer.serialize(entry.getValue(), out);
+            for (Map.Entry<TableId, PartitionUpdate> entry : modifications.entrySet())
+                serializer.serialize(entry.getValue(), out);
         }
 
         public Mutation deserialize(DataInputPlus in, SerializationHelper.Flag flag) throws IOException
@@ -417,7 +477,7 @@ public class Mutation implements IMutation, Scheduleable
             int size = (int)in.readUnsignedVInt();
             assert size > 0;
 
-            PartitionUpdate update = partitionUpdateSerializer.deserialize(in, flag);
+            PartitionUpdate update = serializer.deserialize(in, flag);
             if (size == 1)
                 return new Mutation(update);
 
@@ -427,7 +487,7 @@ public class Mutation implements IMutation, Scheduleable
             modifications.put(update.metadata().id, update);
             for (int i = 1; i < size; ++i)
             {
-                update = partitionUpdateSerializer.deserialize(in, flag);
+                update = serializer.deserialize(in, flag);
                 modifications.put(update.metadata().id, update);
             }
 
@@ -437,15 +497,6 @@ public class Mutation implements IMutation, Scheduleable
         public Mutation deserialize(DataInputPlus in) throws IOException
         {
             return deserialize(in, SerializationHelper.Flag.FROM_REMOTE);
-        }
-
-        public long serializedSize(Mutation mutation)
-        {
-            long size = TypeSizes.sizeofUnsignedVInt(mutation.modifications.size());
-            for (Map.Entry<TableId, PartitionUpdate> entry : mutation.modifications.entrySet())
-                size += partitionUpdateSerializer.serializedSize(entry.getValue());
-
-            return size;
         }
     }
 }

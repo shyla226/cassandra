@@ -51,7 +51,6 @@ import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.util.DataInputBuffer;
-import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableId;
@@ -145,18 +144,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         mutations.addAll(batch.encodedMutations);
 
         for (Mutation mutation : batch.decodedMutations)
-        {
-            try (DataOutputBuffer buffer = new DataOutputBuffer())
-            {
-                Mutation.serializers.get(CURRENT_VERSION).serialize(mutation, buffer);
-                mutations.add(buffer.buffer());
-            }
-            catch (IOException e)
-            {
-                // shouldn't happen
-                throw new AssertionError(e);
-            }
-        }
+            mutations.add(Mutation.rawSerializers.get(CURRENT_VERSION.encodingVersion).serializedBuffer(mutation));
 
         PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(SystemKeyspace.Batches, batch.id);
         builder.row()

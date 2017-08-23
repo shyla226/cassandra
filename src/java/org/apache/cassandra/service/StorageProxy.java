@@ -1032,7 +1032,7 @@ public class StorageProxy implements StorageProxyMBean
         checkHintOverload(targets);
         MessagingService.instance().applyBackPressure(targets.live(), handler.currentTimeout()).thenAccept(v -> {
 
-            Collection<InetAddress> endpointsToHint = Collections2.filter(targets.dead(), e -> shouldHint(e));
+            Collection<InetAddress> endpointsToHint = Collections2.filter(targets.dead(), StorageProxy::shouldHint);
             if (!endpointsToHint.isEmpty())
                 submitHint(mutation, endpointsToHint, handler);
 

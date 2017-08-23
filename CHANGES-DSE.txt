@@ -1,4 +1,5 @@
 dse 6.0.0
+ * Prevent multiple serializations of Mutation (APOLLO-370)
  * Allow to grant/revoke multiple permissions in one statement (APOLLO-792)
  * Fix bug in counting iterated sstables for choosing whether or not to defrag in timestamp ordered path (APOLLO-1018)
  * Corrects improper use of Flow.close() for cancellation (APOLLO-1031)
