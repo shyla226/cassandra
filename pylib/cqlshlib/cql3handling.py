@@ -1508,7 +1508,7 @@ syntax_rules += r'''
                    | "EXECUTE"
                    ;
 
-<permissionExpr> ::= ( <permission> "PERMISSION"? )
+<permissionExpr> ::= ( <permission> "PERMISSION"? ("," <permission> "PERMISSION"? )* )
                    | ( "ALL" "PERMISSIONS"? )
                    ;
 

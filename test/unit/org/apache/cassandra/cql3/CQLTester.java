@@ -1526,16 +1526,17 @@ public abstract class CQLTester
                : replaceValues(query, values);
     }
 
-    protected void assertValidSyntax(String query) throws Throwable
+    protected ParsedStatement assertValidSyntax(String query) throws Throwable
     {
         try
         {
-            QueryProcessor.parseStatement(query);
+            return QueryProcessor.parseStatement(query);
         }
         catch(SyntaxException e)
         {
             fail(String.format("Expected query syntax to be valid but was invalid. Query is: %s; Error is %s",
                                       query, e.getMessage()));
+            return null;
         }
     }
 

@@ -83,6 +83,19 @@ public class Permissions
     }
 
     /**
+     * Extend a given permissions set with another permission
+     * @param permissions current permissions set
+     * @param permission permission to add
+     * @return permission set containing {@code permissions} and {@code permission}
+     */
+    public static Set<Permission> setOf(Set<Permission> permissions, Permission permission)
+    {
+        PartitionedEnumSet<Permission> set = PartitionedEnumSet.of(Permission.class, permissions);
+        set.add(permission);
+        return set;
+    }
+
+    /**
      * Return an immutable set of permissions, backed by PartitionedEnumSet<Permission>
      * @param permissions the permissions to include in the Set
      * @return immutable set of permissions

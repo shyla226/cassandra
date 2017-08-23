@@ -1147,7 +1147,13 @@ permission returns [Permission perm]
 permissionOrAll returns [Set<Permission> perms]
     : K_ALL ( K_PERMISSIONS )?       { $perms = Permissions.all(); }
     | K_PERMISSIONS { $perms = Permissions.all(); }
-    | p=permission ( K_PERMISSION )? { $perms = $p.perm == null ? Collections.emptySet() : Permissions.setOf($p.perm); }
+    | (
+        p=permission ( K_PERMISSION )? { $perms = $p.perm == null ? Collections.emptySet() : Permissions.setOf($p.perm); }
+        (
+            ','
+            px=permission ( K_PERMISSION )? { $perms = Permissions.setOf($perms, $px.perm); }
+        )*
+      )
     ;
 
 resourceFromInternalName returns [IResource res]
