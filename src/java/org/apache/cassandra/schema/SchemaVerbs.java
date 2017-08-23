@@ -23,6 +23,7 @@ import java.util.function.Function;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.EncodingVersion;
+import org.apache.cassandra.net.DroppingResponseException;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.Verb.OneWay;
@@ -67,7 +68,13 @@ public class SchemaVerbs extends VerbGroup<SchemaVerbs.SchemaVersion>
                         .syncHandler((from, x) -> Schema.instance.getVersion());
         PULL = helper.requestResponse("PULL", EmptyPayload.class, SchemaMigration.class)
                         .timeout(DatabaseDescriptor::getRpcTimeout)
-                        .syncHandler((from, x) -> SchemaKeyspace.convertSchemaToMutations());
+                        .syncHandler((from, x) ->
+                                     {
+                                         if (!MigrationManager.shouldAnswerPullFrom(from))
+                                             throw new DroppingResponseException();
+
+                                         return SchemaKeyspace.convertSchemaToMutations();
+                                     });
         PUSH = helper.oneWay("PUSH", SchemaMigration.class)
                      .handler((from, migration) -> Schema.instance.mergeAndAnnounceVersion(migration));
 

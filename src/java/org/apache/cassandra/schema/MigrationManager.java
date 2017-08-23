@@ -127,12 +127,25 @@ public class MigrationManager
     static boolean shouldPullSchemaFrom(InetAddress endpoint)
     {
         /*
-         * Don't request schema from nodes with a differnt or unknonw major version (may have incompatible schema)
+         * Don't request schema from nodes with a different or unknown major version (may have incompatible schema)
          * Don't request schema from fat clients
+         * Checking this before pulling allows us to avoid requesting schema from fat clients and also
+         * reduces the number of pulls that will go unanswered due to mismatched versions
          */
         return MessagingService.instance().knowsVersion(endpoint)
-                && MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version
-                && !Gossiper.instance.isGossipOnlyMember(endpoint);
+               && MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version
+               && !Gossiper.instance.isGossipOnlyMember(endpoint);
+    }
+
+    static boolean shouldAnswerPullFrom(InetAddress endpoint)
+    {
+        /*
+         * Don't answer schema pulls from nodes with a different or unknown major version (may have incompatible schema)
+         * We have to check this condition when answering pulls since we may have a mismatched
+         * version that the requesting node had not yet learned before sending the pull (see APOLLO-1026)
+         */
+        return MessagingService.instance().knowsVersion(endpoint)
+               && MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version;
     }
 
     public static boolean isReadyForBootstrap()
