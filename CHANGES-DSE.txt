@@ -1,4 +1,5 @@
 dse 6.0.0:
+ * Match 'DSE protocol' in cqlshlib test regexes (DB-1058)
  * Warn when the 'cassandra' superuser logs in (DB-104)
  * Ensure that empty clusterings with kind==CLUSTERING are Clustering.EMPTY (DB-1248)
  * Rename artifacts to "db” (DB-1201)
