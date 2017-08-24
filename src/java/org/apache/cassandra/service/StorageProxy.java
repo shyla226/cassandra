@@ -1032,6 +1032,15 @@ public class StorageProxy implements StorageProxyMBean
         checkHintOverload(targets);
         MessagingService.instance().applyBackPressure(targets.live(), handler.currentTimeout()).thenAccept(v -> {
 
+            // For performance, Mutation caches serialized buffers that are computed lazily in serializedBuffer(). That
+            // computation is not synchronized however and we will potentially call that method concurrently for each
+            // dispatched message (not that concurrent calls to serializedBuffer() are "unsafe" per se, just that they
+            // may result in multiple computations, making the caching optimization moot). So forcing the serialization
+            // here to make sure it's already cached/computed when it's concurrently used later.
+            // Side note: we have one cached buffers for each used EncodingVersion and this only pre-compute the one for
+            // the current version, but it's just an optimization and we're ok not optimizing for mixed-version clusters.
+            Mutation.rawSerializers.get(EncodingVersion.last()).serializedBuffer(mutation);
+
             Collection<InetAddress> endpointsToHint = Collections2.filter(targets.dead(), StorageProxy::shouldHint);
             if (!endpointsToHint.isEmpty())
                 submitHint(mutation, endpointsToHint, handler);

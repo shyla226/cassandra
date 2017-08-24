@@ -85,7 +85,7 @@ public class Mutation implements IMutation, Scheduleable
     // Note: there is no functionality to clear/remove serialized instances, because a mutation must never
     // be modified (e.g. calling add(PartitionUpdate)) when it's being serialized.
     private static final int CACHED_SERIALIZATIONS = EncodingVersion.values().length;
-    private final AtomicReferenceArray<ByteBuffer> cachedSerializations = new AtomicReferenceArray<>(CACHED_SERIALIZATIONS);
+    private final ByteBuffer[] cachedSerializations = new ByteBuffer[CACHED_SERIALIZATIONS];
 
     public Mutation(String keyspaceName, DecoratedKey key)
     {
@@ -427,34 +427,32 @@ public class Mutation implements IMutation, Scheduleable
             return cachedSerialization(mutation).remaining();
         }
 
+        /**
+         * Retrieve the cached serialization of this mutation, or computed and cache said serialization if it doesn't
+         * exists yet. Note that this method is _not_ synchronized even though it may (and will often) be called
+         * concurrently. Concurrent calls are still safe however, the only risk is that the value is not cached yet,
+         * multiple concurrent calls may compute it multiple times instead of just once. This is ok as in practice
+         * as we make sure this doesn't happen in the hot path by forcing the initial caching in
+         * {@code StorageProxy.sendToHintedEndpoints}.
+         */
         private ByteBuffer cachedSerialization(Mutation mutation)
         {
             int versionIndex = version.ordinal();
 
-            // Retrieves the cached version, or build+cache it if it's not cached already. The point is to avoid
-            // serializing multiple times since it can be expensive, especially for larger ones, so make sure this
-            // doesn't happen even under concurrent calls (which may and will happen).
-            ByteBuffer cachedSerialization = mutation.cachedSerializations.get(versionIndex);
+            // Retrieves the cached version, or build+cache it if it's not cached already.
+            ByteBuffer cachedSerialization = mutation.cachedSerializations[versionIndex];
             if (cachedSerialization == null)
             {
-                synchronized (this)
+                try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
                 {
-                    // check again under the lock
-                    cachedSerialization = mutation.cachedSerializations.get(versionIndex);
-                    if (cachedSerialization == null)
-                    {
-                        try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
-                        {
-                            serializeInternal(mutation, dob);
-                            cachedSerialization = dob.asNewBuffer();
-                        }
-                        catch (IOException e)
-                        {
-                            throw new RuntimeException(e);
-                        }
-                    }
-                    mutation.cachedSerializations.set(versionIndex, cachedSerialization);
+                    serializeInternal(mutation, dob);
+                    cachedSerialization = dob.asNewBuffer();
                 }
+                catch (IOException e)
+                {
+                    throw new RuntimeException(e);
+                }
+                mutation.cachedSerializations[versionIndex] = cachedSerialization;
             }
             return cachedSerialization;
         }
