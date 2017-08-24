@@ -54,8 +54,6 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
         this.index = index;
     }
 
-    @SuppressWarnings("resource") // Both the OpOrder and 'indexIter' are closed on exception, or through the closing of the result
-    // of this method.
     public Flow<FlowableUnfilteredPartition> search(ReadExecutionController executionController)
     {
         // the value of the index expression is the partition key in the index table

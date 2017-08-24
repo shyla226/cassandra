@@ -115,10 +115,10 @@ public class CompositesSearcher extends CassandraIndexSearcher
     // We assume all rows in dataIter belong to the same partition.
     @SuppressWarnings("resource") // closed by the callers of ReadCommand.executeLocally()
     private FlowableUnfilteredPartition filterStaleEntries(FlowableUnfilteredPartition dataIter,
-                                    final ByteBuffer indexValue,
-                                    final List<IndexEntry> entries,
-                                    final OpOrder.Group writeOp,
-                                    final int nowInSec)
+                                                           final ByteBuffer indexValue,
+                                                           final List<IndexEntry> entries,
+                                                           final OpOrder.Group writeOp,
+                                                           final int nowInSec)
     {
         // collect stale index entries and delete them when we close this iterator
         final List<IndexEntry> staleEntries = new ArrayList<>();

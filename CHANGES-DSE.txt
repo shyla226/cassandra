@@ -1,4 +1,5 @@
 dse 6.0.0
+ * Clarify resource clean-up by Flow and flowable partitions (APOLLO-1074)
  * Do not use memory-mapping for the commit log (APOLLO-1061)
  * Introduce new STARTUP message parameters to identify clients (APOLLO-1054)
  * Load mmapped buffer into physical memory after mlocking it for MemoryOnlyStrategy (APOLLO-1052)

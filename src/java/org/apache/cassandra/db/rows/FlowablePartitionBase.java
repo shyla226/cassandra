@@ -28,7 +28,11 @@ import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.FlowSubscriber;
 
 /**
- * Base class for the Flow versions of partitions.
+ * Base class for partitions whose content is processed as a Flow.
+ *
+ * Flowable partitions must always be used (i.e. subscribed to and closed) because they usually hold resources
+ * (e.g. file readers). If a partition instance happens to be not required before processing the contents, the method
+ * unused() must be called (this will subscribe to and immediately close the flow).
  */
 public abstract class FlowablePartitionBase<T> implements PartitionTrait
 {

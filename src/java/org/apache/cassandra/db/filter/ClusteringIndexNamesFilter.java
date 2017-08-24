@@ -167,7 +167,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         };
     }
 
-    @SuppressWarnings("resource")   // flow will be closed with partition.
+    @SuppressWarnings("resource")   // flow to be closed with partition.
     public FlowableUnfilteredPartition getFlowableUnfilteredPartition(ColumnFilter columnFilter, Partition partition)
     {
         final SearchIterator<Clustering, Row> searcher = partition.searchIterator(columnFilter, reversed);

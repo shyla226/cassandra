@@ -233,9 +233,11 @@ public class PartitionRangeReadCommand extends ReadCommand
         SSTableReadsListener readCountUpdater = newReadCountUpdater();
         for (SSTableReader sstable : view.sstables)
         {
-            @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
-            UnfilteredPartitionIterator iter = sstable.getScanner(columnFilter(), dataRange(), readCountUpdater);
-            iterators.add(FlowablePartitions.fromPartitions(iter, Schedulers.io()));
+            // Since opened sstable scanner always needs to be closed, make sure it's only opened when
+            // the flow is processed.
+            iterators.add(Flow.defer(() -> FlowablePartitions.fromPartitions(
+                                               sstable.getScanner(columnFilter(), dataRange(), readCountUpdater),
+                                               Schedulers.io())));
             if (!sstable.isRepaired())
                 oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
         }
@@ -244,7 +246,6 @@ public class PartitionRangeReadCommand extends ReadCommand
         if (iterators.isEmpty())
             return Flow.empty();
 
-        // TODO: open and close when subscribed -- make sure no resource allocated on create
         if (cfs.isRowCacheEnabled())
         {
             return FlowablePartitions.mergePartitions(iterators, nowInSec(), null)

@@ -71,12 +71,17 @@ public abstract class Flow<T>
 
     /**
      * Create a subscription linking the content of the flow with the given subscriber.
+     *
      * The subscriber is expected to call request() on the returned subscription; in response, it will receive an
      * onNext(item), onComplete(), or onError(throwable). To get further items, the subscriber must call request()
      * again _after_ receiving the onNext (usually before returning from the call).
      *
      * When done with the content (regardless of whether onComplete or onError was received), the subscriber must
      * close the subscription. Closing cannot be done concurrently with any requests.
+     *
+     * For efficiency, subscription is usually done immediately after a transformation is applied on this flow. Since
+     * the resulting flow may remain unused, it is not guaranteed that any open subscription will be requested
+     * or closed. However, if the subscriber does perform at least one request, they must close the subscription.
      */
     abstract public FlowSubscription subscribe(FlowSubscriber<T> subscriber);
 
@@ -1892,29 +1897,103 @@ public abstract class Flow<T>
     /**
      * Try-with-resources equivalent.
      *
-     * The resource supplier is called on subscription, the flow is constructed, and the resource disposer is called
-     * when the subscription is closed.
+     * The resource supplier is called on first request, the flow is constructed, and the resource disposer is called
+     * when the subscription is closed (which is now guaranteed).
      */
     public static <T, R> Flow<T> using(Supplier<R> resourceSupplier, Function<R, Flow<T>> flowSupplier, Consumer<R> resourceDisposer)
     {
-        return new Flow<T>()
+        class Using extends FlowSource<T>
         {
-            public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
+            FlowSubscription source;
+            R resource;
+
+            public void request()
             {
-                R resource = resourceSupplier.get();
-                try
+                if (source == null)
                 {
-                    return flowSupplier.apply(resource)
-                                       .doOnClose(() -> resourceDisposer.accept(resource))
-                                       .subscribe(subscriber);
+                    try
+                    {
+                        resource = resourceSupplier.get();
+                        assert resource != null : "Null resource is not allowed.";
+                        Flow<T> sourceFlow = flowSupplier.apply(resource);
+                        source = sourceFlow.subscribe(subscriber);
+                    }
+                    catch (Throwable t)
+                    {
+                        subscriber.onError(t);
+                        return;
+                    }
                 }
-                catch (Throwable t)
+
+                source.request();
+            }
+
+            public void close() throws Exception
+            {
+                if (resource != null)
                 {
-                    resourceDisposer.accept(resource);
-                    throw com.google.common.base.Throwables.propagate(t);
+                    try
+                    {
+                        resourceDisposer.accept(resource);
+                    }
+                    finally
+                    {
+                        if (source != null)     // we can be closed without being requested
+                            source.close();
+                    }
                 }
             }
-        };
+
+            public String toString()
+            {
+                return Flow.formatTrace("using", flowSupplier, subscriber);
+            }
+        }
+
+        return new Using();
+    }
+
+    /**
+     * Delays construction of the flow until first request, which ensures the flow will be closed.
+     */
+    public static <T> Flow<T> defer(Supplier<Flow<T>> flowSupplier)
+    {
+        class Defer extends FlowSource<T>
+        {
+            FlowSubscription source;
+
+            public void request()
+            {
+                if (source == null)
+                {
+                    try
+                    {
+                        Flow<T> sourceFlow = flowSupplier.get();
+                        source = sourceFlow.subscribe(subscriber);
+                    }
+                    catch (Throwable t)
+                    {
+                        subscriber.onError(t);
+                        return;
+                    }
+                }
+
+                source.request();
+            }
+
+            public void close() throws Exception
+            {
+                if (source != null)
+                    source.close();
+            }
+
+            public String toString()
+            {
+                return Flow.formatTrace("defer", flowSupplier, subscriber);
+            }
+        }
+
+        return new Defer();
     }
 
     /**

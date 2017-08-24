@@ -444,4 +444,293 @@ public class OpsTest
         assertEquals(ex2.getMessage(), error.get().getMessage());
     }
 
+    @Test
+    public void testUsing() throws Exception
+    {
+        AtomicInteger closed = new AtomicInteger(0);
+        class ThrowOnFinalize implements AutoCloseable
+        {
+            boolean objClosed = false;
+
+            @Override
+            public void finalize()
+            {
+                if (!objClosed)
+                    throw new AssertionError("Object should be closed or not exist.");
+            }
+
+            public void close()
+            {
+                assert !objClosed;
+                objClosed = true;
+                closed.incrementAndGet();
+            }
+        }
+        Flow<Integer> flow;
+
+        // Normal usage
+        flow = Flow.using(() -> new ThrowOnFinalize(),
+                          b -> Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                   .doOnClose(() -> closed.addAndGet(2)),
+                          ThrowOnFinalize::close)
+                   .doOnClose(() -> closed.addAndGet(4));
+
+
+        int v = flow.blockingLast(-1);
+        assertEquals(0, v);
+        assertEquals(7, closed.get());
+        closed.set(0);
+        System.gc();    // hope to run finalizers early
+
+        // Only subscribe and close
+        flow = Flow.using(() -> new ThrowOnFinalize(),
+                          b -> Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                   .doOnClose(() -> closed.addAndGet(2)),
+                          ThrowOnFinalize::close)
+                   .doOnClose(() -> closed.addAndGet(4));
+
+
+        subscribeAndClose(flow);
+        assertEquals(4, closed.get());
+        closed.set(0);
+        System.gc();    // hope to run finalizers early
+
+        // Only subscribe
+        flow = Flow.using(() -> new ThrowOnFinalize(),
+                          b -> Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                   .doOnClose(() -> closed.addAndGet(2)),
+                          ThrowOnFinalize::close)
+                   .doOnClose(() -> closed.addAndGet(4));
+
+
+        subscribe(flow);
+        assertEquals(0, closed.get());
+        closed.set(0);
+        System.gc();    // hope to run finalizers early
+
+        // Errors in various stages
+        flow = Flow.using(() ->
+                          {
+                              throw new AssertionError("init");
+                          },
+                          b -> Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                   .doOnClose(() -> closed.addAndGet(2)),
+                          ThrowOnFinalize::close)
+                   .doOnClose(() -> closed.addAndGet(4));
+
+
+        try
+        {
+            flow.blockingLast(-1);
+            fail("should throw");
+        }
+        catch (AssertionError e)
+        {
+            // correct path
+            assertEquals(4, closed.get());
+        }
+        closed.set(0);
+        System.gc();    // hope to run finalizers early
+
+        flow = Flow.<Integer, ThrowOnFinalize>
+                    using(() -> new ThrowOnFinalize(),
+                          b ->
+                          {
+                              throw new AssertionError("construct");
+                          },
+                          ThrowOnFinalize::close)
+                   .doOnClose(() -> closed.addAndGet(4));
+
+
+        try
+        {
+            flow.blockingLast(-1);
+            fail("should throw");
+        }
+        catch (AssertionError e)
+        {
+            // correct path
+            assertEquals(5, closed.get());
+        }
+        closed.set(0);
+        System.gc();    // hope to run finalizers early
+
+        flow = Flow.using(() -> new ThrowOnFinalize(),
+                          b -> Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                   .map(x -> x / 0)
+                                   .doOnClose(() -> closed.addAndGet(2)),
+                          ThrowOnFinalize::close)
+                   .doOnClose(() -> closed.addAndGet(4));
+
+        try
+        {
+            flow.blockingLast(-1);
+            fail("should throw");
+        }
+        catch (ArithmeticException e)
+        {
+            // correct path
+            assertEquals(7, closed.get());
+        }
+        closed.set(0);
+        System.gc();    // hope to run finalizers early
+
+        flow = Flow.using(() -> new ThrowOnFinalize(),
+                          b -> Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                   .doOnClose(() ->
+                                              {
+                                                  throw new AssertionError("close");
+                                              }),
+                          ThrowOnFinalize::close)
+                   .doOnClose(() -> closed.addAndGet(4));
+
+        try
+        {
+            flow.blockingLast(-1);
+            fail("should throw");
+        }
+        catch (AssertionError e)
+        {
+            // correct path
+            assertEquals(5, closed.get());
+        }
+        closed.set(0);
+        System.gc();    // hope to run finalizers early
+
+        flow = Flow.using(() -> true,
+                          b -> Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                   .doOnClose(() -> closed.addAndGet(2)),
+                          b ->
+                          {
+                              throw new AssertionError("release");
+                          }).doOnClose(() -> closed.addAndGet(4));
+
+        try
+        {
+            flow.blockingLast(-1);
+            fail("should throw");
+        }
+        catch (AssertionError e)
+        {
+            // correct path
+            assertEquals(6, closed.get());
+        }
+        closed.set(0);
+        System.gc();    // hope to run finalizers early
+    }
+
+    public <T> FlowSubscription subscribe(Flow<T> flow) throws Exception
+    {
+        return flow.subscribe(new FlowSubscriber<T>()
+        {
+            public void onNext(T item)
+            {
+                throw new AssertionError("no request is made");
+            }
+
+            public void onComplete()
+            {
+                throw new AssertionError("no request is made");
+            }
+
+            public void onError(Throwable t)
+            {
+                throw new AssertionError("no request is made");
+            }
+        });
+    }
+
+    public void subscribeAndClose(Flow<Integer> flow) throws Exception
+    {
+        subscribe(flow).close();
+    }
+
+
+    @Test
+    public void testDefer() throws Exception
+    {
+        AtomicInteger opened = new AtomicInteger(0);
+        AtomicInteger closed = new AtomicInteger(0);
+        Flow<Integer> flow;
+
+        flow = Flow.defer(() ->
+                          {
+                              opened.incrementAndGet();
+                              return Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                         .doOnClose(() -> closed.addAndGet(2));
+                          }).doOnClose(() -> closed.addAndGet(4));
+
+        int v = flow.blockingLast(-1);
+        assertEquals(0, v);
+        assertEquals(6, closed.get());
+        assertEquals(1, opened.get());
+        closed.set(0);
+        opened.set(0);
+
+        flow = Flow.defer(() ->
+                          {
+                              opened.incrementAndGet();
+                              return Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                         .doOnClose(() -> closed.addAndGet(2));
+                          }).doOnClose(() -> closed.addAndGet(4));
+
+        subscribeAndClose(flow);
+        assertEquals(4, closed.get());
+        assertEquals(0, opened.get());
+        closed.set(0);
+        opened.set(0);
+
+        flow = Flow.defer(() ->
+                          {
+                              opened.incrementAndGet();
+                              return Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                         .doOnClose(() -> closed.addAndGet(2));
+                          }).doOnClose(() -> closed.addAndGet(4));
+
+        subscribe(flow);
+        assertEquals(0, closed.get());
+        assertEquals(0, opened.get());
+        closed.set(0);
+        opened.set(0);
+
+        flow = Flow.defer(() ->
+                          {
+                              opened.incrementAndGet();
+                              return Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                         .map(x -> x / 0)
+                                         .doOnClose(() -> closed.addAndGet(2));
+                          }).doOnClose(() -> closed.addAndGet(4));
+
+        try
+        {
+            flow.blockingLast(-1);
+            fail("should throw");
+        }
+        catch (ArithmeticException e)
+        {
+            // correct path
+        }
+        assertEquals(6, closed.get());
+        assertEquals(1, opened.get());
+        closed.set(0);
+        opened.set(0);
+
+        flow = Flow.<Integer>
+                    defer(() ->
+                          {
+                              throw new AssertionError("construct");
+                          }).doOnClose(() -> closed.addAndGet(4));
+
+        try
+        {
+            flow.blockingLast(-1);
+            fail("should throw");
+        }
+        catch (AssertionError e)
+        {
+            // correct path
+        }
+        assertEquals(4, closed.get());
+        closed.set(0);
+    }
 }
