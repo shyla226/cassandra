@@ -178,7 +178,7 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
                                                                       Function<String, Collection<Range<Token>>> rangeProvider)
     {
         TableMetadata table = store.metadata();
-        if (!table.params.nodeSync.isEnabled(table))
+        if (localRangeCount == 0 || !table.params.nodeSync.isEnabled(table))
             return Optional.empty();
 
         int depth = computeDepth(store, localRangeCount, sizeProvider, maxSegmentSize);

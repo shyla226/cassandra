@@ -506,7 +506,16 @@ public class CassandraDaemon
             logger.info("Not starting native transport as requested. Use JMX (StorageService->startNativeTransport()) or nodetool (enablebinary) to start it");
 
         if (DatabaseDescriptor.getNodeSyncConfig().isEnabled())
-            StorageService.instance.nodeSyncService.enable();
+        {
+            try
+            {
+                StorageService.instance.nodeSyncService.enable();
+            }
+            catch (Exception e)
+            {
+                logger.error("Unexpected error starting the NodeSync service. No tables will be validated by NodeSync.", e);
+            }
+        }
     }
 
     /**

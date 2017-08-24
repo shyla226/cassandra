@@ -83,7 +83,7 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
 
                                   // Monitoring tests want to artificially slow down their reads, but we don't want this
                                   // to impact the queries drivers do on system/schema tables
-                                  if (Monitor.isTesting() && SchemaConstants.isSystemKeyspace(command.metadata().keyspace))
+                                  if (Monitor.isTesting() && !SchemaConstants.isUserKeyspace(command.metadata().keyspace))
                                       monitor = null;
 
                                   CompletableFuture<ReadResponse> result = new CompletableFuture<>();

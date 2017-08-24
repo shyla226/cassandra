@@ -11,7 +11,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledFuture;
@@ -152,28 +151,40 @@ public class NodeSyncService implements NodeSyncServiceMBean
         Schema.instance.registerListener(scheduler);
         StorageService.instance.register(scheduler);
 
-        String details;
-        if (StorageService.instance.getTokenMetadata().getAllEndpoints().size() == 1)
-        {
-            // This is a single node cluster so don't create useless validations.
-            details = "currently inactive as this is the only node in the cluster; will activate automatically once more nodes join";
-        }
-        else
-        {
-            scheduler.createInitialProposers();
-            int proposers = scheduler.proposerCount();
-            details = proposers == 0
-                      ? "currently inactive as no replicated table has NodeSync enabled; will activate automatically once this change"
-                      : proposers + " tables have NodeSync enabled";
-        }
-
         logReporterFuture = ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(new LogReporter(metrics, scheduler),
                                                                                   LOG_REPORTING_DELAY_SEC,
                                                                                   LOG_REPORTING_DELAY_SEC,
                                                                                   TimeUnit.SECONDS);
 
-        logger.info("Enabled NodeSync service ({})", details);
-        return true;
+        // Create initial proposers only once everything else is setup so that on error we leave the service in a
+        // functioning (if not exactly right) state.
+        try
+        {
+            String details;
+            if (StorageService.instance.getTokenMetadata().getAllEndpoints().size() == 1)
+            {
+                // This is a single node cluster so don't create useless validations.
+                details = "currently inactive as this is the only node in the cluster; will activate automatically once more nodes join";
+            }
+            else
+            {
+                scheduler.createInitialProposers();
+                int proposers = scheduler.proposerCount();
+                details = proposers == 0
+                          ? "currently inactive as no replicated table has NodeSync enabled; will activate automatically once this change"
+                          : proposers + " tables have NodeSync enabled";
+            }
+
+            logger.info("Enabled NodeSync service ({})", details);
+            return true;
+        }
+        catch (RuntimeException e)
+        {
+            // If we failed creating proposer and throw an exception here, user will expect the service to not really be
+            // running, so make sure that's basically true.
+            disableInternal(true, false);
+            throw e;
+        }
     }
 
     /**
@@ -190,11 +201,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
         if (!isRunning())
             return CompletableFuture.completedFuture(null);
 
-        // We can un-register the scheduler right away.
-        Schema.instance.unregisterListener(scheduler);
-        StorageService.instance.unregister(scheduler);
-
-        return executor.shutdown(force).thenRun(this::finishShutdown);
+        return disableInternal(force, true);
     }
 
     /**
@@ -253,13 +260,23 @@ public class NodeSyncService implements NodeSyncServiceMBean
         }
     }
 
-    private synchronized void finishShutdown()
+    private synchronized CompletableFuture<Void> disableInternal(boolean force, boolean logOnCompletion)
+    {
+        // We can un-register the scheduler right away.
+        Schema.instance.unregisterListener(scheduler);
+        StorageService.instance.unregister(scheduler);
+
+        return executor.shutdown(force).thenRun(() -> finishShutdown(logOnCompletion));
+    }
+
+    private synchronized void finishShutdown(boolean logOnCompletion)
     {
         this.logReporterFuture.cancel(false);
         this.scheduler = null;
         this.executor = null;
         this.logReporterFuture = null;
-        logger.info("Disabled NodeSync service");
+        if (logOnCompletion)
+            logger.info("Disabled NodeSync service");
     }
 
     public boolean isRunning()
