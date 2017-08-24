@@ -27,6 +27,7 @@ import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 
 import io.reactivex.Completable;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.*;
@@ -136,19 +137,22 @@ public class TableViews extends AbstractCollection<View>
         if (command == null)
             return Completable.complete();
 
-        long start = System.nanoTime();
-        Collection<Mutation> mutations;
-        try (UnfilteredRowIterator existings = UnfilteredPartitionIterators.getOnlyElement(command.executeForTests(), command);
-             UnfilteredRowIterator updates = update.unfilteredIterator())
-        {
-            mutations = Iterators.getOnlyElement(generateViewUpdates(views, updates, existings, nowInSec, false));
-        }
-        Keyspace.openAndGetStore(update.metadata()).metric.viewReadTime.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+        //TODO: make command execution for existing rows non-blocking and generateViewUpdates return a Flow<Mutation>
+        return Completable.defer(() -> {
+            long start = System.nanoTime();
+            Collection<Mutation> mutations;
+            try (UnfilteredRowIterator existings = UnfilteredPartitionIterators.getOnlyElement(command.executeForTests(), command);
+                 UnfilteredRowIterator updates = update.unfilteredIterator())
+            {
+                mutations = Iterators.getOnlyElement(generateViewUpdates(views, updates, existings, nowInSec, false));
+            }
+            Keyspace.openAndGetStore(update.metadata()).metric.viewReadTime.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
 
-        if (!mutations.isEmpty())
-            return StorageProxy.mutateMV(update.partitionKey().getKey(), mutations, writeCommitLog, baseComplete, queryStartNanoTime);
-        else
-            return Completable.complete();
+            if (!mutations.isEmpty())
+                return StorageProxy.mutateMV(update.partitionKey().getKey(), mutations, writeCommitLog, baseComplete, queryStartNanoTime);
+            else
+                return Completable.complete();
+        }).subscribeOn(Schedulers.io());
     }
 
 

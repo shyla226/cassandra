@@ -641,11 +641,11 @@ public class Keyspace
             memtablePutCompletables.add(memtableCompletable);
         }
 
-        // avoid the expensive merge call if there's only 1 observable
+        // avoid the expensive concat call if there's only 1 completable
         if (memtablePutCompletables.size() == 1)
             return memtablePutCompletables.get(0);
         else
-            return Completable.merge(memtablePutCompletables);
+            return Completable.concat(memtablePutCompletables);
     }
 
     private Completable failDueToWriteBarrier(Mutation mutation)
