@@ -595,17 +595,8 @@ class TestCqlshCompletion(CqlshCompletionCase):
                                      'memtable_flush_period_in_ms',
                                      'read_repair_chance', 'CLUSTERING',
                                      'COMPACT', 'caching', 'comment',
-                                     'min_index_interval', 'speculative_retry', 'cdc'])
-        self.trycompletions(prefix + ' new_table (col_a int PRIMARY KEY) WITH ',
-                            choices=['bloom_filter_fp_chance', 'compaction',
-                                     'compression',
-                                     'dclocal_read_repair_chance',
-                                     'default_time_to_live', 'gc_grace_seconds',
-                                     'max_index_interval',
-                                     'memtable_flush_period_in_ms',
-                                     'read_repair_chance', 'CLUSTERING',
-                                     'COMPACT', 'caching', 'comment',
-                                     'min_index_interval', 'speculative_retry', 'cdc'])
+                                     'min_index_interval', 'speculative_retry', 'cdc',
+                                     'nodesync'])
         self.trycompletions(prefix + ' new_table (col_a int PRIMARY KEY) WITH bloom_filter_fp_chance ',
                             immediate='= ')
         self.trycompletions(prefix + ' new_table (col_a int PRIMARY KEY) WITH bloom_filter_fp_chance = ',
@@ -653,7 +644,8 @@ class TestCqlshCompletion(CqlshCompletionCase):
                                      'memtable_flush_period_in_ms',
                                      'read_repair_chance', 'CLUSTERING',
                                      'COMPACT', 'caching', 'comment',
-                                     'min_index_interval', 'speculative_retry', 'cdc'])
+                                     'min_index_interval', 'speculative_retry', 'cdc',
+                                     'nodesync'])
         self.trycompletions(prefix + " new_table (col_a int PRIMARY KEY) WITH compaction = "
                             + "{'class': 'DateTieredCompactionStrategy', '",
                             choices=['base_time_seconds', 'max_sstable_age_days',
