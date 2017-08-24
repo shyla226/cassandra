@@ -99,4 +99,13 @@ public class PagingStateTest
         assertEquals(serialized.remaining(), state.serializedSize(ProtocolVersion.DSE_V1));
         assertEquals(state, PagingState.deserialize(serialized, ProtocolVersion.DSE_V1));
     }
+
+    @Test
+    public void testSerializeDeserializeDSE_V2()
+    {
+        PagingState state = Util.makeSomePagingState(ProtocolVersion.DSE_V2);
+        ByteBuffer serialized = state.serialize(ProtocolVersion.DSE_V2);
+        assertEquals(serialized.remaining(), state.serializedSize(ProtocolVersion.DSE_V2));
+        assertEquals(state, PagingState.deserialize(serialized, ProtocolVersion.DSE_V2));
+    }
 }

@@ -144,6 +144,16 @@ public class ClientState
             this.user = AuthenticatedUser.ANONYMOUS_USER;
     }
 
+    protected ClientState(ClientState source)
+    {
+        this.isInternal = source.isInternal;
+        this.remoteAddress = source.remoteAddress;
+        this.connection = source.connection;
+        this.user = source.user;
+        this.keyspace = source.keyspace;
+        this.sasiWarningIssued = source.sasiWarningIssued;
+    }
+
     /**
      * @return a ClientState object for internal C* calls (not limited by any kind of auth).
      */
@@ -158,6 +168,22 @@ public class ClientState
     public static ClientState forExternalCalls(SocketAddress remoteAddress, Connection connection)
     {
         return new ClientState((InetSocketAddress)remoteAddress, connection);
+    }
+
+    /**
+     * Clone this ClientState object, but use the provided keyspace instead of the
+     * keyspace in this ClientState object.
+     *
+     * @return a new ClientState object if the keyspace argument is non-null. Otherwise do not clone
+     *   and return this ClientState object.
+     */
+    public ClientState cloneWithKeyspaceIfSet(String keyspace)
+    {
+        if (keyspace == null)
+            return this;
+        ClientState clientState = new ClientState(this);
+        clientState.setKeyspace(keyspace);
+        return clientState;
     }
 
     /**

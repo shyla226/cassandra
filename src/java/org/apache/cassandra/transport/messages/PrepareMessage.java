@@ -34,26 +34,59 @@ public class PrepareMessage extends Message.Request
         public PrepareMessage decode(ByteBuf body, ProtocolVersion version)
         {
             String query = CBUtil.readLongString(body);
-            return new PrepareMessage(query);
+            String keyspace = null;
+            if (version.isGreaterOrEqualTo(ProtocolVersion.V5, ProtocolVersion.DSE_V2)) {
+                // If flags grows, we may want to consider creating a PrepareOptions class with an internal codec
+                // class that handles flags and options of the prepare message. Since there's only one right now,
+                // we just take care of business here.
+
+                int flags = (int)body.readUnsignedInt();
+                if ((flags & 0x1) == 0x1)
+                    keyspace = CBUtil.readString(body);
+            }
+            return new PrepareMessage(query, keyspace);
         }
 
         public void encode(PrepareMessage msg, ByteBuf dest, ProtocolVersion version)
         {
             CBUtil.writeLongString(msg.query, dest);
+            if (version.isGreaterOrEqualTo(ProtocolVersion.V5, ProtocolVersion.DSE_V2))
+            {
+                // If we have no keyspace, write out a 0-valued flag field.
+                if (msg.keyspace == null)
+                    dest.writeInt(0x0);
+                else {
+                    dest.writeInt(0x1);
+                    CBUtil.writeString(msg.keyspace, dest);
+                }
+            }
         }
 
         public int encodedSize(PrepareMessage msg, ProtocolVersion version)
         {
-            return CBUtil.sizeOfLongString(msg.query);
+            int size = CBUtil.sizeOfLongString(msg.query);
+            if (version.isGreaterOrEqualTo(ProtocolVersion.V5, ProtocolVersion.DSE_V2))
+            {
+                // We always emit a flags int
+                size += 4;
+
+                // If we have a keyspace, we'd write it out. Otherwise, we'd write nothing.
+                size += msg.keyspace == null
+                    ? 0
+                    : CBUtil.sizeOfString(msg.keyspace);
+            }
+            return size;
         }
     };
 
     private final String query;
+    private final String keyspace;
 
-    public PrepareMessage(String query)
+    public PrepareMessage(String query, String keyspace)
     {
         super(Message.Type.PREPARE);
         this.query = query;
+        this.keyspace = keyspace;
     }
 
     public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
@@ -66,7 +99,9 @@ public class PrepareMessage extends Message.Request
                 Tracing.instance.begin("Preparing CQL3 query", state.getClientAddress(), ImmutableMap.of("query", query));
             }
 
-            return ClientState.getCQLQueryHandler().prepare(query, state, getCustomPayload())
+            return ClientState.getCQLQueryHandler().prepare(query,
+                                                            state.getClientState().cloneWithKeyspaceIfSet(keyspace),
+                                                            getCustomPayload())
                               .map(response ->
                                   {
                                       response.setTracingId(state.getPreparedTracingSession());

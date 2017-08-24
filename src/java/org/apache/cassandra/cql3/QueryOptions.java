@@ -67,19 +67,19 @@ public abstract class QueryOptions
         return new DefaultQueryOptions(null, null, true, null, protocolVersion);
     }
 
-    public static QueryOptions create(ConsistencyLevel consistency, List<ByteBuffer> values, boolean skipMetadata, int pageSize, PagingState pagingState, ConsistencyLevel serialConsistency, ProtocolVersion version)
+    public static QueryOptions create(ConsistencyLevel consistency, List<ByteBuffer> values, boolean skipMetadata, int pageSize, PagingState pagingState, ConsistencyLevel serialConsistency, ProtocolVersion version, String keyspace)
     {
         // paging state is ignored if pageSize <= 0
         assert pageSize > 0 || pagingState == null;
         PagingOptions pagingOptions = pageSize > 0
                                       ? new PagingOptions(PageSize.rowsSize(pageSize), PagingOptions.Mechanism.SINGLE, pagingState)
                                       : null;
-        return create(consistency, values, skipMetadata, pagingOptions, serialConsistency, version);
+        return create(consistency, values, skipMetadata, pagingOptions, serialConsistency, version, keyspace);
     }
 
-    public static QueryOptions create(ConsistencyLevel consistency, List<ByteBuffer> values, boolean skipMetadata, PagingOptions pagingOptions, ConsistencyLevel serialConsistency, ProtocolVersion version)
+    public static QueryOptions create(ConsistencyLevel consistency, List<ByteBuffer> values, boolean skipMetadata, PagingOptions pagingOptions, ConsistencyLevel serialConsistency, ProtocolVersion version, String keyspace)
     {
-        return new DefaultQueryOptions(consistency, values, skipMetadata, new SpecificOptions(pagingOptions, serialConsistency, -1L), version);
+        return new DefaultQueryOptions(consistency, values, skipMetadata, new SpecificOptions(pagingOptions, serialConsistency, -1L, keyspace), version);
     }
 
     public static QueryOptions addColumnSpecifications(QueryOptions options, List<ColumnSpecification> columnSpecs)
@@ -96,11 +96,11 @@ public abstract class QueryOptions
      *
      * This is functionally equivalent to:
      *   {@code Json.parseJson(UTF8Type.instance.getSerializer().deserialize(getValues().get(bindIndex)), expectedReceivers).get(columnName)}
-     * but this cache the result of parsing the JSON so that while this might be called for multiple columns on the same {@code bindIndex}
+     * but this caches the result of parsing the JSON, so that while this might be called for multiple columns on the same {@code bindIndex}
      * value, the underlying JSON value is only parsed/processed once.
      *
-     * Note: this is a bit more involved in CQL specifics than this class generally is but we as we need to cache this per-query and in an object
-     * that is available when we bind values, this is the easier place to have this.
+     * Note: this is a bit more involved in CQL specifics than this class generally is, but as we need to cache this per-query and in an object
+     * that is available when we bind values, this is the easiest place to have this.
      *
      * @param bindIndex the index of the bind value that should be interpreted as a JSON value.
      * @param columnName the name of the column we want the value of.
@@ -146,7 +146,7 @@ public abstract class QueryOptions
      *
      * <p>The column specifications will be present only for prepared statements.</p>
      *
-     * <p>Invoke the {@link hasColumnSpecifications} method before invoking this method in order to ensure that this
+     * <p>Invoke the {@link #hasColumnSpecifications} method before invoking this method in order to ensure that this
      * <code>QueryOptions</code> contains the column specifications.</p>
      *
      * @return the option names
@@ -169,6 +169,9 @@ public abstract class QueryOptions
         long tstamp = getSpecificOptions().timestamp;
         return tstamp != Long.MIN_VALUE ? tstamp : state.getTimestamp();
     }
+
+    /** The keyspace that this query is bound to, or null if not relevant. */
+    public String getKeyspace() { return getSpecificOptions().keyspace; }
 
     /**
      * The protocol version for the query.
@@ -332,7 +335,7 @@ public abstract class QueryOptions
         {
             super.prepare(specs);
 
-            orderedValues = new ArrayList<ByteBuffer>(specs.size());
+            orderedValues = new ArrayList<>(specs.size());
             for (int i = 0; i < specs.size(); i++)
             {
                 String name = specs.get(i).name.toString();
@@ -361,17 +364,19 @@ public abstract class QueryOptions
      */
     static class SpecificOptions
     {
-        private static final SpecificOptions DEFAULT = new SpecificOptions(null, null, Long.MIN_VALUE);
+        private static final SpecificOptions DEFAULT = new SpecificOptions(null, null, Long.MIN_VALUE, null);
 
         private final PagingOptions pagingOptions;
         private final ConsistencyLevel serialConsistency;
         private final long timestamp;
+        private final String keyspace;
 
-        private SpecificOptions(PagingOptions pagingOptions, ConsistencyLevel serialConsistency, long timestamp)
+        private SpecificOptions(PagingOptions pagingOptions, ConsistencyLevel serialConsistency, long timestamp, String keyspace)
         {
             this.pagingOptions = pagingOptions;
             this.serialConsistency = serialConsistency == null ? ConsistencyLevel.SERIAL : serialConsistency;
             this.timestamp = timestamp;
+            this.keyspace = keyspace;
         }
     }
 
@@ -481,6 +486,7 @@ public abstract class QueryOptions
             SERIAL_CONSISTENCY(4),
             TIMESTAMP(5),
             NAMES_FOR_VALUES(6),
+            KEYSPACE(7),
 
             // private flags
             PAGE_SIZE_BYTES(30),
@@ -599,7 +605,8 @@ public abstract class QueryOptions
                     pagingOptions = new PagingOptions(pageSize, PagingOptions.Mechanism.SINGLE, pagingState);
                 }
 
-                options = new SpecificOptions(pagingOptions, serialConsistency, timestamp);
+                String keyspace = flags.contains(Flag.KEYSPACE) ? CBUtil.readString(body) : null;
+                options = new SpecificOptions(pagingOptions, serialConsistency, timestamp, keyspace);
             }
 
             DefaultQueryOptions opts = new DefaultQueryOptions(consistency, values, skipMetadata, options, version);
@@ -628,6 +635,8 @@ public abstract class QueryOptions
                 CBUtil.writeConsistencyLevel(options.getSerialConsistency(), dest);
             if (flags.contains(Flag.TIMESTAMP))
                 dest.writeLong(options.getSpecificOptions().timestamp);
+            if (flags.contains(Flag.KEYSPACE))
+                CBUtil.writeString(options.getSpecificOptions().keyspace, dest);
             if (flags.contains(Flag.CONTINUOUS_PAGING))
             {
                 dest.writeInt(pagingOptions.maxPages);
@@ -659,6 +668,8 @@ public abstract class QueryOptions
                 size += CBUtil.sizeOfConsistencyLevel(options.getSerialConsistency());
             if (flags.contains(Flag.TIMESTAMP))
                 size += 8;
+            if (flags.contains(Flag.KEYSPACE))
+                size += CBUtil.sizeOfString(options.getSpecificOptions().keyspace);
             if (flags.contains(Flag.CONTINUOUS_PAGING))
                 size += 8;
 
@@ -687,7 +698,8 @@ public abstract class QueryOptions
                 flags.add(Flag.SERIAL_CONSISTENCY);
             if (options.getSpecificOptions().timestamp != Long.MIN_VALUE)
                 flags.add(Flag.TIMESTAMP);
-
+            if (options.getSpecificOptions().keyspace != null)
+                flags.add(Flag.KEYSPACE);
             return flags;
         }
     }

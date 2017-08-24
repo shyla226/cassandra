@@ -51,7 +51,8 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
     V3(3, "v3", false),
     V4(4, "v4", false),
     V5(5, "v5-beta", true),
-    DSE_V1(65, "dse-v1", false);
+    DSE_V1(0x40 | 1, "dse-v1", false),
+    DSE_V2(0x40 | 2, "dse-v2", false);
 
     /** The version number, for OS version this is a number from 1 to 64, for DSE versions from 65 to 127 */
     private final int num;
@@ -78,7 +79,7 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
     final static ProtocolVersion MAX_OS_VERSION = OS_VERSIONS[OS_VERSIONS.length - 1];
 
     /** The supported DSE versions */
-    final static ProtocolVersion[] DSE_VERSIONS = new ProtocolVersion[] { DSE_V1 };
+    final static ProtocolVersion[] DSE_VERSIONS = new ProtocolVersion[] { DSE_V1, DSE_V2 };
     final static ProtocolVersion MIN_DSE_VERSION = DSE_VERSIONS[0];
     final static ProtocolVersion MAX_DSE_VERSION = DSE_VERSIONS[DSE_VERSIONS.length - 1];
 
@@ -91,7 +92,7 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
     public final static EnumSet<ProtocolVersion> UNSUPPORTED = EnumSet.complementOf(SUPPORTED);
 
     /** The preferred versions */
-    public final static ProtocolVersion CURRENT = DSE_V1;
+    public final static ProtocolVersion CURRENT = DSE_V2;
     public final static Optional<ProtocolVersion> BETA = Optional.empty();
 
     public static List<String> supportedVersions()
@@ -174,6 +175,21 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
     public final boolean isGreaterOrEqualTo(ProtocolVersion other)
     {
         return ordinal() >= other.ordinal();
+    }
+
+    /**
+     * Return true if this is an OSS version greater or equal to the specified OSS version or if this is
+     * a DSE version greater or equal to the specified DSE version.
+     *
+     * @param ossVersion - the OSS version to compare this to, if this is a OSS version
+     * @param dseVersion - the DSE version to compare this to, if this is a DSE version
+     * @return true if this version is greater or equal to the matching version, as described above
+     */
+    public final boolean isGreaterOrEqualTo(ProtocolVersion ossVersion, ProtocolVersion dseVersion)
+    {
+        return ordinal() >= (isDse() ?
+                             dseVersion.ordinal() :
+                             ossVersion.ordinal());
     }
 
     public final boolean isSmallerThan(ProtocolVersion other)
