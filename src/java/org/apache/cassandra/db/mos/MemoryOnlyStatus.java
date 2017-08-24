@@ -8,6 +8,7 @@ package org.apache.cassandra.db.mos;
 
 
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -71,7 +72,7 @@ public class MemoryOnlyStatus implements MemoryOnlyStatusMBean
         return maxAvailableBytes;
     }
 
-    public MemoryLockedBuffer lock(ByteBuffer buffer)
+    public MemoryLockedBuffer lock(MappedByteBuffer buffer)
     {
         long address = MemoryUtil.getAddress(buffer);
 
@@ -83,6 +84,9 @@ public class MemoryOnlyStatus implements MemoryOnlyStatusMBean
             logger.debug("Lock buffer address: {} length: {}", address, length);
             if (NativeLibrary.tryMlock(address, length))
             {
+                // DSP-14169/APOLLO-1052: checking buffer.isLoaded() returns true and judging by the API docs, it's merely a hint
+                // and not a guarantee. Therefore we just call buffer.load() directly to make sure a byte is read and brought into memory.
+                buffer.load();
                 return MemoryLockedBuffer.succeeded(address, lengthRoundedTo4k);
             }
         }
