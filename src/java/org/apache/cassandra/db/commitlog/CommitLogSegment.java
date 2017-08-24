@@ -126,7 +126,7 @@ public abstract class CommitLogSegment
         Configuration config = commitLog.configuration;
         CommitLogSegment segment = config.useEncryption() ? new EncryptedSegment(commitLog, manager)
                                                           : config.useCompression() ? new CompressedSegment(commitLog, manager)
-                                                                                    : new MemoryMappedSegment(commitLog, manager);
+                                                                                    : new UncompressedSegment(commitLog, manager);
         segment.writeLogHeader();
         return segment;
     }

@@ -20,38 +20,34 @@ package org.apache.cassandra.db.commitlog;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.utils.SyncUtil;
 
 /**
- * Compressed commit log segment. Provides an in-memory buffer for the mutation threads. On sync compresses the written
- * section of the buffer and writes it to the destination channel.
+ * Uncompressed commit log segment. Provides an in-memory buffer for the mutation threads. On sync writes anything
+ * unwritten to disk and waits for the writes to materialize.
  *
- * The format of the compressed commit log is as follows:
+ * The format of the uncompressed commit log is as follows:
  * - standard commit log header (as written by {@link CommitLogDescriptor#writeHeader(ByteBuffer, CommitLogDescriptor)})
  * - a series of 'sync segments' that are written every time the commit log is sync()'ed
  * -- a sync section header, see {@link CommitLogSegment#writeSyncMarker(ByteBuffer, int, int, int)}
- * -- total plain text length for this section
- * -- a block of compressed data
+ * -- a block of uncompressed data
  */
-public class CompressedSegment extends FileDirectSegment
+public class UncompressedSegment extends FileDirectSegment
 {
-    static final int COMPRESSED_MARKER_SIZE = SYNC_MARKER_SIZE + 4;
-    final ICompressor compressor;
-
     /**
      * Constructs a new segment file.
      */
-    CompressedSegment(CommitLog commitLog, AbstractCommitLogSegmentManager manager)
+    UncompressedSegment(CommitLog commitLog, AbstractCommitLogSegmentManager manager)
     {
         super(commitLog, manager);
-        this.compressor = commitLog.configuration.getCompressor();
-        manager.getBufferPool().setPreferredReusableBufferType(compressor.preferredBufferType());
+        manager.getBufferPool().setPreferredReusableBufferType(BufferType.OFF_HEAP);
     }
 
     ByteBuffer createBuffer(CommitLog commitLog)
     {
-        return manager.getBufferPool().createBuffer(commitLog.configuration.getCompressor().preferredBufferType());
+        return manager.getBufferPool().createBuffer(BufferType.OFF_HEAP);
     }
 
     @Override
@@ -64,24 +60,17 @@ public class CompressedSegment extends FileDirectSegment
 
         try
         {
-            int neededBufferSize = compressor.initialCompressedBufferLength(length) + COMPRESSED_MARKER_SIZE;
-            ByteBuffer compressedBuffer = manager.getBufferPool().getThreadLocalReusableBuffer(neededBufferSize);
+            writeSyncMarker(buffer, startMarker, startMarker, nextMarker);
 
             ByteBuffer inputBuffer = buffer.duplicate();
-            inputBuffer.limit(contentStart + length).position(contentStart);
-            compressedBuffer.limit(compressedBuffer.capacity()).position(COMPRESSED_MARKER_SIZE);
-            compressor.compress(inputBuffer, compressedBuffer);
-
-            compressedBuffer.flip();
-            compressedBuffer.putInt(SYNC_MARKER_SIZE, length);
+            inputBuffer.limit(nextMarker).position(startMarker);
 
             // Only one thread can be here at a given time.
             // Protected by synchronization on CommitLogSegment.sync().
-            writeSyncMarker(compressedBuffer, 0, (int) channel.position(), (int) channel.position() + compressedBuffer.remaining());
-            manager.addSize(compressedBuffer.limit());
-            channel.write(compressedBuffer);
-            assert channel.position() - lastWrittenPos == compressedBuffer.limit();
-            lastWrittenPos = channel.position();
+            manager.addSize(inputBuffer.remaining());
+            channel.write(inputBuffer);
+            lastWrittenPos = nextMarker;
+            assert channel.position() == nextMarker;
             SyncUtil.force(channel, true);
         }
         catch (Exception e)

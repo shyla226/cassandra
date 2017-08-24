@@ -97,7 +97,7 @@ public class EncryptedSegment extends FileDirectSegment
         return manager.getBufferPool().createBuffer(BufferType.ON_HEAP);
     }
 
-    void write(int startMarker, int nextMarker)
+    synchronized void write(int startMarker, int nextMarker)
     {
         int contentStart = startMarker + SYNC_MARKER_SIZE;
         final int length = nextMarker - contentStart;

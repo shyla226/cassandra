@@ -31,7 +31,11 @@ import org.apache.cassandra.utils.SyncUtil;
 /*
  * Memory-mapped segment. Maps the destination channel into an appropriately-sized memory-mapped buffer in which the
  * mutation threads write. On sync forces the buffer to disk.
- * If possible, recycles used segment files to avoid reallocating large chunks of disk.
+ *
+ * This class is currently unused as memory-mapped writes block the threads while the OS is preparing pages for writing.
+ * However, memory-mapped writing would make a lot of sense if the underlying storage is non-volatile memory, which can
+ * be mapped without any page faults and management overheads and we will most probably need to reuse this in the near
+ * future.
  */
 public class MemoryMappedSegment extends CommitLogSegment
 {
