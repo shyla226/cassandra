@@ -243,15 +243,20 @@ class Validator
         // Can be null on an exception
         if (flow != null)
             flowFuture = flow.flatProcess(p -> p.content.process())
-                         .lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
-                         .processToFuture()
-                         .thenRun(this::markFinished)
-                         .exceptionally(t -> handleError(t, executor));
+                             .lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
+                             .processToFuture()
+                             .handleAsync((v, t) -> {
+                                 if (t == null)
+                                     markFinished();
+                                 else
+                                     handleError(t, executor);
+                                 return null;
+                             }, executor.asExecutor());
 
         return completionFuture;
     }
 
-    private Flow<FlowablePartition> moreContents(PageProcessingStatsListener listener)
+    private Flow<FlowablePartition> moreContents(ValidationExecutor executor)
     {
         if (pager.isExhausted() || state.get() == State.CANCELLED)
             return null;
@@ -261,19 +266,22 @@ class Validator
             observer.onNewPage();
             maybeRefreshLock();
             return pager.fetchPage(new PageSize((int) pageSize, PageSize.PageUnit.BYTES), readContext)
-                        .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), listener))
-                        .concatWith(() -> moreContents(listener));
+                        .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), executor))
+                        .concatWith(() -> moreContents(executor));
         }
         catch (Throwable t)
         {
             // We can typically get UnavailableException here. In any case, delegate to handleError(), which will
             // always make sure to complete the validator so we can just return null (to stop the flow otherwise).
-            handleError(t, listener);
+            // Side-note: handleError() shouldn't be called on a core thread as it blocks (to write system tables) but
+            // moreContents() can be called on a core-thread, hence we make sure to call it on the executor. Note that
+            // it's possible we're already on the executor, but performance isn't a big concern here, so keep it simple.
+            executor.asExecutor().execute(() -> handleError(t, executor));
             return null;
         }
     }
 
-    private Void handleError(Throwable t, PageProcessingStatsListener listener)
+    private void handleError(Throwable t, PageProcessingStatsListener listener)
     {
         if (t instanceof CompletionException)
             t = t.getCause();
@@ -281,7 +289,7 @@ class Validator
         // Cancellation is the one we ignore as we already cancel the completion future when that happens and there is
         // nothing more to do here.
         if (t instanceof CancellationException)
-            return null;
+            return;
 
         if (t instanceof UnknownKeyspaceException)
         {
@@ -312,7 +320,6 @@ class Validator
             recordPage(ValidationOutcome.FAILED, listener);
             markFinished();
         }
-        return null;
     }
 
     /**
