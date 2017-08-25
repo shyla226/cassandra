@@ -57,7 +57,6 @@ public class ClientState
 
     private static final Set<IResource> READABLE_SYSTEM_RESOURCES = new HashSet<>();
     private static final Set<IResource> PROTECTED_AUTH_RESOURCES = new HashSet<>();
-    private static final Set<String> ALTERABLE_SYSTEM_KEYSPACES = new HashSet<>();
     private static final Set<IResource> DROPPABLE_SYSTEM_TABLES = new HashSet<>();
     static
     {
@@ -76,9 +75,6 @@ public class ClientState
             PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getRoleManager().protectedResources());
         }
 
-        // allow users with sufficient privileges to alter KS level options on AUTH_KS and TRACING_KS
-        ALTERABLE_SYSTEM_KEYSPACES.add(SchemaConstants.AUTH_KEYSPACE_NAME);
-        ALTERABLE_SYSTEM_KEYSPACES.add(SchemaConstants.TRACE_KEYSPACE_NAME);
         DROPPABLE_SYSTEM_TABLES.add(DataResource.table(SchemaConstants.AUTH_KEYSPACE_NAME, "resource_role_permissons_index"));
     }
 
@@ -477,17 +473,20 @@ public class ClientState
         if (!((perm == CorePermission.ALTER) || (perm == CorePermission.DROP) || (perm == CorePermission.CREATE)))
             return;
 
-        // prevent system keyspace modification
+        // prevent system keyspace modification (not only because this could be dangerous, but also because this just
+        // wouldn't work with the way the schema of those system keyspace/table schema is hard-coded)
         if (SchemaConstants.isSystemKeyspace(keyspace))
             throw new UnauthorizedException(keyspace + " keyspace is not user-modifiable.");
 
-        // allow users with sufficient privileges to alter KS level options on AUTH_KS and
-        // TRACING_KS, but not to drop any tables
-        if (ALTERABLE_SYSTEM_KEYSPACES.contains(resource.getKeyspace().toLowerCase())
-           && ((perm == CorePermission.ALTER && !resource.isKeyspaceLevel())
-               || (perm == CorePermission.DROP && !DROPPABLE_SYSTEM_TABLES.contains(resource))))
+        // Allow users with sufficient privileges to alter options on certain distributed system keyspaces/tables.
+        // We only allow ALTER, not CREATE nor DROP, outside of a few specific tables that can be dropped  because they
+        // are not used anymore but we prefer leaving user the responsibility to drop them. Note that even when altering
+        // is allowed, only the table options can be altered but any change to the table schema (adding/removing columns
+        // typically) is forbidden by AlterTableStatement.
+        if (SchemaConstants.isReplicatedSystemKeyspace(keyspace))
         {
-            throw new UnauthorizedException(String.format("Cannot %s %s", perm, resource));
+            if (perm != CorePermission.ALTER && !(perm == CorePermission.DROP && DROPPABLE_SYSTEM_TABLES.contains(resource)))
+                throw new UnauthorizedException(String.format("Cannot %s %s", perm, resource));
         }
     }
 

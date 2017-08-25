@@ -196,7 +196,7 @@ public final class TableAttributes extends PropertyDefinitions
         return value;
     }
 
-    private boolean hasOption(Option option)
+    boolean hasOption(Option option)
     {
         return hasProperty(option.toString());
     }

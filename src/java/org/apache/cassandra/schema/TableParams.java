@@ -215,6 +215,14 @@ public final class TableParams
 
         TableParams p = (TableParams) o;
 
+        return equalsIgnoringNodeSync(p) && nodeSync.equals(p.nodeSync);
+    }
+
+    /**
+     * Checks equality of this parameters with the provided ones, but ignoring the {@code nodesync} parameter.
+     */
+    public boolean equalsIgnoringNodeSync(TableParams p)
+    {
         return comment.equals(p.comment)
                && readRepairChance == p.readRepairChance
                && dcLocalReadRepairChance == p.dcLocalReadRepairChance
@@ -230,8 +238,7 @@ public final class TableParams
                && compaction.equals(p.compaction)
                && compression.equals(p.compression)
                && extensions.equals(p.extensions)
-               && cdc == p.cdc
-               && nodeSync.equals(p.nodeSync);
+               && cdc == p.cdc;
     }
 
     @Override

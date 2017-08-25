@@ -17,9 +17,15 @@
  */
 package org.apache.cassandra.cql3.validation.operations;
 
+import java.util.Collections;
+import java.util.concurrent.TimeUnit;
+import javax.validation.constraints.NotNull;
+
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.schema.NodeSyncParams;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -27,9 +33,11 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.schema.SchemaKeyspace;
+import org.apache.cassandra.schema.TableMetadata;
 
 import static java.lang.String.format;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 public class AlterTest extends CQLTester
 {
@@ -523,5 +531,51 @@ public class AlterTest extends CQLTester
         execute("ALTER TABLE %s DROP x");
 
         assertEmpty(execute("SELECT * FROM %s WHERE k = 0 ORDER BY l DESC"));
+    }
+
+    @Test
+    public void testAlterOnSystemDistributedTables() throws Throwable
+    {
+        //testAlterOnSystemDistributedTable("system_traces", "sessions");
+        for (String keyspace : SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES)
+        {
+            for (ColumnFamilyStore store : Keyspace.open(keyspace).getColumnFamilyStores())
+                testAlterOnSystemDistributedTable(keyspace, store.metadata.name);
+        }
+    }
+
+    @NotNull
+    private TableMetadata metadata(String keyspace, String table)
+    {
+        TableMetadata metadata = Schema.instance.getTableMetadata(keyspace, table);
+        assertNotNull("Couldn't found metadata for table " + keyspace + '.' + table, metadata);
+        return metadata;
+    }
+
+    private void testAlterOnSystemDistributedTable(String keyspace, String table) throws Throwable
+    {
+        String alterBase = String.format("ALTER TABLE %s.%s ", keyspace, table);
+
+        // First, check that adding, renaming, or removing columns is forbidden
+        assertInvalidMessage("Cannot alter schema", alterBase + " ADD foo text");
+        // The 2 following would be invalid anyway because the table likely doesn't have a foo column, but that's why we
+        // check the message as well.
+        assertInvalidMessage("Cannot alter schema", alterBase + " RENAME foo TO bar");
+        assertInvalidMessage("Cannot alter schema", alterBase + " DROP foo");
+
+        // Now check that we can change the NodeSync parameters (APOLLO-965)
+        assertEquals(NodeSyncParams.DEFAULT, metadata(keyspace, table).params.nodeSync);
+        NodeSyncParams nodeSyncParams = new NodeSyncParams(true, (int)TimeUnit.HOURS.toSeconds(42), Collections.emptyMap());
+        execute(alterBase + "WITH nodesync=" + nodeSyncParams);
+        assertEquals(nodeSyncParams, metadata(keyspace, table).params.nodeSync);
+
+        // Just in case, check that we can change it more than once.
+        NodeSyncParams nodeSyncParams2 = new NodeSyncParams(false, (int)TimeUnit.HOURS.toSeconds(24), Collections.emptyMap());
+        execute(alterBase + "WITH nodesync=" + nodeSyncParams2);
+        assertEquals(nodeSyncParams2, metadata(keyspace, table).params.nodeSync);
+
+        // Lastly, check that we cannot update other parameters (since it shouldn't be allowed as of APOLLO-965)
+        assertInvalidMessage("Only the nodesync option is user-modifiable", alterBase + " WITH comment='foo'");
+        assertInvalidMessage("Only the nodesync option is user-modifiable", alterBase + " WITH gc_grace_seconds=42");
     }
 }

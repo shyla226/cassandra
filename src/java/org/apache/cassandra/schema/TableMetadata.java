@@ -526,17 +526,34 @@ public final class TableMetadata
 
         TableMetadata tm = (TableMetadata) o;
 
+        return equalsIgnoringParameters(tm)
+               && params.equals(tm.params);
+    }
+
+    /**
+     * Tests whether this metadata object represents the same table name and "schema" than the provided one.
+     * In other words, it tests equality with the provided metadata but with the exclusion of parameters.
+     */
+    private boolean equalsIgnoringParameters(TableMetadata tm)
+    {
         return keyspace.equals(tm.keyspace)
-            && name.equals(tm.name)
-            && id.equals(tm.id)
-            && partitioner.equals(tm.partitioner)
-            && params.equals(tm.params)
-            && flags.equals(tm.flags)
-            && isView == tm.isView
-            && columns.equals(tm.columns)
-            && droppedColumns.equals(tm.droppedColumns)
-            && indexes.equals(tm.indexes)
-            && triggers.equals(tm.triggers);
+               && name.equals(tm.name)
+               && id.equals(tm.id)
+               && partitioner.equals(tm.partitioner)
+               && flags.equals(tm.flags)
+               && isView == tm.isView
+               && columns.equals(tm.columns)
+               && droppedColumns.equals(tm.droppedColumns)
+               && indexes.equals(tm.indexes)
+               && triggers.equals(tm.triggers);
+    }
+
+    /**
+     * Tests whether this metadata object is equal to the provided one but ignoring the {@code nodesync} table parameter.
+     */
+    public boolean equalsIgnoringNodeSync(TableMetadata tm)
+    {
+        return equalsIgnoringParameters(tm) && params.equalsIgnoringNodeSync(tm.params);
     }
 
     @Override

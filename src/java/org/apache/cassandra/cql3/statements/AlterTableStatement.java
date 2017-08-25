@@ -39,6 +39,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.ViewMetadata;
@@ -100,6 +101,12 @@ public class AlterTableStatement extends SchemaAlteringStatement
 
         List<ViewMetadata> viewUpdates = new ArrayList<>();
         Iterable<ViewMetadata> views = View.findAll(keyspace(), columnFamily());
+
+        // We may get here for some (distributed) system tables (meaning, they are not rejected at the authorization
+        // stage) because we do allow modifying their NodeSync options (bearing sufficient privileges). We don't want to
+        // allow any schema related change however as that would almost surely break things.
+        if (!SchemaConstants.isUserKeyspace(keyspace()) && oType != Type.OPTS)
+            return error("Cannot alter schema (adding, renaming or removing columns) of system keyspace " + keyspace());
 
         switch (oType)
         {
@@ -243,6 +250,17 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 if (attrs == null)
                     return error("ALTER TABLE WITH invoked, but no parameters found");
                 attrs.validate();
+
+                if (!SchemaConstants.isUserKeyspace(keyspace()))
+                {
+                    // With APOLLO-965, we started allowing users to alter the NodeSync setting on distributed system
+                    // tables, but to keep that ticket less risky, we don't allow the altering of any other setting (the
+                    // underlying reason being that we don't have a good way in general to let user change those
+                    // system table settings while still preserving our ability to change these same settings if we
+                    // decide on better defaults).
+                    if (attrs.size() != 1 || !attrs.hasOption(TableParams.Option.NODESYNC))
+                        return error("Only the " + TableParams.Option.NODESYNC + " option is user-modifiable on system table " + current);
+                }
 
                 TableParams params = attrs.asAlteredTableParams(current.params);
                 if (params.compaction.klass().equals(DateTieredCompactionStrategy.class) &&

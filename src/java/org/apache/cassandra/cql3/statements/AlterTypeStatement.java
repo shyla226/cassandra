@@ -28,6 +28,7 @@ import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
@@ -75,7 +76,13 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
 
     public void validate(ClientState state) throws RequestValidationException
     {
-        // Validation is left to announceMigration as it's easier to do it while constructing the updated type.
+        // We definitively don't want to let user modify types in system keyspaces but we can't fully rely on
+        // authorization for that because ALTER TYPE only require ALTER permission on the keyspace, and we do allow
+        // that on some system (distributed) keyspace to allow changing the replication factor. So rejecting it now.
+        if (!SchemaConstants.isUserKeyspace(keyspace()))
+            throw new InvalidRequestException("Cannot ALTER types in system keyspace " + keyspace());
+
+        // The rest of validation is mostly left to announceMigration as it's easier to do it while constructing the updated type.
         // It doesn't really change anything anyway.
     }
 

@@ -246,11 +246,6 @@ public final class NodeSyncParams
         if (isEnabled != null)
             return isEnabled;
 
-        // We force nodesync on the system distributed keyspace because it cannot be altered manually.
-        // TODO(Sylvain): we should fix the later part, this is not ideal at all.
-        if (SchemaConstants.isReplicatedSystemKeyspace(table.keyspace))
-            return true;
-
         return withViewDefaultHandling(table, Option.ENABLED, DEFAULT_ENABLED, NodeSyncParams::isEnabled);
     }
 

@@ -59,6 +59,11 @@ public class PropertyDefinitions
         }
     }
 
+    public int size()
+    {
+        return properties.size();
+    }
+
     protected String getSimple(String name) throws SyntaxException
     {
         Object val = properties.get(name);

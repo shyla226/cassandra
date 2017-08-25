@@ -94,6 +94,7 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -1111,8 +1112,24 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         for (TableMetadata expectedTable : expected)
         {
             TableMetadata definedTable = defined.get(expectedTable.name).orElse(null);
-            if (definedTable == null || !definedTable.equals(expectedTable))
+            // If the table doesn't exist yet, create it.
+            if (definedTable == null)
+            {
                 migrations.add(MigrationManager.forceAnnounceNewTable(expectedTable));
+            }
+            // If it exists, on an upgrade, it's schema may not be up-to-date so update it if it's not the case.
+            // One of the subtlety is that we let users override the NodeSync parameters (see APOLLO-965) and we don't
+            // want to override such setting here. So we both ignore NodeSync when checking if the defined schema differs
+            // from the expected one *and* preserve the defined NodeSync setting if we do have to override the schema.
+            // Note that this mean that if we ever want to change the default NodeSync setting for some system tables,
+            // we cannot do it manually where the table is defined but we'd have to rather special case it in NodeSyncParams.
+            else if (!definedTable.equalsIgnoringNodeSync(expectedTable))
+            {
+                TableParams newParams = expectedTable.params.unbuild()
+                                                            .nodeSync(definedTable.params.nodeSync)
+                                                            .build();
+                migrations.add(MigrationManager.forceAnnounceNewTable(expectedTable.unbuild().params(newParams).build()));
+            }
         }
 
         return migrations.isEmpty() ? Completable.complete() : Completable.concat(migrations);
