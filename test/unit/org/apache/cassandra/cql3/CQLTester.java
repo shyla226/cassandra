@@ -568,7 +568,8 @@ public abstract class CQLTester
     public void disableCompaction(String keyspace)
     {
         ColumnFamilyStore store = getCurrentColumnFamilyStore(keyspace);
-        store.disableAutoCompaction();
+        if (store != null)
+            store.disableAutoCompaction();
     }
 
     public void compact()
@@ -588,6 +589,23 @@ public abstract class CQLTester
         {
             throw new RuntimeException(e);
         }
+    }
+
+    public void disableCompaction()
+    {
+        disableCompaction(KEYSPACE);
+    }
+
+    public void enableCompaction(String keyspace)
+    {
+        ColumnFamilyStore store = getCurrentColumnFamilyStore(keyspace);
+        if (store != null)
+            store.enableAutoCompaction();
+    }
+
+    public void enableCompaction()
+    {
+        enableCompaction(KEYSPACE);
     }
 
     public void cleanupCache()
