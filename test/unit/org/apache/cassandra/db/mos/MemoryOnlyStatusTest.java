@@ -6,7 +6,15 @@
 
 package org.apache.cassandra.db.mos;
 
-import java.nio.ByteBuffer;
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
@@ -15,22 +23,50 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 public class MemoryOnlyStatusTest
 {
     private MemoryOnlyStatus memoryOnlyStatus;
+    private static String tmpDirectory;
 
     @BeforeClass
-    public static void setUp()
+    public static void setUp() throws IOException
     {
         DatabaseDescriptor.daemonInitialization();
+        tmpDirectory = Files.createTempDirectory("memory-only-").toString();
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
+        FileUtils.deleteRecursive(new File(tmpDirectory));
+    }
+
+    private MappedByteBuffer createMappedBuffer(int length)
+    {
+        MappedByteBuffer out = null;
+        try
+        {
+            Path filename = Paths.get(tmpDirectory, UUID.randomUUID().toString());
+            out = new RandomAccessFile(filename.toString(), "rw")
+                  .getChannel().map(FileChannel.MapMode.READ_ONLY, 0, length);
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
+        }
+        return out;
     }
 
     @Test
@@ -51,7 +87,7 @@ public class MemoryOnlyStatusTest
         // lock 4 buffers of 32k, only the first 2 should be locked
         MemoryLockedBuffer[] buffers = new MemoryLockedBuffer[4];
         for (int i = 0; i < buffers.length; i++)
-            buffers[i] = lockBuffer(ByteBuffer.allocateDirect(32 * 1024), i < 2);
+            buffers[i] = lockBuffer(createMappedBuffer(32 * 1024), i < 2);
 
         assertEquals(1.0, memoryOnlyStatus.getMemoryOnlyPercentUsed(), Math.ulp(1.0));
 
@@ -89,7 +125,7 @@ public class MemoryOnlyStatusTest
                                 {
                                     try
                                     {
-                                        MemoryLockedBuffer lockedBuffer = memoryOnlyStatus.lock(ByteBuffer.allocateDirect(Math.toIntExact(sizeToLock)));
+                                        MemoryLockedBuffer lockedBuffer = memoryOnlyStatus.lock(createMappedBuffer(Math.toIntExact(sizeToLock)));
                                         assertNotNull(lockedBuffer);
                                         assertTrue(lockedBuffer.succeeded);
                                         assertEquals(sizeToLock, lockedBuffer.amount);
@@ -155,7 +191,7 @@ public class MemoryOnlyStatusTest
         }
     }
 
-    private MemoryLockedBuffer lockBuffer(ByteBuffer buffer, boolean shouldSucceed)
+    private MemoryLockedBuffer lockBuffer(MappedByteBuffer buffer, boolean shouldSucceed)
     {
         MemoryOnlyStatusMBean.TotalInfo before = memoryOnlyStatus.getMemoryOnlyTotals();
 
@@ -163,6 +199,7 @@ public class MemoryOnlyStatusTest
         assertNotNull(lockedBuffer);
         assertEquals(shouldSucceed, lockedBuffer.succeeded);
         assertEquals(roundTo4K(buffer.capacity()), lockedBuffer.amount);
+        assertEquals(shouldSucceed, buffer.isLoaded());
 
         MemoryOnlyStatusMBean.TotalInfo after = memoryOnlyStatus.getMemoryOnlyTotals();
         if (shouldSucceed)

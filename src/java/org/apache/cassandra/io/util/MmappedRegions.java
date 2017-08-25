@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
 import java.util.Collections;
@@ -272,7 +273,7 @@ public class MmappedRegions extends SharedCloseableImpl
         private final ChannelProxy channel;
 
         /** An array of region buffers, synchronized with offsets */
-        private ByteBuffer[] buffers;
+        private MappedByteBuffer[] buffers;
 
         /** An array of region offsets, synchronized with buffers */
         private long[] offsets;
@@ -291,7 +292,7 @@ public class MmappedRegions extends SharedCloseableImpl
         private State(ChannelProxy channel)
         {
             this.channel = channel.sharedCopy();
-            this.buffers = new ByteBuffer[REGION_ALLOC_SIZE];
+            this.buffers = new MappedByteBuffer[REGION_ALLOC_SIZE];
             this.offsets = new long[REGION_ALLOC_SIZE];
             this.length = 0;
             this.last = -1;
@@ -336,7 +337,7 @@ public class MmappedRegions extends SharedCloseableImpl
 
         private void add(long pos, long size)
         {
-            ByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos, size);
+            MappedByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos, size);
 
             ++last;
 

@@ -1578,7 +1578,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         {
             JVMStabilityInspector.inspectThrowable(ret);
             logger.error("Failed to lock {}", this, ret);
-}
+        }
     }
 
     /**
