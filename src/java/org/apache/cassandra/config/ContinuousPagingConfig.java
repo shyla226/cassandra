@@ -18,7 +18,11 @@
 
 package org.apache.cassandra.config;
 
+import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
+
+import com.google.common.base.Joiner;
 
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -113,5 +117,23 @@ public class ContinuousPagingConfig
                                       max_client_wait_time_ms,
                                       max_local_query_time_ms,
                                       max_threads);
+    }
+
+    private Map<String, String> toStringMap()
+    {
+        Map<String, String> m = new TreeMap<>();
+        m.put("max_concurrent_sessions", Integer.toString(max_concurrent_sessions));
+        m.put("max_session_pages", Integer.toString(max_session_pages));
+        m.put("max_page_size_mb", Integer.toString(max_page_size_mb));
+        m.put("max_client_wait_time_ms", Integer.toString(max_client_wait_time_ms));
+        m.put("max_local_query_time_ms", Integer.toString(max_local_query_time_ms));
+        m.put("max_threads", Integer.toString(max_threads));
+        return m;
+    }
+
+    @Override
+    public String toString()
+    {
+        return '{' + Joiner.on(", ").withKeyValueSeparator("=").join(toStringMap()) + '}';
     }
 }

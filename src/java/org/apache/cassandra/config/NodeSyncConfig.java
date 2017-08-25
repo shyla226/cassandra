@@ -5,8 +5,11 @@
  */
 package org.apache.cassandra.config;
 
+import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 
+import com.google.common.base.Joiner;
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -193,5 +196,24 @@ public class NodeSyncConfig
                             max_threads,
                             min_inflight_validations,
                             max_inflight_validations);
+    }
+
+    private Map<String, String> toStringMap()
+    {
+        Map<String, String> m = new TreeMap<>();
+        m.put("enabled", Boolean.toString(enabled));
+        m.put("rate_in_kb", Long.toString(rate_in_kb));
+        m.put("page_size_in_kb", Long.toString(page_size_in_kb));
+        m.put("min_threads", Integer.toString(min_threads));
+        m.put("max_threads", Integer.toString(max_threads));
+        m.put("max_inflight_validations", Integer.toString(max_inflight_validations));
+        m.put("min_inflight_validations", Integer.toString(min_inflight_validations));
+        return m;
+    }
+
+    @Override
+    public String toString()
+    {
+        return '{' + Joiner.on(", ").withKeyValueSeparator("=").join(toStringMap()) + '}';
     }
 }
