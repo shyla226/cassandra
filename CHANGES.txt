@@ -1,4 +1,5 @@
 4.0
+ * Reduce memory copies and object creations when acting on ByteBufs (CASSANDRA-13789)
  * simplify mx4j configuration (Cassandra-13578)
  * Fix trigger example on 4.0 (CASSANDRA-13796)
  * force minumum timeout value (CASSANDRA-9375)
@@ -119,6 +120,7 @@
  * CQLSH: Don't pause when capturing data (CASSANDRA-13743)
 
 3.11.1
+ * Add a skip read validation flag to cassandra-stress (CASSANDRA-13772)
  * Fix cassandra-stress hang issues when an error during cluster connection happens (CASSANDRA-12938)
  * Better bootstrap failure message when blocked by (potential) range movement (CASSANDRA-13744)
  * "ignore" option is ignored in sstableloader (CASSANDRA-13721)

@@ -391,7 +391,7 @@ public class ResultSet
                 EnumSet<Flag> flags = Flag.deserialize(iflags);
 
                 PagingState state = flags.contains(Flag.HAS_MORE_PAGES)
-                                    ? PagingState.deserialize(CBUtil.readValue(body), version)
+                                    ? PagingState.deserialize(CBUtil.readValueNoCopy(body), version)
                                     : null;
 
                 PagingResult pagingResult = flags.contains(Flag.CONTINUOUS_PAGING)
