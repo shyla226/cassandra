@@ -20,6 +20,8 @@ package org.apache.cassandra.utils;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.datastax.driver.core.CodecRegistry;
 import com.datastax.driver.core.DataType;
@@ -78,7 +80,7 @@ public final class JavaDriverUtils
         try
         {
             return (DataType) methodParseOne.invoke(abstractType,
-                                                    com.datastax.driver.core.ProtocolVersion.fromInt(ProtocolVersion.CURRENT.asInt()),
+                                                    LatestDriverSupportedVersion.protocolVersion,
                                                     CodecRegistry.DEFAULT_INSTANCE);
         }
         catch (RuntimeException | Error e)
@@ -97,5 +99,29 @@ public final class JavaDriverUtils
      */
     private JavaDriverUtils()
     {
+    }
+
+    public static final class LatestDriverSupportedVersion
+    {
+        public static final com.datastax.driver.core.ProtocolVersion protocolVersion = newestSupportedProtocolVersion();
+
+        private static com.datastax.driver.core.ProtocolVersion newestSupportedProtocolVersion()
+        {
+            List<ProtocolVersion> available = new ArrayList<>(org.apache.cassandra.transport.ProtocolVersion.SUPPORTED);
+            for (int i = available.size() - 1; i >= 0; i--)
+            {
+                try
+                {
+                    ProtocolVersion avail = available.get(i);
+                    return com.datastax.driver.core.ProtocolVersion.fromInt(avail.asInt());
+                }
+                catch (IllegalArgumentException e)
+                {}
+            }
+            throw new AssertionError();
+        }
+
+        private LatestDriverSupportedVersion()
+        {}
     }
 }
