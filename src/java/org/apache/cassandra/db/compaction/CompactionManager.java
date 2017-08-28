@@ -1347,7 +1347,7 @@ public class CompactionManager implements CompactionManagerMBean
             }
             else
             {
-                if (!validator.isConsistent)
+                if (!validator.isIncremental)
                 {
                     // flush first so everyone is validating data that is as similar as possible
                     StorageService.instance.forceKeyspaceFlush(cfs.keyspace.getName(), cfs.name);
@@ -1469,7 +1469,7 @@ public class CompactionManager implements CompactionManagerMBean
             predicate = prs.getPreviewPredicate();
 
         }
-        else if (validator.isConsistent)
+        else if (validator.isIncremental)
         {
             predicate = s -> validator.desc.parentSessionId.equals(s.getSSTableMetadata().pendingRepair);
         }
