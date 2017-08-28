@@ -189,12 +189,14 @@ public class Threads
         final Callable<T> source;
         final TPCTaskType stage;
         final int coreId;
+        final Scheduler scheduler;
 
         private volatile int requested = 0;
-        EvaluateOn(Callable<T> source, int coreId, TPCTaskType stage)
+        EvaluateOn(Callable<T> source, Scheduler scheduler, TPCTaskType stage)
         {
             this.source = source;
-            this.coreId = coreId;
+            this.scheduler = scheduler;
+            this.coreId = scheduler instanceof TPCScheduler ? ((TPCScheduler)scheduler).coreId() : TPC.getNumCores();
             this.stage = stage;
         }
 
@@ -206,7 +208,7 @@ public class Threads
                 if (TPC.isOnCore(coreId))
                     run();
                 else
-                    TPC.getForCore(coreId).scheduleDirect(this);
+                    scheduler.scheduleDirect(this);
                 break;
             default:
                 // Assuming no need to switch threads for no work.
@@ -334,7 +336,12 @@ public class Threads
      */
     public static <T> Flow<T> evaluateOnCore(Callable<T> callable, int coreId, TPCTaskType stage)
     {
-        return new EvaluateOn<T>(callable, coreId, stage);
+        return new EvaluateOn<T>(callable, TPC.getForCore(coreId), stage);
+    }
+
+    public static <T> Flow<T> evaluateOnIO(Callable<T> callable, TPCTaskType stage)
+    {
+        return new EvaluateOn<T>(callable, Schedulers.io(), stage);
     }
 
     public static <T> Flow<T> deferOnCore(Callable<Flow<T>> source, int coreId, TPCTaskType stage)

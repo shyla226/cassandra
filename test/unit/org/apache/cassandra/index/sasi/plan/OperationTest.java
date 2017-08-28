@@ -39,6 +39,7 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.flow.Flow;
 
 import org.junit.*;
 
@@ -647,7 +648,7 @@ public class OperationTest extends SchemaLoader
         }
 
         @Override
-        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        public Flow<Boolean> isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
             throw new UnsupportedOperationException();
         }

@@ -24,6 +24,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.cql3.statements.SelectStatement;
@@ -38,6 +39,7 @@ import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.FBUtilities;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -170,10 +172,12 @@ public class View
      * @param nowInSec the current time in seconds (to decide what is live and what isn't).
      * @return {@code true} if {@code baseRow} matches the view filters, {@code false} otherwise.
      */
+    //TODO Make this non-blocking (APOLLO-1036)
     public boolean matchesViewFilter(DecoratedKey partitionKey, Row baseRow, int nowInSec)
     {
         return getReadQuery().selectsClustering(partitionKey, baseRow.clustering())
-            && getSelectStatement().rowFilterForInternalCalls().isSatisfiedBy(baseCfs.metadata(), partitionKey, baseRow, nowInSec);
+               && TPCUtils.blockingGet(getSelectStatement().rowFilterForInternalCalls().isSatisfiedBy(baseCfs.metadata(), partitionKey, baseRow, nowInSec)
+                                                           .mapToRxSingle());
     }
 
     /**
