@@ -23,6 +23,7 @@ import java.util.Map;
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.FrameCompressor;
@@ -40,6 +41,11 @@ public class StartupMessage extends Message.Request
     public static final String CQL_VERSION = "CQL_VERSION";
     public static final String COMPRESSION = "COMPRESSION";
     public static final String PROTOCOL_VERSIONS = "PROTOCOL_VERSIONS";
+    public static final String CLIENT_ID = "CLIENT_ID";
+    public static final String APPLICATION_NAME = "APPLICATION_NAME";
+    public static final String APPLICATION_VERSION = "APPLICATION_VERSION";
+    public static final String DRIVER_NAME = "DRIVER_NAME";
+    public static final String DRIVER_VERSION = "DRIVER_VERSION";
 
     public static final Message.Codec<StartupMessage> codec = new Message.Codec<StartupMessage>()
     {
@@ -101,6 +107,16 @@ public class StartupMessage extends Message.Request
                 throw new ProtocolException(String.format("Unknown compression algorithm: %s", compression));
             }
         }
+
+        // Pull out client ID, driver information and application information. Although this
+        // is officially introduced in dse_protocol_v2, it can be also be used in previous protocol
+        // version.
+        ClientState clientState = state.getClientState();
+        clientState.setClientID(options.get(CLIENT_ID));
+        clientState.setApplicationName(options.get(APPLICATION_NAME));
+        clientState.setApplicationVersion(options.get(APPLICATION_VERSION));
+        clientState.setDriverName(options.get(DRIVER_NAME));
+        clientState.setDriverVersion(options.get(DRIVER_VERSION));
 
         if (DatabaseDescriptor.getAuthenticator().requireAuthentication())
             return Single.just(new AuthenticateMessage(DatabaseDescriptor.getAuthenticator().getClass().getName()));

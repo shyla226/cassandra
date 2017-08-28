@@ -126,6 +126,32 @@ public class ClientState
     private static final AtomicLong lastTimestampMicros = new AtomicLong(0);
 
     /**
+     * Client instance id.
+     * @since DSE protocol version 2
+     */
+    private String clientID;
+    /**
+     * Application name.
+     * @since DSE protocol version 2
+     */
+    private String applicationName;
+    /**
+     * Application version.
+     * @since DSE protocol version 2
+     */
+    private String applicationVersion;
+    /**
+     * Driver product name.
+     * @since DSE protocol version 2
+     */
+    private String driverName;
+    /**
+     * Version of the drvier.
+     * @since DSE protocol version 2
+     */
+    private String driverVersion;
+
+    /**
      * Construct a new, empty ClientState for internal calls.
      */
     private ClientState()
@@ -184,6 +210,56 @@ public class ClientState
         ClientState clientState = new ClientState(this);
         clientState.setKeyspace(keyspace);
         return clientState;
+    }
+
+    public String getClientID()
+    {
+        return clientID;
+    }
+
+    public void setClientID(String clientID)
+    {
+        this.clientID = clientID;
+    }
+
+    public String getApplicationName()
+    {
+        return applicationName;
+    }
+
+    public void setApplicationName(String applicationName)
+    {
+        this.applicationName = applicationName;
+    }
+
+    public String getApplicationVersion()
+    {
+        return applicationVersion;
+    }
+
+    public void setApplicationVersion(String applicationVersion)
+    {
+        this.applicationVersion = applicationVersion;
+    }
+
+    public String getDriverName()
+    {
+        return driverName;
+    }
+
+    public void setDriverName(String driverName)
+    {
+        this.driverName = driverName;
+    }
+
+    public String getDriverVersion()
+    {
+        return driverVersion;
+    }
+
+    public void setDriverVersion(String driverVersion)
+    {
+        this.driverVersion = driverVersion;
     }
 
     /**
