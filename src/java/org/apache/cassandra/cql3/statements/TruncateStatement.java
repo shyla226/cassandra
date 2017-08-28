@@ -61,12 +61,12 @@ public class TruncateStatement extends CFStatement implements CQLStatement
         Schema.instance.validateTable(keyspace(), columnFamily());
     }
 
-    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException, TruncateException
+    public Single<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException, TruncateException
     {
         return executeInternal(state, options);
     }
 
-    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
+    public Single<ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
         return RxThreads.subscribeOnIo(
             Single.defer(() ->

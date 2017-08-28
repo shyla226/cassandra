@@ -352,17 +352,17 @@ public class BatchStatement implements CQLStatement
     }
 
 
-    public Single<? extends ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     {
         return execute(queryState, BatchQueryOptions.withoutPerStatementVariables(options), queryStartNanoTime);
     }
 
-    public Single<? extends ResultMessage> execute(QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage> execute(QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
     {
         return execute(queryState, options, options.getTimestamp(queryState), queryStartNanoTime);
     }
 
-    private Single<? extends ResultMessage> execute(QueryState queryState, BatchQueryOptions options, long now, long queryStartNanoTime)
+    private Single<ResultMessage> execute(QueryState queryState, BatchQueryOptions options, long now, long queryStartNanoTime)
     {
         if (options.getConsistency() == null)
             return Single.error(new InvalidRequestException("Invalid empty consistency level"));
@@ -375,7 +375,7 @@ public class BatchStatement implements CQLStatement
         return executeWithConditions(options, queryState, queryStartNanoTime);
     }
 
-    private Single<? extends ResultMessage> executeWithoutConditions(Single<Collection<? extends IMutation>> mutationsSingle,
+    private Single<ResultMessage> executeWithoutConditions(Single<Collection<? extends IMutation>> mutationsSingle,
                                                                      ConsistencyLevel cl,
                                                                      long queryStartNanoTime)
     {
@@ -486,14 +486,14 @@ public class BatchStatement implements CQLStatement
         return Pair.create(casRequest, columnsWithConditions);
     }
 
-    public Single<? extends ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         return hasConditions
                ? executeInternalWithConditions(BatchQueryOptions.withoutPerStatementVariables(options), queryState)
                : executeInternalWithoutCondition(queryState, options, System.nanoTime());
     }
 
-    private Single<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    private Single<ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         return getMutations(BatchQueryOptions.withoutPerStatementVariables(options), true, queryState.getTimestamp(), queryStartNanoTime)
                .flatMapCompletable(mutations -> {
@@ -512,7 +512,7 @@ public class BatchStatement implements CQLStatement
                .andThen(Single.just(new ResultMessage.Void()));
     }
 
-    private Single<? extends ResultMessage> executeInternalWithConditions(BatchQueryOptions options, QueryState state) throws RequestExecutionException, RequestValidationException
+    private Single<ResultMessage> executeInternalWithConditions(BatchQueryOptions options, QueryState state) throws RequestExecutionException, RequestValidationException
     {
         Pair<CQL3CasRequest, Set<ColumnMetadata>> p = makeCasRequest(options, state);
         CQL3CasRequest request = p.left;

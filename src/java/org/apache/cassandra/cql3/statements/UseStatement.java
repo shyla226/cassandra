@@ -56,13 +56,13 @@ public class UseStatement extends ParsedStatement implements CQLStatement
     {
     }
 
-    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException
+    public Single<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException
     {
         state.getClientState().setKeyspace(keyspace);
         return Single.just(new ResultMessage.SetKeyspace(keyspace));
     }
 
-    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options) throws InvalidRequestException
+    public Single<ResultMessage> executeInternal(QueryState state, QueryOptions options) throws InvalidRequestException
     {
         // In production, internal queries are exclusively on the system keyspace and 'use' is thus useless
         // but for some unit tests we need to set the keyspace (e.g. for tests with DROP INDEX)

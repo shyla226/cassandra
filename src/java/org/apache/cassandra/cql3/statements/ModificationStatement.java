@@ -435,7 +435,7 @@ public abstract class ModificationStatement implements CQLStatement
         return !conditions.isEmpty();
     }
 
-    public Single<? extends ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     {
         if (options.getConsistency() == null)
             return Single.error(new InvalidRequestException("Invalid empty consistency level"));
@@ -446,7 +446,7 @@ public abstract class ModificationStatement implements CQLStatement
         return executeWithCondition(queryState, options, queryStartNanoTime);
     }
 
-    private Single<? extends ResultMessage> executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    private Single<ResultMessage> executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     {
         ConsistencyLevel cl = options.getConsistency();
         try
@@ -595,14 +595,14 @@ public abstract class ModificationStatement implements CQLStatement
                               .mapToRxSingle(ResultSet.Builder::build);
     }
 
-    public Single<? extends ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         return hasConditions()
                ? executeInternalWithCondition(queryState, options)
                : executeInternalWithoutCondition(queryState, options, System.nanoTime());
     }
 
-    private Single<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    private Single<ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         return getMutations(options, true, queryState.getTimestamp(), queryStartNanoTime)
                .flatMapCompletable(mutations -> {

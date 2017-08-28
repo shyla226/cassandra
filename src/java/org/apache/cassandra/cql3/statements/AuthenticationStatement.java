@@ -44,7 +44,7 @@ public abstract class AuthenticationStatement extends ParsedStatement implements
         return 0;
     }
 
-    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         return execute(state.getClientState());
@@ -52,7 +52,7 @@ public abstract class AuthenticationStatement extends ParsedStatement implements
 
     public abstract Single<ResultMessage> execute(ClientState state) throws RequestExecutionException, RequestValidationException;
 
-    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
+    public Single<ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
         // executeInternal is for local query only, thus altering users doesn't make sense and is not supported
         throw new UnsupportedOperationException();

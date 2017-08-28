@@ -90,7 +90,7 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
      */
     protected abstract Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException;
 
-    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
+    public Single<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
     {
         // If an IF [NOT] EXISTS clause was used, this may not result in an actual schema change.  To avoid doing
         // extra work in the drivers to handle schema changes, we return an empty message in this case. (CASSANDRA-7600)
@@ -120,7 +120,7 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
                  .toSingle(new ResultMessage.Void());
     }
 
-    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
+    public Single<ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
         return announceMigration(state, true).map(s -> (ResultMessage) new ResultMessage.SchemaChange(s))
                                              .toSingle(new ResultMessage.Void());

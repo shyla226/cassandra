@@ -69,7 +69,7 @@ public class DropIndexStatement extends SchemaAlteringStatement
     }
 
     @Override
-    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
+    public Single<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
     {
         return announceMigration(state, false).map(schemaChangeEvent -> new ResultMessage.SchemaChange(schemaChangeEvent))
                                               .cast(ResultMessage.class)

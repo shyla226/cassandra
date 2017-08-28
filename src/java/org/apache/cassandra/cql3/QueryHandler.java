@@ -32,7 +32,7 @@ import org.apache.cassandra.utils.MD5Digest;
 
 public interface QueryHandler
 {
-    Single<? extends ResultMessage> process(String query,
+    Single<ResultMessage> process(String query,
                                             QueryState state,
                                             QueryOptions options,
                                             Map<String, ByteBuffer> customPayload,
@@ -44,13 +44,13 @@ public interface QueryHandler
 
     ParsedStatement.Prepared getPrepared(MD5Digest id);
 
-    Single<? extends ResultMessage> processPrepared(CQLStatement statement,
+    Single<ResultMessage> processPrepared(CQLStatement statement,
                                                     QueryState state,
                                                     QueryOptions options,
                                                     Map<String, ByteBuffer> customPayload,
                                                     long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
 
-    Single<? extends ResultMessage> processBatch(BatchStatement statement,
+    Single<ResultMessage> processBatch(BatchStatement statement,
                                                  QueryState state,
                                                  BatchQueryOptions options,
                                                  Map<String, ByteBuffer> customPayload,

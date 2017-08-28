@@ -207,7 +207,7 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    public Single<? extends ResultMessage> processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage> processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         if (logger.isTraceEnabled())
@@ -216,7 +216,7 @@ public class QueryProcessor implements QueryHandler
         final ClientState clientState = queryState.getClientState();
         final Scheduler scheduler = statement.getScheduler();
 
-        Single<? extends ResultMessage> ret = Single.defer(() -> {
+        Single<ResultMessage> ret = Single.defer(() -> {
             try
             {
                 statement.checkAccess(clientState);
@@ -228,7 +228,7 @@ public class QueryProcessor implements QueryHandler
                 if (logger.isTraceEnabled())
                     logger.trace("Failed to execute blocking operation, retrying on io schedulers");
 
-                Single<? extends ResultMessage> single = Single.defer(() ->
+                Single<ResultMessage> single = Single.defer(() ->
                                                                      {
                                                                          statement.checkAccess(clientState);
                                                                          statement.validate(clientState);
@@ -243,13 +243,13 @@ public class QueryProcessor implements QueryHandler
         return scheduler == null ? ret : RxThreads.subscribeOn(ret, scheduler, TPCTaskType.EXECUTE_STATEMENT);
     }
 
-    public static Single<? extends ResultMessage> process(String queryString, ConsistencyLevel cl, QueryState queryState, long queryStartNanoTime)
+    public static Single<ResultMessage> process(String queryString, ConsistencyLevel cl, QueryState queryState, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         return instance.process(queryString, queryState, QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()),  queryStartNanoTime);
     }
 
-    public Single<? extends ResultMessage> process(String query,
+    public Single<ResultMessage> process(String query,
                                                    QueryState state,
                                                    QueryOptions options,
                                                    Map<String, ByteBuffer> customPayload,
@@ -258,7 +258,7 @@ public class QueryProcessor implements QueryHandler
         return process(query, state, options, queryStartNanoTime);
     }
 
-    public Single<? extends ResultMessage> process(String queryString, QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage> process(String queryString, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         ParsedStatement.Prepared p = getStatement(queryString, queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace()));
@@ -536,7 +536,7 @@ public class QueryProcessor implements QueryHandler
         return observable.map(resultSet -> new ResultMessage.Prepared(statementId, prepared));
     }
 
-    public Single<? extends ResultMessage> processPrepared(CQLStatement statement,
+    public Single<ResultMessage> processPrepared(CQLStatement statement,
                                                            QueryState state,
                                                            QueryOptions options,
                                                            Map<String, ByteBuffer> customPayload,
@@ -546,7 +546,7 @@ public class QueryProcessor implements QueryHandler
         return processPrepared(statement, state, options, queryStartNanoTime);
     }
 
-    public Single<? extends ResultMessage> processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage> processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         List<ByteBuffer> variables = options.getValues();
@@ -569,7 +569,7 @@ public class QueryProcessor implements QueryHandler
         return processStatement(statement, queryState, options, queryStartNanoTime);
     }
 
-    public Single<? extends ResultMessage> processBatch(BatchStatement statement,
+    public Single<ResultMessage> processBatch(BatchStatement statement,
                                                         QueryState state,
                                                         BatchQueryOptions options,
                                                         Map<String, ByteBuffer> customPayload,
@@ -578,7 +578,7 @@ public class QueryProcessor implements QueryHandler
         return processBatch(statement, state, options, queryStartNanoTime);
     }
 
-    public Single<? extends ResultMessage> processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage> processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
     {
         final ClientState clientState = queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace());
         return Single.defer(() -> {
