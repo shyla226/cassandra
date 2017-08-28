@@ -488,7 +488,9 @@ public class Memtable implements Comparable<Memtable>
 
         for (MemtableSubrange partitionSubrange : this.subranges)
         {
-            SortedMap<PartitionPosition, AtomicBTreePartition> submap = partitionSubrange.data.subMap(from, to);
+            SortedMap<PartitionPosition, AtomicBTreePartition> submap = from.compareTo(to) <= 0
+                    ? partitionSubrange.data.subMap(from, to)
+                    : partitionSubrange.data.subMap(to, from);
             // TreeMap returns these in normal sorted order
             if (!submap.isEmpty())
             {
@@ -535,6 +537,7 @@ public class Memtable implements Comparable<Memtable>
         private final PartitionPosition to;
 
         private volatile boolean aborted;
+        private volatile boolean started;
 
         private FlushRunnable(List<SortedMap<PartitionPosition, AtomicBTreePartition>> toFlush,
                               final RegularAndStaticColumns columns,
@@ -692,6 +695,11 @@ public class Memtable implements Comparable<Memtable>
         public void abort()
         {
             this.aborted = true;
+            if (!started)
+            {
+                logger.debug("Unstared flushing of {} aborted", writer.getFilename());
+                maybeFail(writer.abort(null));
+            }
         }
 
         public SSTableMultiWriter createFlushWriter(LifecycleTransaction txn,
@@ -713,6 +721,7 @@ public class Memtable implements Comparable<Memtable>
         @Override
         public SSTableMultiWriter call()
         {
+            started = true;
             writeSortedContents();
             return writer;
         }
