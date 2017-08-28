@@ -529,7 +529,7 @@ public class StorageProxy implements StorageProxyMBean
             return Single.error(ex);
         }
 
-        Completable ret = Completable.merge(responseHandlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
+        Completable ret = Completable.concat(responseHandlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
         return ret.onErrorResumeNext(ex -> {
             try
             {
@@ -704,7 +704,7 @@ public class StorageProxy implements StorageProxyMBean
             completables.add(BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), nonLocalMutations), writeCommitLog));
 
         if (mutationsAndEndpoints.isEmpty())
-            return Completable.merge(completables);
+            return Completable.concat(completables);
 
         // Creates write handlers: each mutation must be acknowledged to clean the batchlog.
         // We also need to update view metrics.
@@ -734,7 +734,7 @@ public class StorageProxy implements StorageProxyMBean
         // now actually perform the writes
         writeBatchedMutations(mutationsAndEndpoints, handlers, localDataCenter, Verbs.WRITES.VIEW_WRITE);
 
-        return Completable.merge(completables)
+        return Completable.concat(completables)
                           .doFinally(() -> viewWriteMetrics.addNano(System.nanoTime() - startTime));
     }
 
@@ -841,7 +841,7 @@ public class StorageProxy implements StorageProxyMBean
         // now actually perform the writes
         Completable ret = batchlogCompletable.andThen(Completable.defer(() -> {
             writeBatchedMutations(mutationsAndEndpoints, handlers, localDataCenter, Verbs.WRITES.WRITE);
-            return Completable.merge(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
+            return Completable.concat(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
         }));
 
         return ret.onErrorResumeNext(e -> {

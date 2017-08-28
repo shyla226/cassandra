@@ -168,7 +168,7 @@ public class CounterMutation implements IMutation, Scheduleable
     private SingleSource<Mutation> applyCounterMutationInternal(List<Semaphore> locks)
     {
         final Mutation result = new Mutation(getKeyspaceName(), key());
-        Completable ret = Completable.merge(getPartitionUpdates()
+        Completable ret = Completable.concat(getPartitionUpdates()
                                             .stream()
                                             .map(this::processModifications)
                                             .map(single -> single.flatMapCompletable(upd -> Completable.fromRunnable(() -> result.add(upd))))

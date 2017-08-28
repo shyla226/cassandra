@@ -256,7 +256,7 @@ public class BatchStatement implements CQLStatement
             completables.add(statement.addUpdates(collector, statementOptions, local, timestamp, queryStartNanoTime));
         }
 
-        return Completable.merge(completables).andThen(Single.fromCallable(() -> {
+        return Completable.concat(completables).andThen(Single.fromCallable(() -> {
             if (!tablesWithZeroGcGs.isEmpty())
             {
                 String suffix = tablesWithZeroGcGs.size() == 1 ? "" : "s";
@@ -507,7 +507,7 @@ public class BatchStatement implements CQLStatement
                    if (mutationObservables.size() == 1)
                        return mutationObservables.get(0);
                    else
-                       return Completable.merge(mutationObservables);
+                       return Completable.concat(mutationObservables);
                })
                .andThen(Single.just(new ResultMessage.Void()));
     }

@@ -218,7 +218,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
 
     private Completable deleteAllEntries(final List<IndexEntry> entries, final OpOrder.Group writeOp, final int nowInSec)
     {
-        return Completable.merge(entries.stream()
+        return Completable.concat(entries.stream()
                                         .map(entry -> index.deleteStaleEntry(entry.indexValue,
                                                                              entry.indexClustering,
                                                                              new DeletionTime(entry.timestamp, nowInSec),

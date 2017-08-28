@@ -92,7 +92,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
 /*
  * Abstract parent class of individual modifications, i.e. INSERT, UPDATE and DELETE.
  */
-public abstract class ModificationStatement implements CQLStatement
+public abstract class   ModificationStatement implements CQLStatement
 {
     protected static final Logger logger = LoggerFactory.getLogger(ModificationStatement.class);
 
@@ -616,7 +616,7 @@ public abstract class ModificationStatement implements CQLStatement
                     if (mutationObservables.size() == 1)
                         return mutationObservables.get(0);
                     else
-                        return Completable.merge(mutationObservables);
+                        return Completable.concat(mutationObservables);
                }).andThen(Single.just(new ResultMessage.Void()));
     }
 

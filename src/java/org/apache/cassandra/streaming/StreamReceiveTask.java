@@ -191,7 +191,7 @@ public class StreamReceiveTask extends StreamTask
                         }
                     }
                 }
-                Completable.merge(writes).blockingAwait();
+                Completable.concat(writes).blockingAwait();
             }
 
         }

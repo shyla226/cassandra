@@ -169,7 +169,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
         if (!flushingSystem)
             observables.add(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceFlush());
 
-        Single.merge(observables).blockingLast();
+        Single.concat(observables).blockingLast();
 
         return replayedCount.get();
     }

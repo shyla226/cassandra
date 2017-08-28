@@ -1115,7 +1115,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 migrations.add(MigrationManager.forceAnnounceNewTable(expectedTable));
         }
 
-        return migrations.isEmpty() ? Completable.complete() : Completable.merge(migrations);
+        return migrations.isEmpty() ? Completable.complete() : Completable.concat(migrations);
     }
 
     public boolean isJoined()
@@ -4535,7 +4535,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                              .collect(toList());
 
             // wait for the system flushes for up to 1 minute
-            Single.merge(systemFlushes)
+            Single.concat(systemFlushes)
                   .timeout(1, TimeUnit.MINUTES)
                   .doOnError(t -> {
                       JVMStabilityInspector.inspectThrowable(t);

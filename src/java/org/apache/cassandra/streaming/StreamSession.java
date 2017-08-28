@@ -838,7 +838,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         for (ColumnFamilyStore cfs : stores)
             flushes.add(cfs.forceFlush());
         if (!flushes.isEmpty())
-            Single.merge(flushes).blockingLast();
+            Single.concat(flushes).blockingLast();
     }
 
     private synchronized void prepareReceiving(StreamSummary summary)

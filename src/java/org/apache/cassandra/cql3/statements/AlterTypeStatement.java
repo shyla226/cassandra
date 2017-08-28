@@ -111,7 +111,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
         migrations.add(MigrationManager.announceTypeUpdate(updated, isLocalOnly));
 
 
-        return Completable.merge(migrations)
+        return Completable.concat(migrations)
                 .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName())));
     }
 
