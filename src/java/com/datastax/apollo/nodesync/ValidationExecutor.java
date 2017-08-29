@@ -74,6 +74,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     // For an update interval, if we spend more than this waiting on rate limiting, we consider it significant.
     // TODO(Sylvain): this definitely needs testing to check if this is a decent value. May want to make configurable at least for test.
     private static final long LIMITER_WAIT_TIME_THRESHOLD_MS = 5 * CONTROLLER_INTERVAL_MS / 100;
+    // For an update interval, if we spend more than this blocking on getting new task, we consider it significant.
+    // TODO(Sylvain): this definitely needs testing to check if this is a decent value. May want to make configurable at least for test.
+    private static final long BLOCKED_ON_NEW_TASK_THRESHOLD_MS = 10 * CONTROLLER_INTERVAL_MS / 100;
 
     private enum State
     {
@@ -115,6 +118,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     private final AtomicLong processingWaitTimeNanos = new AtomicLong();
     private final AtomicLong limiterWaitTimeNanos = new AtomicLong();
     private final AtomicLong dataValidatedBytes = new AtomicLong();
+    private final AtomicLong blockedOnNewTaskTimeNanos = new AtomicLong();
 
     ValidationExecutor(ValidationScheduler scheduler, NodeSyncConfig config)
     {
@@ -250,7 +254,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                     // we shouldn't block as, given that we can have more threads than segments, we could end up
                     // starving the processing of an ongoing segment otherwise). And we have nothing else to do if
                     // there is no other in-flight validations (keeping in mind we do have a permit ourselves).
+                    long start = System.nanoTime();
                     Validator validator = scheduler.getNextValidation(inFlightValidations.get() <= 1);
+                    blockedOnNewTaskTimeNanos.addAndGet(System.nanoTime() - start);
                     if (validator != null)
                     {
                         submit(validator);
@@ -360,6 +366,10 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
      * The controller runs at regular intervals and is in charge of deciding if the number of threads and number of
      * inflight validations of the executor should be increased, decreased, or left as is, and this by using the
      * heuristics described in the {@link ValidationExecutor} javadoc.
+     * <p>
+     * Additionally, the controller runs a few checks that allow to warn the user if either we don't seem to be able
+     * to achieve the requested rate, or if that rate is simply set too low to meet all tables validation targets (given
+     * the current size of the data each table currently hold).
      *
      * TODO(Sylvain): we should detect when we're at max allowed capacity but still can't achieve our rate and log a
      * warning in the log. The one issue is that on tiny clusters where we have almost to validate, we're likely going
@@ -374,6 +384,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         private final DiffValue processingWaitTimeMsDiff = new DiffValue();
         private final DiffValue limiterWaitTimeMsDiff = new DiffValue();
         private final DiffValue dataValidatedBytesDiff = new DiffValue();
+        private final DiffValue blockedOnNewTaskMsDiff = new DiffValue();
 
         /** An history of the last 6 actions we took (so covers the last 30 minutes with the default of this running every 5 minutes)  */
         private final History<Action> history = new History<>(6);
@@ -407,6 +418,14 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             return limiterWaitTimeMsDiff.currentDiff() > LIMITER_WAIT_TIME_THRESHOLD_MS;
         }
 
+        private boolean hasSignificantBlockOnNewTaskSinceLastCheck()
+        {
+            // blockedOnNewTaskMsDiff is the total time waited by all threads, so divide by our number of threads so
+            // it can be more meaningfully compared to the controller interval
+            long perThreadAvgBlockTime = blockedOnNewTaskMsDiff.currentDiff() / validationExecutor.getCorePoolSize();
+            return perThreadAvgBlockTime > BLOCKED_ON_NEW_TASK_THRESHOLD_MS;
+        }
+
         private boolean canIncreaseThreads()
         {
             // We shouldn't go over the configured max, but we also never want more threads than validations (doesn't make sense)
@@ -434,7 +453,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         private Action pickDecreaseAction()
         {
             if (!canDecreaseInflightValidations())
-                return Action.DECREASE_THREADS;
+                return canDecreaseThreads() ? Action.DECREASE_THREADS : Action.DO_NOTHING;
             if (!canDecreaseThreads())
                 return Action.DECREASE_INFLIGHT_VALIDATIONS;
 
@@ -447,7 +466,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         private Action pickIncreaseAction()
         {
             if (!canIncreaseInflightValidations())
-                return Action.INCREASE_THREADS;
+                return canIncreaseThreads() ? Action.INCREASE_THREADS : Action.DO_NOTHING;
             if (!canIncreaseThreads())
                 return Action.INCREASE_INFLIGHT_VALIDATIONS;
 
@@ -463,6 +482,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             processingWaitTimeMsDiff.update(TimeUnit.NANOSECONDS.toMillis(processingWaitTimeNanos.get()));
             limiterWaitTimeMsDiff.update(TimeUnit.NANOSECONDS.toMillis(limiterWaitTimeNanos.get()));
             dataValidatedBytesDiff.update(dataValidatedBytes.get());
+            blockedOnNewTaskMsDiff.update(TimeUnit.NANOSECONDS.toMillis(blockedOnNewTaskTimeNanos.get()));
         }
 
         public void run()
@@ -478,19 +498,29 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                 // The recent rate is withing 5% of our target, we're basically good. That said, we might be
                 // over-committed. To know if we are, we check how much we've been waiting on the limiter acquire()
                 // method. If that's a non-negligible amount of time, it means our current number of in-flight
-                // validations and threads generate more work than we want. In that case, we consider lowering one of those.
+                // validations and threads generate more work than the limiter allows. In that case, we consider lowering
+                // one of those.
                 // Note however that we want to avoid changing our mind on every "tick", so check our little history to
                 // see if we already already tried decreasing our values without success (i.e. we ended up bumping them
                 // again afterwards).
-                if (!hasRecentUnsuccessfulDecrease() && hasSignificantLimiterWaitTimeSinceLastCheck() && (canDecreaseThreads() || canDecreaseInflightValidations()))
+                if (!hasRecentUnsuccessfulDecrease() && hasSignificantLimiterWaitTimeSinceLastCheck())
                     action = pickDecreaseAction();
             }
             else
             {
-                // We're not achieving our target rate. Unless we're already maxing our allowed number of in-flight
-                // validations and threads, bump one of them to (try to) speed things up.
-                if (canIncreaseThreads() || canIncreaseInflightValidations())
-                    action = pickIncreaseAction();
+                // We're not achieving our target rate. This can actually have 2 causes:
+                // 1) we're not using enough threads and/or in-flight validations to meet our rate goal. Then, assuming
+                //    we're not already maxing out both of those resources, we try to increase one to (try to) speed
+                //    things up.
+                // 2) we haven't add much work to do during the last interval, typically because the cluster has little
+                //    to no data to validate. In that case, we may actually want to decrease our resource used unless
+                //    we're already to the min.
+                // We detect whether we are in case 2) by checking what percentage of the last interval time was spend
+                // (on average per thread) simply waiting for work to do. If that's non-negligible, we assume we're in
+                // case 2), otherwise, that we're in case 1).
+                action = hasSignificantBlockOnNewTaskSinceLastCheck()
+                         ? pickDecreaseAction()
+                         : pickIncreaseAction();
             }
 
             if (logger.isDebugEnabled())
