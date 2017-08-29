@@ -32,10 +32,10 @@ import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cache.RowCacheSentinel;
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCRunnable;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
@@ -1059,7 +1059,7 @@ public class SinglePartitionReadCommand extends ReadCommand
              + ClusteringIndexFilter.serializers.get(version).serializedSize(clusteringIndexFilter());
     }
 
-    public TPCScheduler getScheduler()
+    public StagedScheduler getScheduler()
     {
         return TPC.getForKey(Keyspace.open(metadata().keyspace), partitionKey());
     }

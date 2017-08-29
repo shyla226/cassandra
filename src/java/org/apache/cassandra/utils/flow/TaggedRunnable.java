@@ -18,6 +18,9 @@
 
 package org.apache.cassandra.utils.flow;
 
+import io.reactivex.Scheduler;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 
 /**
@@ -27,17 +30,17 @@ import org.apache.cassandra.concurrent.TPCTaskType;
 public interface TaggedRunnable extends Runnable
 {
     TPCTaskType getStage();
-    int scheduledOnCore();
+    Scheduler scheduledOn();
 
     public abstract static class Base implements TaggedRunnable
     {
         private final TPCTaskType stage;
-        private final int core;
+        private final Scheduler scheduler;
 
-        public Base(TPCTaskType stage, int core)
+        public Base(TPCTaskType stage, Scheduler scheduler)
         {
             this.stage = stage;
-            this.core = core;
+            this.scheduler = scheduler;
         }
 
         public TPCTaskType getStage()
@@ -45,9 +48,9 @@ public interface TaggedRunnable extends Runnable
             return stage;
         }
 
-        public int scheduledOnCore()
+        public Scheduler scheduledOn()
         {
-            return core;
+            return scheduler;
         }
     }
 
@@ -56,5 +59,10 @@ public interface TaggedRunnable extends Runnable
         return (runnable instanceof TaggedRunnable)
                ? ((TaggedRunnable) runnable).getStage()
                : TPCTaskType.UNKNOWN;
+    }
+
+    static int scheduledOnCore(TaggedRunnable runnable)
+    {
+        return runnable.scheduledOn() instanceof TPCScheduler ? ((TPCScheduler)runnable.scheduledOn()).coreId() : TPC.getNumCores();
     }
 }

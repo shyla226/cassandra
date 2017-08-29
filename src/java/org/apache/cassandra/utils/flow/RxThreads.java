@@ -26,7 +26,6 @@ import io.reactivex.Single;
 import io.reactivex.SingleObserver;
 import io.reactivex.SingleOperator;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCRunnable;
 import org.apache.cassandra.concurrent.TPCScheduler;
@@ -36,14 +35,16 @@ public class RxThreads
 {
     public static <T> Single<T> subscribeOn(Single<T> source, Scheduler scheduler, TPCTaskType taskType)
     {
-        // TODO change this to go to subscribeOnCore if scheduler is TPC one
         class SubscribeOn extends Single<T>
         {
             protected void subscribeActual(SingleObserver<? super T> subscriber)
             {
-                scheduler.scheduleDirect(TPCRunnable.wrap(() -> source.subscribe(subscriber),
-                                                          taskType,
-                                                          TPCScheduler.coreIdOf(scheduler)));
+                if (TPC.isOnScheduler(scheduler))
+                    source.subscribe(subscriber);
+                else
+                    scheduler.scheduleDirect(TPCRunnable.wrap(() -> source.subscribe(subscriber),
+                                                              taskType,
+                                                              TPCScheduler.coreIdOf(scheduler)));
             }
         }
         return new SubscribeOn();
@@ -51,7 +52,7 @@ public class RxThreads
 
     public static <T> Single<T> subscribeOnIo(Single<T> source, TPCTaskType taskType)
     {
-        return subscribeOn(source, Schedulers.io(), taskType);
+        return subscribeOn(source, TPC.ioScheduler(), taskType);
     }
 
     public static <T> Single<T> subscribeOnCore(Single<T> source, int coreId, TPCTaskType taskType)
@@ -77,9 +78,12 @@ public class RxThreads
         {
             protected void subscribeActual(CompletableObserver subscriber)
             {
-                scheduler.scheduleDirect(TPCRunnable.wrap(() -> source.subscribe(subscriber),
-                                                          taskType,
-                                                          TPCScheduler.coreIdOf(scheduler)));
+                if (TPC.isOnScheduler(scheduler))
+                    source.subscribe(subscriber);
+                else
+                    scheduler.scheduleDirect(TPCRunnable.wrap(() -> source.subscribe(subscriber),
+                                                              taskType,
+                                                              TPCScheduler.coreIdOf(scheduler)));
             }
         }
         return new SubscribeOn();
@@ -87,7 +91,7 @@ public class RxThreads
 
     public static Completable subscribeOnIo(Completable source, TPCTaskType taskType)
     {
-        return subscribeOn(source, Schedulers.io(), taskType);
+        return subscribeOn(source, TPC.ioScheduler(), taskType);
     }
 
     public static <T> SingleOperator<T, T> observeOnSingle(Scheduler scheduler, TPCTaskType taskType)
@@ -108,9 +112,12 @@ public class RxThreads
 
             public void onSuccess(T value)
             {
-                scheduler.scheduleDirect(TPCRunnable.wrap(() -> subscriber.onSuccess(value),
-                                                          taskType,
-                                                          TPCScheduler.coreIdOf(scheduler)));
+                if (TPC.isOnScheduler(scheduler))
+                    subscriber.onSuccess(value);
+                else
+                    scheduler.scheduleDirect(TPCRunnable.wrap(() -> subscriber.onSuccess(value),
+                                                              taskType,
+                                                              TPCScheduler.coreIdOf(scheduler)));
             }
 
             public void onError(Throwable throwable)
@@ -128,7 +135,7 @@ public class RxThreads
 
     public static <T> Single<T> observeOnIo(Single<T> source, TPCTaskType taskType)
     {
-        return observeOn(source, Schedulers.io(), taskType);
+        return observeOn(source, TPC.ioScheduler(), taskType);
     }
 
     public static CompletableOperator observeOnCompletable(Scheduler scheduler, TPCTaskType taskType)
@@ -149,9 +156,12 @@ public class RxThreads
 
             public void onComplete()
             {
-                scheduler.scheduleDirect(TPCRunnable.wrap(subscriber::onComplete,
-                                                          taskType,
-                                                          TPCScheduler.coreIdOf(scheduler)));
+                if (TPC.isOnScheduler(scheduler))
+                    subscriber.onComplete();
+                else
+                    scheduler.scheduleDirect(TPCRunnable.wrap(subscriber::onComplete,
+                                                              taskType,
+                                                              TPCScheduler.coreIdOf(scheduler)));
             }
 
             public void onError(Throwable throwable)

@@ -18,22 +18,36 @@
 
 package org.apache.cassandra.concurrent;
 
-/**
- * An interface defining the ability to select a Netty TPC scheduler
- * for operations involving the concrete implementations of this interface,
- * see {@link org.apache.cassandra.db.ReadCommand} and {@link org.apache.cassandra.db.Mutation}
- * as examples.
- */
-public interface Scheduleable
-{
-    /**
-     * Returns the executor to use for submitting the runnables of the operation. This will augment them with
-     * information about the type of operation they implement.
-     */
-    TracingAwareExecutor getOperationExecutor();
+import io.netty.util.concurrent.DefaultThreadFactory;
+import io.netty.util.concurrent.FastThreadLocalThread;
 
-    /**
-     * Returns an executor to use when scheduling later stages of the processing.
-     */
-    StagedScheduler getScheduler();
+class IOThread extends FastThreadLocalThread
+{
+    private final int id;
+
+    private IOThread(ThreadGroup group, Runnable target, int id)
+    {
+        super(group, target, "IOThread-" + id);
+        this.id = id;
+    }
+
+    public int id()
+    {
+        return id;
+    }
+
+    static class Factory extends DefaultThreadFactory
+    {
+        private int id = 0;
+
+        Factory()
+        {
+            super(IOThread.class, true, Thread.MAX_PRIORITY);
+        }
+
+        protected Thread newThread(Runnable r, String name)
+        {
+            return new IOThread(this.threadGroup, r, id++);
+        }
+    }
 }

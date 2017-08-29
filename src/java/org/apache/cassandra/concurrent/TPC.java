@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.Aio;
 import io.netty.channel.epoll.Epoll;
+import io.reactivex.Scheduler;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
@@ -87,6 +88,8 @@ public class TPC
 
     // Maps each core ID to its TPCScheduler (which wraps the corresponding event loop from eventLoopGroup).
     private final static TPCScheduler[] perCoreSchedulers = new TPCScheduler[NUM_CORES];
+
+    private final static IOScheduler ioScheduler = new IOScheduler();
 
     private final static OpOrderThreaded.ThreadIdentifier threadIdentifier = new OpOrderThreaded.ThreadIdentifier()
     {
@@ -154,6 +157,8 @@ public class TPC
     private static void initRx()
     {
         RxJavaPlugins.setComputationSchedulerHandler((s) -> TPC.bestTPCScheduler());
+        RxJavaPlugins.setIoSchedulerHandler((s) -> TPC.ioScheduler());
+
         RxJavaPlugins.setErrorHandler(e -> CassandraDaemon.defaultExceptionHandler.accept(Thread.currentThread(), e));
 
         /*
@@ -221,6 +226,11 @@ public class TPC
         return isValidCoreId(coreId) ? getForCore(coreId) : getForCore(getNextCore());
     }
 
+    public static IOScheduler ioScheduler()
+    {
+        return ioScheduler;
+    }
+
     /**
      * Creates a new {@link OpOrder} suitable for synchronizing operations that mostly execute on TPC threads.
      * <p>
@@ -268,6 +278,11 @@ public class TPC
         return getCoreId() == coreId;
     }
 
+    public static boolean isOnIO()
+    {
+        return isIOThread(Thread.currentThread());
+    }
+
     /**
      * @return the core id for TPC threads, otherwise the number of cores. Callers can verify if the returned
      * core is valid via {@link TPC#isValidCoreId(int)}, or alternatively can allocate an
@@ -286,6 +301,28 @@ public class TPC
     public static boolean isTPCThread()
     {
         return isTPCThread(Thread.currentThread());
+    }
+
+    private static boolean isIOThread(Thread thread)
+    {
+        return thread instanceof IOThread;
+    }
+
+    /**
+     * Return true if the current thread belongs to the specified scheduler, that is the current thread is part
+     * of the thread pool that supports the scheduler.
+     * <p>
+     * This functionality is currently only supported for {@link StagedScheduler}.
+     *
+     * @param scheduler - the scheduler to which the current thread should belong
+     *
+     * @return true if the current thread is part of the thread pool for the specified scheduler, false otherwise.
+     */
+    public static boolean isOnScheduler(Scheduler scheduler)
+    {
+        return scheduler instanceof StagedScheduler
+               ? ((StagedScheduler)scheduler).isOnScheduler(Thread.currentThread())
+               : false;
     }
 
     public static int getNumCores()

@@ -34,9 +34,9 @@ import io.reactivex.Completable;
 import io.reactivex.Single;
 import io.reactivex.SingleEmitter;
 import io.reactivex.SingleSource;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
@@ -136,7 +136,7 @@ public class CounterMutation implements IMutation, Scheduleable
         return applyCounterMutation(System.nanoTime());
     }
 
-    public TPCScheduler getScheduler()
+    public StagedScheduler getScheduler()
     {
         return mutation.getScheduler();
     }

@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.concurrent;
 
-import java.util.EnumMap;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -32,12 +30,23 @@ import io.reactivex.disposables.Disposable;
  */
 public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
 {
+    /**
+     * Creates a new TPC scheduler that wraps the provided TPC event loop.
+     *
+     * @param eventLoop the event loop to wrap.
+     */
+    @VisibleForTesting
+    public TPCScheduler(TPCEventLoop eventLoop)
+    {
+        super(eventLoop);
+    }
+
     public void execute(Runnable runnable, ExecutorLocals locals, TPCTaskType stage)
     {
-        getExecutor().execute(new TPCRunnable(runnable,
-                                              locals,
-                                              stage,
-                                              coreId()));
+        eventLoop.execute(new TPCRunnable(runnable,
+                                          locals,
+                                          stage,
+                                          coreId()));
     }
 
     @Override
@@ -51,15 +60,10 @@ public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
         return super.scheduleDirect(TPCRunnable.wrap(run, stage, coreId()), delay, unit);
     }
 
-    /**
-     * Creates a new TPC scheduler that wraps the provided TPC event loop.
-     *
-     * @param eventLoop the event loop to wrap.
-     */
-    @VisibleForTesting
-    public TPCScheduler(TPCEventLoop eventLoop)
+    @Override
+    public boolean isOnScheduler(Thread thread)
     {
-        super(eventLoop);
+        return thread == eventLoop.thread(); // == intended
     }
 
     /**
@@ -80,39 +84,17 @@ public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
         return thread().coreId();
     }
 
-    /**
-     * To access the underlying executor
-     */
-    public Executor getExecutor()
-    {
-        return eventLoop;
-    }
-
-    private final EnumMap<TPCTaskType, TracingAwareExecutor> executorsForTaskType = new EnumMap<>(TPCTaskType.class);
-
-    /**
-     * Returns an executor that assigns the given task type to the runnables it receives.
-     */
-    public TracingAwareExecutor forTaskType(TPCTaskType type)
-    {
-        TracingAwareExecutor executor = executorsForTaskType.get(type);
-        if (executor != null)
-            return executor;
-
-        synchronized (executorsForTaskType)
-        {
-            return executorsForTaskType.computeIfAbsent(type,
-                                                        s -> (runnable, locals) -> execute(runnable,
-                                                                                           locals,
-                                                                                           s));
-        }
-    }
-
     public static int coreIdOf(Scheduler scheduler)
     {
         if (scheduler instanceof TPCScheduler)
             return ((TPCScheduler) scheduler).coreId();
 
         return TPC.getNumCores();
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("TPC scheduler for core %d",coreId());
     }
 }

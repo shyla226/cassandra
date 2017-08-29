@@ -22,7 +22,7 @@ import java.util.EnumMap;
 import java.util.concurrent.Callable;
 
 import io.reactivex.Scheduler;
-import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
@@ -30,59 +30,11 @@ import org.apache.cassandra.concurrent.TPCScheduler;
 
 public class Threads
 {
-    static class RequestOnCore implements FlowSubscription, TaggedRunnable
-    {
-        final int coreId;
-        final FlowSubscription source;
-        final TPCTaskType stage;
-
-        <T> RequestOnCore(FlowSubscriber<T> subscriber, int coreId, TPCTaskType stage, Flow<T> source)
-        {
-            this.coreId = coreId;
-            this.source = source.subscribe(subscriber);
-            this.stage = stage;
-        }
-
-        public void request()
-        {
-            if (TPC.isOnCore(coreId))
-                run();
-            else
-                TPC.getForCore(coreId).scheduleDirect(this);
-        }
-
-        public void close() throws Exception
-        {
-            // Close on the current thread to propagate exceptions
-            source.close();
-        }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return source.addSubscriberChainFromSource(throwable);
-        }
-
-        public TPCTaskType getStage()
-        {
-            return stage;
-        }
-
-        public int scheduledOnCore()
-        {
-            return coreId;
-        }
-
-        public void run()
-        {
-            source.request();
-        }
-    }
-
     final static EnumMap<TPCTaskType, Flow.Operator[]> REQUEST_ON_CORE = new EnumMap<>(TPCTaskType.class);
 
     private static Flow.Operator<Object, Object> constructRequestOnCore(int coreId, TPCTaskType stage)
     {
-        return (source, subscriber) -> new RequestOnCore(subscriber, coreId, stage, source);
+        return (source, subscriber) -> new RequestOn(subscriber, TPC.getForCore(coreId), stage, source);
     }
 
     /**
@@ -117,8 +69,10 @@ public class Threads
 
         public void request()
         {
-            // TODO: If blocking is not a concern, recognizing we are already on an IO thread could boost perf.
-            scheduler.scheduleDirect(this);
+            if (TPC.isOnScheduler(scheduler))
+                run();
+            else
+                scheduler.scheduleDirect(this);
         }
 
         public void close() throws Exception
@@ -136,9 +90,9 @@ public class Threads
             return stage;
         }
 
-        public int scheduledOnCore()
+        public Scheduler scheduledOn()
         {
-            return TPC.getNumCores();
+            return scheduler;
         }
 
         public void run()
@@ -156,7 +110,7 @@ public class Threads
     {
         if (scheduler instanceof TPCScheduler)
             return requestOnCore(((TPCScheduler) scheduler).coreId(), stage);
-        else if (scheduler == Schedulers.io())
+        else if (scheduler == TPC.ioScheduler())
             return requestOnIo(stage);
         else
             return createRequestOn(scheduler, stage);
@@ -168,6 +122,11 @@ public class Threads
     }
 
     static final EnumMap<TPCTaskType, Flow.Operator<?, ?>> REQUEST_ON_IO = new EnumMap<>(TPCTaskType.class);
+
+    private static Flow.Operator<Object, Object> constructRequestOnIO(TPCTaskType stage)
+    {
+        return (source, subscriber) -> new RequestOn(subscriber, TPC.ioScheduler(), stage, source);
+    }
 
     /**
      * Returns an operator to perform each request() on the given flow on the IO scheduler.
@@ -181,7 +140,7 @@ public class Threads
 
         synchronized (REQUEST_ON_IO)
         {
-            return (Flow.Operator<T, T>) REQUEST_ON_IO.computeIfAbsent(stage, t -> createRequestOn(Schedulers.io(), t));
+            return (Flow.Operator<T, T>) REQUEST_ON_IO.computeIfAbsent(stage, t -> constructRequestOnIO(t));
         }
     }
 
@@ -189,15 +148,13 @@ public class Threads
     {
         final Callable<T> source;
         final TPCTaskType stage;
-        final int coreId;
-        final Scheduler scheduler;
+        final StagedScheduler scheduler;
 
         private volatile int requested = 0;
-        EvaluateOn(Callable<T> source, Scheduler scheduler, TPCTaskType stage)
+        EvaluateOn(Callable<T> source, StagedScheduler scheduler, TPCTaskType stage)
         {
             this.source = source;
             this.scheduler = scheduler;
-            this.coreId = scheduler instanceof TPCScheduler ? ((TPCScheduler)scheduler).coreId() : TPC.getNumCores();
             this.stage = stage;
         }
 
@@ -206,10 +163,10 @@ public class Threads
             switch (requested++)
             {
             case 0:
-                if (TPC.isOnCore(coreId))
+                if (TPC.isOnScheduler(scheduler))
                     run();
                 else
-                    TPC.getForCore(coreId).execute(this, ExecutorLocals.create(), stage);
+                    scheduler.execute(this, ExecutorLocals.create(), stage);
                 break;
             default:
                 // Assuming no need to switch threads for no work.
@@ -236,7 +193,7 @@ public class Threads
 
         public String toString()
         {
-            return Flow.formatTrace("evaluateOn " + coreId + " stage " + stage, source, subscriber);
+            return Flow.formatTrace("evaluateOn [" + scheduler + "] stage " + stage, source, subscriber);
         }
 
         public TPCTaskType getStage()
@@ -244,9 +201,9 @@ public class Threads
             return stage;
         }
 
-        public int scheduledOnCore()
+        public Scheduler scheduledOn()
         {
-            return coreId;
+            return scheduler;
         }
     }
 
@@ -255,12 +212,12 @@ public class Threads
         FlowSubscription source;
         final Callable<Flow<T>> deferred;
         final TPCTaskType stage;
-        final int coreId;
+        final Scheduler scheduler;
 
-        DeferOn(Callable<Flow<T>> source, int coreId, TPCTaskType stage)
+        DeferOn(Callable<Flow<T>> source, Scheduler scheduler, TPCTaskType stage)
         {
             this.deferred = source;
-            this.coreId = coreId;
+            this.scheduler = scheduler;
             this.stage = stage;
         }
 
@@ -268,10 +225,10 @@ public class Threads
         {
             if (source == null)
             {
-                if (TPC.isOnCore(coreId))
+                if (TPC.isOnScheduler(scheduler))
                     run();
                 else
-                    TPC.getForCore(coreId).scheduleDirect(this);
+                    scheduler.scheduleDirect(this);
             }
             else
                 source.request();
@@ -316,7 +273,7 @@ public class Threads
 
         public String toString()
         {
-            return Flow.formatTrace("deferOn " + coreId + " stage " + stage, deferred, subscriber);
+            return Flow.formatTrace("deferOn [" + scheduler + "] stage " + stage, deferred, subscriber);
         }
 
         public TPCTaskType getStage()
@@ -324,9 +281,9 @@ public class Threads
             return stage;
         }
 
-        public int scheduledOnCore()
+        public Scheduler scheduledOn()
         {
-            return coreId;
+            return scheduler;
         }
     }
 
@@ -342,11 +299,16 @@ public class Threads
 
     public static <T> Flow<T> evaluateOnIO(Callable<T> callable, TPCTaskType stage)
     {
-        return new EvaluateOn<T>(callable, Schedulers.io(), stage);
+        return new EvaluateOn<T>(callable, TPC.ioScheduler(), stage);
     }
 
     public static <T> Flow<T> deferOnCore(Callable<Flow<T>> source, int coreId, TPCTaskType stage)
     {
-        return new DeferOn<>(source, coreId, stage);
+        return new DeferOn<>(source, TPC.getForCore(coreId), stage);
+    }
+
+    public static <T> Flow<T> deferOnIO(Callable<Flow<T>> source, TPCTaskType stage)
+    {
+        return new DeferOn<>(source, TPC.ioScheduler(), stage);
     }
 }

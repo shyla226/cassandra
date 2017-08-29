@@ -21,12 +21,11 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import io.reactivex.Completable;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.Scheduleable;
 
 import org.apache.commons.lang3.StringUtils;
@@ -241,7 +240,7 @@ public class Mutation implements IMutation, Scheduleable
         return new Mutation(ks, key, modifications);
     }
 
-    public TPCScheduler getScheduler()
+    public StagedScheduler getScheduler()
     {
         return TPC.getForKey(Keyspace.open(getKeyspaceName()), key());
     }

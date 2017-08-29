@@ -34,7 +34,7 @@ public class TPCRunnable implements Runnable
 
     public TPCRunnable(TaggedRunnable runnable)
     {
-        this(runnable, ExecutorLocals.create(), runnable.getStage(), runnable.scheduledOnCore());
+        this(runnable, ExecutorLocals.create(), runnable.getStage(), TaggedRunnable.scheduledOnCore(runnable));
     }
 
     public TPCRunnable(Runnable runnable, ExecutorLocals locals, TPCTaskType stage, int scheduledOn)
