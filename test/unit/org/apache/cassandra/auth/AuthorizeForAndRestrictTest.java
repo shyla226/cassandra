@@ -71,6 +71,11 @@ public class AuthorizeForAndRestrictTest extends CQLTester
                                       UnauthorizedException.class,
                                       "GRANT SELECT ON TABLE authfor_test.t1 TO authfor2");
 
+            assertInvalidThrowMessage(() -> session.execute("GRANT AUTHORIZE FOR SELECT ON KEYSPACE authfor_test TO authfor2"),
+                                      "User authfor1 must not grant AUTHORIZE FOR AUTHORIZE permission on <keyspace authfor_test>",
+                                      UnauthorizedException.class,
+                                      "GRANT AUTHORIZE FOR SELECT ON KEYSPACE authfor_test TO authfor2");
+
             // authfor1 can grant the SELECT privilege - all that must work (although the GRANT on the keyspace is technically sufficient)
             session.execute("GRANT SELECT ON KEYSPACE authfor_test TO authfor2");
             session.execute("GRANT SELECT ON TABLE authfor_test.t1 TO authfor2");
@@ -97,9 +102,6 @@ public class AuthorizeForAndRestrictTest extends CQLTester
                                       "INSERT INTO authfor_test.t1 (id, val) VALUES (1, 'foo')");
 
             // authfor2 has the privilege to grant the MODIFY permission
-            session.execute("GRANT MODIFY ON TABLE authfor_test.t2 TO authfor1");
-            // authfor2 has the privilege to grant the MODIFY permission even with the grant option
-            session.execute("GRANT AUTHORIZE FOR MODIFY ON TABLE authfor_test.t2 TO authfor1");
             session.execute("GRANT MODIFY ON TABLE authfor_test.t2 TO authfor1");
 
             // authfor2 has MODIFY permission on t2
@@ -147,7 +149,7 @@ public class AuthorizeForAndRestrictTest extends CQLTester
             assertRowsNet(session.execute("LIST PERMISSIONS OF authfor1"),
                           new Object[]{ "authfor1", "authfor1", "<keyspace authfor_test>", "SELECT", false, false, true },
                           new Object[]{ "authfor1", "authfor1", "<table authfor_test.t1>", "MODIFY", true, false, false },
-                          new Object[]{ "authfor1", "authfor1", "<table authfor_test.t2>", "MODIFY", true, false, true });
+                          new Object[]{ "authfor1", "authfor1", "<table authfor_test.t2>", "MODIFY", true, false, false });
             assertRowsNet(session.execute("LIST PERMISSIONS OF authfor2"),
                           new Object[]{ "authfor2", "authfor2", "<keyspace authfor_test>", "SELECT", true, false, false },
                           new Object[]{ "authfor2", "authfor2", "<table authfor_test.t1>", "SELECT", true, false, false },

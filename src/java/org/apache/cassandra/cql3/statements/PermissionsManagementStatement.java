@@ -97,6 +97,14 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
 
         if (!missingPermissions.isEmpty())
         {
+            if (grantMode == GrantMode.GRANTABLE)
+            {
+                throw new UnauthorizedException(String.format("User %s must not grant AUTHORIZE FOR %s permission on %s",
+                                                              state.getUser().getName(),
+                                                              StringUtils.join(missingPermissions, ", "),
+                                                              resource));
+            }
+
             Set<Permission> missingGrantables = Permissions.setOf();
 
             // Check that the user has grant-option on all permissions to be
@@ -108,11 +116,11 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
                 }
 
             if (!missingGrantables.isEmpty())
-                 throw new UnauthorizedException(String.format("User %s has no %s permission nor AUTHORIZE FOR %s permission on %s or any of its parents",
-                                                               state.getUser().getName(),
-                                                               StringUtils.join(missingPermissions, ", "),
-                                                               StringUtils.join(missingGrantables, ", "),
-                                                               resource));
+                throw new UnauthorizedException(String.format("User %s has no %s permission nor AUTHORIZE FOR %s permission on %s or any of its parents",
+                                                              state.getUser().getName(),
+                                                              StringUtils.join(missingPermissions, ", "),
+                                                              StringUtils.join(missingGrantables, ", "),
+                                                              resource));
 
             // This prevents a user to grant a permission to himself or
             // to any of the roles the user belongs to. This check
