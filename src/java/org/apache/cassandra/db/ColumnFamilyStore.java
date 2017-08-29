@@ -69,8 +69,11 @@ import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
+import org.apache.cassandra.io.FSError;
+import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.*;
@@ -769,7 +772,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             }
             catch (IOException e)
             {
-                SSTableReader.logOpenException(entry.getKey(), e);
+                FileUtils.handleCorruptSSTable(new CorruptSSTableException(e, entry.getKey().filenameFor(Component.STATS)));
+                logger.error("Cannot read sstable {}; other IO error, skipping table", entry, e);
                 continue;
             }
 
@@ -795,9 +799,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             {
                 reader = SSTableReader.open(newDescriptor, entry.getValue(), metadata);
             }
-            catch (IOException e)
+            catch (CorruptSSTableException ex)
             {
-                SSTableReader.logOpenException(entry.getKey(), e);
+                FileUtils.handleCorruptSSTable(ex);
+                logger.error("Corrupt sstable {}; skipping table", entry, ex);
+                continue;
+            }
+            catch (FSError ex)
+            {
+                FileUtils.handleFSError(ex);
+                logger.error("Cannot read sstable {}; file system error, skipping table", entry, ex);
                 continue;
             }
             newSSTables.add(reader);
@@ -1976,7 +1987,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 }
             }
         }
-        catch (IOException | RuntimeException e)
+        catch (FSReadError | RuntimeException e)
         {
             // In case one of the snapshot sstables fails to open,
             // we must release the references to the ones we opened so far

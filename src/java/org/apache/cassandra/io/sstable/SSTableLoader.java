@@ -27,6 +27,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -121,8 +122,9 @@ public class SSTableLoader implements StreamEventHandler
                                                   streamingDetails.put(endpoint, details);
                                               }
                                           }
-                                          catch (IOException e)
+                                          catch (FSError e)
                                           {
+                                              // todo: should we really continue if we can't open all sstables?
                                               outputHandler.output(String.format("Skipping file %s, error opening it: %s", name, e.getMessage()));
                                           }
                                           return false;
