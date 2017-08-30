@@ -167,6 +167,8 @@ public class TableMetrics
     public final static LatencyMetrics globalWriteLatency = new LatencyMetrics(globalFactory, globalAliasFactory, "Write");
     public final static LatencyMetrics globalRangeLatency = new LatencyMetrics(globalFactory, globalAliasFactory, "Range");
 
+    public final Meter shortReadProtectionRequests;
+
     public final static Gauge<Double> globalPercentRepaired = Metrics.register(globalFactory.createMetricName("PercentRepaired"),
             new Gauge<Double>()
     {
@@ -200,8 +202,6 @@ public class TableMetrics
             return total > 0 ? (repaired / total) * 100 : 100.0;
         }
     });
-
-    public final Meter shortReadProtectionRequests;
 
     public final Map<Sampler, TopKSampler<ByteBuffer>> samplers;
     /**
