@@ -78,6 +78,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     // TODO(Sylvain): this definitely needs testing to check if this is a decent value. May want to make configurable at least for test.
     private static final long BLOCKED_ON_NEW_TASK_THRESHOLD_MS = 10 * CONTROLLER_INTERVAL_MS / 100;
 
+    private static final long MIN_WARN_INTERVAL_MS = TimeUnit.SECONDS.toMillis(Long.getLong("datastax.nodesync.min_warn_interval_sec",
+                                                                                            TimeUnit.HOURS.toSeconds(10)));
+
     private enum State
     {
         CREATED, RUNNING, SOFT_STOPPED, HARD_STOPPED;
@@ -347,7 +350,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     {
         INCREASE_THREADS,
         INCREASE_INFLIGHT_VALIDATIONS,
+        MAXED_OUT, // Indicates we wanted to increase, but were already max-ed out so nothing was done in practice
         DO_NOTHING,
+        MINED_OUT, // Indicates we wanted to decrease, but were already min-ed out so nothing was done in practice
         DECREASE_THREADS,
         DECREASE_INFLIGHT_VALIDATIONS;
 
@@ -386,8 +391,12 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         private final DiffValue dataValidatedBytesDiff = new DiffValue();
         private final DiffValue blockedOnNewTaskMsDiff = new DiffValue();
 
-        /** An history of the last 6 actions we took (so covers the last 30 minutes with the default of this running every 5 minutes)  */
-        private final History<Action> history = new History<>(6);
+        /** An history of the recent actions we took (covers the last hour with the default of this running every 5 minutes)  */
+        private final History<Action> history = new History<>(12);
+
+        /** Timestamp of the last time we warned about the executor being maxed out (without achieving the requested rate
+         * that is). Negative if we haven't warned (or should warn unconditionally next time the situation arise). */
+        private long lastMaxedOutWarn = -1;
 
         /**
          * Whether we recently attempted a decrease immediately followed by an increase.
@@ -453,7 +462,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         private Action pickDecreaseAction()
         {
             if (!canDecreaseInflightValidations())
-                return canDecreaseThreads() ? Action.DECREASE_THREADS : Action.DO_NOTHING;
+                return canDecreaseThreads() ? Action.DECREASE_THREADS : Action.MINED_OUT;
             if (!canDecreaseThreads())
                 return Action.DECREASE_INFLIGHT_VALIDATIONS;
 
@@ -466,7 +475,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         private Action pickIncreaseAction()
         {
             if (!canIncreaseInflightValidations())
-                return canIncreaseThreads() ? Action.INCREASE_THREADS : Action.DO_NOTHING;
+                return canIncreaseThreads() ? Action.INCREASE_THREADS : Action.MAXED_OUT;
             if (!canIncreaseThreads())
                 return Action.INCREASE_INFLIGHT_VALIDATIONS;
 
@@ -518,9 +527,21 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                 // We detect whether we are in case 2) by checking what percentage of the last interval time was spend
                 // (on average per thread) simply waiting for work to do. If that's non-negligible, we assume we're in
                 // case 2), otherwise, that we're in case 1).
-                action = hasSignificantBlockOnNewTaskSinceLastCheck()
-                         ? pickDecreaseAction()
-                         : pickIncreaseAction();
+                if (hasSignificantBlockOnNewTaskSinceLastCheck())
+                {
+                    action = pickDecreaseAction();
+                }
+                else
+                {
+                    action = pickIncreaseAction();
+                    // It's possible we are already maxing out on both threads and inflight validations. In that case,
+                    // this suggests the node is not able to achieve the requested rate within the resources constraint
+                    // of NodeSyncConfig.max_threads and max_inflight_validations, and there is nothing we can do, the
+                    // user need to change one of those setting (or simply accept the rate he has set isn't being
+                    // achieved).
+                    if (action == Action.MAXED_OUT)
+                        maybeWarnOnMaxedOut(recentRate);
+                }
             }
 
             if (logger.isDebugEnabled())
@@ -548,6 +569,61 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                     break;
             }
             history.add(action);
+
+            postRunCleanup();
+        }
+
+        /**
+         * Called when we're not achieving the requested rate, but we are maxing out threads and in-flight validations
+         * so we can't "go faster" so we inform the user of that situation.
+         * <p>
+         * To avoid premature or repetitive warnings, we use the 2 following heuristics:
+         * 1) we only warn once every {@link #MIN_WARN_INTERVAL_MS}. The idea is to not bother the user every controller
+         *    interval while things are maxed out, but with a cap after which we consider that maybe the user has
+         *    forgotten and reminding him of the problem may be worth it.
+         * 2) we only warn on either 2 consecutive interval being maxed out, or if we detect that more than 1/3 of our
+         *    history is maxed out. The general idea being that we want to avoid warning the user on a single interval
+         *    fluke (hence the 2 consecutive interval rule), but still want to detect case where we alternate too
+         *    much between maxed out and not max out since those would mean our average rate may be genuinely lower
+         *    than the configured one.
+         */
+        private void maybeWarnOnMaxedOut(double recentRate)
+        {
+            if (lastMaxedOutWarn >= 0 && (System.currentTimeMillis() - lastMaxedOutWarn) < MIN_WARN_INTERVAL_MS)
+                return;
+
+            // As mentioned above, we only log if either the previous interval was also maxed out (we haven't added the
+            // current interval action yet when this method is called), or more than 30% of our history is maxed out.
+            if (history.last() != Action.MAXED_OUT
+                && (history.isAtCapacity() && history.stream().filter(a -> a == Action.MAXED_OUT).count() <= (30 * history.size()) / 100))
+                return;
+
+            lastMaxedOutWarn = System.currentTimeMillis();
+            logger.warn("NodeSync doesn't seem to be able to sustain the configured rate (over the last {}, the "
+                        + "effective rate was {} for a configured rate of {}) and this despite using {} threads and "
+                        + "{} parallel range validations (maximums allowed). "
+                        + "You may try to improve throughput by increasing the maximum allowed number of threads and/or "
+                        + "parallel range validations with the understanding that this may result in NodeSync using "
+                        + "more of the node resources. "
+                        + "If doing so doesn't help, this suggests the configured rate cannot be sustained by NodeSync "
+                        + "on the current hardware.",
+                        Units.toString(CONTROLLER_INTERVAL_MS, TimeUnit.MILLISECONDS),
+                        Units.toString((long)recentRate, RateUnit.B_S),
+                        config.getRate(),
+                        validationExecutor.getCorePoolSize(),
+                        maxInFlightValidations);
+        }
+
+        private void postRunCleanup()
+        {
+            // If we've recently warned about the executor being maxed out, but we haven't done so in recent history
+            // (last hour currently), clear up lastMaxedOutWarn so that if we get maxed out again we log again (without
+            // waiting for MIN_WARN_INTERVAL_MS. The rational is that if we haven't max out for an hour, this is a good
+            // indication that the user has somehow fixed whatever was making the executor max out (maybe the rate was
+            // lowered, or maybe the max threads/inflight validations was upped). In which case, it feels worth warning
+            // ASAP if conditions changes.
+            if (lastMaxedOutWarn >= 0 && history.isAtCapacity() && history.stream().noneMatch(a -> a == Action.MAXED_OUT))
+                lastMaxedOutWarn = -1;
         }
     }
 
