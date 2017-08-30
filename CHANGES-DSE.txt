@@ -82,6 +82,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no APOLLO ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no APOLLO ticket)
 Merged from dse5.0:
+ * Group multiple view updates within the same base partition to speedup view build process(APOLLO-969)
  * Add nodetool mark_unrepaired command (APOLLO-692)
  * Disallow incremental repair on MV/CDC tables (APOLLO-596)
  * Revert CASSANDRA-11223 behavior in AbstractReadCommandBuilder (APOLLO-1010)
