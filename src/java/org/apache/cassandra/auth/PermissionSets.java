@@ -93,6 +93,11 @@ public final class PermissionSets
         return result;
     }
 
+    public boolean isEmpty()
+    {
+        return granted.isEmpty() && grantables.isEmpty() && restricted.isEmpty();
+    }
+
     @Override
     public String toString()
     {

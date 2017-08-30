@@ -64,7 +64,9 @@ public class ListPermissionsStatement extends AuthorizationStatement
 
     public void validate(QueryState state) throws RequestValidationException
     {
-
+        if (!DatabaseDescriptor.getAuthorizer().requireAuthorization())
+            throw invalidRequest(String.format("LIST PERMISSIONS operation is not supported by the %s if it is not enabled",
+                                               DatabaseDescriptor.getAuthorizer().implementation().getClass().getSimpleName()));
     }
 
     @Override

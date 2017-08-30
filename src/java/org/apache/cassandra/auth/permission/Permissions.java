@@ -51,7 +51,10 @@ public class Permissions
      */
     public static Permission permission(String domain, String name)
     {
-        return domains.get(domain, name);
+        Permission permission = domains.get(domain, name);
+        if (permission == null)
+            throw new IllegalArgumentException("Unknown permission: " + domain + "." + name);
+        return permission;
     }
 
     /**

@@ -1641,17 +1641,52 @@ public abstract class CQLTester
             if (exception != null && !exception.isAssignableFrom(e.getClass()))
             {
                 fail("Query should be invalid but wrong error was thrown. " +
-                        "Expected: " + exception.getName() + ", got: " + e.getClass().getName() + ". " +
-                        "Query is: " + queryInfo(query, values) + ". Stack trace of unexpected exception is:\n" +
-                        String.join("\n", Arrays.stream(e.getStackTrace())
-                                                .map(t -> t.toString())
-                                                .collect(Collectors.toList())));
+                     "Expected: " + exception.getName() + ", got: " + e.getClass().getName() + ". " +
+                     "Query is: " + queryInfo(query, values) + ". Stack trace of unexpected exception is:\n" +
+                     String.join("\n", Arrays.stream(e.getStackTrace())
+                                             .map(t -> t.toString())
+                                             .collect(Collectors.toList())));
             }
             if (errorMessage != null)
             {
                 assertMessageContains(errorMessage, e);
             }
         }
+    }
+
+    protected void assertClientWarning(String warningMessage,
+                                       String query,
+                                       Object... values) throws Throwable
+    {
+        assertClientWarning(getDefaultVersion(), warningMessage, query, values);
+    }
+
+    protected void assertClientWarning(ProtocolVersion protocolVersion,
+                                       String warningMessage,
+                                       String query,
+                                       Object... values) throws Throwable
+    {
+        ResultSet rs = executeNet(protocolVersion, query, values);
+        List<String> warnings = rs.getExecutionInfo().getWarnings();
+        assertNotNull("Expecting one warning but get none", warnings);
+        assertTrue("Expecting one warning but get " + warnings.size(), warnings.size() == 1);
+        assertTrue("Expecting warning message to contains " + warningMessage + " but was: " + warnings.get(0),
+                   warnings.get(0).contains(warningMessage));
+    }
+
+    protected void assertNoClientWarning(String query,
+                                         Object... values) throws Throwable
+    {
+        assertNoClientWarning(getDefaultVersion(), query, values);
+    }
+
+    protected void assertNoClientWarning(ProtocolVersion protocolVersion,
+                                         String query,
+                                         Object... values) throws Throwable
+    {
+        ResultSet rs = executeNet(protocolVersion, query, values);
+        List<String> warnings = rs.getExecutionInfo().getWarnings();
+        assertTrue("Expecting no warning but get some: " + warnings, warnings == null || warnings.isEmpty());
     }
 
     private static String queryInfo(String query, Object[] values)

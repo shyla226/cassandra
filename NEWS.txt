@@ -63,6 +63,9 @@ Upgrading
      for *_validity_in_ms and *_update_interval_in_ms, if configured.
      Please note, that only "reachable" nodes will receive the invalidation messages and
      unreachable nodes may still hold outdated information after DCL command.
+   - REVOKE (and the new UNRESTRICT statement) now error out when the statement would not change
+     anything. This means, an error is raised when the statement targets permissions which are
+     not present for that resource.
    - The caches for JMX permissions and credentials no longer exist and therefore the JMX beans
      for these caches have been removed, too. Also the configuration options for the credentials
      cache need to be removed from the cassandra.yaml file.

@@ -18,13 +18,21 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 import io.reactivex.Single;
-import org.apache.cassandra.auth.*;
+
+import org.apache.cassandra.auth.GrantMode;
+import org.apache.cassandra.auth.IAuthorizer;
+import org.apache.cassandra.auth.IResource;
+import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.enums.PartitionedEnum;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -35,10 +43,33 @@ public class RevokePermissionsStatement extends PermissionsManagementStatement
         super(permissions, resource, grantee, grantMode);
     }
 
+    @Override
+    protected String operation()
+    {
+        return grantMode.revokeOperationName();
+    }
+
     public Single<ResultMessage> execute(QueryState state) throws RequestValidationException, RequestExecutionException
     {
         return Single.fromCallable(() -> {
-            DatabaseDescriptor.getAuthorizer().revoke(state.getUser(), permissions, resource, grantee, grantMode);
+
+            IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+            Set<Permission> revoked = authorizer.revoke(state.getUser(), permissions, resource, grantee, grantMode);
+
+            // We want to warn the client if all the specified permissions have not been revoked and the client did
+            // not specified ALL in the query.
+            if (!revoked.equals(permissions) && !permissions.equals(authorizer.applicablePermissions(resource)))
+            {
+                // We use a TreeSet to guarantee the order for testing
+                String permissionsStr = new TreeSet<>(permissions).stream()
+                                                                  .filter(permission -> !revoked.contains(permission))
+                                                                  .map(PartitionedEnum::name)
+                                                                  .collect(Collectors.joining(", "));
+
+                ClientWarn.instance.warn(grantMode.revokeWarningMessage(grantee.getRoleName(),
+                                                                        resource,
+                                                                        permissionsStr));
+            }
 
             return new ResultMessage.Void();
         });

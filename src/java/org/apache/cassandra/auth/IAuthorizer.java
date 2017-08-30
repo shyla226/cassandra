@@ -87,12 +87,12 @@ public interface IAuthorizer
      * @param grantee Role to which the permissions are to be granted.
      * @param grantModes whether to grant permissions on the resource, the resource with grant option or
      *                    only the permission to grant
-     *
+     * @return the permissions that have been sucessfully granted.
      * @throws RequestValidationException
      * @throws RequestExecutionException
      * @throws java.lang.UnsupportedOperationException
      */
-    void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee, GrantMode... grantModes)
+    Set<Permission> grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee, GrantMode... grantModes)
     throws RequestValidationException, RequestExecutionException;
 
     /**
@@ -106,12 +106,13 @@ public interface IAuthorizer
      * @param resource Resource on which to revoke the permissions.
      * @param revokee Role from which to the permissions are to be revoked.
      * @param grantModes what to revoke, the permission on the resource, the permission to grant or both
+     * @return the permissions that have been sucessfully revoked.
      *
      * @throws RequestValidationException
      * @throws RequestExecutionException
      * @throws java.lang.UnsupportedOperationException
      */
-    void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee, GrantMode... grantModes)
+    Set<Permission> revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee, GrantMode... grantModes)
     throws RequestValidationException, RequestExecutionException;
 
     /**

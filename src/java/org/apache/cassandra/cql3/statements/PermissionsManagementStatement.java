@@ -49,7 +49,13 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
 
     public void validate(QueryState state) throws RequestValidationException
     {
+        if (!DatabaseDescriptor.getAuthorizer().requireAuthorization())
+            throw invalidRequest(String.format("%s operation is not supported by the %s if it is not enabled",
+                                               operation(),
+                                               DatabaseDescriptor.getAuthorizer().implementation().getClass().getSimpleName()));
     }
+
+    protected abstract String operation();
 
     @Override
     public void checkAccess(QueryState state)
