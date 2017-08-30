@@ -8,10 +8,8 @@ package org.apache.cassandra.auth;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.datastax.driver.core.exceptions.UnauthorizedException;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 public class AuthorizeForAndRestrictTest extends CQLTester
 {
@@ -21,163 +19,128 @@ public class AuthorizeForAndRestrictTest extends CQLTester
         requireAuthentication();
         DatabaseDescriptor.setPermissionsValidity(9999);
         DatabaseDescriptor.setPermissionsUpdateInterval(9999);
-        requireNetwork(false);
+        requireNetwork();
     }
 
     @Test
     public void testAuthorizeFor() throws Throwable
     {
-        sessionWithUser("cassandra", "cassandra", ProtocolVersion.CURRENT, (session) ->
-        {
-            session.execute("CREATE USER authfor1 WITH PASSWORD 'pass1'");
-            session.execute("CREATE USER authfor2 WITH PASSWORD 'pass2'");
-            session.execute("CREATE ROLE authfor_role1");
-            session.execute("GRANT authfor_role1 TO authfor1");
+        useSuperUser();
 
-            session.execute("CREATE KEYSPACE authfor_test WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}");
-            session.execute("CREATE TABLE authfor_test.t1 (id int PRIMARY KEY, val text)");
-            session.execute("CREATE TABLE authfor_test.t2 (id int PRIMARY KEY, val text)");
+        executeNet("CREATE USER authfor1 WITH PASSWORD 'pass1'");
+        executeNet("CREATE USER authfor2 WITH PASSWORD 'pass2'");
+        executeNet("CREATE ROLE authfor_role1");
+        executeNet("GRANT authfor_role1 TO authfor1");
 
-            session.execute("GRANT AUTHORIZE FOR SELECT ON KEYSPACE authfor_test TO authfor1");
-            session.execute("GRANT MODIFY ON TABLE authfor_test.t1 TO authfor1");
-            session.execute("GRANT AUTHORIZE FOR MODIFY ON TABLE authfor_test.t2 TO authfor2");
-            session.execute("GRANT MODIFY ON TABLE authfor_test.t2 TO authfor2");
-            return null;
-        });
+        executeNet("CREATE KEYSPACE authfor_test WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}");
+        executeNet("CREATE TABLE authfor_test.t1 (id int PRIMARY KEY, val text)");
+        executeNet("CREATE TABLE authfor_test.t2 (id int PRIMARY KEY, val text)");
 
-        sessionWithUser("authfor1", "pass1", ProtocolVersion.CURRENT, (session) ->
-        {
-            // SELECT on table t1 must not work, authfor1 only has the privilege to grant the SELECT permission
-            assertInvalidThrowMessage(() -> session.execute("SELECT * FROM authfor_test.t1"),
-                                      "User authfor1 has no SELECT permission on <table authfor_test.t1> or any of its parents",
-                                      UnauthorizedException.class,
-                                      "SELECT * FROM authfor_test.t1");
+        executeNet("GRANT AUTHORIZE FOR SELECT ON KEYSPACE authfor_test TO authfor1");
+        executeNet("GRANT MODIFY ON TABLE authfor_test.t1 TO authfor1");
+        executeNet("GRANT AUTHORIZE FOR MODIFY ON TABLE authfor_test.t2 TO authfor2");
+        executeNet("GRANT MODIFY ON TABLE authfor_test.t2 TO authfor2");
 
-            // authfor1 must not be able to grant the SELECT permission to himself
-            assertInvalidThrowMessage(() -> session.execute("GRANT SELECT ON TABLE authfor_test.t1 TO authfor1"),
-                                      "User authfor1 has grant privilege for SELECT permission(s) on <table authfor_test.t1> but must not grant/revoke for him/herself",
-                                      UnauthorizedException.class,
-                                      "GRANT SELECT ON TABLE authfor_test.t1 TO authfor1");
 
-            // authfor1 must not be able to grant the SELECT permission to himself - even via a role
-            assertInvalidThrowMessage(() -> session.execute("GRANT SELECT ON TABLE authfor_test.t1 TO authfor_role1"),
-                                      "User authfor1 has grant privilege for SELECT permission(s) on <table authfor_test.t1> but must not grant/revoke for him/herself",
-                                      UnauthorizedException.class,
-                                      "GRANT SELECT ON TABLE authfor_test.t1 TO authfor_role1");
+        useUser("authfor1", "pass1");
 
-            // authfor1 has MODIFIY permission on t1 but not the privilege to grant the MODIFY permission
-            assertInvalidThrowMessage(() -> session.execute("GRANT MODIFY ON TABLE authfor_test.t1 to authfor2"),
-                                      "User authfor1 has no AUTHORIZE permission nor AUTHORIZE FOR MODIFY permission on <table authfor_test.t1> or any of its parents",
-                                      UnauthorizedException.class,
-                                      "GRANT SELECT ON TABLE authfor_test.t1 TO authfor2");
+        // SELECT on table t1 must not work, authfor1 only has the privilege to grant the SELECT permission
+        assertUnauthorizedQuery("User authfor1 has no SELECT permission on <table authfor_test.t1> or any of its parents",
+                                "SELECT * FROM authfor_test.t1");
 
-            assertInvalidThrowMessage(() -> session.execute("GRANT AUTHORIZE FOR SELECT ON KEYSPACE authfor_test TO authfor2"),
-                                      "User authfor1 must not grant AUTHORIZE FOR AUTHORIZE permission on <keyspace authfor_test>",
-                                      UnauthorizedException.class,
-                                      "GRANT AUTHORIZE FOR SELECT ON KEYSPACE authfor_test TO authfor2");
+        // authfor1 must not be able to grant the SELECT permission to himself
+        assertUnauthorizedQuery("User authfor1 has grant privilege for SELECT permission(s) on <table authfor_test.t1> but must not grant/revoke for him/herself",
+                                "GRANT SELECT ON TABLE authfor_test.t1 TO authfor1");
 
-            // authfor1 can grant the SELECT privilege - all that must work (although the GRANT on the keyspace is technically sufficient)
-            session.execute("GRANT SELECT ON KEYSPACE authfor_test TO authfor2");
-            session.execute("GRANT SELECT ON TABLE authfor_test.t1 TO authfor2");
-            session.execute("GRANT SELECT ON TABLE authfor_test.t2 TO authfor2");
+        // authfor1 must not be able to grant the SELECT permission to himself - even via a role
+        assertUnauthorizedQuery("User authfor1 has grant privilege for SELECT permission(s) on <table authfor_test.t1> but must not grant/revoke for him/herself",
+                                "GRANT SELECT ON TABLE authfor_test.t1 TO authfor_role1");
 
-            // authfor1 has no MODIFIY permission on t2
-            assertInvalidThrowMessage(() -> session.execute("INSERT INTO authfor_test.t2 (id, val) VALUES (1, 'foo')"),
-                                      "User authfor1 has no MODIFY permission on <table authfor_test.t2> or any of its parents",
-                                      UnauthorizedException.class,
-                                      "INSERT INTO authfor_test.t2 (id, val) VALUES (1, 'foo')");
+        // authfor1 has MODIFIY permission on t1 but not the privilege to grant the MODIFY permission
+        assertUnauthorizedQuery("User authfor1 has no AUTHORIZE permission nor AUTHORIZE FOR MODIFY permission on <table authfor_test.t1> or any of its parents",
+                                "GRANT MODIFY ON TABLE authfor_test.t1 to authfor2");
 
-            return null;
-        });
+        assertUnauthorizedQuery("User authfor1 must not grant AUTHORIZE FOR AUTHORIZE permission on <keyspace authfor_test>",
+                                "GRANT AUTHORIZE FOR SELECT ON KEYSPACE authfor_test TO authfor2");
 
-        sessionWithUser("authfor2", "pass2", ProtocolVersion.CURRENT, (session) ->
-        {
-            // authfor2 has SELECT permission on t1
-            session.execute("SELECT * FROM authfor_test.t1");
+        // authfor1 can grant the SELECT privilege - all that must work (although the GRANT on the keyspace is technically sufficient)
+        executeNet("GRANT SELECT ON KEYSPACE authfor_test TO authfor2");
+        executeNet("GRANT SELECT ON TABLE authfor_test.t1 TO authfor2");
+        executeNet("GRANT SELECT ON TABLE authfor_test.t2 TO authfor2");
 
-            // authfor2 has no MODIFY permission on t1
-            assertInvalidThrowMessage(() -> session.execute("INSERT INTO authfor_test.t1 (id, val) VALUES (1, 'foo')"),
-                                      "User authfor2 has no MODIFY permission on <table authfor_test.t1> or any of its parents",
-                                      UnauthorizedException.class,
-                                      "INSERT INTO authfor_test.t1 (id, val) VALUES (1, 'foo')");
+        // authfor1 has no MODIFIY permission on t2
+        assertUnauthorizedQuery("User authfor1 has no MODIFY permission on <table authfor_test.t2> or any of its parents",
+                                "INSERT INTO authfor_test.t2 (id, val) VALUES (1, 'foo')");
 
-            // authfor2 has the privilege to grant the MODIFY permission
-            session.execute("GRANT MODIFY ON TABLE authfor_test.t2 TO authfor1");
+        useUser("authfor2", "pass2");
 
-            // authfor2 has MODIFY permission on t2
-            session.execute("INSERT INTO authfor_test.t2 (id, val) VALUES (1, 'foo')");
+        // authfor2 has SELECT permission on t1
+        executeNet("SELECT * FROM authfor_test.t1");
 
-            // authfor2 has SElECT permission on t2
-            assertRowsNet(session.execute("SELECT id, val FROM authfor_test.t2"),
-                          new Object[] {1, "foo"});
+        // authfor2 has no MODIFY permission on t1
+        assertUnauthorizedQuery("User authfor2 has no MODIFY permission on <table authfor_test.t1> or any of its parents",
+                                "INSERT INTO authfor_test.t1 (id, val) VALUES (1, 'foo')");
 
-            return null;
-        });
+        // authfor2 has the privilege to grant the MODIFY permission
+        executeNet("GRANT MODIFY ON TABLE authfor_test.t2 TO authfor1");
 
-        sessionWithUser("authfor1", "pass1", ProtocolVersion.CURRENT, (session) ->
-        {
-            // attn: the permission is still cached !
+        // authfor2 has MODIFY permission on t2
+        executeNet("INSERT INTO authfor_test.t2 (id, val) VALUES (1, 'foo')");
 
-            assertInvalidThrowMessage(() -> session.execute("INSERT INTO authfor_test.t2 (id, val) VALUES (2, 'bar')"),
-                                      "User authfor1 has no MODIFY permission on <table authfor_test.t2> or any of its parents",
-                                      UnauthorizedException.class,
-                                      "INSERT INTO authfor_test.t2 (id, val) VALUES (2, 'bar')");
+        // authfor2 has SElECT permission on t2
+        assertRowsNet(executeNet("SELECT id, val FROM authfor_test.t2"),
+                      new Object[] { 1, "foo" });
 
-            // need to invalidate the permissions cache
+        useUser("authfor1", "pass1");
 
-            invalidateAuthCaches();
+        // attn: the permission is still cached !
 
-            // now the CQL works
+        assertUnauthorizedQuery("User authfor1 has no MODIFY permission on <table authfor_test.t2> or any of its parents",
+                                "INSERT INTO authfor_test.t2 (id, val) VALUES (2, 'bar')");
 
-            session.execute("INSERT INTO authfor_test.t2 (id, val) VALUES (2, 'bar')");
+        // need to invalidate the permissions cache
 
-            return null;
-        });
+        invalidateAuthCaches();
 
-        sessionWithUser("authfor2", "pass2", ProtocolVersion.CURRENT, (session) ->
-        {
+        // now the CQL works
 
-            assertRowsNet(session.execute("SELECT id, val FROM authfor_test.t2"),
-                          new Object[] {1, "foo"},
-                          new Object[] {2, "bar"});
+        executeNet("INSERT INTO authfor_test.t2 (id, val) VALUES (2, 'bar')");
 
-            return null;
-        });
+        useUser("authfor2", "pass2");
 
-        sessionWithUser("cassandra", "cassandra", ProtocolVersion.CURRENT, (session) ->
-        {
-            assertRowsNet(session.execute("LIST PERMISSIONS OF authfor1"),
-                          new Object[]{ "authfor1", "authfor1", "<keyspace authfor_test>", "SELECT", false, false, true },
-                          new Object[]{ "authfor1", "authfor1", "<table authfor_test.t1>", "MODIFY", true, false, false },
-                          new Object[]{ "authfor1", "authfor1", "<table authfor_test.t2>", "MODIFY", true, false, false });
-            assertRowsNet(session.execute("LIST PERMISSIONS OF authfor2"),
-                          new Object[]{ "authfor2", "authfor2", "<keyspace authfor_test>", "SELECT", true, false, false },
-                          new Object[]{ "authfor2", "authfor2", "<table authfor_test.t1>", "SELECT", true, false, false },
-                          new Object[]{ "authfor2", "authfor2", "<table authfor_test.t2>", "SELECT", true, false, false },
-                          new Object[]{ "authfor2", "authfor2", "<table authfor_test.t2>", "MODIFY", true, false, true }
-                          );
+        assertRowsNet(executeNet("SELECT id, val FROM authfor_test.t2"),
+                      row(1, "foo"),
+                      row(2, "bar"));
 
-            // all permissions and grant options must have been removed
-            session.execute("DROP ROLE authfor1");
-            session.execute("CREATE USER authfor1 WITH PASSWORD 'pass1'");
+        useSuperUser();
+        assertRowsNet(executeNet("LIST PERMISSIONS OF authfor1"),
+                      row("authfor1", "authfor1", "<keyspace authfor_test>", "SELECT", false, false, true),
+                      row("authfor1", "authfor1", "<table authfor_test.t1>", "MODIFY", true, false, false),
+                      row("authfor1", "authfor1", "<table authfor_test.t2>", "MODIFY", true, false, false));
+        assertRowsNet(executeNet("LIST PERMISSIONS OF authfor2"),
+                      row("authfor2", "authfor2", "<keyspace authfor_test>", "SELECT", true, false, false),
+                      row("authfor2", "authfor2", "<table authfor_test.t1>", "SELECT", true, false, false),
+                      row("authfor2", "authfor2", "<table authfor_test.t2>", "SELECT", true, false, false),
+                      row("authfor2", "authfor2", "<table authfor_test.t2>", "MODIFY", true, false, true));
 
-            assertRowsNet(session.execute("LIST PERMISSIONS OF authfor1"));
-            assertRowsNet(session.execute("LIST PERMISSIONS OF authfor2"),
-                          new Object[]{ "authfor2", "authfor2", "<keyspace authfor_test>", "SELECT", true, false, false },
-                          new Object[]{ "authfor2", "authfor2", "<table authfor_test.t1>", "SELECT", true, false, false },
-                          new Object[]{ "authfor2", "authfor2", "<table authfor_test.t2>", "SELECT", true, false, false },
-                          new Object[]{ "authfor2", "authfor2", "<table authfor_test.t2>", "MODIFY", true, false, true }
-            );
+        // all permissions and grant options must have been removed
+        executeNet("DROP ROLE authfor1");
+        executeNet("CREATE USER authfor1 WITH PASSWORD 'pass1'");
 
-            // all permissions and grant options must have been removed
-            session.execute("DROP ROLE authfor2");
-            session.execute("CREATE USER authfor2 WITH PASSWORD 'pass2'");
+        assertRowsNet(executeNet("LIST PERMISSIONS OF authfor1"));
+        assertRowsNet(executeNet("LIST PERMISSIONS OF authfor2"),
+                      row("authfor2", "authfor2", "<keyspace authfor_test>", "SELECT", true, false, false),
+                      row("authfor2", "authfor2", "<table authfor_test.t1>", "SELECT", true, false, false),
+                      row("authfor2", "authfor2", "<table authfor_test.t2>", "SELECT", true, false, false),
+                      row("authfor2", "authfor2", "<table authfor_test.t2>", "MODIFY", true, false, true));
 
-            assertRowsNet(session.execute("LIST PERMISSIONS OF authfor1"));
-            assertRowsNet(session.execute("LIST PERMISSIONS OF authfor2"));
+        // all permissions and grant options must have been removed
+        executeNet("DROP ROLE authfor2");
+        executeNet("CREATE USER authfor2 WITH PASSWORD 'pass2'");
 
-            return null;
-        });
+        assertRowsNet(executeNet("LIST PERMISSIONS OF authfor1"));
+        assertRowsNet(executeNet("LIST PERMISSIONS OF authfor2"));
+
     }
 
     @Test
@@ -191,75 +154,48 @@ public class AuthorizeForAndRestrictTest extends CQLTester
         // - security admin user must still not be able to access that table
         // - security admin user must not be able to "unrestrict"
 
-        sessionWithUser("cassandra", "cassandra", ProtocolVersion.CURRENT, (session) ->
-        {
-            session.execute("CREATE KEYSPACE restrict_test WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}");
-            session.execute("CREATE TABLE restrict_test.t1 (id int PRIMARY KEY, val text)");
+        useSuperUser();
 
-            session.execute("CREATE ROLE role_restrict");
-            session.execute("CREATE USER restrict1 WITH PASSWORD 'restrict1'");
+        executeNet("CREATE KEYSPACE restrict_test WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}");
+        executeNet("CREATE TABLE restrict_test.t1 (id int PRIMARY KEY, val text)");
 
-            session.execute("GRANT AUTHORIZE FOR SELECT ON KEYSPACE restrict_test TO restrict1");
-            return null;
-        });
+        executeNet("CREATE ROLE role_restrict");
+        executeNet("CREATE USER restrict1 WITH PASSWORD 'restrict1'");
 
-        sessionWithUser("restrict1", "restrict1", ProtocolVersion.CURRENT, (session) ->
-        {
-            assertInvalidThrowMessage(() -> session.execute("SELECT * FROM restrict_test.t1"),
-                                      "User restrict1 has no SELECT permission on <table restrict_test.t1> or any of its parents",
-                                      UnauthorizedException.class,
-                                      "SELECT * FROM restrict_test.t1");
+        executeNet("GRANT AUTHORIZE FOR SELECT ON KEYSPACE restrict_test TO restrict1");
 
-            session.execute("GRANT SELECT ON KEYSPACE restrict_test TO role_restrict");
 
-            assertInvalidThrowMessage(() -> session.execute("SELECT * FROM restrict_test.t1"),
-                                      "User restrict1 has no SELECT permission on <table restrict_test.t1> or any of its parents",
-                                      UnauthorizedException.class,
-                                      "SELECT * FROM restrict_test.t1");
+        useUser("restrict1", "restrict1");
 
-            return null;
-        });
+        assertUnauthorizedQuery("User restrict1 has no SELECT permission on <table restrict_test.t1> or any of its parents",
+                                "SELECT * FROM restrict_test.t1");
 
-        sessionWithUser("cassandra", "cassandra", ProtocolVersion.CURRENT, (session) ->
-        {
-            session.execute("GRANT role_restrict TO restrict1");
-            return null;
-        });
+        executeNet("GRANT SELECT ON KEYSPACE restrict_test TO role_restrict");
+
+        assertUnauthorizedQuery("User restrict1 has no SELECT permission on <table restrict_test.t1> or any of its parents",
+                                "SELECT * FROM restrict_test.t1");
+
+        useSuperUser();
+        executeNet("GRANT role_restrict TO restrict1");
 
         invalidateAuthCaches();
 
-        sessionWithUser("restrict1", "restrict1", ProtocolVersion.CURRENT, (session) ->
-        {
-            assertRowsNet(session.execute("SELECT * FROM restrict_test.t1"));
-            return null;
-        });
+        useUser("restrict1", "restrict1");
+        assertRowsNet(executeNet("SELECT * FROM restrict_test.t1"));
 
-        sessionWithUser("cassandra", "cassandra", ProtocolVersion.CURRENT, (session) ->
-        {
-            assertRowsNet(session.execute("RESTRICT SELECT ON TABLE restrict_test.t1 TO restrict1"));
-            return null;
-        });
+        useSuperUser();
+        executeNet("RESTRICT SELECT ON TABLE restrict_test.t1 TO restrict1");
 
         invalidateAuthCaches();
 
-        sessionWithUser("restrict1", "restrict1", ProtocolVersion.CURRENT, (session) ->
-        {
-            assertInvalidThrowMessage(() -> session.execute("SELECT * FROM restrict_test.t1"),
-                                      "Access for user restrict1 on <table restrict_test.t1> or any of its parents with SELECT permission is restricted",
-                                      UnauthorizedException.class,
-                                      "SELECT * FROM restrict_test.t1");
+        useUser("restrict1", "restrict1");
+        assertUnauthorizedQuery("Access for user restrict1 on <table restrict_test.t1> or any of its parents with SELECT permission is restricted",
+                                "SELECT * FROM restrict_test.t1");
 
-            assertInvalidThrowMessage(() -> session.execute("UNRESTRICT SELECT ON TABLE restrict_test.t1 FROM restrict1"),
-                                      "Only superusers are allowed to RESTRICT/UNRESTRICT",
-                                      UnauthorizedException.class,
-                                      "UNRESTRICT SELECT ON TABLE restrict_test.t1 FROM restrict1");
+        assertUnauthorizedQuery("Only superusers are allowed to RESTRICT/UNRESTRICT",
+                                "UNRESTRICT SELECT ON TABLE restrict_test.t1 FROM restrict1");
 
-            assertInvalidThrowMessage(() -> session.execute("SELECT * FROM restrict_test.t1"),
-                                      "Access for user restrict1 on <table restrict_test.t1> or any of its parents with SELECT permission is restricted",
-                                      UnauthorizedException.class,
-                                      "SELECT * FROM restrict_test.t1");
-
-            return null;
-        });
+        assertUnauthorizedQuery("Access for user restrict1 on <table restrict_test.t1> or any of its parents with SELECT permission is restricted",
+                                "SELECT * FROM restrict_test.t1");
     }
 }

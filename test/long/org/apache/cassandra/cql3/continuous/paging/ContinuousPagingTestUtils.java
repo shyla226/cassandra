@@ -71,7 +71,7 @@ class ContinuousPagingTestUtils
 
     public static void startup()
     {
-        CQLTester.requireNetwork(false);
+        CQLTester.requireNetwork();
 
         long seed = System.nanoTime();
         logger.info("Using seed {}", seed);
