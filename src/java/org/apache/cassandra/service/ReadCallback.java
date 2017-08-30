@@ -296,6 +296,8 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
         // There is 3 "normal" exceptions we can get here:
         //   - ReadTimeoutException if we timeout.
         //   - ReadFailureException if we receive failure responses.
+        //   - UnavailableException if too many node become unavailable in the middle of a range query (when fetching
+        //     more sub-ranges).
         //   - DigestMismatchException on a digest mismatch for a digest read.
         // Anything else is a programming error, so log a proper message if that happens (we still propagate the
         // exception in all cases, so it's possible we get double-logging upper in the stack, but better that than
@@ -319,7 +321,7 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
                 logger.debug("{}; received {} of {} responses{}", isFailure ? "Failed" : "Timed out", received, blockfor, gotData);
             }
         }
-        else if (!(error instanceof DigestMismatchException))
+        else if (!(error instanceof DigestMismatchException || error instanceof UnavailableException))
         {
             logger.error("Unexpected error handling read responses for {}. Have received {} of {} responses.",
                          resolver.command, received, blockfor, error);
