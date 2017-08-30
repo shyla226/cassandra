@@ -292,8 +292,8 @@ public class OSSMessageSerializer implements Message.Serializer
         Tracing.SessionInfo info = message.tracingInfo();
         if (info != null)
         {
-            params.put(TRACE_HEADER, UUIDGen.decompose(Tracing.instance.getSessionId()));
-            params.put(TRACE_TYPE, new byte[] { Tracing.TraceType.serialize(Tracing.instance.getTraceType()) });
+            params.put(TRACE_HEADER, UUIDGen.decompose(info.sessionId));
+            params.put(TRACE_TYPE, new byte[] { Tracing.TraceType.serialize(info.traceType) });
         }
 
         if (message.isRequest())
