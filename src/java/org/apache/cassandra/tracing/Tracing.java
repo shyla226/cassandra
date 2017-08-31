@@ -370,8 +370,8 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
 
     public static class SessionInfo
     {
-        final UUID sessionId;
-        final TraceType traceType;
+        public final UUID sessionId;
+        public final TraceType traceType;
 
         private SessionInfo(TraceState state)
         {
