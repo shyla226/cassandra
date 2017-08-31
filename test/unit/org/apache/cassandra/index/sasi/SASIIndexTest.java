@@ -1312,14 +1312,14 @@ public class SASIIndexTest
         RowFilter filter = RowFilter.create();
         filter.add(store.metadata.getColumnDefinition(firstName), Operator.LIKE_CONTAINS, AsciiType.instance.fromString("a"));
 
-        ReadCommand command = new PartitionRangeReadCommand(store.metadata,
-                                                            FBUtilities.nowInSeconds(),
-                                                            ColumnFilter.all(store.metadata),
-                                                            filter,
-                                                            DataLimits.NONE,
-                                                            DataRange.allData(store.metadata.partitioner),
-                                                            Optional.empty());
-
+        ReadCommand command =
+            PartitionRangeReadCommand.create(false,
+                                             store.metadata,
+                                             FBUtilities.nowInSeconds(),
+                                             ColumnFilter.all(store.metadata),
+                                             filter,
+                                             DataLimits.NONE,
+                                             DataRange.allData(store.metadata.partitioner));
         try
         {
             new QueryPlan(store, command, 0).execute(ReadExecutionController.empty());
@@ -2276,13 +2276,14 @@ public class SASIIndexTest
         ColumnIndex index = ((SASIIndex) store.indexManager.getIndexByName("first_name")).getIndex();
         IndexMemtable beforeFlushMemtable = index.getCurrentMemtable();
 
-        PartitionRangeReadCommand command = new PartitionRangeReadCommand(store.metadata,
-                                                                          FBUtilities.nowInSeconds(),
-                                                                          ColumnFilter.all(store.metadata),
-                                                                          RowFilter.NONE,
-                                                                          DataLimits.NONE,
-                                                                          DataRange.allData(store.getPartitioner()),
-                                                                          Optional.empty());
+        PartitionRangeReadCommand command =
+            PartitionRangeReadCommand.create(false,
+                                             store.metadata,
+                                             FBUtilities.nowInSeconds(),
+                                             ColumnFilter.all(store.metadata),
+                                             RowFilter.NONE,
+                                             DataLimits.NONE,
+                                             DataRange.allData(store.getPartitioner()));
 
         QueryController controller = new QueryController(store, command, Integer.MAX_VALUE);
         org.apache.cassandra.index.sasi.plan.Expression expression =
@@ -2470,13 +2471,14 @@ public class SASIIndexTest
         for (Expression e : expressions)
             filter.add(store.metadata.getColumnDefinition(e.name), e.op, e.value);
 
-        ReadCommand command = new PartitionRangeReadCommand(store.metadata,
-                                                            FBUtilities.nowInSeconds(),
-                                                            columnFilter,
-                                                            filter,
-                                                            DataLimits.thriftLimits(maxResults, DataLimits.NO_LIMIT),
-                                                            range,
-                                                            Optional.empty());
+        ReadCommand command =
+            PartitionRangeReadCommand.create(false,
+                                             store.metadata,
+                                             FBUtilities.nowInSeconds(),
+                                             columnFilter,
+                                             filter,
+                                             DataLimits.thriftLimits(maxResults, DataLimits.NO_LIMIT),
+                                             range);
 
         return command.executeLocally(command.executionController());
     }

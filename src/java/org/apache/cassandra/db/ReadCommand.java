@@ -23,6 +23,8 @@ import java.util.*;
 import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
+import javax.annotation.Nullable;
+
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -111,26 +113,29 @@ public abstract class ReadCommand implements ReadQuery
     private final RowFilter rowFilter;
     private final DataLimits limits;
 
-    // SecondaryIndexManager will attempt to provide the most selective of any available indexes
-    // during execution. Here we also store an the results of that lookup to repeating it over
-    // the lifetime of the command.
-    protected Optional<IndexMetadata> index = Optional.empty();
-
-    // Flag to indicate whether the index manager has been queried to select an index for this
-    // command. This is necessary as the result of that lookup may be null, in which case we
-    // still don't want to repeat it.
-    private boolean indexManagerQueried = false;
-
-    private boolean isDigestQuery;
+    private final boolean isDigestQuery;
     // if a digest query, the version for which the digest is expected. Ignored if not a digest.
     private int digestVersion;
     private final boolean isForThrift;
 
     protected Monitorable optionalMonitor;
 
+    @Nullable
+    private final IndexMetadata index;
+
     protected static abstract class SelectionDeserializer
     {
-        public abstract ReadCommand deserialize(DataInputPlus in, int version, boolean isDigest, int digestVersion, boolean isForThrift, CFMetaData metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index) throws IOException;
+        public abstract ReadCommand deserialize(DataInputPlus in,
+                                                int version,
+                                                boolean isDigest,
+                                                int digestVersion,
+                                                boolean isForThrift,
+                                                CFMetaData metadata,
+                                                int nowInSec,
+                                                ColumnFilter columnFilter,
+                                                RowFilter rowFilter,
+                                                DataLimits limits,
+                                                IndexMetadata index) throws IOException;
     }
 
     protected enum Kind
@@ -155,6 +160,7 @@ public abstract class ReadCommand implements ReadQuery
                           ColumnFilter columnFilter,
                           RowFilter rowFilter,
                           DataLimits limits,
+                          IndexMetadata index,
                           Monitorable optionalMonitor)
     {
         this.kind = kind;
@@ -166,6 +172,7 @@ public abstract class ReadCommand implements ReadQuery
         this.columnFilter = columnFilter;
         this.rowFilter = rowFilter;
         this.limits = limits;
+        this.index = index;
         this.optionalMonitor = optionalMonitor;
     }
 
@@ -270,18 +277,6 @@ public abstract class ReadCommand implements ReadQuery
     }
 
     /**
-     * Sets whether this command should be a digest one or not.
-     *
-     * @param isDigestQuery whether the command should be set as a digest one or not.
-     * @return this read command.
-     */
-    public ReadCommand setIsDigestQuery(boolean isDigestQuery)
-    {
-        this.isDigestQuery = isDigestQuery;
-        return this;
-    }
-
-    /**
      * Sets the digest version, for when digest for that command is requested.
      * <p>
      * Note that we allow setting this independently of setting the command as a digest query as
@@ -308,6 +303,17 @@ public abstract class ReadCommand implements ReadQuery
     }
 
     /**
+     * Index (metadata) chosen for this query. Can be null.
+     *
+     * @return index (metadata) chosen for this query
+     */
+    @Nullable
+    public IndexMetadata indexMetadata()
+    {
+        return index;
+    }
+
+    /**
      * The clustering index filter this command to use for the provided key.
      * <p>
      * Note that that method should only be called on a key actually queried by this command
@@ -327,6 +333,11 @@ public abstract class ReadCommand implements ReadQuery
      */
     public abstract ReadCommand copy();
 
+    /**
+     * Returns a copy of this command with isDigestQuery set to true.
+     */
+    public abstract ReadCommand copyAsDigestQuery();
+
     protected abstract UnfilteredPartitionIterator queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
 
     protected abstract int oldestUnrepairedTombstone();
@@ -338,12 +349,11 @@ public abstract class ReadCommand implements ReadQuery
              : ReadResponse.createDataResponse(iterator, this);
     }
 
-    public long indexSerializedSize(int version)
+    long indexSerializedSize(int version)
     {
-        if (index.isPresent())
-            return IndexMetadata.serializer.serializedSize(index.get(), version);
-        else
-            return 0;
+        return null != index
+             ? IndexMetadata.serializer.serializedSize(index, version)
+             : 0;
     }
 
     public Index getIndex()
@@ -353,25 +363,23 @@ public abstract class ReadCommand implements ReadQuery
 
     public Index getIndex(ColumnFamilyStore cfs)
     {
-        // if we've already consulted the index manager, and it returned a valid index
-        // the result should be cached here.
-        if(index.isPresent())
-            return cfs.indexManager.getIndex(index.get());
+        return null != index
+             ? cfs.indexManager.getIndex(index)
+             : null;
+    }
 
-        // if no cached index is present, but we've already consulted the index manager
-        // then no registered index is suitable for this command, so just return null.
-        if (indexManagerQueried)
+    static IndexMetadata findIndex(CFMetaData table, RowFilter rowFilter)
+    {
+        if (table.getIndexes().isEmpty() || rowFilter.isEmpty())
             return null;
 
-        // do the lookup, set the flag to indicate so and cache the result if not null
-        Index selected = cfs.indexManager.getBestIndexFor(this);
-        indexManagerQueried = true;
+        ColumnFamilyStore cfs = Keyspace.openAndGetStore(table);
 
-        if (selected == null)
-            return null;
+        Index index = cfs.indexManager.getBestIndexFor(rowFilter);
 
-        index = Optional.of(selected.getIndexMetadata());
-        return selected;
+        return null != index
+             ? index.getIndexMetadata()
+             : null;
     }
 
     /**
@@ -755,7 +763,7 @@ public abstract class ReadCommand implements ReadQuery
             assert version >= MessagingService.VERSION_30;
 
             out.writeByte(command.kind.ordinal());
-            out.writeByte(digestFlag(command.isDigestQuery()) | thriftFlag(command.isForThrift()) | indexFlag(command.index.isPresent()));
+            out.writeByte(digestFlag(command.isDigestQuery()) | thriftFlag(command.isForThrift()) | indexFlag(null != command.index));
             if (command.isDigestQuery())
                 out.writeUnsignedVInt(command.digestVersion());
             CFMetaData.serializer.serialize(command.metadata(), out, version);
@@ -763,8 +771,8 @@ public abstract class ReadCommand implements ReadQuery
             ColumnFilter.serializer.serialize(command.columnFilter(), out, version);
             RowFilter.serializer.serialize(command.rowFilter(), out, version);
             DataLimits.serializer.serialize(command.limits(), out, version, command.metadata.comparator);
-            if (command.index.isPresent())
-                IndexMetadata.serializer.serialize(command.index.get(), out, version);
+            if (null != command.index)
+                IndexMetadata.serializer.serialize(command.index, out, version);
 
             command.serializeSelection(out, version);
         }
@@ -784,18 +792,16 @@ public abstract class ReadCommand implements ReadQuery
             ColumnFilter columnFilter = ColumnFilter.serializer.deserialize(in, version, metadata);
             RowFilter rowFilter = RowFilter.serializer.deserialize(in, version, metadata);
             DataLimits limits = DataLimits.serializer.deserialize(in, version,  metadata.comparator);
-            Optional<IndexMetadata> index = hasIndex
-                                            ? deserializeIndexMetadata(in, version, metadata)
-                                            : Optional.empty();
+            IndexMetadata index = hasIndex ? deserializeIndexMetadata(in, version, metadata) : null;
 
             return kind.selectionDeserializer.deserialize(in, version, isDigest, digestVersion, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         }
 
-        private Optional<IndexMetadata> deserializeIndexMetadata(DataInputPlus in, int version, CFMetaData cfm) throws IOException
+        private IndexMetadata deserializeIndexMetadata(DataInputPlus in, int version, CFMetaData cfm) throws IOException
         {
             try
             {
-                return Optional.of(IndexMetadata.serializer.deserialize(in, version, cfm));
+                return IndexMetadata.serializer.deserialize(in, version, cfm);
             }
             catch (UnknownIndexException e)
             {
@@ -804,7 +810,7 @@ public abstract class ReadCommand implements ReadQuery
                             "being fully propagated. Local read will proceed without using the " +
                             "index. Please wait for schema agreement after index creation.",
                             cfm.ksName, cfm.cfName, e.indexId);
-                return Optional.empty();
+                return null;
             }
         }
 
@@ -982,7 +988,7 @@ public abstract class ReadCommand implements ReadQuery
             else
                 limits = DataLimits.cqlLimits(maxResults);
 
-            return new PartitionRangeReadCommand(false, 0, true, metadata, nowInSec, selection, rowFilter, limits, new DataRange(keyRange, filter), Optional.empty());
+            return PartitionRangeReadCommand.create(true, metadata, nowInSec, selection, rowFilter, limits, new DataRange(keyRange, filter));
         }
 
         static void serializeRowFilter(DataOutputPlus out, RowFilter rowFilter) throws IOException
@@ -1091,9 +1097,8 @@ public abstract class ReadCommand implements ReadQuery
             ClusteringIndexNamesFilter filter = (ClusteringIndexNamesFilter) command.dataRange().clusteringIndexFilter;
             ClusteringIndexSliceFilter sliceFilter = LegacyReadCommandSerializer.convertNamesFilterToSliceFilter(filter, metadata);
             DataRange newRange = new DataRange(command.dataRange().keyRange(), sliceFilter);
-            return new PartitionRangeReadCommand(
-                    command.isDigestQuery(), command.digestVersion(), command.isForThrift(), metadata, command.nowInSec(),
-                    command.columnFilter(), command.rowFilter(), command.limits(), newRange, Optional.empty());
+
+            return command.withUpdatedDataRange(newRange);
         }
 
         static ColumnFilter getColumnSelectionForSlice(boolean selectsStatics, int compositesToGroup, CFMetaData metadata)
@@ -1248,7 +1253,7 @@ public abstract class ReadCommand implements ReadQuery
                 // missing without any problems, so we can safely always set "inclusive" to false in the data range
                 dataRange = dataRange.forPaging(keyRange, metadata.comparator, startBound.getAsClustering(metadata), false);
             }
-            return new PartitionRangeReadCommand(false, 0, true, metadata, nowInSec, selection, rowFilter, limits, dataRange, Optional.empty());
+            return PartitionRangeReadCommand.create(true, metadata, nowInSec, selection, rowFilter, limits, dataRange);
         }
 
         public long serializedSize(ReadCommand command, int version)
@@ -1442,10 +1447,7 @@ public abstract class ReadCommand implements ReadQuery
         {
             Pair<ColumnFilter, ClusteringIndexNamesFilter> selectionAndFilter = deserializeNamesSelectionAndFilter(in, metadata);
 
-            // messages from old nodes will expect the thrift format, so always use 'true' for isForThrift
-            return new SinglePartitionReadCommand(
-                    isDigest, version, true, metadata, nowInSeconds, selectionAndFilter.left, RowFilter.NONE, DataLimits.NONE,
-                    key, selectionAndFilter.right);
+            return SinglePartitionReadCommand.legacyNamesCommand(isDigest, version, metadata, nowInSeconds, selectionAndFilter.left, key, selectionAndFilter.right);
         }
 
         static Pair<ColumnFilter, ClusteringIndexNamesFilter> deserializeNamesSelectionAndFilter(DataInputPlus in, CFMetaData metadata) throws IOException
@@ -1574,8 +1576,7 @@ public abstract class ReadCommand implements ReadQuery
             else
                 limits = DataLimits.cqlLimits(count);
 
-            // messages from old nodes will expect the thrift format, so always use 'true' for isForThrift
-            return new SinglePartitionReadCommand(isDigest, version, true, metadata, nowInSeconds, columnFilter, RowFilter.NONE, limits, key, filter);
+            return SinglePartitionReadCommand.legacySliceCommand(isDigest, version, metadata, nowInSeconds, columnFilter, limits, key, filter);
         }
 
         private long serializedSliceCommandSize(SinglePartitionReadCommand command)
@@ -1757,9 +1758,8 @@ public abstract class ReadCommand implements ReadQuery
 
             ClusteringIndexNamesFilter filter = (ClusteringIndexNamesFilter)command.clusteringIndexFilter();
             ClusteringIndexSliceFilter sliceFilter = convertNamesFilterToSliceFilter(filter, metadata);
-            return new SinglePartitionReadCommand(
-                    command.isDigestQuery(), command.digestVersion(), command.isForThrift(), metadata, command.nowInSec(),
-                    command.columnFilter(), command.rowFilter(), command.limits(), command.partitionKey(), sliceFilter);
+
+            return command.withUpdatedClusteringIndexFilter(sliceFilter);
         }
 
         /**
