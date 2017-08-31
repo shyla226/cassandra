@@ -48,40 +48,48 @@ public class FlatMap<I, O> extends Flow.RequestLoopFlow<O> implements FlowSubscr
     /**
      * Upstream subscription which will be requested to supply source items.
      */
-    private final FlowSubscription source;
+    FlowSubscription source;
+    private final Flow<I> sourceFlow;
 
     /**
      * If an item is active, this holds our subscription to the resulting flow.
      */
-    private volatile FlatMapChild current;
+    private final FlatMapChild child = new FlatMapChild();
 
     FlatMap(FlatMapper<I, O> mapper, Flow<I> source)
     {
         this.mapper = mapper;
-        this.source = source.subscribe(this);
+        this.sourceFlow = source;
     }
 
-    public FlowSubscription subscribe(FlowSubscriber<O> subscriber)
+    public void requestFirst(FlowSubscriber<O> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
     {
         assert this.subscriber == null : "Flow are single-use.";
         this.subscriber = subscriber;
-        return this;
+        subscriptionRecipient.onSubscribe(this);
+
+        sourceFlow.requestFirst(this, this);
     }
 
-    public void request()
+    public void onSubscribe(FlowSubscription source)
     {
-        if (current == null)
-            source.request();
+        this.source = source;
+    }
+
+    public void requestNext()
+    {
+        if (child.isActive())
+            child.requestNext();
         else
-            current.source.request();
+            source.requestNext();
     }
 
     public void close() throws Exception
     {
         try
         {
-            if (current != null)
-                current.source.close();
+            if (child.isActive())
+                child.source.close();
         }
         finally
         {
@@ -89,20 +97,15 @@ public class FlatMap<I, O> extends Flow.RequestLoopFlow<O> implements FlowSubscr
         }
     }
 
-    public Throwable addSubscriberChainFromSource(Throwable throwable)
-    {
-        return source.addSubscriberChainFromSource(throwable);
-    }
-
     public void onNext(I next)
     {
-        if (!verify(current == null, null))
+        if (!verify(!child.isActive(), null))
             return;
 
+        Flow<O> flow;
         try
         {
-            Flow<O> child = mapper.apply(next);
-            current = new FlatMapChild(child);
+            flow = mapper.apply(next);
         }
         catch (Throwable t)
         {
@@ -110,12 +113,12 @@ public class FlatMap<I, O> extends Flow.RequestLoopFlow<O> implements FlowSubscr
             return;
         }
 
-        current.source.request();
+        child.requestFirst(flow);
     }
 
     public void onError(Throwable throwable)
     {
-        if (!verify(current == null, throwable))
+        if (!verify(!child.isActive(), throwable))
             return;
 
         subscriber.onError(throwable);
@@ -123,7 +126,7 @@ public class FlatMap<I, O> extends Flow.RequestLoopFlow<O> implements FlowSubscr
 
     public void onComplete()
     {
-        if (!verify(current == null, null))
+        if (!verify(!child.isActive(), null))
             return;
 
         subscriber.onComplete();
@@ -138,21 +141,44 @@ public class FlatMap<I, O> extends Flow.RequestLoopFlow<O> implements FlowSubscr
 
     public String toString()
     {
-        return Flow.formatTrace("flatMap", mapper, subscriber);
+        return Flow.formatTrace("flatMap", mapper, sourceFlow);
     }
 
     class FlatMapChild implements FlowSubscriber<O>
     {
-        final FlowSubscription source;
+        FlowSubscription source;
 
-        FlatMapChild(Flow<O> source) throws Exception
+        FlatMapChild()
         {
-            this.source = source.subscribe(this);
+            source = null;
+        }
+
+        boolean isActive()
+        {
+            return source != null;
+        }
+
+        void requestFirst(Flow<O> source)
+        {
+            source.requestFirst(this, this);
+        }
+
+        void requestNext()
+        {
+            source.requestNext();
+        }
+
+        public void onSubscribe(FlowSubscription source)
+        {
+            if (!verify(this.source == null, null))
+                return;
+
+            this.source = source;
         }
 
         public void onNext(O next)
         {
-            if (!verify(current == this, null))
+            if (!verify(source != null, null))
                 return;
 
             subscriber.onNext(next);
@@ -160,7 +186,7 @@ public class FlatMap<I, O> extends Flow.RequestLoopFlow<O> implements FlowSubscr
 
         public void onError(Throwable throwable)
         {
-            if (!verify(current == this, throwable))
+            if (!verify(source != null, throwable))
                 return;
 
             subscriber.onError(throwable);
@@ -168,18 +194,18 @@ public class FlatMap<I, O> extends Flow.RequestLoopFlow<O> implements FlowSubscr
 
         public void onComplete()
         {
-            if (!verify(current == this, null))
+            if (!verify(source != null, null))
                 return;
 
             try
             {
-                current = null;
                 source.close();
             }
             catch (Exception e)
             {
                 subscriber.onError(e);
             }
+            source = null;
 
             // We have to request another child; since there is a risk of multiple empty children being returned
             // and causing stack exhaustion, perform this request in a loop.

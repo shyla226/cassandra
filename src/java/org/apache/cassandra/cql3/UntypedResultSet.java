@@ -35,7 +35,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.flow.Flow;
-import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSource;
 import org.apache.cassandra.utils.flow.FlowSubscription;
 
 /** a utility for doing internal cql-based queries */
@@ -199,18 +199,12 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
         public Flow<Row> rows()
         {
-            class Subscription extends Flow.RequestLoop implements FlowSubscription
+            class PagerFlow extends FlowSource<Row> implements FlowSubscription
             {
                 private Iterator<List<ByteBuffer>> currentPage;
                 private final int nowInSec = FBUtilities.nowInSeconds();
-                private final FlowSubscriber<Row> subscriber;
 
-                Subscription(FlowSubscriber<Row> subscriber)
-                {
-                    this.subscriber = subscriber;
-                }
-
-                public void request()
+                public void requestNext()
                 {
                     if (currentPage == null || !currentPage.hasNext())
                         nextPage();
@@ -233,7 +227,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
                     currentPage = rows.iterator();
 
                     if (!currentPage.hasNext())
-                        requestInLoop(this);
+                        requestNext();
                     else
                         subscriber.onNext(new Row(metadata, currentPage.next()));
                 }
@@ -247,20 +241,9 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
                 {
                     // nothing to release
                 }
-
-                public Throwable addSubscriberChainFromSource(Throwable throwable)
-                {
-                    return Flow.wrapException(throwable, this);
-                }
             }
 
-            return new Flow<Row>()
-            {
-                public FlowSubscription subscribe(FlowSubscriber<Row> subscriber)
-                {
-                   return new Subscription(subscriber);
-                }
-            };
+            return new PagerFlow();
         }
 
         public Iterator<Row> iterator()

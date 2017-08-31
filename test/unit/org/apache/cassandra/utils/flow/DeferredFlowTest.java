@@ -150,23 +150,7 @@ public class DeferredFlowTest
                 try
                 {
                     semaphore.await();
-                    deferred.subscribe(new FlowSubscriber<Integer>()
-                    {
-                        public void onNext(Integer item)
-                        {
-                            throw new IllegalStateException("Got item without requesting it");
-                        }
-
-                        public void onComplete()
-                        {
-                            throw new IllegalStateException("Got complete without requesting it");
-                        }
-
-                        public void onError(Throwable t)
-                        {
-                            throw new IllegalStateException("Got error without requesting it", t);
-                        }
-                    }).close();
+                    OpsTest.subscribeAndClose(deferred);
                 }
                 catch (Throwable t)
                 {
@@ -180,6 +164,8 @@ public class DeferredFlowTest
             t1.join();
             t2.join();
 
+            if (error.get() != null)
+                error.get().printStackTrace();
             assertNull(error.get());
 
         }

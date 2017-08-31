@@ -31,6 +31,7 @@ import org.junit.Test;
 
 import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.LineNumberInference;
 import org.apache.cassandra.utils.Pair;
@@ -255,7 +256,8 @@ public class FlowTest
         }
         catch (Exception e)
         {
-            assertStacktraceMessage(e.getSuppressed()[0].getMessage(), new Object[]{ inc, multiplyByTwo, multiplyByThree, divideByZero, reduceToSum });
+            assertStacktraceMessage(e.getSuppressed()[0].getMessage(), new Object[]{ multiplyByTwo, divideByZero });
+            assertStacktraceMessage(e.getSuppressed()[1].getMessage(), new Object[]{ inc, multiplyByThree, reduceToSum });
         }
 
         try
@@ -274,7 +276,7 @@ public class FlowTest
         }
         catch (Exception e)
         {
-            assertStacktraceMessage(e.getSuppressed()[0].getMessage(), new Object[]{ inc, multiplyByTwo, multiplyByThree, divideByZero, reduceToSum });
+            assertStacktraceMessage(e.getSuppressed()[0].getMessage(), new Object[]{ inc, divideByZero, reduceToSum });
         }
     }
 
@@ -291,13 +293,13 @@ public class FlowTest
                 currentThread.set(Thread.currentThread().getName());
                 return ignored;
             })
-            .observeOn(Schedulers.newThread())
+            .observeOn(Schedulers.newThread(), TPCTaskType.UNKNOWN)
             .map(ignored ->
             {
                 transformedThread1.set(Thread.currentThread().getName());
                 return ignored;
             })
-            .observeOn(Schedulers.newThread())
+            .observeOn(Schedulers.newThread(), TPCTaskType.UNKNOWN)
             .reduceBlocking("ignored", (i, o) ->
             {
                 transformedThread2.set(Thread.currentThread().getName());

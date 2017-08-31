@@ -19,6 +19,7 @@
 package org.apache.cassandra.utils.flow;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -28,7 +29,6 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.disposables.Disposable;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
  * Implementation of {@link DeferredFlow}.
@@ -46,7 +46,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
  *
  * @param <T> - the type of the items for the flow
  */
-class DeferredFlowImpl<T> extends DeferredFlow<T>
+class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRecipient
 {
     private static final Logger logger = LoggerFactory.getLogger(DeferredFlowImpl.class);
 
@@ -55,22 +55,11 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
     private final Supplier<Flow<T>> timeoutSupplier;
 
     private volatile FlowSubscriber<T> subscriber;
+    private volatile FlowSubscriptionRecipient subscriptionRecipient;
     private volatile FlowSubscription subscription;
-    private volatile Throwable subscriptionError;
     private volatile Disposable timeoutTask;
 
-    private enum RequestStatus
-    {
-        NONE, ITEM, CLOSE
-    }
-
-    private enum SubscribeStatus
-    {
-        NONE, SUBSCRIBING, SUBSCRIBED
-    }
-
-    private final AtomicReference<RequestStatus> requestStatus = new AtomicReference<>(RequestStatus.NONE);
-    private final AtomicReference<SubscribeStatus> subscribeStatus = new AtomicReference<>(SubscribeStatus.NONE);
+    private final AtomicBoolean subscribed = new AtomicBoolean(false);
 
     DeferredFlowImpl(long deadlineNanos, Supplier<Flow<T>> timeoutSupplier)
     {
@@ -79,86 +68,21 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
         this.timeoutSupplier = timeoutSupplier;
     }
 
-    public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
+    public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
     {
         assert this.subscriber == null : "Only one subscriber is supported";
+        this.subscriptionRecipient = subscriptionRecipient;
         this.subscriber = subscriber;
 
         if (source.get() == null)
             startTimeoutTask();
 
         maybeSubscribe();
-        return new Subscription();
     }
 
-    /**
-     * Request to the source unless there was a subscription error, in which
-     * case we report it. This method is guaranteed to be called when subscribeStatus
-     * is already SUBSCRIBED, and therefore both subscriber and subscription are available.
-     */
-    private void realRequest()
+    public void onSubscribe(FlowSubscription source)
     {
-        if (subscriptionError != null)
-            subscriber.onError(subscriptionError);
-        else
-            subscription.request();
-    }
-
-    private class Subscription implements FlowSubscription
-    {
-        public void request()
-        {
-            if (subscribeStatus.get() == SubscribeStatus.SUBSCRIBED)
-            { // we already have a subscription to the source flow
-                realRequest();
-            }
-            else
-            { // no subscription yet, record the pending request
-                boolean ret = requestStatus.compareAndSet(RequestStatus.NONE, RequestStatus.ITEM);
-                if (!ret)
-                {
-                    subscriber.onError(new AssertionError("Unexpected request status: " + requestStatus.get()));
-                    return;
-                }
-
-                // if in the meantime we raced with the subscribing thread, request the item only if
-                // we can reset the request status
-                if (subscribeStatus.get() == SubscribeStatus.SUBSCRIBED)
-                {
-                    if (requestStatus.compareAndSet(RequestStatus.ITEM, RequestStatus.NONE))
-                        realRequest();
-                }
-            }
-        }
-
-        public void close() throws Exception
-        {
-            if (subscribeStatus.get() == SubscribeStatus.SUBSCRIBED)
-            { // we already have a subscription to the source flow
-                subscription.close();
-            }
-            else
-            { // no subscription yet, record the pending close
-                boolean ret = requestStatus.compareAndSet(RequestStatus.NONE, RequestStatus.CLOSE);
-                assert ret : "Unexpected request status";
-
-                // if in the meantime we raced with the subscribing thread, close only if
-                // we can reset the request status
-                if (subscribeStatus.get() == SubscribeStatus.SUBSCRIBED)
-                {
-                    if (requestStatus.compareAndSet(RequestStatus.CLOSE, RequestStatus.NONE))
-                        subscription.close();
-                }
-            }
-        }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            if (subscription != null)
-                return subscription.addSubscriberChainFromSource(throwable);
-            else
-                return throwable;
-        }
+        this.subscription = source;
     }
 
     /**
@@ -181,11 +105,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
             return true;
         }
         else
-        {
-            // TODO - We are at risk of resource leaks, once APOLLO-970 is merged, if Flow becomes closeable,
-            // we should close the flow here.
             return false;
-        }
     }
 
     /**
@@ -241,43 +161,12 @@ class DeferredFlowImpl<T> extends DeferredFlow<T>
         if (subscriber == null || source.get() == null)
             return; // we need both subscriber and Flow before attempting to subscribe
 
-        if (!subscribeStatus.compareAndSet(SubscribeStatus.NONE, SubscribeStatus.SUBSCRIBING))
+        // One thread could be calling us for source, the other for subscriber and both can pass test above
+        if (!subscribed.compareAndSet(false, true))
             return; // the other thread raced us
 
-        try
-        {
-            subscription = source.get().subscribe(subscriber);
-        }
-        catch (Throwable t)
-        {
-            JVMStabilityInspector.inspectThrowable(t);
-            subscriptionError = t;
-            logger.debug("Got error whilst subscribing to ReadCallback source, {}/{}", t.getClass(), t.getMessage());
-        }
-
-        // even if we got an error subscribing, we'll use that error, not the timeout and so dispose it if
-        // there is one running
         disposeTimeoutTask();
 
-        boolean ret = subscribeStatus.compareAndSet(SubscribeStatus.SUBSCRIBING, SubscribeStatus.SUBSCRIBED);
-        assert ret : "Failed to set subscribe status, no other thread should have raced";
-
-        if (requestStatus.compareAndSet(RequestStatus.ITEM, RequestStatus.NONE))
-        {
-            realRequest();
-        }
-        else if (requestStatus.compareAndSet(RequestStatus.CLOSE, RequestStatus.NONE))
-        {
-            try
-            {
-                subscription.close();
-            }
-            catch (Throwable t)
-            {
-                JVMStabilityInspector.inspectThrowable(t);
-                logger.debug("Got error whilst closing subscription but downstream had already closed, so did not pass down error, {}/{}",
-                                          t.getClass().getName(), t.getMessage());
-            }
-        }
+        source.get().requestFirst(subscriber, subscriptionRecipient);
     }
 }

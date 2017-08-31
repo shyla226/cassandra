@@ -64,41 +64,28 @@ public class SkipEmpty
             child = new SkipEmptyContentSubscriber(content, this);
         }
 
-        public FlowSubscription subscribe(FlowSubscriber<U> subscriber)
+        public void requestFirst(FlowSubscriber<U> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
         {
             if (state != State.UNSUBSCRIBED)
                 throw new AssertionError("skipEmpty partitions can only be subscribed to once. State was " + state);
 
             this.subscriber = subscriber;
-            state = State.SUBSCRIBED;
-            return this;
+            state = State.REQUESTED;
+            subscriptionRecipient.onSubscribe(this);
+
+            child.start();
         }
 
-        public void request()
+        public void requestNext()
         {
-            if (tryTransition(State.SUPPLIED, State.COMPLETED))
-            {
-                subscriber.onComplete();
-                return;
-            }
-            if (!verifyTransition(State.SUBSCRIBED, State.REQUESTED))
+            if (!verifyTransition(State.SUPPLIED, State.COMPLETED))
                 return;
 
-            child.source.request();
+            subscriber.onComplete();
         }
 
         public void close() throws Exception
         {
-            switch (state)
-            {
-            case SUBSCRIBED:
-            case SUPPLIED:
-            case COMPLETED:
-                state = State.CLOSED;
-                break;
-            default:
-                throw new AssertionError("Unexpected state " + state + " while closing " + this);
-            }
         }
 
         void onContent(Flow<T> child)
@@ -152,14 +139,9 @@ public class SkipEmpty
             return false;
         }
 
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return child.addSubscriberChainFromSource(throwable);
-        }
-
         public String toString()
         {
-            return Flow.formatTrace("skipEmpty", mapper, subscriber);
+            return Flow.formatTrace("skipEmpty", mapper, child.sourceFlow);
         }
     }
 
@@ -167,7 +149,7 @@ public class SkipEmpty
      * This is both flow and subscription. Done this way as we can only subscribe to these implementations once
      * and thus it doesn't make much sense to create subscription-specific instances.
      */
-    private static class SkipEmptyContentSubscriber<T> extends FlowTransform<T, T>
+    private static class SkipEmptyContentSubscriber<T> extends FlowTransformNext<T, T>
     {
         final SkipEmptyContent parent;
         T first = null;
@@ -179,22 +161,24 @@ public class SkipEmpty
             this.parent = parent;
         }
 
-        public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
+        void start()
         {
-            assert first != null;
-            return super.subscribe(subscriber);
+            sourceFlow.requestFirst(this, this);
         }
 
-        public void request()
+        public void onSubscribe(FlowSubscription source)
         {
-            if (first != null)
-            {
-                T toReturn = first;
-                first = null;
-                subscriber.onNext(toReturn);
-            }
-            else
-                source.request();
+            this.source = source;
+        }
+
+        public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+        {
+            assert first != null;
+            assert source != null;
+            assert this.subscriber == null : "Flow are single-use.";
+            this.subscriber = subscriber;
+            subscriptionRecipient.onSubscribe(source);  // subscribe direct, we only modify first value
+            subscriber.onNext(first);
         }
 
         public void onNext(T item)
@@ -251,7 +235,7 @@ public class SkipEmpty
 
         public String toString()
         {
-            return Flow.formatTrace("skipEmpty", parent.mapper, subscriber);
+            return parent.toString();
         }
     }
 }

@@ -181,7 +181,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
                                                new FlowSource<Unfiltered>() {
                                                    final Iterator<Clustering> clusteringIter = clusteringsInQueryOrder.iterator();
 
-                                                   public void request()
+                                                   public void requestNext()
                                                    {
                                                        while (clusteringIter.hasNext())
                                                        {

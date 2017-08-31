@@ -38,8 +38,6 @@ import org.apache.cassandra.io.util.Rebufferer.NotInCacheException;
 import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.FlowSource;
-import org.apache.cassandra.utils.flow.FlowSubscriber;
-import org.apache.cassandra.utils.flow.FlowSubscription;
 
 /**
  * Asynchronous partition reader.
@@ -141,7 +139,7 @@ class AsyncPartitionReader
             }
         }
 
-        public void request()
+        public void requestNext()
         {
             readWithRetry(false);
         }
@@ -193,9 +191,16 @@ class AsyncPartitionReader
                                                          ssTableIterator.isReverseOrder(),
                                                          ssTableIterator.stats());
 
-            Flow<Unfiltered> content = new PartitionSubscription();
+            PartitionSubscription partitionContent = new PartitionSubscription();
             issued = true;
-            subscriber.onNext(new FlowableUnfilteredPartition(header, ssTableIterator.staticRow(), content));
+            subscriber.onNext(new FlowableUnfilteredPartition(header, ssTableIterator.staticRow(), partitionContent)
+            {
+                @Override
+                public void unused() throws Exception
+                {
+                    partitionContent.close();
+                }
+            });
         }
 
         public void close() throws Exception

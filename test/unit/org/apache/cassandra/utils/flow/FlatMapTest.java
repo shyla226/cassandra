@@ -131,62 +131,30 @@ public class FlatMapTest
         {
             case 2:
             case 3:
-                return new Flow<Integer>()
-                {
-                    public FlowSubscription subscribe(FlowSubscriber<Integer> subscriber)
-                    {
-                        return new SpinningGenerator(subscriber, seed);
-                    }
-                };
+                return new SpinningGenerator(seed);
             case 4:
-                return new Flow<Integer>()
-                {
-                    public FlowSubscription subscribe(FlowSubscriber<Integer> subscriber)
-                    {
-                        return (new YieldingGenerator(subscriber, seed));
-                    }
-                };
+                return new YieldingGenerator(seed);
             case 5:
-                return new Flow<Integer>()
-                {
-                    public FlowSubscription subscribe(FlowSubscriber<Integer> subscriber)
-                    {
-                        return (new ParkingGenerator(subscriber, seed));
-                    }
-                };
+                return new ParkingGenerator(seed);
             case 6:
-                return new Flow<Integer>()
-                {
-                    public FlowSubscription subscribe(FlowSubscriber<Integer> subscriber)
-                    {
-                        return (new SleepingGenerator(subscriber, seed));
-                    }
-                };
+                return new SleepingGenerator(seed);
             default:
-                return new Flow<Integer>()
-                {
-                    public FlowSubscription subscribe(FlowSubscriber<Integer> subscriber)
-                    {
-                        return (new ImmediateGenerator(subscriber, seed));
-                    }
-                };
+                return new ImmediateGenerator(seed);
         }
     }
 
-    static class ImmediateGenerator implements FlowSubscription
+    static class ImmediateGenerator extends FlowSource<Integer>
     {
-        final FlowSubscriber<Integer> sub;
         final Random rand;
         volatile boolean closed = false;
         volatile boolean done = false;
 
-        ImmediateGenerator(FlowSubscriber<Integer> sub, int seed)
+        ImmediateGenerator(int seed)
         {
-            this.sub = sub;
             this.rand = new Random(seed);
         }
 
-        public void request()
+        public void requestNext()
         {
             switch (rand.nextInt(35))
             {
@@ -202,12 +170,12 @@ public class FlatMapTest
 
         void next()
         {
-            sub.onNext(rand.nextInt());
+            subscriber.onNext(rand.nextInt());
         }
 
         void complete()
         {
-            sub.onComplete();
+            subscriber.onComplete();
             done = true;
         }
 
@@ -222,14 +190,9 @@ public class FlatMapTest
             closed = true;
         }
 
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return Flow.wrapException(throwable, this);
-        }
-
         public String toString()
         {
-            return "\tImmediateGenerator " + sub;
+            return Flow.formatTrace(getClass().getSimpleName());
         }
 
         public void finalize()
@@ -245,9 +208,9 @@ public class FlatMapTest
         volatile Runnable call = null;
         AtomicInteger iteration = new AtomicInteger(0);
 
-        SpinningGenerator(FlowSubscriber<Integer> sub, int seed)
+        SpinningGenerator(int seed)
         {
-            super(sub, seed);
+            super(seed);
             spinner = new Thread()
             {
                 public void run()
@@ -280,9 +243,9 @@ public class FlatMapTest
         final Thread spinner;
         volatile Runnable call = null;
 
-        YieldingGenerator(FlowSubscriber<Integer> sub, int seed)
+        YieldingGenerator(int seed)
         {
-            super(sub, seed);
+            super(seed);
             spinner = new Thread()
             {
                 public void run()
@@ -315,9 +278,9 @@ public class FlatMapTest
         final Thread spinner;
         volatile Runnable call = null;
 
-        ParkingGenerator(FlowSubscriber<Integer> sub, int seed)
+        ParkingGenerator(int seed)
         {
-            super(sub, seed);
+            super(seed);
             spinner = new Thread()
             {
                 public void run()
@@ -351,9 +314,9 @@ public class FlatMapTest
         final Thread spinner;
         volatile Runnable call = null;
 
-        SleepingGenerator(FlowSubscriber<Integer> sub, int seed)
+        SleepingGenerator(int seed)
         {
-            super(sub, seed);
+            super(seed);
             spinner = new Thread()
             {
                 public void run()

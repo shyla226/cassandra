@@ -125,29 +125,33 @@ public class Merge
          */
         static final int SORTED_SECTION_SIZE = 4;
 
-        public ManyToOne(Reducer<In, Out> reducer, List<? extends Flow<In>> iterators, Comparator<? super In> comparator)
+        public ManyToOne(Reducer<In, Out> reducer, List<? extends Flow<In>> sources, Comparator<? super In> comparator)
         {
             this.reducer = reducer;
 
             @SuppressWarnings("unchecked")
-            Candidate<In>[] heap = new Candidate[iterators.size()];
+            Candidate<In>[] heap = new Candidate[sources.size()];
             this.heap = heap;
             size = 0;
 
-            for (int i = 0; i < iterators.size(); i++)
+            for (int i = 0; i < sources.size(); i++)
             {
-                Candidate<In> candidate = new Candidate<In>(this, i, iterators.get(i), comparator);
+                Candidate<In> candidate = new Candidate<In>(this, i, sources.get(i), comparator);
                 heap[size++] = candidate;
             }
             needingAdvance = size;
 
         }
 
-        public FlowSubscription subscribe(FlowSubscriber<Out> subscriber)
+        public void requestFirst(FlowSubscriber<Out> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
         {
             assert this.subscriber == null : "Flow are single-use.";
             this.subscriber = subscriber;
-            return this;
+            subscriptionRecipient.onSubscribe(this);
+
+            advancing.set(size);
+            for (int i = 0; i < needingAdvance; i++)
+                heap[i].requestFirst();
         }
 
         @Override
@@ -157,14 +161,9 @@ public class Merge
             Throwables.maybeFail(t);
         }
 
-        public Throwable addSubscriberChainFromSource(Throwable error)
-        {
-            return Flow.wrapException(error, this);
-        }
-
         public String toString()
         {
-            return Flow.formatTrace("merge", reducer, subscriber);
+            return Flow.formatTrace("merge", reducer);
         }
 
         /**
@@ -181,7 +180,7 @@ public class Merge
          * the heap if the number of consumed elements is high (as it is in the initial heap construction). With non- or
          * lightly-overlapping iterators the procedure finishes after just one (resp. a couple of) comparisons.
          */
-        public void request()
+        public void requestNext()
         {
             // Set to 1 initially to guard so we don't get called while we are increasing advancing.
             // It must be 0 before we are called.
@@ -269,13 +268,13 @@ public class Merge
             }
             catch (Throwable t)
             {
-                subscriber.onError(addSubscriberChainFromSource(t));
+                onError(t);
                 return;
             }
 
             Throwable error = reducer.getErrors();
             if (error != null)
-                subscriber.onError(error);
+                onError(error);
             else
             {
                 Out item = reducer.getReduced();
@@ -284,6 +283,11 @@ public class Merge
                 else
                     requestInLoop(this); // reducer rejected its input; get another set
             }
+        }
+
+        void onError(Throwable error)
+        {
+            subscriber.onError(error);
         }
 
         /**
@@ -418,6 +422,7 @@ public class Merge
     protected final static class Candidate<In> implements Comparable<Candidate<In>>, FlowSubscriber<In>, AutoCloseable
     {
         private final ManyToOne<In, ?> merger;
+        private final Flow<In> sourceFlow;
         private FlowSubscription source;
         private final Comparator<? super In> comp;
         private final int idx;
@@ -435,12 +440,24 @@ public class Merge
 
         boolean equalParent;
 
-        public Candidate(final ManyToOne<In, ?> merger, int idx, Flow<In> iter, Comparator<? super In> comp)
+        public Candidate(final ManyToOne<In, ?> merger, int idx, Flow<In> source, Comparator<? super In> comp)
         {
             this.merger = merger;
             this.comp = comp;
             this.idx = idx;
-            source = iter.subscribe(this);
+            this.sourceFlow = source;
+        }
+
+        void requestFirst()
+        {
+            if (!verifyStateChange(State.NEEDS_REQUEST, State.AWAITING_ADVANCE, true))
+                return;
+            sourceFlow.requestFirst(this, this);
+        }
+
+        public void onSubscribe(FlowSubscription source)
+        {
+            this.source = source;
         }
 
         public boolean needsRequest()
@@ -448,30 +465,32 @@ public class Merge
             return state.get() == State.NEEDS_REQUEST;
         }
 
-        private void verifyStateChange(State from, State to, boolean itemShouldBeNull)
+        private boolean verifyStateChange(State from, State to, boolean itemShouldBeNull)
         {
             State prev = state.getAndSet(to);
             if (prev == from && (!itemShouldBeNull || item == null))
-                return;
+                return true;
 
             onOurError(new AssertionError("Invalid state " + prev +
                                           (item == null ? "/" : "/non-") + "null item to transition " +
                                           from + (itemShouldBeNull ? "/null item" : "") + "->" + to));
+            return false;
         }
 
         private AssertionError onOurError(AssertionError e)
         {
             // We are in a bad state. We can't expect to pass this error through the merge, so pass on to subscriber
             // directly and abort everything we can.
-            merger.subscriber.onError(source.addSubscriberChainFromSource(e));
+            merger.onError(Flow.wrapException(e, this));
             return e;
         }
 
         protected void request()
         {
-            verifyStateChange(State.NEEDS_REQUEST, State.AWAITING_ADVANCE, true);
+            if (!verifyStateChange(State.NEEDS_REQUEST, State.AWAITING_ADVANCE, true))
+                return;
 
-            source.request();
+            source.requestNext();
         }
 
         @Override
@@ -483,7 +502,7 @@ public class Merge
         @Override
         public void onError(Throwable error)
         {
-            this.error = source.addSubscriberChainFromSource(error);
+            this.error = Flow.wrapException(error, this);
             onAdvance(null);
         }
 
@@ -498,7 +517,8 @@ public class Merge
 
         private void onAdvance(In next)
         {
-            verifyStateChange(State.AWAITING_ADVANCE, State.ADVANCED, true);
+            if (!verifyStateChange(State.AWAITING_ADVANCE, State.ADVANCED, true))
+                return;
 
             item = next;
             merger.onAdvance();
@@ -532,7 +552,8 @@ public class Merge
 
         public void consume(Reducer<In, ?> reducer)
         {
-            verifyStateChange(State.PROCESSED, State.NEEDS_REQUEST, false);
+            if (!verifyStateChange(State.PROCESSED, State.NEEDS_REQUEST, false))
+                return;
 
             if (error != null)
                 reducer.error(error);
@@ -549,7 +570,7 @@ public class Merge
 
         public String toString()
         {
-            return merger.toString();
+            return Flow.formatTrace("merge child", sourceFlow);
         }
     }
 }

@@ -33,8 +33,6 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.FlowSource;
-import org.apache.cassandra.utils.flow.FlowSubscriber;
-import org.apache.cassandra.utils.flow.FlowSubscription;
 import org.apache.cassandra.utils.versioning.Versioned;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -203,7 +201,7 @@ public abstract class ReadResponse
             {
                 private int idx = 0;
 
-                public void request()
+                public void requestNext()
                 {
                     if (idx < partitions.size())
                         subscriber.onNext(partitions.get(idx++).unfilteredPartition(command.columnFilter(),

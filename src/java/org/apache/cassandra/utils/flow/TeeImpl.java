@@ -48,8 +48,9 @@ import java.util.stream.Collectors;
  */
 public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
 {
-    private final FlowSubscription source;
     private final TeeSubscription[] children;
+    private final Flow<T> sourceFlow;
+    private volatile FlowSubscription source;
 
     private final AtomicInteger requests = new AtomicInteger();
     private final AtomicInteger closed = new AtomicInteger();
@@ -57,7 +58,7 @@ public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
     @SuppressWarnings("resource") // tee children are closed by the downstream flows
     TeeImpl(Flow<T> source, int count)
     {
-        this.source = source.subscribe(this);
+        this.sourceFlow = source;
         children = new TeeImpl.TeeSubscription[count];
         for (int i = 0; i < count; ++i)
             children[i] = new TeeSubscription();
@@ -66,6 +67,11 @@ public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
     public Flow<T> child(int i)
     {
         return children[i];
+    }
+
+    public void onSubscribe(FlowSubscription source)
+    {
+        this.source = source;
     }
 
     public void onNext(T item)
@@ -92,8 +98,19 @@ public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
                 child.subscriber.onError(t);
     }
 
-    private void requestOne()
+    private void requestFirstOne()
     {
+        assert source == null;
+        if (requests.incrementAndGet() < children.length)
+            return;
+
+        requests.set(0);
+        sourceFlow.requestFirst(this, this);
+    }
+
+    private void requestNextOne()
+    {
+        assert source != null;
         if (requests.incrementAndGet() < children.length)
             return;
 
@@ -101,13 +118,14 @@ public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
         // so it's safe to copy without checking concurrent modification.
         requests.set(closed.get());
 
-        source.request();
+        source.requestNext();
     }
 
     private void closeOne() throws Exception
     {
+        assert source != null;
         if (closed.incrementAndGet() < children.length)
-            requestOne();   // Reflect the closing in the number of requests we need.
+            requestNextOne();   // Reflect the closing in the number of requests we need.
         else
             source.close();
     }
@@ -124,9 +142,15 @@ public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
     {
         volatile boolean closed = false;
 
-        public void request()
+        public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
         {
-            requestOne();
+            subscribe(subscriber, subscriptionRecipient);
+            requestFirstOne();
+        }
+
+        public void requestNext()
+        {
+            requestNextOne();
         }
 
         public void close() throws Exception

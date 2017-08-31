@@ -19,9 +19,7 @@
 package org.apache.cassandra.utils.flow;
 
 import java.util.Arrays;
-import java.util.function.Supplier;
-
-import org.apache.cassandra.utils.Throwables;
+import java.util.concurrent.Callable;
 
 /**
  * Implementation of methods relating to the concatenation of flows.
@@ -43,7 +41,7 @@ class Concat
         return concat(Arrays.asList(sources));
     }
 
-    static <T> Flow<T> concatWith(Flow<T> source, Supplier<Flow<T>> supplier)
+    static <T> Flow<T> concatWith(Flow<T> source, Callable<Flow<T>> supplier)
     {
         // Implement directly rather than creating an iterable and calling concat, because this is used by short reads,
         // where most of the time the supplier will return null. This direct implementation should
@@ -53,47 +51,26 @@ class Concat
         return new ConcatWithFlow<>(source, supplier);
     }
 
-    private static class ConcatWithFlow<T> extends Flow.RequestLoopFlow<T> implements FlowSubscription, FlowSubscriber<T>
+    private static class ConcatWithFlow<T> extends FlowTransform<T, T>
     {
-        private final Supplier<Flow<T>> supplier;
-        private FlowSubscriber<T> subscriber;
-        private FlowSubscription subscription;
+        private final Callable<Flow<T>> supplier;
 
-        ConcatWithFlow(Flow<T> source, Supplier<Flow<T>> supplier)
+        ConcatWithFlow(Flow<T> source, Callable<Flow<T>> supplier)
         {
+            super(source);
             this.supplier = supplier;
-            this.subscription = source.subscribe(this);
-        }
-
-        public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
-        {
-            assert this.subscriber == null : "Flow are single-use.";
-            this.subscriber = subscriber;
-            return this;
-        }
-
-        public void request()
-        {
-            // here subscription should never be null, we could assert it but for perf. reasons we don't
-            subscription.request();
         }
 
         public void close() throws Exception
         {
             // subscription could be null if we already closed it in OnComplete
-            if (subscription != null)
-                subscription.close();
-        }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            // subscription could be null if we already closed it in OnComplete
-            return subscription == null ? throwable : subscription.addSubscriberChainFromSource(throwable);
+            if (source != null)
+                source.close();
         }
 
         public String toString()
         {
-            return formatTrace("concat-with", subscriber);
+            return formatTrace("concat-with", supplier, sourceFlow);
         }
 
         public void onNext(T item)
@@ -103,40 +80,55 @@ class Concat
 
         public void onComplete()
         {
-            Throwable err = Throwables.perform((Throwable)null, subscription::close);
-            if (err != null)
+            try
             {
-                onError(err);
+                source.close();
+            }
+            catch (Throwable t)
+            {
+                onError(t);
                 return;
             }
 
             // set to null after calling onError so we don't lose the subscriber's stack trace but before
             // subscribing to the next one so we don't call close twice
-            subscription = null;
+            source = null;
 
-            Flow<T> next = supplier.get();
+            Flow<T> next;
+            try
+            {
+                next = supplier.call();
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
+            }
             if (next == null)
             {
                 subscriber.onComplete();
                 return;
             }
 
-            err = Throwables.perform((Throwable)null, () -> subscription = next.subscribe(this));
-            if (err != null)
+            // Request another item in a request loop to avoid stack overflow.
+            sourceFlow = next;
+            requestInLoop(requestFirstInLoop);
+        }
+
+        // A somewhat hacky method of applying the RequestLoop machinery to do requestFirst.
+        // Warning: requestInLoop cannot be used to do anything else in this class.
+        private final FlowSubscription requestFirstInLoop = new FlowSubscription()
+        {
+            public void requestNext()
             {
-                onError(err);
-                return;
+                ConcatWithFlow<T> us = ConcatWithFlow.this;
+                sourceFlow.requestFirst(us, us);
             }
 
-            // Request another child in a request loop to avoid stack overflow.
-            // 'subscription' may change during the loop, so do the loop on 'this' instead.
-            requestInLoop(this);
-        }
-
-        public void onError(Throwable t)
-        {
-            subscriber.onError(addSubscriberChainFromSource(t));
-        }
+            public void close() throws Exception
+            {
+                // Nothing to do. This is not a real subscription.
+            }
+        };
     }
-
 }

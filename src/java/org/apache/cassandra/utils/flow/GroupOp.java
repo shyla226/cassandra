@@ -114,17 +114,17 @@ public interface GroupOp<I, O>
                 subscriber.onComplete();
         }
 
-        public void request()
+        public void requestNext()
         {
             if (!completeOnNextRequest)
-                source.request();
+                source.requestNext();
             else
                 subscriber.onComplete();
         }
 
         public String toString()
         {
-            return Flow.formatTrace("group", mapper, subscriber);
+            return Flow.formatTrace("group", mapper, sourceFlow);
         }
     }
 }

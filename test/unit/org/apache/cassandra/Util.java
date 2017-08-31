@@ -436,7 +436,7 @@ public class Util
         }
     }
 
-    public static Flow<DecoratedKey> nonEmptyKeys(FlowablePartitionBase partition)
+    public static Flow<DecoratedKey> nonEmptyKeys(FlowablePartitionBase partition) throws Exception
     {
         if (!partition.staticRow.isEmpty() || !partition.header.partitionLevelDeletion.isLive())
         {

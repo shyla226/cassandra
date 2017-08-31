@@ -21,9 +21,9 @@ package org.apache.cassandra.utils.flow;
 /**
  * Base class for flow transformations that need to intercept both the request and onNext paths (e.g. group)
  *
- * Descendants need to implement request() and onNext().
+ * Descendants need to implement onNext() and most probably requestFirst() and requestNext().
  */
-public abstract class FlowTransform<I, O> extends FlowTransformNext<I, O> implements FlowSubscription
+public abstract class FlowTransform<I, O> extends FlowTransformBase<I, O> implements FlowSubscription
 {
     protected FlowTransform(Flow<I> source)
     {
@@ -31,16 +31,24 @@ public abstract class FlowTransform<I, O> extends FlowTransformNext<I, O> implem
     }
 
     @Override
-    public FlowSubscription subscribe(FlowSubscriber<O> subscriber)
+    public void requestFirst(FlowSubscriber<O> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
     {
-        super.subscribe(subscriber);
-        return this;    // subscriber must use us
+        assert this.subscriber == null : "Flow are single-use.";
+        this.subscriber = subscriber;
+        subscriptionRecipient.onSubscribe(this);
+        sourceFlow.requestFirst(this, this);
     }
 
     @Override
-    public Throwable addSubscriberChainFromSource(Throwable throwable)
+    public void onSubscribe(FlowSubscription source)
     {
-        return source.addSubscriberChainFromSource(throwable);
+        this.source = source;
+    }
+
+    @Override
+    public void requestNext()
+    {
+        source.requestNext();
     }
 
     @Override

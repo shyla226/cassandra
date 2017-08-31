@@ -94,6 +94,7 @@ public class KeysSearcher extends CassandraIndexSearcher
                                                       ByteBuffer indexedValue,
                                                       OpOrder.Group writeOp,
                                                       int nowInSec)
+    throws Exception
     {
         assert partition.header.metadata.isCompactTable();
         Row data = partition.staticRow;

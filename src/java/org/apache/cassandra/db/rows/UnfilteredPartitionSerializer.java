@@ -306,7 +306,7 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
             this.sHeader = header.sHeader;
         }
 
-        public void request()
+        public void requestNext()
         {
             try
             {

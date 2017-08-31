@@ -21,30 +21,29 @@ package org.apache.cassandra.utils.flow;
 /**
  * Base class for flow sources that combine Flow and subscription object in the same class.
  *
- * Descendants only need to implement request() and close().
+ * Descendants need to implement requestNext() and close(). If the first request is special, they will also override
+ * requestFirst() using subscribe().
  */
 public abstract class FlowSource<T> extends Flow<T> implements FlowSubscription
 {
     protected FlowSubscriber<T> subscriber;
 
-    @Override
-    public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
+    public void subscribe(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
     {
         assert this.subscriber == null : "Flow are single-use.";
         this.subscriber = subscriber;
-        return this;
+        subscriptionRecipient.onSubscribe(this);
     }
 
-    @Override
-    public Throwable addSubscriberChainFromSource(Throwable throwable)
+    public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
     {
-        return Flow.wrapException(throwable, this);
+        subscribe(subscriber, subscriptionRecipient);
+        requestNext();
     }
-
 
     @Override
     public String toString()
     {
-        return formatTrace(getClass().getSimpleName(), subscriber);
+        return formatTrace(getClass().getSimpleName());
     }
 }

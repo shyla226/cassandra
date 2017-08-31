@@ -871,8 +871,11 @@ public class MergeTest
             this.inputs = inputs;
         }
 
-        public void request()
+        public void requestNext()
         {
+            if (pos >= inputs.length)
+                return;
+
             Object o = inputs[pos++];
             process(o);
         }
@@ -883,7 +886,7 @@ public class MergeTest
 
         public String toString()
         {
-            return Flow.formatTrace("BadFlow " + Arrays.toString(inputs), subscriber);
+            return Flow.formatTrace("BadFlow " + Arrays.toString(inputs));
         }
 
         private void process(Object o)

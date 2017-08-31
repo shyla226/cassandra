@@ -92,6 +92,7 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
                                                          final IndexEntry entry,
                                                          final OpOrder.Group writeOp,
                                                          final int nowInSec)
+    throws Exception
     {
         boolean stale = false;
         // if there is a partition level delete in the base table, we need to filter

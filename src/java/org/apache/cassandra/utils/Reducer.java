@@ -26,7 +26,9 @@ public abstract class Reducer<In,Out>
 
     public Throwable getErrors()
     {
-        return errors;
+        Throwable toReturn = errors;
+        errors = null;
+        return toReturn;
     }
 
     /** @return The last object computed by reduce */

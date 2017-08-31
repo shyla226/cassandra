@@ -23,7 +23,7 @@ package org.apache.cassandra.utils.flow;
  * This interface is used by the subscription to push data back to the subscriber in response to a request.
  * Exactly one of the methods must be called for each Subscription.request().
  */
-public interface FlowSubscriber<T>
+public interface FlowSubscriber<T> extends FlowSubscriptionRecipient
 {
     /**
      * Next item in the flow. Called in response to Subscription.request().

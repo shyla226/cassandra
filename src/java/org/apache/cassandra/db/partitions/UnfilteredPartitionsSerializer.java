@@ -109,7 +109,7 @@ public class UnfilteredPartitionsSerializer
                 this.flag = flag;
             }
 
-            public void request()
+            public void requestNext()
             {
                 try
                 {

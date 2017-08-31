@@ -19,6 +19,7 @@
 package org.apache.cassandra.utils.flow;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -357,38 +358,41 @@ public class OpsTest
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
         final AtomicBoolean completed = new AtomicBoolean(false);
 
-        final FlowSubscription subscription = Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
-                                                  .map(x ->
-                                                       {
-                                                           try
-                                                           {
-                                                               return x;
-                                                           }
-                                                           finally
-                                                           {
-                                                               throw ex1;
-                                                           }
-                                                       })
-                                                  .onErrorResumeNext(e -> Flow.error(ex2))
-                                                  .subscribe(new FlowSubscriber<Integer>()
-                                                  {
-                                                      public void onNext(Integer item)
-                                                      {
-                                                          // nothing to do
-                                                      }
+        Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+            .map(x ->
+                 {
+                     try
+                     {
+                         return x;
+                     }
+                     finally
+                     {
+                         throw ex1;
+                     }
+                 })
+            .onErrorResumeNext(e -> Flow.error(ex2))
+            .requestFirst(new FlowSubscriber<Integer>()
+            {
+                public void onSubscribe(FlowSubscription source)
+                {
+                    // do nothing
+                }
 
-                                                      public void onComplete()
-                                                      {
-                                                          completed.set(true);
-                                                      }
+                public void onNext(Integer item)
+                {
+                    // nothing to do
+                }
 
-                                                      public void onError(Throwable t)
-                                                      {
-                                                          error.set(t);
-                                                      }
-                                                  });
+                public void onComplete()
+                {
+                    completed.set(true);
+                }
 
-        subscription.request();
+                public void onError(Throwable t)
+                {
+                    error.set(t);
+                }
+            });
 
         assertFalse(completed.get());
         assertNotNull(error.get());
@@ -406,38 +410,41 @@ public class OpsTest
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
         final AtomicBoolean completed = new AtomicBoolean(false);
 
-        final FlowSubscription subscription = Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
-                                                  .map(x ->
-                                                       {
-                                                           try
-                                                           {
-                                                               return x;
-                                                           }
-                                                           finally
-                                                           {
-                                                               throw ex1;
-                                                           }
-                                                       })
-                                                  .mapError(e -> ex2)
-                                                  .subscribe(new FlowSubscriber<Integer>()
-                                                  {
-                                                      public void onNext(Integer item)
-                                                      {
-                                                          // nothing to do
-                                                      }
+        Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+            .map(x ->
+                 {
+                     try
+                     {
+                         return x;
+                     }
+                     finally
+                     {
+                         throw ex1;
+                     }
+                 })
+            .mapError(e -> ex2)
+            .requestFirst(new FlowSubscriber<Integer>()
+            {
+                public void onSubscribe(FlowSubscription source)
+                {
+                    // do nothing
+                }
 
-                                                      public void onComplete()
-                                                      {
-                                                          completed.set(true);
-                                                      }
+                public void onNext(Integer item)
+                {
+                    // nothing to do
+                }
 
-                                                      public void onError(Throwable t)
-                                                      {
-                                                          error.set(t);
-                                                      }
-                                                  });
+                public void onComplete()
+                {
+                    completed.set(true);
+                }
 
-        subscription.request();
+                public void onError(Throwable t)
+                {
+                    error.set(t);
+                }
+            });
 
         assertFalse(completed.get());
         assertNotNull(error.get());
@@ -491,7 +498,7 @@ public class OpsTest
 
 
         subscribeAndClose(flow);
-        assertEquals(4, closed.get());
+        assertEquals(7, closed.get());
         closed.set(0);
         System.gc();    // hope to run finalizers early
 
@@ -619,30 +626,38 @@ public class OpsTest
         System.gc();    // hope to run finalizers early
     }
 
-    public <T> FlowSubscription subscribe(Flow<T> flow) throws Exception
+    public static <T> CompletableFuture<FlowSubscription> subscribe(Flow<T> flow) throws Exception
     {
-        return flow.subscribe(new FlowSubscriber<T>()
+        CompletableFuture<FlowSubscription> future = new CompletableFuture<>();
+
+        flow.requestFirst(new FlowSubscriber<T>()
         {
+            public void onSubscribe(FlowSubscription source)
+            {
+                future.complete(source);
+            }
+
             public void onNext(T item)
             {
-                throw new AssertionError("no request is made");
+                // do nothing
             }
 
             public void onComplete()
             {
-                throw new AssertionError("no request is made");
+                // do nothing
             }
 
             public void onError(Throwable t)
             {
-                throw new AssertionError("no request is made");
+                future.completeExceptionally(t);
             }
         });
+        return future;
     }
 
-    public void subscribeAndClose(Flow<Integer> flow) throws Exception
+    public static void subscribeAndClose(Flow<Integer> flow) throws Exception
     {
-        subscribe(flow).close();
+        subscribe(flow).join().close();
     }
 
 
@@ -675,8 +690,8 @@ public class OpsTest
                           }).doOnClose(() -> closed.addAndGet(4));
 
         subscribeAndClose(flow);
-        assertEquals(4, closed.get());
-        assertEquals(0, opened.get());
+        assertEquals(6, closed.get());
+        assertEquals(1, opened.get());
         closed.set(0);
         opened.set(0);
 
@@ -689,7 +704,7 @@ public class OpsTest
 
         subscribe(flow);
         assertEquals(0, closed.get());
-        assertEquals(0, opened.get());
+        assertEquals(1, opened.get());
         closed.set(0);
         opened.set(0);
 

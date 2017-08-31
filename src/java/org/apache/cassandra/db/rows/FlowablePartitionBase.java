@@ -17,15 +17,12 @@
  */
 package org.apache.cassandra.db.rows;
 
-import com.google.common.base.Throwables;
-
 import io.reactivex.functions.Function;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.flow.Flow;
-import org.apache.cassandra.utils.flow.FlowSubscriber;
 
 /**
  * Base class for partitions whose content is processed as a Flow.
@@ -94,32 +91,9 @@ public abstract class FlowablePartitionBase<T> implements PartitionTrait
      * Only to be called on requested but unused partitions (e.g. when aborting).
      * Since we usually verify one use only, this will throw if the partition was already used.
      */
-    public void unused()
+    public void unused() throws Exception
     {
-        try
-        {
-            content.subscribe(new FlowSubscriber<T>()
-            {
-                public void onNext(T item)
-                {
-                    throw new AssertionError(); // We haven't requested, this should not be called.
-                }
-
-                public void onComplete()
-                {
-                    throw new AssertionError(); // We haven't requested, this should not be called.
-                }
-
-                public void onError(Throwable t)
-                {
-                    throw new AssertionError(); // We haven't requested, this should not be called.
-                }
-            }).close();
-        }
-        catch (Exception e)
-        {
-            throw Throwables.propagate(e);
-        }
+        // Nothing by default
     }
 
     public TableMetadata metadata()

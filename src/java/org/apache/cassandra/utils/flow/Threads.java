@@ -34,7 +34,7 @@ public class Threads
 
     private static Flow.Operator<Object, Object> constructRequestOnCore(int coreId, TPCTaskType stage)
     {
-        return (source, subscriber) -> new RequestOn(subscriber, TPC.getForCore(coreId), stage, source);
+        return (source, subscriber, subscriptionRecipient) -> new RequestOn(source, subscriber, subscriptionRecipient, TPC.getForCore(coreId), stage);
     }
 
     /**
@@ -54,20 +54,36 @@ public class Threads
         return (Flow.Operator<T, T>) req[coreId];
     }
 
-    static class RequestOn implements FlowSubscription, TaggedRunnable
+    static class RequestOn implements FlowSubscription, TaggedRunnable, FlowSubscriptionRecipient
     {
         final Scheduler scheduler;
-        final FlowSubscription source;
         final TPCTaskType stage;
+        FlowSubscription source;
 
-        <T> RequestOn(FlowSubscriber<T> subscriber, Scheduler scheduler, TPCTaskType stage, Flow<T> source)
+        <T> RequestOn(Flow<T> source, FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient, Scheduler scheduler, TPCTaskType stage)
         {
             this.scheduler = scheduler;
-            this.source = source.subscribe(subscriber);
             this.stage = stage;
+            subscriptionRecipient.onSubscribe(this);
+
+            if (TPC.isOnScheduler(scheduler))
+                source.requestFirst(subscriber, this);
+            else
+                scheduler.scheduleDirect(new TaggedRunnable.Base(stage, scheduler)
+                {
+                    public void run()
+                    {
+                        source.requestFirst(subscriber, RequestOn.this);
+                    }
+                });
         }
 
-        public void request()
+        public void onSubscribe(FlowSubscription source)
+        {
+            this.source = source;
+        }
+
+        public void requestNext()
         {
             if (TPC.isOnScheduler(scheduler))
                 run();
@@ -78,11 +94,6 @@ public class Threads
         public void close() throws Exception
         {
             source.close();
-        }
-
-        public Throwable addSubscriberChainFromSource(Throwable throwable)
-        {
-            return source.addSubscriberChainFromSource(throwable);
         }
 
         public TPCTaskType getStage()
@@ -97,7 +108,7 @@ public class Threads
 
         public void run()
         {
-            source.request();
+            source.requestNext();
         }
     }
 
@@ -118,14 +129,14 @@ public class Threads
 
     private static <T> Flow.Operator<T, T> createRequestOn(Scheduler scheduler, TPCTaskType stage)
     {
-        return (source, subscriber) -> new RequestOn(subscriber, scheduler, stage, source);
+        return (source, subscriber, subscriptionRecipient) -> new RequestOn(source, subscriber, subscriptionRecipient, scheduler, stage);
     }
 
     static final EnumMap<TPCTaskType, Flow.Operator<?, ?>> REQUEST_ON_IO = new EnumMap<>(TPCTaskType.class);
 
     private static Flow.Operator<Object, Object> constructRequestOnIO(TPCTaskType stage)
     {
-        return (source, subscriber) -> new RequestOn(subscriber, TPC.ioScheduler(), stage, source);
+        return (source, subscriber, subscriptionRecepient) -> new RequestOn(source, subscriber, subscriptionRecepient, TPC.ioScheduler(), stage);
     }
 
     /**
@@ -150,7 +161,6 @@ public class Threads
         final TPCTaskType stage;
         final StagedScheduler scheduler;
 
-        private volatile int requested = 0;
         EvaluateOn(Callable<T> source, StagedScheduler scheduler, TPCTaskType stage)
         {
             this.source = source;
@@ -158,20 +168,20 @@ public class Threads
             this.stage = stage;
         }
 
-        public void request()
+        @Override
+        public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
         {
-            switch (requested++)
-            {
-            case 0:
-                if (TPC.isOnScheduler(scheduler))
-                    run();
-                else
-                    scheduler.execute(this, ExecutorLocals.create(), stage);
-                break;
-            default:
-                // Assuming no need to switch threads for no work.
-                subscriber.onComplete();
-            }
+            subscribe(subscriber, subscriptionRecipient);
+
+            if (TPC.isOnScheduler(scheduler))
+                run();
+            else
+                scheduler.execute(this, ExecutorLocals.create(), stage);
+        }
+
+        public void requestNext()
+        {
+            subscriber.onComplete();
         }
 
         public void run()
@@ -193,7 +203,7 @@ public class Threads
 
         public String toString()
         {
-            return Flow.formatTrace("evaluateOn [" + scheduler + "] stage " + stage, source, subscriber);
+            return Flow.formatTrace("evaluateOn [" + scheduler + "] stage " + stage, source);
         }
 
         public TPCTaskType getStage()
@@ -207,73 +217,52 @@ public class Threads
         }
     }
 
-    static class DeferOn<T> extends FlowSource<T> implements FlowSubscriber<T>, TaggedRunnable
+    static class DeferOn<T> extends Flow<T> implements TaggedRunnable
     {
-        FlowSubscription source;
-        final Callable<Flow<T>> deferred;
+        final Callable<Flow<T>> flowSupplier;
         final TPCTaskType stage;
         final Scheduler scheduler;
+        FlowSubscriber<T> subscriber;
+        FlowSubscriptionRecipient subscriptionRecipient;
+        Flow<T> sourceFlow;
 
         DeferOn(Callable<Flow<T>> source, Scheduler scheduler, TPCTaskType stage)
         {
-            this.deferred = source;
+            this.flowSupplier = source;
             this.scheduler = scheduler;
             this.stage = stage;
         }
 
-        public void request()
+        public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
         {
-            if (source == null)
-            {
-                if (TPC.isOnScheduler(scheduler))
-                    run();
-                else
-                    scheduler.scheduleDirect(this);
-            }
+            this.subscriber = subscriber;
+            this.subscriptionRecipient = subscriptionRecipient;
+
+            if (TPC.isOnScheduler(scheduler))
+                run();
             else
-                source.request();
+                scheduler.scheduleDirect(this);
         }
 
         public void run()
         {
             try
             {
-                Flow<T> v = deferred.call();
-                source = v.subscribe(this);
+                sourceFlow = flowSupplier.call();
             }
             catch (Throwable t)
             {
+                subscriptionRecipient.onSubscribe(FlowSubscription.DONE);
                 subscriber.onError(t);
                 return;
             }
 
-            source.request();
-        }
-
-        public void close() throws Exception
-        {
-            if (source != null)     // we can be closed without being requested
-                source.close();
-        }
-
-        public void onNext(T item)
-        {
-            subscriber.onNext(item);
-        }
-
-        public void onComplete()
-        {
-            subscriber.onComplete();
-        }
-
-        public void onError(Throwable t)
-        {
-            subscriber.onError(t);
+            sourceFlow.requestFirst(subscriber, subscriptionRecipient);
         }
 
         public String toString()
         {
-            return Flow.formatTrace("deferOn [" + scheduler + "] stage " + stage, deferred, subscriber);
+            return Flow.formatTrace("deferOn [" + scheduler + "] stage " + stage, flowSupplier, sourceFlow);
         }
 
         public TPCTaskType getStage()
@@ -304,7 +293,7 @@ public class Threads
 
     public static <T> Flow<T> deferOnCore(Callable<Flow<T>> source, int coreId, TPCTaskType stage)
     {
-        return new DeferOn<>(source, TPC.getForCore(coreId), stage);
+        return new DeferOn<T>(source, TPC.getForCore(coreId), stage);
     }
 
     public static <T> Flow<T> deferOnIO(Callable<Flow<T>> source, TPCTaskType stage)

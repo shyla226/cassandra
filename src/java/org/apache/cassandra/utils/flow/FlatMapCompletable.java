@@ -52,9 +52,9 @@ class FlatMapCompletable<I> extends Flow.RequestLoop implements FlowSubscriber<I
             {
                 try
                 {
-                    FlatMapCompletable<I> subscriber = new FlatMapCompletable<>(observer, mapper, source);
+                    FlatMapCompletable<I> subscriber = new FlatMapCompletable<>(observer, mapper);
                     observer.onSubscribe(subscriber);
-                    subscriber.request();
+                    subscriber.requestFirst(source);
                 }
                 catch (Throwable t)
                 {
@@ -79,7 +79,7 @@ class FlatMapCompletable<I> extends Flow.RequestLoop implements FlowSubscriber<I
     /**
      * Upstream subscription which will be requested to supply source items.
      */
-    private final FlowSubscription source;
+    private FlowSubscription source;
 
     /**
      * Set to true when the outer completable has been disposed. In this case then next
@@ -93,13 +93,21 @@ class FlatMapCompletable<I> extends Flow.RequestLoop implements FlowSubscriber<I
     private volatile FlatMapChild current;
 
     private FlatMapCompletable(CompletableObserver observer,
-                               Function<? super I, ? extends CompletableSource> mapper,
-                               Flow<I> source) throws Exception
+                               Function<? super I, ? extends CompletableSource> mapper) throws Exception
     {
         this.observer = observer;
         this.mapper = mapper;
-        this.source = source.subscribe(this);
         this.isDisposed = new AtomicBoolean(false);
+    }
+
+    void requestFirst(Flow<I> source)
+    {
+        source.requestFirst(this, this);
+    }
+
+    public void onSubscribe(FlowSubscription source)
+    {
+        this.source = source;
     }
 
     public void request()
@@ -132,7 +140,7 @@ class FlatMapCompletable<I> extends Flow.RequestLoop implements FlowSubscriber<I
 
     public void onError(Throwable throwable)
     {
-        onErrorInternal(source.addSubscriberChainFromSource(throwable));
+        onErrorInternal(Flow.wrapException(throwable, this));
     }
 
     private void onErrorInternal(Throwable throwable)

@@ -21,6 +21,7 @@ package org.apache.cassandra.utils.flow;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
@@ -49,11 +50,11 @@ public class ConcatTest
         Flow<Integer> flow4 = Flow.fromIterable(() -> IntStream.range(10, 20).iterator());
         Flow<Integer> flow5 = Flow.fromIterable(() -> IntStream.range(20, 30).iterator());
 
-        class MoreContents implements Supplier<Flow<Integer>>
+        class MoreContents implements Callable<Flow<Integer>>
         {
             List<Flow<Integer>> flows = new ArrayList<>(Arrays.asList(flow4, flow5));
 
-            public Flow<Integer> get()
+            public Flow<Integer> call()
             {
                 return flows.isEmpty() ? null : flows.remove(0);
             }

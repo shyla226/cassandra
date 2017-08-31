@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
@@ -271,7 +272,9 @@ public class BatchlogManager implements BatchlogManagerMBean
         Set<UUID> replayedBatches = new HashSet<>();
 
         // Sending out batches for replay without waiting for them, so that one stuck batch doesn't affect others
-        TPCUtils.blockingGet(batches.rows().observeOn(Schedulers.io()).reduceToRxSingle(0, (positionInPage, row) -> {
+        TPCUtils.blockingGet(batches.rows().observeOn(Schedulers.io(), TPCTaskType.BATCH_REPLAY)
+                                    .reduceToRxSingle(0, (positionInPage, row) ->
+        {
             UUID id = row.getUUID("id");
             WriteVersion version = getVersion(row, "version");
             try

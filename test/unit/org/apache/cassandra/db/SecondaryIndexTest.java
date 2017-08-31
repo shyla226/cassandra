@@ -83,7 +83,7 @@ public class SecondaryIndexTest
 
     //@Test
     //TPC this test requires a BOP
-    public void testIndexScan()
+    public void testIndexScan() throws Exception
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(WITH_COMPOSITE_INDEX);
 
