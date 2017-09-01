@@ -136,34 +136,16 @@ public class CompositesSearcher extends CassandraIndexSearcher
         }
 
         ClusteringComparator comparator = dataIter.header.metadata.comparator;
-        class Transform extends FlowTransformNext<Unfiltered, Unfiltered>
+        class Transform extends Flow.Filter<Unfiltered>
         {
             private int entriesIdx;
 
             public Transform(Flow<Unfiltered> source)
             {
-                super(source);
+                super(source, null);
             }
 
-            public void onNext(Unfiltered next)
-            {
-                boolean pass;
-                try
-                {
-                    pass = test(next);
-                }
-                catch (Throwable t)
-                {
-                    subscriber.onError(t);
-                    return;
-                }
-
-                if (pass)
-                    subscriber.onNext(next);
-                else
-                    requestInLoop(source);
-            }
-
+            @Override
             public boolean test(Unfiltered unfiltered)
             {
                 if (!unfiltered.isRow())

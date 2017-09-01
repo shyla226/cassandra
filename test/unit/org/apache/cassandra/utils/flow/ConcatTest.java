@@ -23,12 +23,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Supplier;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import org.junit.Test;
 
 import io.reactivex.Completable;
+import io.reactivex.functions.BiFunction;
 
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertTrue;
@@ -38,17 +39,23 @@ public class ConcatTest
     @Test
     public void testConcatFlows() throws Exception
     {
-        Flow<Integer> flow1 = Flow.fromIterable(() -> IntStream.range(0, 10).iterator());
-        Flow<Integer> flow2 = Flow.fromIterable(() -> IntStream.range(10, 20).iterator());
-        Flow<Integer> flow3 = Flow.fromIterable(() -> IntStream.range(20, 30).iterator());
+        testConcatFlows(this::range);
+        testConcatFlows(this::rangeNoFinal);
+    }
+
+    public void testConcatFlows(BiFunction<Integer, Integer, Flow<Integer>> gen) throws Exception
+    {
+        Flow<Integer> flow1 = gen.apply(0, 10);
+        Flow<Integer> flow2 = gen.apply(10, 20);
+        Flow<Integer> flow3 = gen.apply(20, 30);
 
         long res = Flow.concat(flow1, flow2, flow3).countBlocking();
         assertEquals(30, res);
 
         // Reset flows.
-        flow1 = Flow.fromIterable(() -> IntStream.range(0, 10).iterator());
-        Flow<Integer> flow4 = Flow.fromIterable(() -> IntStream.range(10, 20).iterator());
-        Flow<Integer> flow5 = Flow.fromIterable(() -> IntStream.range(20, 30).iterator());
+        flow1 = gen.apply(0, 10);
+        Flow<Integer> flow4 = gen.apply(10, 20);
+        Flow<Integer> flow5 = gen.apply(20, 30);
 
         class MoreContents implements Callable<Flow<Integer>>
         {
@@ -67,18 +74,73 @@ public class ConcatTest
     @Test
     public void testConcatWithCompletables() throws Exception
     {
-        AtomicBoolean completed = new AtomicBoolean(false);
-        Flow<Integer> flow1 = Flow.fromIterable(() -> IntStream.range(0, 10).iterator());
-        Completable completable = Completable.fromRunnable(() -> assertTrue(completed.compareAndSet(false, true)));
+        testConcatWithCompletables(this::range);
+        testConcatWithCompletables(this::rangeNoFinal);
+    }
 
-        long res = Flow.concat(completable, flow1).countBlocking();
+    public void testConcatWithCompletables(BiFunction<Integer, Integer, Flow<Integer>> gen) throws Exception
+    {
+        AtomicBoolean completed = new AtomicBoolean(false);
+        AtomicInteger value = new AtomicInteger(-1);
+        AtomicInteger completablePoint = new AtomicInteger(-1);
+        Flow<Integer> flow1 = gen.apply(0, 10);
+        Completable completable = Completable.fromRunnable(() ->
+                                                           {
+                                                               completablePoint.set(value.get());
+                                                               assertTrue(completed.compareAndSet(false, true));
+                                                           });
+
+        long res = Flow.concat(completable, flow1)
+                       .map(v ->
+                            {
+                                value.set(v);
+                                return v;
+                            })
+                       .countBlocking();
         assertEquals(10, res);
         assertTrue(completed.get());
+        assertEquals(9, value.get());
+        assertEquals(-1, completablePoint.get());
+        value.set(-1);
+        completablePoint.set(-1);
 
         completed.set(false);
-        flow1 = Flow.fromIterable(() -> IntStream.range(0, 10).iterator());
-        res = Flow.concat(flow1, completable).countBlocking();
+        flow1 = gen.apply(0, 10);
+        res = Flow.concat(flow1, completable)
+                  .map(v ->
+                       {
+                           value.set(v);
+                           return v;
+                       })
+                  .countBlocking();
         assertEquals(10, res);
         assertTrue(completed.get());
+        assertEquals(9, value.get());
+        assertEquals(9, completablePoint.get());
+    }
+
+    Flow<Integer> range(int start, int end)
+    {
+        return new FlowSource()
+        {
+            int pos = start;
+
+            public void requestNext()
+            {
+                if (pos + 1 < end)
+                    subscriber.onNext(pos++);
+                else
+                    subscriber.onFinal(pos);
+            }
+
+            public void close() throws Exception
+            {
+            }
+        };
+    }
+
+    Flow<Integer> rangeNoFinal(int start, int end)
+    {
+        return Flow.fromIterable(() -> IntStream.range(start, end).iterator());
     }
 }

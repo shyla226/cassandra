@@ -46,12 +46,13 @@ public class FlatMapTest
     }
 
     @Test
-    public void testFlatMap() throws Exception
+    public void testFlatMapNoFinal() throws Exception
     {
         // Test with a mix of:
         // - immediate flowables
         // - delayed response flowables
         // - immediate response on another thread flowables
+        useFinal = false;
 
         for (int typeSeed = 1; typeSeed < 10; ++typeSeed)
         {
@@ -67,6 +68,32 @@ public class FlatMapTest
             }
         }
     }
+
+    @Test
+    public void testFlatMapWithFinal() throws Exception
+    {
+        // Test with a mix of:
+        // - immediate flowables
+        // - delayed response flowables
+        // - immediate response on another thread flowables
+        useFinal = true;
+
+        for (int typeSeed = 1; typeSeed < 10; ++typeSeed)
+        {
+            Random rand = new Random(typeSeed);
+            for (int seed = 4; seed < 255; seed += 8)
+            {
+                Flow<Integer> immediate = makeRecursive(() -> 0, seed);
+                List<Integer> immValues = immediate.toList().blockingSingle();
+                System.out.println("Sequence length: " + immValues.size());
+                Flow<Integer> one = makeRecursive(rand::nextInt, seed);
+                List<Integer> oneValues = one.toList().blockingSingle();
+                assertEquals(immValues, oneValues);
+            }
+        }
+    }
+
+    static boolean useFinal;
 
     // TODO:
     // - onError thrown instead of onNext
@@ -159,6 +186,11 @@ public class FlatMapTest
             switch (rand.nextInt(35))
             {
                 case 3:
+                    if (useFinal)
+                    {
+                        perform(this::nextAndComplete);
+                        break;
+                    } // else fall through
                 case 4:
                     perform(this::complete);
                     break;
@@ -171,6 +203,11 @@ public class FlatMapTest
         void next()
         {
             subscriber.onNext(rand.nextInt());
+        }
+
+        void nextAndComplete()
+        {
+            subscriber.onFinal(rand.nextInt());
         }
 
         void complete()

@@ -48,5 +48,5 @@ public abstract class FlowTransformNext<I, O> extends FlowTransformBase<I, O>
         subscriptionRecipient.onSubscribe(source);
     }
 
-    // at least onNext must be overridden by subclass
+    // at least onNext and onFinal must be overridden by subclass
 }

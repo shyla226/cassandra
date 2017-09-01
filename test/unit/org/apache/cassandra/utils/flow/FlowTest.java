@@ -19,7 +19,6 @@
 package org.apache.cassandra.utils.flow;
 
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -96,12 +95,11 @@ public class FlowTest
         // failure happening before flatmap
         try
         {
-            Flow.fromIterable(range(5))
-                .map(inc)
-                .map(divideByZero)
-                .flatMap((i) -> Flow.fromIterable(range(i)))
-                .map(multiplyByTwo)
-                .reduceBlocking(0, reduceToSum);
+            range(5).map(inc)
+                    .map(divideByZero)
+                    .flatMap((i) -> range(i))
+                    .map(multiplyByTwo)
+                    .reduceBlocking(0, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -112,12 +110,11 @@ public class FlowTest
         // failure happening after flatmap
         try
         {
-            Flow.fromIterable(range(5))
-                .map(inc)
-                .map(multiplyByTwo)
-                .flatMap((i) -> Flow.fromIterable(range(i)))
-                .map(divideByZero)
-                .reduceBlocking(0, reduceToSum);
+            range(5).map(inc)
+                    .map(multiplyByTwo)
+                    .flatMap((i) -> range(i))
+                    .map(divideByZero)
+                    .reduceBlocking(0, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -128,16 +125,15 @@ public class FlowTest
         // failure happening in flatmap operation itself
         try
         {
-            Flow.fromIterable(range(5))
-                .map(inc)
-                .map(multiplyByTwo)
-                .flatMap((i) -> {
-                      if (true)
-                          throw new RuntimeException();
-                      return Flow.fromIterable(range(i));
-                  })
-                .map(divideByZero)
-                .reduceBlocking(0, reduceToSum);
+            range(5).map(inc)
+                    .map(multiplyByTwo)
+                    .flatMap((i) -> {
+                        if (true)
+                            throw new RuntimeException();
+                        return range(i);
+                    })
+                    .map(divideByZero)
+                    .reduceBlocking(0, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -179,11 +175,10 @@ public class FlowTest
 
         try
         {
-            Flow.fromIterable(range(5))
-                .map(inc)
-                .group(failingGroupOp)
-                .map(multiplyByTwo)
-                .reduceBlocking(1, reduceToSum);
+            range(5).map(inc)
+                    .group(failingGroupOp)
+                    .map(multiplyByTwo)
+                    .reduceBlocking(1, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -193,12 +188,11 @@ public class FlowTest
 
         try
         {
-            Flow.fromIterable(range(5))
-                .map(inc)
-                .map(divideByZero)
-                .group(failingGroupOp)
-                .map(multiplyByTwo)
-                .reduceBlocking(1, reduceToSum);
+            range(5).map(inc)
+                    .map(divideByZero)
+                    .group(failingGroupOp)
+                    .map(multiplyByTwo)
+                    .reduceBlocking(1, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -208,12 +202,11 @@ public class FlowTest
 
         try
         {
-            Flow.fromIterable(range(5))
-                .map(inc)
-                .group(groupOp)
-                .map(divideByZero)
-                .map(multiplyByTwo)
-                .reduceBlocking(1, reduceToSum);
+            range(5).map(inc)
+                    .group(groupOp)
+                    .map(divideByZero)
+                    .map(multiplyByTwo)
+                    .reduceBlocking(1, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -241,11 +234,9 @@ public class FlowTest
 
         try
         {
-            Flow.merge(Arrays.asList(Flow.fromIterable(range(5))
-                                         .map((i) -> i),
-                                     Flow.fromIterable(range(5, 10))
-                                         .map(multiplyByTwo)
-                                         .map(divideByZero)),
+            Flow.merge(Arrays.asList(range(5).map((i) -> i),
+                                     range(5, 10).map(multiplyByTwo)
+                                                 .map(divideByZero)),
                        Ordering.natural(),
                        reducer)
                 .map(inc)
@@ -261,11 +252,9 @@ public class FlowTest
 
         try
         {
-            Flow.merge(Arrays.asList(Flow.fromIterable(range(5))
-                                         .map((i) -> i),
-                                     Flow.fromIterable(range(5, 10))
-                                         .map(multiplyByTwo)
-                                         .map(multiplyByThree)),
+            Flow.merge(Arrays.asList(range(5).map((i) -> i),
+                                     range(5, 10).map(multiplyByTwo)
+                                                 .map(multiplyByThree)),
                        Ordering.natural(),
                        reducer)
                 .map(inc)
@@ -309,8 +298,8 @@ public class FlowTest
             return o;
         });
 
-        Assert.assertNotEquals(currentThread.get(), transformedThread1.get());
-        Assert.assertNotEquals(transformedThread1.get(), transformedThread2.get());
+        Assert.assertFalse(currentThread.get().equals(transformedThread1.get()));
+        Assert.assertFalse(transformedThread1.get().equals(transformedThread2.get()));
     }
 
     static void assertStacktraceMessage(String msg, Object[] tags)
@@ -324,30 +313,27 @@ public class FlowTest
         }
     }
 
-    static Iterable<Integer> range(final int max)
+    static Flow<Integer> range(final int max)
     {
         return range(0, max);
     }
 
-    static Iterable<Integer> range(final int min, final int max)
+    static Flow<Integer> range(final int start, final int end)
     {
-        return new Iterable<Integer>()
+        return new FlowSource()
         {
-            public Iterator<Integer> iterator()
-            {
-                return new Iterator<Integer> ()
-                {
-                    int current = min;
-                    public boolean hasNext()
-                    {
-                        return current <= max;
-                    }
+            int pos = start;
 
-                    public Integer next()
-                    {
-                        return current++;
-                    }
-                };
+            public void requestNext()
+            {
+                if (pos + 1 < end)
+                    subscriber.onNext(pos++);
+                else
+                    subscriber.onFinal(pos);
+            }
+
+            public void close() throws Exception
+            {
             }
         };
     }

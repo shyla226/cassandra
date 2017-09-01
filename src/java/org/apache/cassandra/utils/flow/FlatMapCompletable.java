@@ -92,6 +92,11 @@ class FlatMapCompletable<I> extends Flow.RequestLoop implements FlowSubscriber<I
      */
     private volatile FlatMapChild current;
 
+    /**
+     * Set to true to indicate an onFinal was received with the previous item.
+     */
+    boolean completeOnNextRequest = false;
+
     private FlatMapCompletable(CompletableObserver observer,
                                Function<? super I, ? extends CompletableSource> mapper) throws Exception
     {
@@ -110,12 +115,18 @@ class FlatMapCompletable<I> extends Flow.RequestLoop implements FlowSubscriber<I
         this.source = source;
     }
 
-    public void request()
+    public void requestNext()
     {
-        if (!isDisposed())
+        if (!isDisposed() && !completeOnNextRequest)
             requestInLoop(source);
         else
             close(null);
+    }
+
+    public void onFinal(I next)
+    {
+        completeOnNextRequest = true;
+        onNext(next);
     }
 
     public void onNext(I next)
@@ -248,7 +259,7 @@ class FlatMapCompletable<I> extends Flow.RequestLoop implements FlowSubscriber<I
             current = null;
 
             // request the next child
-            FlatMapCompletable.this.request();
+            FlatMapCompletable.this.requestNext();
         }
 
         public String toString()

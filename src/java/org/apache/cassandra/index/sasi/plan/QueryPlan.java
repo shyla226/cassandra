@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sasi.plan;
 
+import io.reactivex.functions.Function;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -73,7 +74,7 @@ public class QueryPlan
         return new ResultRetriever(analyze(), controller, executionController).getPartitions();
     }
 
-    private static class ResultRetriever implements FlatMap.FlatMapper<DecoratedKey, FlowableUnfilteredPartition>
+    private static class ResultRetriever implements Function<DecoratedKey, Flow<FlowableUnfilteredPartition>>
     {
         private final AbstractBounds<PartitionPosition> keyRange;
         private final Operation operationTree;

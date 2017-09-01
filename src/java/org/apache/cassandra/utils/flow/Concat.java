@@ -54,11 +54,24 @@ class Concat
     private static class ConcatWithFlow<T> extends FlowTransform<T, T>
     {
         private final Callable<Flow<T>> supplier;
+        boolean completeOnRequest = false;
 
         ConcatWithFlow(Flow<T> source, Callable<Flow<T>> supplier)
         {
             super(source);
             this.supplier = supplier;
+        }
+
+        public void requestNext()
+        {
+            // here subscription should never be null, we could assert it but for perf. reasons we don't
+            if (!completeOnRequest)
+                source.requestNext();
+            else
+            {
+                completeOnRequest = false;
+                onComplete();
+            }
         }
 
         public void close() throws Exception
@@ -76,6 +89,15 @@ class Concat
         public void onNext(T item)
         {
             subscriber.onNext(item);
+        }
+
+        public void onFinal(T item)
+        {
+            completeOnRequest = true;
+            subscriber.onNext(item);
+            // We could expand this to request the next from the supplier, but this brings a set of complications
+            // (error to be signalled at next request, next supplier's requestFirst is to be called
+            // the first time etc.). It's easier to just convert a final to next + complete.
         }
 
         public void onComplete()

@@ -41,22 +41,11 @@ public class SkipEmpty
      * This is both flow and subscription. Done this way as we can only subscribe to these implementations once
      * and thus it doesn't make much sense to create subscription-specific instances.
      */
-    static class SkipEmptyContent<T, U> extends Flow<U> implements FlowSubscription
+    static class SkipEmptyContent<T, U> extends Flow<U>
     {
         final Function<Flow<T>, U> mapper;
         FlowSubscriber<U> subscriber;
         final SkipEmptyContentSubscriber<T> child;
-
-        private enum State
-        {
-            UNSUBSCRIBED,
-            SUBSCRIBED,
-            REQUESTED,
-            SUPPLIED,
-            COMPLETED,
-            CLOSED
-        }
-        State state = State.UNSUBSCRIBED;
 
         public SkipEmptyContent(Flow<T> content, Function<Flow<T>, U> mapper)
         {
@@ -66,33 +55,15 @@ public class SkipEmpty
 
         public void requestFirst(FlowSubscriber<U> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
         {
-            if (state != State.UNSUBSCRIBED)
-                throw new AssertionError("skipEmpty partitions can only be subscribed to once. State was " + state);
-
+            assert this.subscriber == null : "Flow are single-use.";
             this.subscriber = subscriber;
-            state = State.REQUESTED;
-            subscriptionRecipient.onSubscribe(this);
 
+            subscriptionRecipient.onSubscribe(FlowSubscription.DONE);
             child.start();
-        }
-
-        public void requestNext()
-        {
-            if (!verifyTransition(State.SUPPLIED, State.COMPLETED))
-                return;
-
-            subscriber.onComplete();
-        }
-
-        public void close() throws Exception
-        {
         }
 
         void onContent(Flow<T> child)
         {
-            if (!verifyTransition(State.REQUESTED, State.SUPPLIED))
-                return;
-
             U result;
             try
             {
@@ -104,39 +75,17 @@ public class SkipEmpty
                 return;
             }
 
-            subscriber.onNext(result);
+            subscriber.onFinal(result);
         }
 
         void onEmpty()
         {
-            if (!verifyTransition(State.REQUESTED, State.COMPLETED))
-                return;
-
             subscriber.onComplete();
         }
 
         void onError(Throwable e)
         {
-            state = state.COMPLETED;
             subscriber.onError(e);
-        }
-
-        boolean tryTransition(State from, State to)
-        {
-            if (state != from)
-                return false;
-
-            state = to;
-            return true;
-        }
-
-        boolean verifyTransition(State from, State to)
-        {
-            if (tryTransition(from, to))
-                return true;
-
-            onError(new AssertionError("Incorrect state " + from + " to transition to " + to + " in " + this));
-            return false;
         }
 
         public String toString()
@@ -153,6 +102,7 @@ public class SkipEmpty
     {
         final SkipEmptyContent parent;
         T first = null;
+        boolean firstIsFinal = false;
 
         public SkipEmptyContentSubscriber(Flow<T> content,
                                           SkipEmptyContent parent)
@@ -177,8 +127,13 @@ public class SkipEmpty
             assert source != null;
             assert this.subscriber == null : "Flow are single-use.";
             this.subscriber = subscriber;
-            subscriptionRecipient.onSubscribe(source);  // subscribe direct, we only modify first value
-            subscriber.onNext(first);
+            subscriptionRecipient.onSubscribe(source);  // subscribe direct, we only modify firstvalue
+            T toReturn = first;
+            first = null;
+            if (firstIsFinal)
+                subscriber.onFinal(toReturn);
+            else
+                subscriber.onNext(toReturn);
         }
 
         public void onNext(T item)
@@ -195,6 +150,21 @@ public class SkipEmpty
             }
         }
 
+        public void onFinal(T item)
+        {
+            if (subscriber != null)
+                subscriber.onFinal(item);
+            else
+            {
+                if (first != null)
+                    parent.onError(new AssertionError("Got onNext twice with " + first + " and then " + item + " in " + parent
+                                                                                                                        .toString()));
+                first = item;
+                firstIsFinal = true;
+                parent.onContent(this);
+            }
+        }
+
         public void onComplete()
         {
             if (subscriber != null)
@@ -205,12 +175,13 @@ public class SkipEmpty
                 try
                 {
                     source.close();
-                    parent.onEmpty();
                 }
                 catch (Exception e)
                 {
                     parent.onError(e);
+                    return;
                 }
+                parent.onEmpty();
             }
         }
 

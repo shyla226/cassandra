@@ -82,6 +82,14 @@ public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
                 child.subscriber.onNext(item);
     }
 
+    public void onFinal(T item)
+    {
+        // None of these are allowed to throw, so we are okay not guarding with try/catch.
+        for (TeeSubscription child : children)
+            if (!child.closed)
+                child.subscriber.onFinal(item);
+    }
+
     public void onComplete()
     {
         // None of these are allowed to throw, so we are okay not guarding with try/catch.

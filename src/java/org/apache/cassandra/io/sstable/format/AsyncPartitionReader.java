@@ -194,11 +194,7 @@ class AsyncPartitionReader
          */
         void performRead(boolean isRetry) throws Exception
         {
-            if (issued)
-            {
-                subscriber.onComplete();    // our job is done, we have already issued partition.
-                return;
-            }
+            assert !issued;
 
             // If this is a retry the indexEntry may be already read.
             if (indexEntry == null)
@@ -236,7 +232,7 @@ class AsyncPartitionReader
 
             PartitionSubscription partitionContent = new PartitionSubscription();
             issued = true;
-            subscriber.onNext(new FlowableUnfilteredPartition(header, ssTableIterator.staticRow(), partitionContent)
+            subscriber.onFinal(new FlowableUnfilteredPartition(header, ssTableIterator.staticRow(), partitionContent)
             {
                 @Override
                 public void unused() throws Exception
@@ -248,20 +244,14 @@ class AsyncPartitionReader
 
         public void close() throws Exception
         {
-            // If we didn't get around to issuing a FUP, we need to close anything partially open.
+            // If we have issued a FUP, we have passed control over the opened dfile and sstableIterator to it.
+            // If didn't get around to issuing, we need to close anything partially open.
             if (issued || dfile == null)
                 return;
 
-            try
-            {
-                if (ssTableIterator != null)
-                    ssTableIterator.close();
-            }
-            finally
-            {
-                if (closeDataFile)
-                    dfile.close();
-            }
+            if (closeDataFile)
+                dfile.close();
+            assert ssTableIterator == null;
         }
 
 

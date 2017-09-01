@@ -136,7 +136,7 @@ public class Threads
 
     private static Flow.Operator<Object, Object> constructRequestOnIO(TPCTaskType stage)
     {
-        return (source, subscriber, subscriptionRecepient) -> new RequestOn(source, subscriber, subscriptionRecepient, TPC.ioScheduler(), stage);
+        return (source, subscriber, subscriptionRecipient) -> new RequestOn(source, subscriber, subscriptionRecipient, TPC.ioScheduler(), stage);
     }
 
     /**
@@ -181,7 +181,7 @@ public class Threads
 
         public void requestNext()
         {
-            subscriber.onComplete();
+            subscriber.onError(new AssertionError("requestNext called after onFinal"));
         }
 
         public void run()
@@ -189,7 +189,7 @@ public class Threads
             try
             {
                 T v = source.call();
-                subscriber.onNext(v);
+                subscriber.onFinal(v);
             }
             catch (Throwable t)
             {
@@ -324,6 +324,22 @@ public class Threads
                 subscriber.onNext(next);
             else
                 scheduler.execute(() -> subscriber.onNext(next), locals, taskType);
+        }
+
+
+        @Override
+        public void onFinal(I next)
+        {
+            if (TPC.isOnScheduler(scheduler))
+                subscriber.onFinal(next);
+            else
+                scheduler.scheduleDirect(new TaggedRunnable.Base(taskType, scheduler)
+                {
+                    public void run()
+                    {
+                        subscriber.onFinal(next);
+                    }
+                });
         }
 
         public String toString()

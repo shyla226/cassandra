@@ -32,6 +32,14 @@ public interface FlowSubscriber<T> extends FlowSubscriptionRecipient
     void onNext(T item);
 
     /**
+     * Indicates that the flow has generated its final item.
+     * This should be treated as a combination of onNext and onComplete.
+     *
+     * It is the subscriber's duty to call the subscription's close method after receiving this.
+     */
+    void onFinal(T item);
+
+    /**
      * Indicates that the flow has completed. Called in response to Subscription.request().
      * It is an error to call this together with onNext in response to a single request.
      *

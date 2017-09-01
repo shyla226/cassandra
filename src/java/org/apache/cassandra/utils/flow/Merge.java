@@ -427,6 +427,7 @@ public class Merge
         private final Comparator<? super In> comp;
         private final int idx;
         private In item;
+        private boolean completeOnNextRequest = false;
         Throwable error = null;
 
         enum State {
@@ -490,7 +491,10 @@ public class Merge
             if (!verifyStateChange(State.NEEDS_REQUEST, State.AWAITING_ADVANCE, true))
                 return;
 
-            source.requestNext();
+            if (completeOnNextRequest)
+                onComplete();
+            else
+                source.requestNext();
         }
 
         @Override
@@ -513,6 +517,13 @@ public class Merge
                 onAdvance(next);
             else
                 onError(new AssertionError("null item in onNext"));
+        }
+
+        @Override
+        public void onFinal(In next)
+        {
+            completeOnNextRequest = true;
+            onNext(next);
         }
 
         private void onAdvance(In next)

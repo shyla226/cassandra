@@ -19,7 +19,6 @@
 package org.apache.cassandra.utils.flow;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -42,8 +41,6 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.CompletableSource;
-import io.reactivex.Scheduler;
-import io.reactivex.Single;
 import io.reactivex.SingleObserver;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.Action;
@@ -52,8 +49,6 @@ import io.reactivex.functions.BooleanSupplier;
 import io.reactivex.functions.Consumer;
 import io.reactivex.functions.Function;
 import io.reactivex.functions.Predicate;
-import org.apache.cassandra.concurrent.ExecutorLocals;
-import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -117,7 +112,7 @@ public abstract class Flow<T>
      *
      * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
      */
-    static class Map<I, O> extends FlowTransformNext<I, O>
+    public static class Map<I, O> extends FlowTransformNext<I, O>
     {
         final Function<I, O> mapper;
 
@@ -141,6 +136,22 @@ public abstract class Flow<T>
             }
 
             subscriber.onNext(out);
+        }
+
+        public void onFinal(I next)
+        {
+            O out;
+            try
+            {
+                out = mapper.apply(next);
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
+            }
+
+            subscriber.onFinal(out);
         }
 
         public String toString()
@@ -191,6 +202,25 @@ public abstract class Flow<T>
                 requestInLoop(source);
         }
 
+        public void onFinal(I next)
+        {
+            O out;
+            try
+            {
+                out = mapper.apply(next);
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
+            }
+
+            if (out != null)
+                subscriber.onFinal(out);
+            else
+                subscriber.onComplete();
+        }
+
         public String toString()
         {
             return formatTrace(getClass().getSimpleName(), mapper, sourceFlow);
@@ -210,7 +240,7 @@ public abstract class Flow<T>
      *
      * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
      */
-    static class Filter<I> extends FlowTransformNext<I, I>
+    public static class Filter<I> extends FlowTransformNext<I, I>
     {
         final Predicate<I> tester;
 
@@ -225,7 +255,7 @@ public abstract class Flow<T>
             boolean pass;
             try
             {
-                pass = tester.test(next);
+                pass = test(next);
             }
             catch (Throwable t)
             {
@@ -237,6 +267,30 @@ public abstract class Flow<T>
                 subscriber.onNext(next);
             else
                 requestInLoop(source);
+        }
+
+        public void onFinal(I next)
+        {
+            boolean pass;
+            try
+            {
+                pass = test(next);
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
+            }
+
+            if (pass)
+                subscriber.onFinal(next);
+            else
+                subscriber.onComplete();
+        }
+
+        public boolean test(I next) throws Exception
+        {
+            return tester.test(next);
         }
 
         public String toString()
@@ -287,6 +341,25 @@ public abstract class Flow<T>
                 subscriber.onComplete();
         }
 
+        public void onFinal(I next)
+        {
+            O out;
+            try
+            {
+                out = mapper.apply(next);
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
+            }
+
+            if (out != null)
+                subscriber.onFinal(out);
+            else
+                subscriber.onComplete();
+        }
+
         public String toString()
         {
             return formatTrace(getClass().getSimpleName(), mapper, sourceFlow);
@@ -331,6 +404,25 @@ public abstract class Flow<T>
 
             if (pass)
                 subscriber.onNext(next);
+            else
+                subscriber.onComplete();
+        }
+
+        public void onFinal(I next)
+        {
+            boolean pass;
+            try
+            {
+                pass = tester.test(next);
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
+            }
+
+            if (pass)
+                subscriber.onFinal(next);
             else
                 subscriber.onComplete();
         }
@@ -532,6 +624,11 @@ public abstract class Flow<T>
                 subscriber.onNext(item);
             }
 
+            public void onFinal(T item)
+            {
+                subscriber.onFinal(item);
+            }
+
             public void onError(Throwable t)
             {
                 try
@@ -556,10 +653,9 @@ public abstract class Flow<T>
     }
 
     /**
-     * Apply the operation when the flow completes. If handler throws, subscriber's onError will be called instead
-     * of onComplete.
+     * Apply the operation when the flow completes. To avoid having to split onFinal calls, handler is not allowed to throw.
      */
-    public Flow<T> doOnComplete(Action onComplete)
+    public Flow<T> doOnComplete(Runnable onComplete)
     {
         class DoOnComplete extends FlowTransformNext<T, T>
         {
@@ -573,19 +669,16 @@ public abstract class Flow<T>
                 subscriber.onNext(item);
             }
 
+            public void onFinal(T item)
+            {
+                subscriber.onFinal(item);
+                onComplete.run();
+            }
+
             public void onComplete()
             {
-                try
-                {
-                    onComplete.run();
-                }
-                catch (Throwable t)
-                {
-                    subscriber.onError(t);
-                    return;
-                }
-
                 subscriber.onComplete();
+                onComplete.run();
             }
 
             public String toString()
@@ -608,7 +701,7 @@ public abstract class Flow<T>
     /**
      * Pass all elements through the given transformation, then concatenate the results together.
      */
-    public <O> Flow<O> flatMap(FlatMap.FlatMapper<T, O> op)
+    public <O> Flow<O> flatMap(Function<T, Flow<O>> op)
     {
         return FlatMap.flatMap(this, op);
     }
@@ -621,7 +714,7 @@ public abstract class Flow<T>
     /**
      * Concatenate the input flows one after another and return a flow of items.
      * <p>
-     * This is currently implemented with {@link #fromIterable(Iterable)} and {@link #flatMap(FlatMap.FlatMapper)},
+     * This is currently implemented with {@link #fromIterable} and {@link #flatMap},
      * to be optimized later.
      *
      * @param sources - an iterable of Flow<O></O>
@@ -696,6 +789,11 @@ public abstract class Flow<T>
                 subscriber.onNext(item);
             }
 
+            public void onFinal(T item)
+            {
+                subscriber.onFinal(item);
+            }
+
             @Override
             public String toString()
             {
@@ -745,6 +843,11 @@ public abstract class Flow<T>
             public void onNext(T item)
             {
                 subscriber.onNext(item);
+            }
+
+            public void onFinal(T item)
+            {
+                subscriber.onFinal(item);
             }
 
             public void onError(Throwable t)
@@ -1001,6 +1104,21 @@ public abstract class Flow<T>
             }
 
             requestNext();
+        }
+
+        public void onFinal(T item)
+        {
+            try
+            {
+                current = reducer.apply(current, item);
+            }
+            catch (Throwable t)
+            {
+                onError(t);
+                return;
+            }
+
+            onComplete();
         }
 
         public void requestNext()
@@ -1315,10 +1433,10 @@ public abstract class Flow<T>
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
      */
-    public <O> Single<O> reduceToRxSingle(O seed, ReduceFunction<O, T> reducerToSingle)
+    public <O> io.reactivex.Single<O> reduceToRxSingle(O seed, ReduceFunction<O, T> reducerToSingle)
     {
         @SuppressWarnings("resource") // reduce subscriber is disposed by the Rx observer
-        class SingleFromFlow extends Single<O>
+        class SingleFromFlow extends io.reactivex.Single<O>
         {
             protected void subscribeActual(SingleObserver<? super O> observer)
             {
@@ -1364,7 +1482,7 @@ public abstract class Flow<T>
     /**
      * Maps a Flow holding a single value into an Rx Single using the supplied mapper.
      */
-    public <O> Single<O> mapToRxSingle(RxSingleMapper<T, O> mapper)
+    public <O> io.reactivex.Single<O> mapToRxSingle(RxSingleMapper<T, O> mapper)
     {
         return reduceToRxSingle(null, mapper);
     }
@@ -1372,7 +1490,7 @@ public abstract class Flow<T>
     /**
      * Maps a Flow holding a single value into an Rx Single using the supplied mapper.
      */
-    public Single<T> mapToRxSingle()
+    public io.reactivex.Single<T> mapToRxSingle()
     {
         return mapToRxSingle(x -> x);
     }
@@ -1447,7 +1565,6 @@ public abstract class Flow<T>
         class Reduce extends FlowTransform<T, O>
         {
             O current = seed;
-            boolean completed = false;
 
             public Reduce(Flow<T> source)
             {
@@ -1469,18 +1586,24 @@ public abstract class Flow<T>
                 requestInLoop(source);
             }
 
-            public void requestNext()
+            public void onFinal(T item)
             {
-                if (completed)
-                    subscriber.onComplete();
-                else
-                    source.requestNext();
+                try
+                {
+                    current = reducer.apply(current, item);
+                }
+                catch (Throwable t)
+                {
+                    onError(t);
+                    return;
+                }
+
+                onComplete();
             }
 
             public void onComplete()
             {
-                completed = true;
-                subscriber.onNext(current);
+                subscriber.onFinal(current);
             }
 
             public String toString()
@@ -1521,7 +1644,7 @@ public abstract class Flow<T>
         return process(noOp());
     }
 
-    public <O> Flow<Void> flatProcess(FlatMap.FlatMapper<T, O> mapper)
+    public <O> Flow<Void> flatProcess(Function<T, Flow<O>> mapper)
     {
         return this.flatMap(mapper)
                    .process();
@@ -1571,6 +1694,12 @@ public abstract class Flow<T>
             subscriber.onNext(item);
         }
 
+        public void onFinal(T item)
+        {
+            hadItem = true;
+            subscriber.onFinal(item);
+        }
+
         public void onComplete()
         {
             completed = true;
@@ -1586,22 +1715,40 @@ public abstract class Flow<T>
         }
     }
 
+    static class ToList<T> extends FlowTransformNext<T, List<T>>
+    {
+        List<T> entries;
+
+        public ToList(Flow<T> source)
+        {
+            super(source);
+            entries = new ArrayList<>();
+        }
+
+        public void onNext(T entry)
+        {
+            entries.add(entry);
+            requestInLoop(source);
+        }
+
+        public void onFinal(T entry)
+        {
+            entries.add(entry);
+            onComplete();
+        }
+
+        public void onComplete()
+        {
+            subscriber.onFinal(entries);
+        }
+    }
+
     /**
      * Converts the flow to singleton flow of the list of items.
      */
     public Flow<List<T>> toList()
     {
-        return group(new GroupOp<T, List<T>>(){
-            public boolean inSameGroup(T l, T r)
-            {
-                return true;
-            }
-
-            public List<T> map(List<T> inputs)
-            {
-                return inputs;
-            }
-        }).ifEmpty(Collections.emptyList());
+        return new ToList<>(this);
     }
 
     /**
@@ -1639,6 +1786,30 @@ public abstract class Flow<T>
     public void executeBlocking() throws Exception
     {
         blockingLast(null);
+    }
+
+    /**
+     * Returns a singleton flow with the given value.
+     */
+    public static <T> Flow<T> just(T value)
+    {
+        return new Just<>(value);
+    }
+
+    static class Just<T> extends Flow<T>
+    {
+        final T value;
+
+        Just(T value)
+        {
+            this.value = value;
+        }
+
+        public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+        {
+            subscriptionRecipient.onSubscribe(FlowSubscription.DONE);
+            subscriber.onFinal(value);
+        }
     }
 
     /**
@@ -1743,11 +1914,28 @@ public abstract class Flow<T>
      */
     public static <T> Flow<T> concat(Flow<T> source, Completable completable)
     {
-        return new FlowTransformNext<T, T>(source)
+        return new FlowTransform<T, T>(source)
         {
+            boolean completeOnNextRequest = false;
+
+            public void requestNext()
+            {
+                if (completeOnNextRequest)
+                    onComplete();
+                else
+                    super.requestNext();
+            }
+
             public void onNext(T item)
             {
                 subscriber.onNext(item);
+            }
+
+            public void onFinal(T item)
+            {
+                // Split item from completion so that we don't start completable before processing last item.
+                completeOnNextRequest = true;
+                onNext(item);
             }
 
             public void onComplete()
@@ -1761,39 +1949,6 @@ public abstract class Flow<T>
                 return formatTrace("concatFlowCompletable", completable, sourceFlow);
             }
         };
-    }
-
-    /**
-     * Returns a singleton flow with the given value.
-     */
-    public static <T> Flow<T> just(T value)
-    {
-        return new SingleFlow<>(value);
-    }
-
-    static class SingleFlow<T> extends FlowSource<T>
-    {
-        final T value;
-
-        SingleFlow(T value)
-        {
-            this.value = value;
-        }
-
-        public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
-        {
-            subscribe(subscriber, subscriptionRecipient);
-            subscriber.onNext(value);
-        }
-
-        public void requestNext()
-        {
-            subscriber.onComplete();
-        }
-
-        public void close() throws Exception
-        {
-        }
     }
 
     /**
@@ -1973,6 +2128,14 @@ public abstract class Flow<T>
                                                       sleepFor,
                                                       timeUnit);
             }
+
+            public void onFinal(T item)
+            {
+                TPC.bestTPCScheduler().scheduleDirect(() -> subscriber.onFinal(item),
+                                                      taskType,
+                                                      sleepFor,
+                                                      timeUnit);
+            }
         };
     }
 
@@ -2026,7 +2189,10 @@ public abstract class Flow<T>
 
         FlowSubscription source;
         BlockingQueue<Object> queue = new ArrayBlockingQueue<>(1);
+        // No need for the ones below to be volatile as a modification to the queue always follows their change
+        boolean completeOnNextRequest = false;
         Throwable error = null;
+
         Object next = null;
 
         public ToIteratorSubscriber(Flow<T> source) throws Exception
@@ -2071,14 +2237,27 @@ public abstract class Flow<T>
             Uninterruptibles.putUninterruptibly(queue, arg0);
         }
 
+        @Override
+        public void onFinal(T arg0)
+        {
+            // We can't just do a sequence of onNext and onComplete because a thread may catch the first and run through
+            // computeNext before we've had a chance to do the latter.
+            // Use a separate flag (that we can set before handing over control) instead. Note this can only be set
+            // (in response to requestNext) after computeNext has checked it.
+            completeOnNextRequest = true;
+            Uninterruptibles.putUninterruptibly(queue, arg0);
+        }
+
         protected Object computeNext()
         {
             if (next != null)
                 return next;
 
             assert queue.isEmpty();
-            source.requestNext();
+            if (completeOnNextRequest)
+                return POISON_PILL;
 
+            source.requestNext();
             return awaitReply();
         }
 

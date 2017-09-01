@@ -50,7 +50,7 @@ public interface GroupOp<I, O>
     static class GroupFlow<I, O> extends FlowTransform<I, O>
     {
         final GroupOp<I, O> mapper;
-        volatile boolean completeOnNextRequest;
+        volatile boolean completeOnNextRequest = false;
         I first;
         List<I> entries;
 
@@ -58,6 +58,36 @@ public interface GroupOp<I, O>
         {
             super(source);
             this.mapper = mapper;
+        }
+
+        public void onFinal(I entry)
+        {
+            O out = null;
+            try
+            {
+                if (first == null || !mapper.inSameGroup(first, entry))
+                {
+                    if (first != null)
+                        out = mapper.map(entries);
+
+                    entries = new ArrayList<>();
+                    first = entry;
+                }
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
+            }
+
+            entries.add(entry);
+            if (out != null)
+            {
+                completeOnNextRequest = true;
+                subscriber.onNext(out);
+            }
+            else
+                onComplete();
         }
 
         public void onNext(I entry)
@@ -84,7 +114,7 @@ public interface GroupOp<I, O>
             if (out != null)
                 subscriber.onNext(out);
             else
-                requestInLoop(this);
+                requestInLoop(source);
         }
 
         public void onComplete()
@@ -106,10 +136,7 @@ public interface GroupOp<I, O>
             }
 
             if (out != null)
-            {
-                completeOnNextRequest = true;
-                subscriber.onNext(out);
-            }
+                subscriber.onFinal(out);
             else
                 subscriber.onComplete();
         }
@@ -119,7 +146,7 @@ public interface GroupOp<I, O>
             if (!completeOnNextRequest)
                 source.requestNext();
             else
-                subscriber.onComplete();
+                onComplete();
         }
 
         public String toString()

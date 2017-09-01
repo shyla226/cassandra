@@ -383,6 +383,11 @@ public class OpsTest
                     // nothing to do
                 }
 
+                public void onFinal(Integer item)
+                {
+                    onComplete();
+                }
+
                 public void onComplete()
                 {
                     completed.set(true);
@@ -433,6 +438,11 @@ public class OpsTest
                 public void onNext(Integer item)
                 {
                     // nothing to do
+                }
+
+                public void onFinal(Integer item)
+                {
+                    onComplete();
                 }
 
                 public void onComplete()
@@ -638,6 +648,11 @@ public class OpsTest
             }
 
             public void onNext(T item)
+            {
+                // do nothing
+            }
+
+            public void onFinal(T item)
             {
                 // do nothing
             }
