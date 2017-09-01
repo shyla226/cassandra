@@ -10,6 +10,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -25,6 +28,8 @@ import org.apache.cassandra.utils.units.Units;
  */
 abstract class AbstractValidationProposer implements ValidationProposer
 {
+    private static final Logger logger = LoggerFactory.getLogger(AbstractValidationProposer.class);
+
     // For testing, we abstract how the size on disk of a table is computed, so this is the function we use in real code.
     protected static final ToLongFunction<ColumnFamilyStore> DEFAULT_TABLE_SIZE_PROVIDER = t -> t.getMemtablesLiveSize() + t.metric.liveDiskSpaceUsed.getCount();
     // For testing, we want to fake the local range of a keyspace so that's the function we use in real code.
@@ -92,5 +97,18 @@ abstract class AbstractValidationProposer implements ValidationProposer
                : String.format("%s ago (%d)",
                                Units.toString(System.currentTimeMillis() - validationTime, TimeUnit.MILLISECONDS),
                                validationTime);
+    }
+
+    public ValidationProposer onTableRemoval(String keyspace, String table)
+    {
+        if (this.table.keyspace.equals(keyspace) && this.table.name.equals(table))
+        {
+            // Logging at debug because when you explicitly dropped a table, it doesn't feel like you'd care too much
+            // about that confirmation. Further, when a keyspace is dropped, this is called for every table it has
+            // and this would feel like log spamming if the keyspace has very many tables.
+            logger.debug("Stopping NodeSync validations on table {} as the table has been dropped", table);
+            return null;
+        }
+        return this;
     }
 }

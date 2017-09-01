@@ -245,13 +245,6 @@ class UserValidationProposer extends AbstractValidationProposer
         return this;
     }
 
-    public ValidationProposer onTableRemoval(String keyspace, String table)
-    {
-        // Stop the proposer and return null so it gets removed
-        cancel();
-        return null;
-    }
-
     private void onValidationDone(ValidationInfo info, ValidationMetrics metrics)
     {
         outcomes.incrementAndGet(info.outcome.ordinal());

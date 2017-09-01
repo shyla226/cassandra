@@ -175,13 +175,15 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
      *
      * @param proposer the proposer to remove.
      * @return {@code true} if {@code proposer} was removed, {@code false} if the scheduler didn't had that proposer.
+     * Note that the proposer will be cancelled as part of this operation (but this will be a no-op if it was already
+     * completed/cancelled when passed to this method anyway).
      */
     boolean remove(ValidationProposer proposer)
     {
         lock.lock();
         try
         {
-            return removeProposer(proposer);
+            return cancelAndRemoveProposer(proposer);
         }
         finally
         {
@@ -203,7 +205,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     }
 
     // *Must* only be called while holding the lock
-    private boolean removeProposer(ValidationProposer proposer)
+    private boolean cancelAndRemoveProposer(ValidationProposer proposer)
     {
         // We need to cancel the removed proposer (to cancel no-yet-activated proposals and make sure in general than
         // we don't wrongly preserve the proposer due to activities concurrent to this call) but the actual proposer to
@@ -218,8 +220,8 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
             if (!proposer.equals(p))
                 continue;
 
-            iter.remove();
             p.cancel();
+            iter.remove();
             return true;
         }
         return false;
@@ -246,7 +248,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
             }
 
             // The order below don't matter much, but do the remove first so we don't grow proposalQueue unnecessarily
-            toRemove.forEach(this::removeProposer);
+            toRemove.forEach(this::cancelAndRemoveProposer);
             toAdd.forEach(this::addProposer);
         }
         finally
@@ -364,7 +366,10 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     private void requeue(ValidationProposer proposer)
     {
         if (!proposer.supplyNextProposal(this::queueProposal))
-            removeProposer(proposer);
+            proposers.remove(proposer); // We don't call cancelAndRemove() because when requeue() is called, we haven't
+                                        // even started processing the previous proposal, so we don't want to cancel.
+                                        // Besides, getting here means that the proposer itself told us it was done so
+                                        // there is no reason to cancel it.
     }
 
     // This needs the lock but may or may not be called while already holding it, so we acquire said lock and rely

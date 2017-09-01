@@ -1656,9 +1656,9 @@ public class NodeProbe implements AutoCloseable
         return nodeSyncProxy.getRate();
     }
 
-    public String startUserValidation(Map<String, String> optionMap)
+    public void startUserValidation(Map<String, String> optionMap)
     {
-        return nodeSyncProxy.startUserValidation(optionMap);
+        nodeSyncProxy.startUserValidation(optionMap);
     }
 
     public void cancelUserValidation(String idStr)

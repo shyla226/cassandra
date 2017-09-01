@@ -84,10 +84,8 @@ public interface NodeSyncServiceMBean
      *                force validation (all local ranges are validated if no specific ranges are provided)). Those
      *                are passed in a string map for JMX sakes but see the comment {@link UserValidationOptions#fromMap}
      *                for details on valid (and mandatory) values for this argument.
-     * @return a string uniquely identifying this user validation. Among other things, this identifier can later be used
-     * to cancel that user validation through {@link #cancelUserValidation}.
      */
-    public String startUserValidation(Map<String, String> options);
+    public void startUserValidation(Map<String, String> options);
 
     /**
      * Starts a user validation.
@@ -112,9 +110,8 @@ public interface NodeSyncServiceMBean
      * @param table the name of the table to validate.
      * @param ranges the ranges to validate (see {@link UserValidationOptions} for format) or {@code null} to validate
      *               all local ranges.
-     * @return the user validation identifier.
      */
-    public String startUserValidation(String id, String keyspace, String table, String ranges);
+    public void startUserValidation(String id, String keyspace, String table, String ranges);
 
     /**
      * Cancel a user validation given the validation identifier.
