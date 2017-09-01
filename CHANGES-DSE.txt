@@ -1,4 +1,5 @@
 dse 6.0.0
+ * Internal implementation of paging by bytes (APOLLO-414).
  * Check for mismatched versions when answering schema pulls (APOLLO-1026)
  * Add nodesync as a valid choice to cqlshlib completion tests for table creation (APOLLO-1056)
  * Limit the number of concurrent requests in TPC and retry on EAGAIN (APOLLO-1011)
