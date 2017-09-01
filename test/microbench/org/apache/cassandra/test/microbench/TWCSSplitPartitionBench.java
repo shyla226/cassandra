@@ -24,11 +24,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
-import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -37,7 +35,6 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
-import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.compaction.TWCSMultiWriter;
@@ -127,13 +124,12 @@ public class TWCSSplitPartitionBench extends CQLTester
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         Range<Token> r = new Range<>(cfs.getPartitioner().getMinimumToken(), cfs.getPartitioner().getMaximumToken());
         DataRange dr = new DataRange(Range.makeRowRange(r), new ClusteringIndexSliceFilter(Slices.ALL, false));
-        PartitionRangeReadCommand rc = new PartitionRangeReadCommand(cfs.metadata(),
-                                                                     FBUtilities.nowInSeconds(),
-                                                                     ColumnFilter.all(cfs.metadata()),
-                                                                     RowFilter.NONE,
-                                                                     DataLimits.NONE,
-                                                                     dr,
-                                                                     Optional.empty());
+        PartitionRangeReadCommand rc = PartitionRangeReadCommand.create(cfs.metadata(),
+                                                                        FBUtilities.nowInSeconds(),
+                                                                        ColumnFilter.all(cfs.metadata()),
+                                                                        RowFilter.NONE,
+                                                                        DataLimits.NONE,
+                                                                        dr);
 
 
         try (UnfilteredPartitionIterator pi = rc.executeForTests())

@@ -18,7 +18,6 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
-import java.util.*;
 import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
@@ -77,15 +76,8 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     private final RowFilter rowFilter;
     private final DataLimits limits;
 
-    // SecondaryIndexManager will attempt to provide the most selective of any available indexes
-    // during execution. Here we also store an the results of that lookup to repeating it over
-    // the lifetime of the command.
-    protected Optional<IndexMetadata> index = Optional.empty();
-
-    // Flag to indicate whether the index manager has been queried to select an index for this
-    // command. This is necessary as the result of that lookup may be null, in which case we
-    // still don't want to repeat it.
-    private boolean indexManagerQueried = false;
+    @Nullable
+    private final IndexMetadata index;
 
     /** The version of the digest this must generate if it is a digest query, {@code null} if it isn't a digest query */
     @Nullable
@@ -93,7 +85,15 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
     protected static abstract class SelectionDeserializer
     {
-        public abstract ReadCommand deserialize(DataInputPlus in, ReadVersion version, DigestVersion digestVersion, TableMetadata metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index) throws IOException;
+        public abstract ReadCommand deserialize(DataInputPlus in,
+                                                ReadVersion version,
+                                                DigestVersion digestVersion,
+                                                TableMetadata metadata,
+                                                int nowInSec,
+                                                ColumnFilter columnFilter,
+                                                RowFilter rowFilter,
+                                                DataLimits limits,
+                                                IndexMetadata index) throws IOException;
     }
 
     protected enum Kind
@@ -115,7 +115,8 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                           int nowInSec,
                           ColumnFilter columnFilter,
                           RowFilter rowFilter,
-                          DataLimits limits)
+                          DataLimits limits,
+                          IndexMetadata index)
     {
         this.kind = kind;
         this.digestVersion = digestVersion;
@@ -124,6 +125,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         this.columnFilter = columnFilter;
         this.rowFilter = rowFilter;
         this.limits = limits;
+        this.index = index;
     }
 
     protected abstract void serializeSelection(DataOutputPlus out, ReadVersion version) throws IOException;
@@ -240,6 +242,17 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     public abstract ReadCommand createDigestCommand(DigestVersion digestVersion);
 
     /**
+     * Index (metadata) chosen for this query. Can be null.
+     *
+     * @return index (metadata) chosen for this query
+     */
+    @Nullable
+    public IndexMetadata indexMetadata()
+    {
+        return index;
+    }
+
+    /**
      * The clustering index filter this command to use for the provided key.
      * <p>
      * Note that that method should only be called on a key actually queried by this command
@@ -285,10 +298,9 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
     public long indexSerializedSize()
     {
-        if (index.isPresent())
-            return IndexMetadata.serializer.serializedSize(index.get());
-        else
-            return 0;
+        return null != index
+               ? IndexMetadata.serializer.serializedSize(index)
+               : 0;
     }
 
     public Index getIndex()
@@ -298,25 +310,23 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
     public Index getIndex(ColumnFamilyStore cfs)
     {
-        // if we've already consulted the index manager, and it returned a valid index
-        // the result should be cached here.
-        if(index.isPresent())
-            return cfs.indexManager.getIndex(index.get());
+        return null != index
+               ? cfs.indexManager.getIndex(index)
+               : null;
+    }
 
-        // if no cached index is present, but we've already consulted the index manager
-        // then no registered index is suitable for this command, so just return null.
-        if (indexManagerQueried)
+    static IndexMetadata findIndex(TableMetadata table, RowFilter rowFilter)
+    {
+        if (table.indexes.isEmpty() || rowFilter.isEmpty())
             return null;
 
-        // do the lookup, set the flag to indicate so and cache the result if not null
-        Index selected = cfs.indexManager.getBestIndexFor(this);
-        indexManagerQueried = true;
+        ColumnFamilyStore cfs = Keyspace.openAndGetStore(table);
 
-        if (selected == null)
-            return null;
+        Index index = cfs.indexManager.getBestIndexFor(rowFilter);
 
-        index = Optional.of(selected.getIndexMetadata());
-        return selected;
+        return null != index
+               ? index.getIndexMetadata()
+               : null;
     }
 
     /**
@@ -629,7 +639,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         public void serialize(ReadCommand command, DataOutputPlus out) throws IOException
         {
             out.writeByte(command.kind.ordinal());
-            out.writeByte(digestFlag(command.isDigestQuery()) | indexFlag(command.index.isPresent()));
+            out.writeByte(digestFlag(command.isDigestQuery()) | indexFlag(null != command.indexMetadata()));
             if (command.isDigestQuery())
                 out.writeUnsignedVInt(digestVersionInt(command.digestVersion()));
             command.metadata.id.serialize(out);
@@ -637,8 +647,8 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             ColumnFilter.serializers.get(version).serialize(command.columnFilter(), out);
             RowFilter.serializers.get(version).serialize(command.rowFilter(), out);
             DataLimits.serializers.get(version).serialize(command.limits(), out, command.metadata.comparator);
-            if (command.index.isPresent())
-                IndexMetadata.serializer.serialize(command.index.get(), out);
+            if (null != command.index)
+                IndexMetadata.serializer.serialize(command.index, out);
 
             command.serializeSelection(out, version);
         }
@@ -665,18 +675,16 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             RowFilter rowFilter = RowFilter.serializers.get(version).deserialize(in, metadata);
             DataLimits limits = DataLimits.serializers.get(version).deserialize(in, metadata);
 
-            Optional<IndexMetadata> index = hasIndex
-                                          ? deserializeIndexMetadata(in, metadata)
-                                          : Optional.empty();
+            IndexMetadata index = hasIndex ? deserializeIndexMetadata(in, metadata) : null;
 
             return kind.selectionDeserializer.deserialize(in, version, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         }
 
-        private Optional<IndexMetadata> deserializeIndexMetadata(DataInputPlus in, TableMetadata metadata) throws IOException
+        private IndexMetadata deserializeIndexMetadata(DataInputPlus in, TableMetadata metadata) throws IOException
         {
             try
             {
-                return Optional.of(IndexMetadata.serializer.deserialize(in, metadata));
+                return IndexMetadata.serializer.deserialize(in, metadata);
             }
             catch (UnknownIndexException e)
             {
@@ -685,7 +693,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                             "being fully propagated. Local read will proceed without using the " +
                             "index. Please wait for schema agreement after index creation.",
                             metadata.keyspace, metadata.name, e.indexId);
-                return Optional.empty();
+                return null;
             }
         }
 

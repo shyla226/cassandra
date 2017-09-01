@@ -97,7 +97,8 @@ public class CompositesSearcher extends CassandraIndexSearcher
                                                                                        command.rowFilter(),
                                                                                        DataLimits.NONE,
                                                                                        partitionKey,
-                                                                                       filter);
+                                                                                       filter,
+                                                                                       null);
                 Flow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
 
                 return partition.map(p -> filterStaleEntries(p,

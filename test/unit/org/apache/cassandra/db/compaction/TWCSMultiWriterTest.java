@@ -19,7 +19,6 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.Iterator;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -94,13 +93,12 @@ public class TWCSMultiWriterTest extends CQLTester
         int nowInSeconds = FBUtilities.nowInSeconds();
         Range<Token> r = new Range<>(cfs.getPartitioner().getMinimumToken(), cfs.getPartitioner().getMaximumToken());
         DataRange dr = new DataRange(Range.makeRowRange(r), new ClusteringIndexSliceFilter(Slices.ALL, false));
-        PartitionRangeReadCommand rc = new PartitionRangeReadCommand(cfs.metadata(),
-                                                                     nowInSeconds,
-                                                                     ColumnFilter.all(cfs.metadata()),
-                                                                     RowFilter.NONE,
-                                                                     DataLimits.NONE,
-                                                                     dr,
-                                                                     Optional.empty());
+        PartitionRangeReadCommand rc = PartitionRangeReadCommand.create(cfs.metadata(),
+                                                                        nowInSeconds,
+                                                                        ColumnFilter.all(cfs.metadata()),
+                                                                        RowFilter.NONE,
+                                                                        DataLimits.NONE,
+                                                                        dr);
         TWCSMultiWriter.BucketIndexer indexes = TWCSMultiWriter.createBucketIndexes(TimeUnit.MINUTES, 1);
         try (UnfilteredPartitionIterator pi = rc.executeForTests())
         {

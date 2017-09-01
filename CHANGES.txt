@@ -131,6 +131,7 @@
  * Properly evict pstmts from prepared statements cache (CASSANDRA-13641)
 Merged from 3.0:
  * Better tolerate improperly formatted bcrypt hashes (CASSANDRA-13626)
+ * Fix race condition in read command serialization (CASSANDRA-13363)
  * Don't skip corrupted sstables on startup (CASSANDRA-13620)
  * Fix the merging of cells with different user type versions (CASSANDRA-13776)
  * Copy session properties on cqlsh.py do_login (CASSANDRA-13640)
