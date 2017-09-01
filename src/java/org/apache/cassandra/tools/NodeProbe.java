@@ -731,6 +731,11 @@ public class NodeProbe implements AutoCloseable
         ssProxy.enableAutoCompaction(ks, tableNames);
     }
 
+    public Map<String, Boolean> getAutoCompactionDisabled(String ks, String ... tableNames) throws IOException
+    {
+        return ssProxy.getAutoCompactionStatus(ks, tableNames);
+    }
+
     public void setIncrementalBackupsEnabled(boolean enabled)
     {
         ssProxy.setIncrementalBackupsEnabled(enabled);
