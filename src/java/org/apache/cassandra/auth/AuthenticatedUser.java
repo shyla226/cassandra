@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -99,6 +100,16 @@ public class AuthenticatedUser
     public Set<RoleResource> getRoles()
     {
         return Roles.getRoles(role);
+    }
+
+    /**
+     * Returns the names of the roles that have been granted to the user via the IRoleManager
+     *
+     * @return a list of role names that have been granted to the user
+     */
+    public List<String> getRoleNames()
+    {
+        return getRoles().stream().map(RoleResource::getRoleName).collect(Collectors.toList());
     }
 
     /**
