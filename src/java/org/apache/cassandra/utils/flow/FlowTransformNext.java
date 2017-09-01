@@ -19,7 +19,7 @@
 package org.apache.cassandra.utils.flow;
 
 /**
- * Base class for flow transformations that only intercept both the onNext path (e.g. map)
+ * Base class for flow transformations that only intercepts the onNext path (e.g. map)
  *
  * Descendants need to implement onNext().
  */

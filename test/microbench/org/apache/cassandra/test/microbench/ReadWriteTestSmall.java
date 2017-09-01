@@ -40,6 +40,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.openjdk.jmh.annotations.*;
 
 @BenchmarkMode(Mode.AverageTime)
+//@BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @Warmup(iterations = 10, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 15, time = 2, timeUnit = TimeUnit.SECONDS)
@@ -56,8 +57,11 @@ public class ReadWriteTestSmall extends CQLTester
     ColumnFamilyStore cfs;
     static final int count = 1_100_000;
 
-    @Param({"10000", "1000", "100"})
-    int BATCH = 2_500;
+//    @Param({"10000", "1000", "100"})
+    int BATCH = 1_000;
+
+    @Param({"false", "true"})
+    boolean flush = true;
 
     Random rand = new Random(1);
 
@@ -86,12 +90,15 @@ public class ReadWriteTestSmall extends CQLTester
         System.err.println("Writing " + count);
         for (long i = 0; i < count; i++)
             execute(writeStatement, i, i, i );
-        cfs.forceBlockingFlush();
-        while (cfs.getLiveSSTables().size() >= 15)
-        {
-            cfs.enableAutoCompaction(true);
-            cfs.disableAutoCompaction();
-        }
+
+        if (flush)
+            cfs.forceBlockingFlush();
+
+//        while (cfs.getLiveSSTables().size() >= 15)
+//        {
+//            cfs.enableAutoCompaction(true);
+//            cfs.disableAutoCompaction();
+//        }
     }
 
     @TearDown(Level.Trial)

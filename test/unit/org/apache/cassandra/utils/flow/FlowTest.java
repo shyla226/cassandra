@@ -286,24 +286,28 @@ public class FlowTest
         AtomicReference<String> transformedThread1 = new AtomicReference<>();
         AtomicReference<String> transformedThread2 = new AtomicReference<>();
 
-        Flow.fromIterable(Arrays.asList("ignored"))
-            .map(ignored ->
-            {
-                currentThread.set(Thread.currentThread().getName());
-                return ignored;
-            })
-            .observeOn(TPC.ioScheduler(), TPCTaskType.UNKNOWN)
-            .map(ignored ->
-            {
-                transformedThread1.set(Thread.currentThread().getName());
-                return ignored;
-            })
-            .observeOn(TPC.bestTPCScheduler(), TPCTaskType.UNKNOWN)
-            .reduceBlocking("ignored", (i, o) ->
-            {
-                transformedThread2.set(Thread.currentThread().getName());
-                return o;
-            });
+        Flow<String> flow;
+        flow = Flow.fromIterable(Arrays.asList("ignored"));
+        flow = flow.map(ignored ->
+                        {
+                            currentThread.set(Thread.currentThread().getName());
+                            return ignored;
+                        });
+
+        flow = Threads.observeOn(flow, TPC.ioScheduler(), TPCTaskType.UNKNOWN);
+        flow = flow.map(ignored ->
+                        {
+                            transformedThread1.set(Thread.currentThread().getName());
+                            return ignored;
+                        });
+
+        flow = Threads.observeOn(flow, TPC.bestTPCScheduler(), TPCTaskType.UNKNOWN);
+
+        flow.reduceBlocking("ignored", (i, o) ->
+        {
+            transformedThread2.set(Thread.currentThread().getName());
+            return o;
+        });
 
         Assert.assertNotEquals(currentThread.get(), transformedThread1.get());
         Assert.assertNotEquals(transformedThread1.get(), transformedThread2.get());

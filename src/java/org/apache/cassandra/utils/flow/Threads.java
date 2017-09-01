@@ -300,4 +300,44 @@ public class Threads
     {
         return new DeferOn<>(source, TPC.ioScheduler(), stage);
     }
+
+    /**
+     * Op for applying any other subsequent operations/transformations on a (potentially) different scheduler.
+     */
+    static class SchedulingTransformer<I> extends FlowTransformNext<I, I>
+    {
+        final StagedScheduler scheduler;
+        final TPCTaskType taskType;
+        final ExecutorLocals locals = ExecutorLocals.create();
+
+        public SchedulingTransformer(Flow<I> source, StagedScheduler scheduler, TPCTaskType taskType)
+        {
+            super(source);
+            this.scheduler = scheduler;
+            this.taskType = taskType;
+        }
+
+        @Override
+        public void onNext(I next)
+        {
+            if (TPC.isOnScheduler(scheduler))
+                subscriber.onNext(next);
+            else
+                scheduler.execute(() -> subscriber.onNext(next), locals, taskType);
+        }
+
+        public String toString()
+        {
+            return formatTrace(getClass().getSimpleName(), scheduler, sourceFlow);
+        }
+    }
+
+    /**
+     * Applies any subsequent transformations (i.e. map, reduce...) on the given scheduler
+     * (similarly to RxJava's observeOn()).
+     */
+    public static <T> Flow<T> observeOn(Flow<T> source, StagedScheduler scheduler, TPCTaskType taskType)
+    {
+        return new SchedulingTransformer<>(source, scheduler, taskType);
+    }
 }

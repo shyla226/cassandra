@@ -68,6 +68,7 @@ import org.apache.cassandra.service.WriteEndpoints;
 import org.apache.cassandra.service.WriteHandler;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.versioning.Version;
 
 import static com.google.common.collect.Iterables.transform;
@@ -273,7 +274,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         Set<UUID> replayedBatches = new HashSet<>();
 
         // Sending out batches for replay without waiting for them, so that one stuck batch doesn't affect others
-        TPCUtils.blockingGet(batches.rows().observeOn(TPC.ioScheduler(), TPCTaskType.BATCH_REPLAY)
+        TPCUtils.blockingGet(Threads.observeOn(batches.rows(), TPC.ioScheduler(), TPCTaskType.BATCH_REPLAY)
                                     .reduceToRxSingle(0, (positionInPage, row) ->
         {
             UUID id = row.getUUID("id");

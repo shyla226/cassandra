@@ -113,48 +113,6 @@ public abstract class Flow<T>
     private static final boolean DEBUG_ENABLED = Boolean.getBoolean("dse.debug_flow");
 
     /**
-     * Op for applying any other subsequent operations/transformations on a (potentially) different scheduler.
-     *
-     * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
-     */
-    static class SchedulingTransformer<I> extends FlowTransformNext<I, I>
-    {
-        final StagedScheduler scheduler;
-        final TPCTaskType taskType;
-        final ExecutorLocals locals = ExecutorLocals.create();
-
-        public SchedulingTransformer(Flow<I> source, StagedScheduler scheduler, TPCTaskType taskType)
-        {
-            super(source);
-            this.scheduler = scheduler;
-            this.taskType = taskType;
-        }
-
-        @Override
-        public void onNext(I next)
-        {
-            if (TPC.isOnScheduler(scheduler))
-                subscriber.onNext(next);
-            else
-                scheduler.execute(() -> subscriber.onNext(next), locals, taskType);
-        }
-
-        public String toString()
-        {
-            return formatTrace(getClass().getSimpleName(), scheduler, sourceFlow);
-        }
-    }
-
-    /**
-     * Applies any subsequent transformations (i.e. map, reduce...) on the given scheduler
-     * (similarly to RxJava's observeOn()).
-     */
-    public Flow<T> observeOn(StagedScheduler scheduler, TPCTaskType taskType)
-    {
-        return new SchedulingTransformer<>(this, scheduler, taskType);
-    }
-
-    /**
      * Op for element-wise transformation.
      *
      * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
