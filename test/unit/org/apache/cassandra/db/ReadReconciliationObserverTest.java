@@ -90,11 +90,11 @@ public class ReadReconciliationObserverTest extends CQLTester
         InetAddress peer2 = peer();
         InetAddress peer3 = peer();
 
-        ReadContext params = readContext(cmd);
+        ReadContext ctx = readContext(cmd, true);
         List<InetAddress> peers = Arrays.asList(peer1, peer2, peer3);
-        ReadCallback<FlowablePartition> callback = ReadCallback.forDigestRead(cmd, peers, params);
+        ReadCallback<FlowablePartition> callback = ReadCallback.forInitialRead(cmd, peers, ctx);
 
-        TestObserver observer = (TestObserver) params.readObserver;
+        TestObserver observer = (TestObserver) ctx.readObserver;
         assert observer != null;
 
         PartitionUpdate full = update(table, row(0, 0), row(1, 1), row(2, 2));
@@ -124,11 +124,11 @@ public class ReadReconciliationObserverTest extends CQLTester
         InetAddress peer2 = peer();
         InetAddress peer3 = peer();
 
-        ReadContext params = readContext(cmd);
+        ReadContext ctx = readContext(cmd, true);
         List<InetAddress> peers = Arrays.asList(peer1, peer2, peer3);
-        ReadCallback<FlowablePartition> callback = ReadCallback.forDigestRead(cmd, peers, params);
+        ReadCallback<FlowablePartition> callback = ReadCallback.forInitialRead(cmd, peers, ctx);
 
-        TestObserver observer = (TestObserver) params.readObserver;
+        TestObserver observer = (TestObserver) ctx.readObserver;
         assert observer != null;
 
         PartitionUpdate full = update(table, row(0, 0), row(1, 1), row(2, 2));
@@ -159,11 +159,11 @@ public class ReadReconciliationObserverTest extends CQLTester
         InetAddress peer2 = peer();
         InetAddress peer3 = peer();
 
-        ReadContext params = readContext(cmd);
+        ReadContext ctx = readContext(cmd, false);
         List<InetAddress> peers = Arrays.asList(peer1, peer2, peer3);
-        ReadCallback<FlowablePartition> callback = ReadCallback.forDataRead(cmd, peers, params);
+        ReadCallback<FlowablePartition> callback = ReadCallback.forInitialRead(cmd, peers, ctx);
 
-        TestObserver observer = (TestObserver) params.readObserver;
+        TestObserver observer = (TestObserver) ctx.readObserver;
         assert observer != null;
 
         PartitionUpdate full = update(table, row(0, 0), row(1, 1), row(2, 2));
@@ -245,13 +245,14 @@ public class ReadReconciliationObserverTest extends CQLTester
         return Response.testResponse(peer, FBUtilities.getBroadcastAddress(), Verbs.READS.READ, payload);
     }
 
-    private ReadContext readContext(ReadCommand command)
+    private ReadContext readContext(ReadCommand command, boolean useDigests)
     {
         // Note that we need to  use "block on all targets" because we're faking 3 nodes but we only have one so by
         // default even CL.ALL would only wait for 1.
         return ReadContext.builder(command, ConsistencyLevel.ALL)
                           .observer(new TestObserver())
                           .blockForAllTargets()
+                          .useDigests(useDigests)
                           .build(System.nanoTime());
     }
 

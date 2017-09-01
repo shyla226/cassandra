@@ -1498,11 +1498,12 @@ public class StorageProxy implements StorageProxyMBean
             ReadRepairMetrics.repairedBlocking.mark();
 
             // Do a full data read to resolve the correct response (and repair node that need be)
-            List<InetAddress> contactedReplicas = executor.getContactedReplicas();
-            repairHandler = ReadCallback.forDataRead(command, contactedReplicas, ctx);
+            Pair<ReadCallback<FlowablePartition>, Collection<InetAddress>> p = executor.handler.forDigestMismatchRepair(executor.getContactedReplicas());
+            repairHandler = p.left;
+            Collection<InetAddress> contactedReplicas = p.right;
+
             Tracing.trace("Enqueuing full data reads to {}", contactedReplicas);
             MessagingService.instance().send(Verbs.READS.READ.newDispatcher(contactedReplicas, command), repairHandler);
-
 
             return repairHandler.result().mapError(e -> {
                 if (logger.isTraceEnabled())
@@ -1832,9 +1833,12 @@ public class StorageProxy implements StorageProxyMBean
             Tracing.trace("Digest mismatch: {}", ex);
 
             ReadCommand command = handler.command();
-            ReadCallback<FlowablePartition> repairHandler = ReadCallback.forDataRead(command, handler.endpoints, handler.readContext());
-            Tracing.trace("Enqueuing full data reads to {}", handler.endpoints);
-            MessagingService.instance().send(Verbs.READS.READ.newDispatcher(handler.endpoints, command), repairHandler);
+            Pair<ReadCallback<FlowablePartition>, Collection<InetAddress>> p = handler.forDigestMismatchRepair(handler.endpoints);
+            ReadCallback<FlowablePartition> repairHandler = p.left;
+            Collection<InetAddress> endpoints = p.right;
+
+            Tracing.trace("Enqueuing full data reads to {}", endpoints);
+            MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command), repairHandler);
 
             return repairHandler.result();
         }

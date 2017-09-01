@@ -30,7 +30,7 @@ import org.apache.cassandra.utils.flow.Flow;
 
 public class DigestResolver extends ResponseResolver<FlowablePartition>
 {
-    private volatile ReadResponse dataResponse;
+    volatile Response<ReadResponse> dataResponse;
 
     DigestResolver(ReadCommand command, ReadContext params, int maxResponseCount)
     {
@@ -42,7 +42,7 @@ public class DigestResolver extends ResponseResolver<FlowablePartition>
     {
         super.preprocess(message);
         if (dataResponse == null && !message.payload().isDigestResponse())
-            dataResponse = message.payload();
+            dataResponse = message;
     }
 
     /**
@@ -53,7 +53,7 @@ public class DigestResolver extends ResponseResolver<FlowablePartition>
         assert isDataPresent();
         if (ctx.readObserver != null)
             ctx.readObserver.onDigestMatch();
-        return fromSingleResponseFiltered(dataResponse);
+        return fromSingleResponseFiltered(dataResponse.payload());
     }
 
     /*
@@ -75,7 +75,7 @@ public class DigestResolver extends ResponseResolver<FlowablePartition>
             logger.trace("resolving {} responses", responses.size());
 
         return Flow.concat(compareResponses(),
-                           fromSingleResponseFiltered(dataResponse));
+                           fromSingleResponseFiltered(dataResponse.payload()));
     }
 
     public Completable completeOnReadRepairAnswersReceived()
