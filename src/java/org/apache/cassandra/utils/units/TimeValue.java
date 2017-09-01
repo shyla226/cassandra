@@ -137,7 +137,7 @@ public class TimeValue implements Comparable<TimeValue>
         TimeUnit thatSmallest = that.smallestRepresentableUnit();
 
         if (thisSmallest == thatSmallest)
-            return Long.compare(this.value, that.value);
+            return Long.compare(this.in(thisSmallest), that.in(thatSmallest));
 
         // If one value overflow "before" (it has a bigger smallest representable unit) the other one, then that value
         // is bigger.

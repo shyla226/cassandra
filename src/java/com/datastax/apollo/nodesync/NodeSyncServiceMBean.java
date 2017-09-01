@@ -5,11 +5,13 @@
  */
 package com.datastax.apollo.nodesync;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.cassandra.metrics.NodeSyncMetrics;
+import org.apache.cassandra.tools.nodetool.nodesync.RateSimulatorCmd;
 
 public interface NodeSyncServiceMBean
 {
@@ -127,4 +129,19 @@ public interface NodeSyncServiceMBean
      * @param id the identifier of the user validation to cancel.
      */
     public void cancelUserValidation(String id);
+
+    /**
+     * Returns the serialized-for-JMX information on tables required by the rate simulator.
+     * <p>
+     * This include, for every NodeSync-enabled table on the node (or all table if {@code includeAllTables} is true),
+     * the table replication factor, data size and NodeSync deadline target. The information is build using
+     * {@link RateSimulator.Info#compute} and serialized for JMX using {@link RateSimulator.Info#toJMX()}.
+     *
+     * @param includeAllTables if {@code false}, only NodeSync-enabled tables will be included. Otherwise, all tables
+     *                         will be included (note that in any case, the rate simulator only even consider
+     *                         NodeSync-enabled tables, but include all tables here allows to "fake-enabled" NodeSync
+     *                         on tables in {@link RateSimulatorCmd} for convenience).
+     * @return the result of calling {@code RateSimulator.Info.compute().toJMX()}.
+     */
+    public List<Map<String, String>> getRateSimulatorInfo(boolean includeAllTables);
 }

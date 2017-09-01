@@ -5,9 +5,7 @@
  */
 package com.datastax.apollo.nodesync;
 
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
@@ -17,8 +15,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.ToLongFunction;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
@@ -37,7 +34,6 @@ import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.NodeSyncParams;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.units.Units;
 
@@ -74,13 +70,9 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
 
     private volatile boolean cancelled;
 
-    private ContinuousTableValidationProposer(NodeSyncService service,
-                                              TableMetadata table,
-                                              int depth,
-                                              Function<String, Collection<Range<Token>>> localRangesProvider,
-                                              ToLongFunction<ColumnFamilyStore> tableSizeProvider)
+    private ContinuousTableValidationProposer(NodeSyncService service, TableMetadata table, int depth)
     {
-        super(service, table, depth, localRangesProvider, tableSizeProvider);
+        super(service, table, depth);
     }
 
     /**
@@ -92,7 +84,7 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
      */
     static ContinuousTableValidationProposer dummyProposerFor(TableMetadata table)
     {
-        return new ContinuousTableValidationProposer(null, table, 0, DEFAULT_LOCAL_RANGES_PROVIDER, DEFAULT_TABLE_SIZE_PROVIDER);
+        return new ContinuousTableValidationProposer(null, table, 0);
     }
 
     /**
@@ -104,10 +96,11 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
      */
     static List<ContinuousTableValidationProposer> createAll(NodeSyncService service)
     {
-        List<ContinuousTableValidationProposer> proposers = new ArrayList<>();
-        for (Keyspace keyspace : Iterables.transform(StorageService.instance.getNonSystemKeyspaces(), Keyspace::open))
-            proposers.addAll(createForKeyspace(service, keyspace));
-        return proposers;
+        return NodeSyncHelpers.nodeSyncEnabledTables()
+                              .map(store -> create(service,
+                                                   store,
+                                                   NodeSyncService.SEGMENT_SIZE_TARGET))
+                              .collect(Collectors.toList());
     }
 
     /**
@@ -116,16 +109,12 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
      *
      * @param service the NodeSync service for which we create the proposers.
      * @param keyspace the keyspace for which to create the proposers.
-     * @return a list containing a continuous table proposers for every table eligible to NodeSync. Note that ff the
+     * @return a list containing a continuous table proposers for every table eligible to NodeSync. Note that if the
      * keyspace has RF <= 1, then this will return an empty list.
      */
     static List<ContinuousTableValidationProposer> createForKeyspace(NodeSyncService service, Keyspace keyspace)
     {
-        return createForKeyspace(service,
-                                 keyspace,
-                                 NodeSyncService.SEGMENT_SIZE_TARGET,
-                                 DEFAULT_TABLE_SIZE_PROVIDER,
-                                 DEFAULT_LOCAL_RANGES_PROVIDER);
+        return createForKeyspace(service, keyspace, NodeSyncService.SEGMENT_SIZE_TARGET);
     }
 
     /**
@@ -135,19 +124,11 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
     @VisibleForTesting
     static List<ContinuousTableValidationProposer> createForKeyspace(NodeSyncService service,
                                                                      Keyspace keyspace,
-                                                                     long maxSegmentSize,
-                                                                     ToLongFunction<ColumnFamilyStore> sizeProvider,
-                                                                     Function<String, Collection<Range<Token>>> rangeProvider)
+                                                                     long maxSegmentSize)
     {
-        if (keyspace.getReplicationStrategy().getReplicationFactor() <= 1)
-            return Collections.emptyList();
-
-        int localRangeCount = rangeProvider.apply(keyspace.getName()).size();
-
-        List<ContinuousTableValidationProposer> proposers = new ArrayList<>();
-        for (ColumnFamilyStore store : keyspace.getColumnFamilyStores())
-            create(service, store, localRangeCount, maxSegmentSize, sizeProvider, rangeProvider).ifPresent(proposers::add);
-        return proposers;
+        return NodeSyncHelpers.nodeSyncEnabledTables(keyspace)
+                              .map(store -> create(service, store, maxSegmentSize))
+                              .collect(Collectors.toList());
     }
 
     /**
@@ -161,27 +142,20 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
      */
     static Optional<ContinuousTableValidationProposer> create(NodeSyncService service, ColumnFamilyStore store)
     {
-        return create(service,
-                      store,
-                      DEFAULT_LOCAL_RANGES_PROVIDER.apply(store.keyspace.getName()).size(),
-                      NodeSyncService.SEGMENT_SIZE_TARGET,
-                      DEFAULT_TABLE_SIZE_PROVIDER,
-                      DEFAULT_LOCAL_RANGES_PROVIDER);
-    }
-
-    private static Optional<ContinuousTableValidationProposer> create(NodeSyncService service,
-                                                                      ColumnFamilyStore store,
-                                                                      int localRangeCount,
-                                                                      long maxSegmentSize,
-                                                                      ToLongFunction<ColumnFamilyStore> sizeProvider,
-                                                                      Function<String, Collection<Range<Token>>> rangeProvider)
-    {
         TableMetadata table = store.metadata();
-        if (localRangeCount == 0 || !table.params.nodeSync.isEnabled(table))
+        if (NodeSyncHelpers.localRanges(store.keyspace.getName()).isEmpty() || !table.params.nodeSync.isEnabled(table))
             return Optional.empty();
 
-        int depth = computeDepth(store, localRangeCount, sizeProvider, maxSegmentSize);
-        return Optional.of(new ContinuousTableValidationProposer(service, table, depth, rangeProvider, sizeProvider));
+        return Optional.of(create(service, store, NodeSyncService.SEGMENT_SIZE_TARGET));
+    }
+
+    private static ContinuousTableValidationProposer create(NodeSyncService service, ColumnFamilyStore store, long maxSegmentSize)
+    {
+        TableMetadata table = store.metadata();
+        int localRangeCount = NodeSyncHelpers.localRanges(store.keyspace.getName()).size();
+        assert localRangeCount > 0 && table.params.nodeSync.isEnabled(table);
+        int depth = computeDepth(store, localRangeCount, maxSegmentSize);
+        return new ContinuousTableValidationProposer(service, table, depth);
     }
 
     public void init()

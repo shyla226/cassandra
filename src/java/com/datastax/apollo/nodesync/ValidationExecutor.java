@@ -5,8 +5,13 @@
  */
 package com.datastax.apollo.nodesync;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -17,7 +22,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
+import com.google.common.base.Joiner;
 import com.google.common.math.DoubleMath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,8 +37,14 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.concurrent.TracingAwareExecutorService;
 import org.apache.cassandra.config.NodeSyncConfig;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.schema.NodeSyncParams;
 import org.apache.cassandra.utils.collection.History;
 import org.apache.cassandra.utils.units.RateUnit;
+import org.apache.cassandra.utils.units.RateValue;
+import org.apache.cassandra.utils.units.SizeUnit;
+import org.apache.cassandra.utils.units.SizeValue;
+import org.apache.cassandra.utils.units.TimeValue;
 import org.apache.cassandra.utils.units.Units;
 
 /**
@@ -77,9 +90,6 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     // For an update interval, if we spend more than this blocking on getting new task, we consider it significant.
     // TODO(Sylvain): this definitely needs testing to check if this is a decent value. May want to make configurable at least for test.
     private static final long BLOCKED_ON_NEW_TASK_THRESHOLD_MS = 10 * CONTROLLER_INTERVAL_MS / 100;
-
-    private static final long MIN_WARN_INTERVAL_MS = TimeUnit.SECONDS.toMillis(Long.getLong("datastax.nodesync.min_warn_interval_sec",
-                                                                                            TimeUnit.HOURS.toSeconds(10)));
 
     private enum State
     {
@@ -578,9 +588,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
          * so we can't "go faster" so we inform the user of that situation.
          * <p>
          * To avoid premature or repetitive warnings, we use the 2 following heuristics:
-         * 1) we only warn once every {@link #MIN_WARN_INTERVAL_MS}. The idea is to not bother the user every controller
-         *    interval while things are maxed out, but with a cap after which we consider that maybe the user has
-         *    forgotten and reminding him of the problem may be worth it.
+         * 1) we only warn once every {@link NodeSyncService#MIN_WARN_INTERVAL_MS}. The idea is to not bother the user
+         *    every controller interval while things are maxed out, but with a cap after which we consider that maybe
+         *    the user has forgotten and reminding him of the problem may be worth it.
          * 2) we only warn on either 2 consecutive interval being maxed out, or if we detect that more than 1/3 of our
          *    history is maxed out. The general idea being that we want to avoid warning the user on a single interval
          *    fluke (hence the 2 consecutive interval rule), but still want to detect case where we alternate too
@@ -589,7 +599,8 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
          */
         private void maybeWarnOnMaxedOut(double recentRate)
         {
-            if (lastMaxedOutWarn >= 0 && (System.currentTimeMillis() - lastMaxedOutWarn) < MIN_WARN_INTERVAL_MS)
+            long now = System.currentTimeMillis();
+            if (lastMaxedOutWarn >= 0 && (now - lastMaxedOutWarn) < NodeSyncService.MIN_VALIDATION_INTERVAL_MS)
                 return;
 
             // As mentioned above, we only log if either the previous interval was also maxed out (we haven't added the
@@ -598,7 +609,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                 && (history.isAtCapacity() && history.stream().filter(a -> a == Action.MAXED_OUT).count() <= (30 * history.size()) / 100))
                 return;
 
-            lastMaxedOutWarn = System.currentTimeMillis();
+            lastMaxedOutWarn = now;
             logger.warn("NodeSync doesn't seem to be able to sustain the configured rate (over the last {}, the "
                         + "effective rate was {} for a configured rate of {}) and this despite using {} threads and "
                         + "{} parallel range validations (maximums allowed). "

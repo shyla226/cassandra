@@ -20,6 +20,7 @@ package com.datastax.apollo.nodesync;
 import java.util.List;
 import java.util.function.ToLongFunction;
 
+import org.junit.After;
 import org.junit.Test;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -31,6 +32,12 @@ import static com.datastax.apollo.nodesync.NodeSyncTestTools.*;
 
 public class ContinuousTableValidationProposerTest extends AbstractValidationProposerTester
 {
+    @After
+    public void cleanupTask()
+    {
+        NodeSyncHelpers.resetTableSizeAndLocalRangeProviders();
+    }
+
     @Test
     public void testValidationProposalGeneration() throws Exception
     {
@@ -60,12 +67,12 @@ public class ContinuousTableValidationProposerTest extends AbstractValidationPro
             throw new AssertionError();
         };
 
+        NodeSyncHelpers.setTableSizeAndLocalRangeProviders(sizeProvider, TEST_RANGES);
+
         NodeSyncService service = new NodeSyncService(); // Not even started, just here because we need a reference below
         List<ContinuousTableValidationProposer> proposers = ContinuousTableValidationProposer.createForKeyspace(service,
                                                                                                                 Keyspace.open(ks),
-                                                                                                                mb(200),
-                                                                                                                sizeProvider,
-                                                                                                                TEST_RANGES);
+                                                                                                                mb(200));
 
         // Make sure the unrepaired table was ignored
         assertEquals(String.format("Expect %d proposers but got %d (%s)", 3, proposers.size(), proposers), 3, proposers.size());

@@ -165,7 +165,7 @@ public class RateValue implements Comparable<RateValue>
         RateUnit thatSmallest = that.smallestRepresentableUnit();
 
         if (thisSmallest.equals(thatSmallest))
-            return Long.compare(this.value, that.value);
+            return Long.compare(this.in(thisSmallest), that.in(thatSmallest));
 
         // If one value overflow "before" (it has a bigger smallest representable unit) the other one, then that value
         // is bigger. Note that rate units are not comparable in the absolute

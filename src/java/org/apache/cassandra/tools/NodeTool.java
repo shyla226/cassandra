@@ -33,6 +33,7 @@ import org.apache.cassandra.tools.nodetool.*;
 import org.apache.cassandra.tools.nodetool.nodesync.Disable;
 import org.apache.cassandra.tools.nodetool.nodesync.Enable;
 import org.apache.cassandra.tools.nodetool.nodesync.GetRate;
+import org.apache.cassandra.tools.nodetool.nodesync.RateSimulatorCmd;
 import org.apache.cassandra.tools.nodetool.nodesync.SetRate;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -209,7 +210,8 @@ public class NodeTool
                .withCommand(GetRate.class)
                .withCommand(Enable.class)
                .withCommand(Disable.class)
-               .withCommand(org.apache.cassandra.tools.nodetool.nodesync.Status.class);
+               .withCommand(org.apache.cassandra.tools.nodetool.nodesync.Status.class)
+               .withCommand(RateSimulatorCmd.class);
 
         return builder.build();
     }

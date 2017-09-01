@@ -19,6 +19,7 @@ package com.datastax.apollo.nodesync;
 
 import java.util.List;
 
+import org.junit.After;
 import org.junit.Test;
 
 import org.apache.cassandra.dht.Range;
@@ -31,6 +32,12 @@ import static com.datastax.apollo.nodesync.NodeSyncTestTools.*;
 
 public class UserValidationProposerTest extends AbstractValidationProposerTester
 {
+    @After
+    public void cleanupTask()
+    {
+        NodeSyncHelpers.resetTableSizeAndLocalRangeProviders();
+    }
+
     @Test
     public void testSegmentGeneration() throws Exception
     {
@@ -69,14 +76,12 @@ public class UserValidationProposerTest extends AbstractValidationProposerTester
 
         List<Range<Token>> requested = asList(requestedRanges);
 
+        // We have 3 local ranges and 10MB max seg size, so...
+        NodeSyncHelpers.setTableSizeAndLocalRangeProviders(t -> depth * mb(31), TEST_RANGES);
+
         NodeSyncService service = new NodeSyncService(); // Not even started, just here because we need a reference below
         UserValidationOptions options = new UserValidationOptions("test", table, requested);
-        UserValidationProposer proposer = UserValidationProposer.create(service,
-                                                                        options,
-                                                                        TEST_RANGES,
-                                                                        // We have 3 local ranges and 10MB max seg size, so...
-                                                                        t -> depth * mb(31),
-                                                                        mb(10));
+        UserValidationProposer proposer = UserValidationProposer.create(service, options, mb(10));
 
         proposer.init();
 
