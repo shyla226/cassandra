@@ -153,6 +153,11 @@ public class NodeSyncConfig
         if (max_threads > max_inflight_validations)
             throw new ConfigurationException(String.format("max_threads value (%d) should be less than or equal to max_inflight_validations (%d)",
                                                            max_threads, max_inflight_validations));
+        
+        if (SizeValue.of(page_size_in_kb, SizeUnit.KILOBYTES).in(SizeUnit.BYTES) > Integer.MAX_VALUE)
+            throw new ConfigurationException(String.format("Max page_size_in_kb supported is %d, got: %d",
+                                                           SizeValue.of(Integer.MAX_VALUE, SizeUnit.BYTES).in(SizeUnit.KILOBYTES),
+                                                           page_size_in_kb));
     }
 
     private void validateMinMax(long min, long max, String option, boolean allowZeros) throws ConfigurationException

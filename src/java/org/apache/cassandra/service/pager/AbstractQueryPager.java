@@ -22,6 +22,7 @@ import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.rows.*;
@@ -35,7 +36,6 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     private static final Logger logger = LoggerFactory.getLogger(AbstractQueryPager.class);
 
     protected final T command;
-    protected final DataLimits limits;
     protected final ProtocolVersion protocolVersion;
 
     /** The internal pager is created when the fetch command is issued since its properties will depend on
@@ -45,7 +45,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
      */
     private Pager internalPager;
 
-    /** The total number of rows remaining to be fetched*/
+    /** The total number of rows remaining to be fetched: this is initialized with the limit count, and capped by it */
     private int remaining;
 
     /** This is set to true when we want the last returned row to be also part of the query used when fetching a page */
@@ -54,60 +54,66 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     /** This is the last key we've been reading from (or can still be reading within). This is the key for
        which remainingInPartition makes sense: if we're starting another key, we should reset remainingInPartition
       (and this is done in PagerIterator). This can be null (when we start). */
-    private DecoratedKey lastKey;
+    public DecoratedKey lastKey;
 
-    /** The total number of rows remaining to be fetched in the current partition */
+    /** The total number of rows remaining to be fetched in the current partition: this is initialized with the limit 
+     * partition count, and capped by it  */
     private int remainingInPartition;
 
     /** This is set to true once the iterator is closed, and only then, if we have run out of data */
     private boolean exhausted;
+    
+    /** This is the last counter from the latest page iteration. */
+    DataLimits.Counter lastCounter;
 
     protected AbstractQueryPager(T command, ProtocolVersion protocolVersion)
     {
         this.command = command;
         this.protocolVersion = protocolVersion;
-        this.limits = command.limits();
-        this.remaining = limits.count();
-        this.remainingInPartition = limits.perPartitionCount();
+        this.remaining = command.limits().count();
+        this.remainingInPartition = command.limits().perPartitionCount();
 
         if (logger.isTraceEnabled())
-            logger.trace("{} - created with {}/{}/{}", hashCode(), limits, remaining, remainingInPartition);
+            logger.trace("{} - created with {}/{}/{}", hashCode(), command.limits(), remaining, remainingInPartition);
     }
 
-    public Flow<FlowablePartition> fetchPage(int pageSize, ReadContext ctx)
+    public Flow<FlowablePartition> fetchPage(PageSize pageSize, ReadContext ctx)
     {
         return innerFetch(pageSize, (pageCommand) -> pageCommand.execute(ctx));
     }
 
-    public Flow<FlowablePartition> fetchPageInternal(int pageSize)
+    public Flow<FlowablePartition> fetchPageInternal(PageSize pageSize)
     {
         return innerFetch(pageSize, ReadQuery::executeInternal);
     }
 
-    public Flow<FlowableUnfilteredPartition> fetchPageUnfiltered(int pageSize)
+    public Flow<FlowableUnfilteredPartition> fetchPageUnfiltered(PageSize pageSize)
     {
         assert internalPager == null : "only one iteration at a time is supported";
 
         if (isExhausted())
             return Flow.empty();
 
-        final int toFetch = Math.min(pageSize, remaining);
-        final ReadCommand pageCommand = nextPageReadCommand(toFetch);
-        internalPager = new UnfilteredPager(limits.forPaging(toFetch), command.nowInSec());
+        final ReadCommand pageCommand = nextPageReadCommand(nextPageLimits(), pageSize);
+        internalPager = new UnfilteredPager(pageCommand.limits().duplicate(), command.nowInSec());
         return ((UnfilteredPager)internalPager).apply(pageCommand.executeLocally());
     }
 
-    private Flow<FlowablePartition> innerFetch(int pageSize, Function<ReadCommand, Flow<FlowablePartition>> dataSupplier)
+    private Flow<FlowablePartition> innerFetch(PageSize pageSize, Function<ReadCommand, Flow<FlowablePartition>> dataSupplier)
     {
         assert internalPager == null : "only one iteration at a time is supported";
 
         if (isExhausted())
             return Flow.empty();
 
-        final int toFetch = Math.min(pageSize, remaining);
-        final ReadCommand pageCommand = nextPageReadCommand(toFetch);
-        internalPager = new RowPager(limits.forPaging(toFetch), command.nowInSec());
-        return ((RowPager)internalPager).apply(dataSupplier.apply(pageCommand));
+        final ReadCommand pageCommand = nextPageReadCommand(nextPageLimits(), pageSize);
+        internalPager = new RowPager(pageCommand.limits().duplicate(), command.nowInSec());
+        return ((RowPager) internalPager).apply(dataSupplier.apply(pageCommand));
+    }
+    
+    private DataLimits nextPageLimits()
+    {
+        return limits().withCount(Math.min(limits().count(), remaining));
     }
 
     private class UnfilteredPager extends Pager<Unfiltered>
@@ -224,7 +230,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             counter.endOfIteration();
 
             recordLast(lastKey, lastRow);
-
+            
             remaining = getRemaining();
             remainingInPartition = getRemainingInPartition();
 
@@ -237,6 +243,8 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
             // remove the internal page so that we know that the iteration is finished
             internalPager = null;
+            
+            lastCounter = counter;
         }
 
         private int getRemaining()
@@ -267,7 +275,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
             if (!row.isEmpty())
             {
-                remainingInPartition = limits.perPartitionCount();
+                remainingInPartition = pageLimits.perPartitionCount();
                 lastKey = currentKey;
                 lastRow = row;
             }
@@ -283,7 +291,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
             if (!currentKey.equals(lastKey))
             {
-                remainingInPartition = limits.perPartitionCount();
+                remainingInPartition = pageLimits.perPartitionCount();
                 lastKey = currentKey;
             }
 
@@ -332,11 +340,16 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     {
         return internalPager == null ? remainingInPartition : internalPager.getRemainingInPartition();
     }
+    
+    DataLimits limits() 
+    {
+        return command.limits();
+    }
 
     protected abstract PagingState makePagingState(DecoratedKey lastKey, Row lastRow, boolean inclusive);
     protected abstract PagingState makePagingState(boolean inclusive);
 
-    protected abstract ReadCommand nextPageReadCommand(int pageSize);
+    protected abstract ReadCommand nextPageReadCommand(DataLimits limits, PageSize pageSize);
     protected abstract void recordLast(DecoratedKey key, Row row);
     protected abstract boolean isPreviouslyReturnedPartition(DecoratedKey key);
 }

@@ -34,6 +34,8 @@ public class PageSize
         BYTES,
         ROWS
     }
+    
+    public static PageSize NULL = new PageSize();
 
     private final int size;
     private final PageUnit unit;
@@ -50,6 +52,12 @@ public class PageSize
 
         this.size = size;
         this.unit = unit;
+    }
+    
+    private PageSize()
+    {
+        this.size = -1;
+        this.unit = PageUnit.ROWS;
     }
 
     /**
@@ -178,6 +186,19 @@ public class PageSize
     public boolean isComplete(int rowCount, int sizeInBytes)
     {
         return isInRows() ? rowCount >= size : sizeInBytes >= size;
+    }
+
+    /**
+     * Check if the specified row count would fit in a page of this size, if
+     * the page size is in rows. If the page size is in bytes we cannot say and
+     * false will be returned.
+     *
+     * @param rowCount - the number of rows that should fit into a page
+     * @return true if the page size is unspecified, or it is in rows and larger or equal to rowCount
+     */
+    public boolean isLarger(int rowCount)
+    {
+        return this == PageSize.NULL || (isInRows() && rowCount <= rawSize());
     }
 
     @Override

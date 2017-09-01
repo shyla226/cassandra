@@ -53,12 +53,12 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         return new FromResultList(results);
     }
 
-    public static UntypedResultSet create(SelectStatement select, QueryPager pager, int pageSize)
+    public static UntypedResultSet create(SelectStatement select, QueryPager pager, PageSize pageSize)
     {
         return create(select, pager, pageSize, null);
     }
 
-    public static UntypedResultSet create(SelectStatement select, QueryPager pager, int pageSize, ReadContext params)
+    public static UntypedResultSet create(SelectStatement select, QueryPager pager, PageSize pageSize, ReadContext params)
     {
         return new FromPager(select, pager, pageSize, params);
     }
@@ -174,11 +174,11 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
     {
         private final SelectStatement select;
         private final QueryPager pager;
-        private final int pageSize;
+        private final PageSize pageSize;
         private final List<ColumnSpecification> metadata;
         private final ReadContext params;
 
-        private FromPager(SelectStatement select, QueryPager pager, int pageSize, ReadContext params)
+        private FromPager(SelectStatement select, QueryPager pager, PageSize pageSize, ReadContext params)
         {
             this.select = select;
             this.pager = pager;

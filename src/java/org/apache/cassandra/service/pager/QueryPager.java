@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.service.pager;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.ReadContext;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.rows.FlowablePartition;
@@ -30,8 +31,7 @@ import org.apache.cassandra.utils.flow.Flow;
  * This is essentially an iterator of pages. Each call to fetchPage() will
  * return the next page (i.e. the next list of rows) and isExhausted()
  * indicates whether there is more page to fetch. The pageSize will
- * either be in term of cells or in term of CQL3 row, depending on the
- * parameters of the command we page.
+ * either be in term of CQL rows or bytes to read, see {@code org.apache.cassandra.cql3.PageSize}.
  *
  * Please note that the pager might page within rows, so there is no guarantee
  * that successive pages won't return the same row (though with different
@@ -47,12 +47,12 @@ public interface QueryPager
 {
     QueryPager EMPTY = new QueryPager()
     {
-        public Flow<FlowablePartition> fetchPage(int pageSize, ReadContext ctx) throws RequestValidationException, RequestExecutionException
+        public Flow<FlowablePartition> fetchPage(PageSize pageSize, ReadContext ctx) throws RequestValidationException, RequestExecutionException
         {
             return Flow.empty();
         }
 
-        public Flow<FlowablePartition> fetchPageInternal(int pageSize) throws RequestValidationException, RequestExecutionException
+        public Flow<FlowablePartition> fetchPageInternal(PageSize pageSize) throws RequestValidationException, RequestExecutionException
         {
             return Flow.empty();
         }
@@ -81,20 +81,20 @@ public interface QueryPager
     /**
      * Fetches the next page.
      *
-     * @param pageSize the maximum number of elements to return in the next page.
+     * @param pageSize the size of the elements returned in the next page.
      * @param ctx the read context for the underlying query
      * @return he page of result as an asynchronous flow of partitions
      */
-    public Flow<FlowablePartition> fetchPage(int pageSize, ReadContext ctx)
+    public Flow<FlowablePartition> fetchPage(PageSize pageSize, ReadContext ctx)
     throws RequestValidationException, RequestExecutionException;
 
     /**
      * Fetches the next page internally (in other words, this does a local query).
      *
-     * @param pageSize the maximum number of elements to return in the next page.
+     * @param pageSize the size of the elements returned in the next page.
      * @return the page of result as an asynchronous flow of partitions
      */
-    public Flow<FlowablePartition> fetchPageInternal(int pageSize)
+    public Flow<FlowablePartition> fetchPageInternal(PageSize pageSize)
     throws RequestValidationException, RequestExecutionException;
 
     /**
@@ -106,7 +106,7 @@ public interface QueryPager
     public boolean isExhausted();
 
     /**
-     * The maximum number of cells/CQL3 row that we may still have to return.
+     * The maximum number of CQL rows that we may still have to return.
      * In other words, that's the initial user limit minus what we've already
      * returned (note that it's not how many we *will* return, just the upper
      * limit on it).

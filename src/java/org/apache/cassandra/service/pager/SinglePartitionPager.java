@@ -19,6 +19,7 @@ package org.apache.cassandra.service.pager;
 
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.*;
@@ -70,11 +71,6 @@ public class SinglePartitionPager extends AbstractQueryPager<SinglePartitionRead
         return command.partitionKey().getKey();
     }
 
-    public DataLimits limits()
-    {
-        return command.limits();
-    }
-
     protected PagingState makePagingState(DecoratedKey lastKey, Row lastRow, boolean inclusive)
     {
         return makePagingState(getLastReturned(lastRow), inclusive);
@@ -92,12 +88,12 @@ public class SinglePartitionPager extends AbstractQueryPager<SinglePartitionRead
                : new PagingState(null, lastRow, maxRemaining(), remainingInPartition(), inclusive);
     }
 
-    protected ReadCommand nextPageReadCommand(int pageSize)
+    protected ReadCommand nextPageReadCommand(DataLimits limits, PageSize pageSize)
     {
         Clustering clustering = lastReturned == null ? null : lastReturned.clustering(command.metadata());
-        DataLimits limits = lastReturned == null
-                          ? limits().forPaging(pageSize)
-                          : limits().forPaging(pageSize, key(), remainingInPartition());
+        limits = lastReturned == null
+                 ? limits.forPaging(pageSize)
+                 : limits.forPaging(pageSize, key(), remainingInPartition());
 
         return command.forPaging(clustering, limits, inclusive);
     }

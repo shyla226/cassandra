@@ -42,7 +42,8 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
         OSS_3014 (EncodingVersion.OSS_30, BoundsVersion.OSS_30, DigestVersion.OSS_30),  // Contains changes to ColumnFilter from CASSANDRA-13004
         OSS_40   (EncodingVersion.OSS_30, BoundsVersion.OSS_30, DigestVersion.OSS_30),  // Changes the meaning of isFetchAll in ColumnFilter
         DSE_60   (EncodingVersion.OSS_30, BoundsVersion.OSS_30, DigestVersion.OSS_30);  // Uses the encodingVersion ordinal when writing digest versions
-                                                                                        // rather than the whole messaging version.
+                                                                                        // rather than the whole messaging version,
+                                                                                        // serializes the bytes limit in DataLimits
 
         public final EncodingVersion encodingVersion;
         public final BoundsVersion boundsVersion;
