@@ -78,9 +78,22 @@ public final class AsynchronousChannelProxy extends AbstractChannelProxy<Asynchr
             if (!TPC.USE_AIO || javaAIO)
                 return AsynchronousFileChannel.open(file.toPath(), READ_ONLY, javaAioGroup, NO_ATTRIBUTES);
 
-            EpollEventLoop loop = (EpollEventLoop) TPC.bestTPCScheduler().getExecutor();
-            int flags = FileDescriptor.O_RDONLY | FileDescriptor.O_DIRECT;
-            return new AIOEpollFileChannel(file, loop, flags);
+            try
+            {
+                EpollEventLoop loop = (EpollEventLoop) TPC.bestTPCScheduler().getExecutor();
+                int flags = FileDescriptor.O_RDONLY | FileDescriptor.O_DIRECT;
+                return new AIOEpollFileChannel(file, loop, flags);
+            }
+            catch (IOException e)
+            {
+                // We can get a EINVAL error on open() if the underlying file system does not support O_DIRECT (see
+                // O_DIRECT sections in http://man7.org/linux/man-pages/man2/open.2.html for details). In that case,
+                // we don't want to error out, but rather default to java "fake" asynchronous IO.
+                if (e.getMessage().contains("Invalid argument"))
+                    return AsynchronousFileChannel.open(file.toPath(), READ_ONLY, javaAioGroup, NO_ATTRIBUTES);
+                else
+                    throw e;
+            }
         }
         catch (IOException e)
         {
