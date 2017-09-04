@@ -43,6 +43,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -372,7 +373,8 @@ public final class SchemaKeyspace
     private static void convertSchemaToMutations(Map<DecoratedKey, Mutation> mutationMap, String schemaTableName)
     {
         ReadCommand cmd = getReadCommandForTableSchema(schemaTableName);
-        try (ReadOrderGroup orderGroup = cmd.startOrderGroup(); UnfilteredPartitionIterator iter = cmd.executeLocally(orderGroup))
+        try (ReadOrderGroup orderGroup = cmd.startOrderGroup();
+             UnfilteredPartitionIterator iter = cmd.executeLocally(orderGroup))
         {
             while (iter.hasNext())
             {
@@ -387,11 +389,16 @@ public final class SchemaKeyspace
                     {
                         mutation = new Mutation(NAME, key);
                         mutationMap.put(key, mutation);
+                        cmd.metadata().getKeyValidator().validate(key.getKey());
                     }
 
-                    mutation.add(PartitionUpdate.fromIterator(partition));
+                    mutation.add(PartitionUpdate.fromIterator(UnfilteredRowIterators.withValidation(partition)));
                 }
             }
+        }
+        catch (Exception e)
+        {
+            logger.error("Can't convert a schema entry to mutation", e);
         }
     }
 
@@ -951,24 +958,46 @@ public final class SchemaKeyspace
         String query = format("SELECT table_name FROM %s.%s WHERE keyspace_name = ?", NAME, TABLES);
 
         Tables.Builder tables = org.apache.cassandra.schema.Tables.builder();
+        Set<String> tableSet = new HashSet<>();
         for (UntypedResultSet.Row row : query(query, keyspaceName))
         {
-            String tableName = row.getString("table_name");
+            String tableName = null;
+
             try
             {
-                tables.add(fetchTable(keyspaceName, tableName, types));
+                tableName = row.getString("table_name");
+                if (!tableSet.contains(tableName))
+                {
+                    tables.add(fetchTable(keyspaceName, tableName, types));
+                    tableSet.add(tableName);
+                }
+                else
+                {
+                    throw new DuplicateException(String.format("Found a duplicate entry for the table %s in keyspace %s.", tableName, keyspaceName));
+                }
             }
-            catch (MissingColumns exc)
+            catch (MarshalException | MissingColumns | DuplicateException exc)
             {
                 if (!IGNORE_CORRUPTED_SCHEMA_TABLES)
                 {
-                    logger.error("No columns found for table {}.{} in {}.{}.  This may be due to " +
-                                 "corruption or concurrent dropping and altering of a table.  If this table " +
-                                 "is supposed to be dropped, restart cassandra with -Dcassandra.ignore_corrupted_schema_tables=true " +
-                                 "and run the following query: \"DELETE FROM {}.{} WHERE keyspace_name = '{}' AND table_name = '{}';\"." +
-                                 "If the table is not supposed to be dropped, restore {}.{} sstables from backups.",
-                                 keyspaceName, tableName, NAME, COLUMNS, NAME, TABLES, keyspaceName, tableName, NAME, COLUMNS);
+                    if (tableName == null)
+                        logger.error("Can not decode the table name in {} keyspace. This may be due to the sstable corruption." +
+                                     "In order to start Cassandra ignoring this error, run it with -Dcassandra.ignore_corrupted_schema_tables=true", keyspaceName);
+                    else
+                        logger.error("No columns found for table {}.{} in {}.{}.  This may be due to " +
+                                     "corruption or concurrent dropping and altering of a table.  If this table " +
+                                     "is supposed to be dropped, restart cassandra with -Dcassandra.ignore_corrupted_schema_tables=true " +
+                                     "and run the following query: \"DELETE FROM {}.{} WHERE keyspace_name = '{}' AND table_name = '{}';\"." +
+                                     "If the table is not supposed to be dropped, restore {}.{} sstables from backups.",
+                                     keyspaceName, tableName, NAME, COLUMNS, NAME, TABLES, keyspaceName, tableName, NAME, COLUMNS);
                     throw exc;
+                }
+                else
+                {
+                    if (tableName == null)
+                        logger.warn("Skipping table in the keyspace {}, because cassandra.ignore_corrupted_schema_tables is set to true.", keyspaceName);
+                    else
+                        logger.warn("Skipping {}.{} table, because cassandra.ignore_corrupted_schema_tables is set to true.", keyspaceName, tableName);
                 }
             }
         }
@@ -1453,6 +1482,14 @@ public final class SchemaKeyspace
     private static class MissingColumns extends RuntimeException
     {
         MissingColumns(String message)
+        {
+            super(message);
+        }
+    }
+
+    private static class DuplicateException extends RuntimeException
+    {
+        DuplicateException(String message)
         {
             super(message);
         }
