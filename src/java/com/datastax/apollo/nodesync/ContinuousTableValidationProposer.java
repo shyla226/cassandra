@@ -29,7 +29,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.config.NodeSyncConfig;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Range;
@@ -210,19 +209,6 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
         if (table.equals(this.table) && !table.params.nodeSync.isEnabled(table))
         {
             logger.info("Stopping NodeSync validations on table {} following user deactivation", table);
-            return null;
-        }
-        return this;
-    }
-
-    public ValidationProposer onTableRemoval(String keyspace, String table)
-    {
-        if (this.table.keyspace.equals(keyspace) && this.table.name.equals(table))
-        {
-            // Logging at debug because when you explicitly dropped a table, it doesn't feel like you'd care too much
-            // about that confirmation. Further, when a keyspace is dropped, this is called for every table it has
-            // and this would feel like log spamming if the keyspace has very many tables.
-            logger.debug("Stopping NodeSync validations on table {} as the table has been dropped", table);
             return null;
         }
         return this;

@@ -327,17 +327,17 @@ public class NodeSyncService implements NodeSyncServiceMBean
         return (int)config.getRate().in(RateUnit.KB_S);
     }
 
-    public String startUserValidation(Map<String, String> optionMap)
+    public void startUserValidation(Map<String, String> optionMap)
     {
         ValidationScheduler scheduler = this.scheduler;
         if (scheduler == null)
             throw new IllegalStateException("Cannot start user validation, NodeSync is not currently running.");
 
         // TODO: we should use JMX notifications for progress reporting. Not really a priority though.
-        return scheduler.userValidations().createAndStart(UserValidationOptions.fromMap(optionMap)).id();
+        scheduler.userValidations().createAndStart(UserValidationOptions.fromMap(optionMap));
     }
 
-    public String startUserValidation(String id, String keyspace, String table, String ranges)
+    public void startUserValidation(String id, String keyspace, String table, String ranges)
     {
         HashMap<String, String> m = new HashMap<>();
         m.put(UserValidationOptions.ID, id);
@@ -345,7 +345,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
         m.put(UserValidationOptions.TABLE_NAME, table);
         if (ranges != null && !ranges.isEmpty())
             m.put(UserValidationOptions.REQUESTED_RANGES, ranges);
-        return startUserValidation(m);
+        startUserValidation(m);
     }
 
     public void cancelUserValidation(String id)
@@ -360,7 +360,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
 
         // We could return the value of cancel() from this method, but as validations are unregistered as soon as they
         // complete, we can only get false here on a race with that removal and the window for that is really small. It
-        // follows that returned a boolean where 99.9% of user will always see it return true might be more confusing
+        // follows that returning a boolean where 99.9% of user will always see it return true might be more confusing
         // than anything. So we throw an exception instead: after all, if this had run just a few ms later, we'd have
         // thrown a NoSuchElementException.
         if (!proposer.cancel())
