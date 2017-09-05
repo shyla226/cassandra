@@ -1124,7 +1124,7 @@ public abstract class CQLTester
         assert ignoreExtra || expectedRows.size() == actualRows.size();
     }
 
-    private static List<String> makeRowStrings(UntypedResultSet resultSet)
+    protected static List<String> makeRowStrings(UntypedResultSet resultSet)
     {
         List<List<ByteBuffer>> rows = new ArrayList<>();
         for (UntypedResultSet.Row row : resultSet)
