@@ -147,7 +147,9 @@ public class CassandraAuthorizer implements IAuthorizer
     private void deletePermissionsFor(IResource resource, Set<String> roles)
     {
         process("DELETE FROM " + ROLE_PERMISSIONS_TABLE + " WHERE role IN (%s) AND resource = '%s'",
-                Joiner.on(", ").join(roles),
+                roles.stream()
+                     .map(CassandraAuthorizer::escape)
+                     .collect(Collectors.joining("', '", "'", "'")),
                 escape(resource.getName()));
     }
 
@@ -164,7 +166,7 @@ public class CassandraAuthorizer implements IAuthorizer
 
         Set<String> roles = new HashSet<>(rows.size());
         for (UntypedResultSet.Row row : rows)
-            roles.add(escape(row.getString("role")));
+            roles.add(row.getString("role"));
 
         return roles;
     }
@@ -367,6 +369,7 @@ public class CassandraAuthorizer implements IAuthorizer
     private static UntypedResultSet process(String query, Object... arguments) throws RequestExecutionException
     {
         String cql = String.format(query, arguments);
+        logger.info("EXECUTING {}", cql);
         return QueryProcessor.processBlocking(cql, ConsistencyLevel.LOCAL_ONE);
     }
 }
