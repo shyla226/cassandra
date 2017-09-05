@@ -64,8 +64,6 @@ import org.apache.cassandra.service.CacheService.CacheType;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.LineNumberInference;
 
-import org.apache.commons.lang3.StringUtils;
-
 import static org.apache.cassandra.io.util.FileUtils.ONE_GB;
 
 public class DatabaseDescriptor
@@ -437,7 +435,8 @@ public class DatabaseDescriptor
             throw new ConfigurationException("native_transport_max_frame_size_in_mb must be positive, but was " + conf.native_transport_max_frame_size_in_mb, false);
 
         // if data dirs, commitlog dir, or saved caches dir are set in cassandra.yaml, use that.  Otherwise,
-        // use -Dcassandra.storagedir (set in cassandra-env.sh) as the parent dir for data/, commitlog/, and saved_caches/
+        // use -Dcassandra.storagedir (set in cassandra-env.sh) as the parent dir for data/, commitlog/,
+        // saved_caches/ and system_key/
         if (conf.commitlog_directory == null)
             conf.commitlog_directory = storagedirFor("commitlog");
 
@@ -839,6 +838,45 @@ public class DatabaseDescriptor
         // always attempt to load the cipher factory, as we could be in the situation where the user has disabled encryption,
         // but has existing commitlogs and sstables on disk that are still encrypted (and still need to be read)
         encryptionContext = new EncryptionContext(conf.transparent_data_encryption_options);
+
+        // DSE system tables encryption
+        if (conf.system_info_encryption.enabled)
+        {
+            if (conf.system_info_encryption.isKmipKeyProvider())
+            {
+                if (conf.system_info_encryption.kmip_host == null)
+                    throw new ConfigurationException("system_info_encryption.kmip_host must be specified for KMIP key provider");
+                try
+                {
+                    InetAddress.getByName(conf.system_info_encryption.kmip_host);
+                }
+                catch (Throwable t)
+                {
+                    throw new ConfigurationException(String.format("system_info_encryption.kmip_host '%s' is not a valid, " +
+                                                                   "resolvable host name: %s",
+                                                                   conf.system_info_encryption.kmip_host, t));
+                }
+            }
+            else // local file system provider
+            {
+                //only set and/or use the system key directory if sustem_info_encryption is enabled.
+                if (conf.system_key_directory == null)
+                    conf.system_key_directory = storagedirFor("system_key");
+
+                File systemKeyDir = new File(conf.system_key_directory);
+                if (!systemKeyDir.isDirectory() || !systemKeyDir.canRead() || !systemKeyDir.canWrite())
+                    throw new ConfigurationException(String.format("system_key_directory '%s' must be a directory " +
+                                                                   ", readable and writeable by the DSE process.",
+                                                                   conf.system_key_directory));
+            }
+
+            if (conf.system_info_encryption.key_name == null || conf.system_info_encryption.key_name.trim().isEmpty())
+                throw new ConfigurationException("system_info_encryption.key_name must not be empty");
+            if (conf.system_info_encryption.chunk_length_kb <= 0)
+                throw new ConfigurationException("system_info_encryption.chunk_length_kb must be greater than 0");
+            if (conf.system_info_encryption.secret_key_strength <= 0)
+                throw new ConfigurationException("system_info_encryption.secret_key_strength must be greater than 0");
+        }
     }
 
     public static void applySeedProvider()
@@ -1018,6 +1056,16 @@ public class DatabaseDescriptor
             snitchClassName = "org.apache.cassandra.locator." + snitchClassName;
         IEndpointSnitch snitch = FBUtilities.construct(snitchClassName, "snitch");
         return dynamic ? new DynamicEndpointSnitch(snitch) : snitch;
+    }
+
+    public static String getSystemKeyDirectory()
+    {
+        return conf.system_key_directory;
+    }
+
+    public static SystemTableEncryptionOptions getSystemTableEncryptionOptions()
+    {
+        return conf.system_info_encryption;
     }
 
     public static IAuthenticator getAuthenticator()

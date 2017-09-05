@@ -33,7 +33,9 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
+import org.apache.cassandra.config.SystemTableEncryptionOptions;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.compress.*;
@@ -61,10 +63,18 @@ public final class CompressionParams
                                                                         // different default value.
     public static final Versioned<StreamVersion, Serializer<CompressionParams>> serializers = StreamVersion.versioned(CompressionParmsSerializer::new);
 
+    // Sstable compression options
     public static final String CLASS = "class";
     public static final String CHUNK_LENGTH_IN_KB = "chunk_length_in_kb";
     public static final String ENABLED = "enabled";
     public static final String MIN_COMPRESS_RATIO = "min_compress_ratio";
+
+    // Sstable encryption options
+    public static final String CIPHER_ALGORITHM = "cipher_algorithm";
+    public static final String SECRET_KEY_STRENGTH = "secret_key_strength";
+    public static final String KEY_PROVIDER = "key_provider";
+    public static final String HOST_NAME = "kmip_host";
+    public static final String SECRET_KEY_FILE = "secret_key_file";
 
     public static final CompressionParams DEFAULT = new CompressionParams(LZ4Compressor.create(Collections.<String, String>emptyMap()),
                                                                           DEFAULT_CHUNK_LENGTH,
@@ -115,6 +125,36 @@ public final class CompressionParams
         cp.validate();
 
         return cp;
+    }
+
+    /**
+     * If system_info_encryption is enabled in cassandra.yaml, add the compression/encryption options to the table builder.
+     * {@link org.apache.cassandra.db.SystemKeyspace#Paxos}
+     */
+    public static CompressionParams forSystemTables() {
+        SystemTableEncryptionOptions options = DatabaseDescriptor.getSystemTableEncryptionOptions();
+
+        if (!options.enabled)
+            return DEFAULT;
+
+        Map <String, String> opts = new HashMap<>();
+
+        opts.put(CLASS, "org.apache.cassandra.io.compress.EncryptingLZ4Compressor");
+        opts.put(CHUNK_LENGTH_IN_KB, Integer.toString(options.chunk_length_kb));
+
+        opts.put(CIPHER_ALGORITHM, options.cipher_algorithm);
+        opts.put(SECRET_KEY_STRENGTH, Integer.toString(options.secret_key_strength));
+
+        opts.put(KEY_PROVIDER, options.key_provider);
+        if (options.isKmipKeyProvider())
+            opts.put(HOST_NAME, options.kmip_host);
+        else  // local file system provider
+            opts.put(SECRET_KEY_FILE,
+                     format("%s/system/%s",
+                            DatabaseDescriptor.getSystemKeyDirectory(),
+                            options.key_name));
+
+        return fromMap(opts);
     }
 
     public Class<? extends ICompressor> klass()

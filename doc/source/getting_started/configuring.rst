@@ -48,6 +48,7 @@ The following yaml properties control the location of directories:
 - ``data_file_directories``: one or more directories where data files are located.
 - ``commitlog_directory``: the directory where commitlog files are located.
 - ``saved_caches_directory``: the directory where saved caches are located.
+- ``system_key_directory``: the directory where system encryption keys are located.
 - ``hints_directory``: the directory where hints are located.
 
 For performance reasons, if you have multiple disks, consider putting commitlog and data files on different disks.

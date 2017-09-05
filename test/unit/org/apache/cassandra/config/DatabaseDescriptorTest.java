@@ -18,6 +18,7 @@
 */
 package org.apache.cassandra.config;
 
+import java.io.File;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -36,6 +37,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
 public class DatabaseDescriptorTest
@@ -212,6 +214,93 @@ public class DatabaseDescriptorTest
     }
 
     @Test
+    public void testSystemInfoEncryption()
+    {
+        String someDir = new File(".").getAbsolutePath();
+
+        Config testConfig;
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = false;
+        DatabaseDescriptor.applyEncryptionContext();
+
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = true;
+        assertConfigException(DatabaseDescriptor::applyEncryptionContext, "system_key_directory is missing and -Dcassandra.storagedir is not set");
+
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = true;
+        testConfig.system_key_directory = someDir;
+        DatabaseDescriptor.applyEncryptionContext();
+
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = true;
+        testConfig.system_info_encryption.key_provider = "LocalFileSystemKeyProviderFactory";
+        testConfig.system_key_directory = someDir;
+        DatabaseDescriptor.applyEncryptionContext();
+
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = true;
+        testConfig.system_key_directory = someDir;
+        testConfig.system_info_encryption.chunk_length_kb = 0;
+        assertConfigException(DatabaseDescriptor::applyEncryptionContext, "system_info_encryption.chunk_length_kb must be greater than 0");
+
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = true;
+        testConfig.system_key_directory = someDir;
+        testConfig.system_info_encryption.secret_key_strength = 0;
+        assertConfigException(DatabaseDescriptor::applyEncryptionContext, "system_info_encryption.secret_key_strength must be greater than 0");
+
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = true;
+        testConfig.system_key_directory = someDir;
+        testConfig.system_info_encryption.key_name = null;
+        assertConfigException(DatabaseDescriptor::applyEncryptionContext, "system_info_encryption.key_name must not be empty");
+
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = true;
+        testConfig.system_key_directory = someDir;
+        testConfig.system_info_encryption.key_name = "  ";
+        assertConfigException(DatabaseDescriptor::applyEncryptionContext, "system_info_encryption.key_name must not be empty");
+
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = true;
+        testConfig.system_info_encryption.key_provider = "KmipKeyProviderFactory";
+        assertConfigException(DatabaseDescriptor::applyEncryptionContext, "system_info_encryption.kmip_host must be specified for KMIP key provider");
+
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = true;
+        testConfig.system_info_encryption.key_provider = "com.datastax.bdp.cassandra.crypto.KmipKeyProviderFactory";
+        assertConfigException(DatabaseDescriptor::applyEncryptionContext, "system_info_encryption.kmip_host must be specified for KMIP key provider");
+
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = true;
+        testConfig.system_info_encryption.key_provider = "com.datastax.bdp.cassandra.crypto.KmipKeyProviderFactory";
+        testConfig.system_info_encryption.kmip_host = "this-crazy-hostname-hopefully.never-exists-in-the-world.datastax.lan";
+        assertConfigException(DatabaseDescriptor::applyEncryptionContext, "system_info_encryption.kmip_host 'this-crazy-hostname-hopefully.never-exists-in-the-world.datastax.lan' " +
+                                                                          "is not a valid, resolvable host name: java.net.UnknownHostException: " +
+                                                                          "this-crazy-hostname-hopefully.never-exists-in-the-world.datastax.lan: Name or service not known");
+
+        DatabaseDescriptor.setConfig(testConfig = new Config());
+        testConfig.system_info_encryption.enabled = true;
+        testConfig.system_info_encryption.key_provider = "com.datastax.bdp.cassandra.crypto.KmipKeyProviderFactory";
+        testConfig.system_info_encryption.kmip_host = "localhost";
+        DatabaseDescriptor.applyEncryptionContext();
+    }
+
+    private void assertConfigException(Runnable runnable, String exceptionPattern)
+    {
+        try
+        {
+            runnable.run();
+            fail("Expected ConfigurationException to be thrown");
+        }
+        catch (ConfigurationException e)
+        {
+            assertTrue("Expected '" + exceptionPattern + "', but got '" + e.getMessage() + "'", e.getMessage().matches(exceptionPattern));
+        }
+    }
+
+    @Test
     public void testLowestAcceptableTimeouts() throws ConfigurationException
     {
         Config testConfig = new Config();
@@ -222,7 +311,7 @@ public class DatabaseDescriptorTest
         testConfig.cas_contention_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT + 1;
         testConfig.counter_write_request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT + 1;
         testConfig.request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT + 1;
-        
+
         assertTrue(testConfig.read_request_timeout_in_ms > DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
         assertTrue(testConfig.range_request_timeout_in_ms > DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
         assertTrue(testConfig.write_request_timeout_in_ms > DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);

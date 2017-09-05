@@ -62,6 +62,10 @@ public class Config
     public volatile int credentials_cache_max_entries = 1000;
     public volatile int credentials_update_interval_in_ms = -1;
 
+    // encryption options
+    public String system_key_directory;
+    public SystemTableEncryptionOptions system_info_encryption = new SystemTableEncryptionOptions();
+
     public Integer tpc_cores;
 
     /* Hashing strategy Random or OPHF */

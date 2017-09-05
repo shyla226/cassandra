@@ -128,6 +128,7 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.LogbackStatusListener$1",
     "org.apache.cassandra.LogbackStatusListener$2",
     "org.apache.cassandra.TeeingAppender",
+    "org.apache.cassandra.config.SystemTableEncryptionOptions",
     // generated classes
     "org.apache.cassandra.config.ConfigBeanInfo",
     "org.apache.cassandra.config.ConfigCustomizer",

@@ -40,7 +40,6 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
-import org.apache.cassandra.cql3.statements.CreateTypeStatement;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionHistoryTabularData;
@@ -105,9 +104,10 @@ public final class SystemKeyspace
               + "PRIMARY KEY ((id)))")
               .partitioner(new LocalPartitioner(TimeUUIDType.instance))
               .compaction(CompactionParams.scts(singletonMap("min_threshold", "2")))
+              .compression(CompressionParams.forSystemTables())
               .build();
 
-    private static final TableMetadata Paxos =
+    public static final TableMetadata Paxos =
         parse(PAXOS,
               "in-progress paxos proposals",
               "CREATE TABLE %s ("
@@ -122,6 +122,7 @@ public final class SystemKeyspace
               + "proposal_version int,"
               + "PRIMARY KEY ((row_key), cf_id))")
               .compaction(CompactionParams.lcs(emptyMap()))
+              .compression(CompressionParams.forSystemTables())
               .build();
 
     private static final TableMetadata BuiltIndexes =
