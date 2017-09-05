@@ -145,6 +145,8 @@ public class CommitLogTest
     @Test
     public void testRecoveryWithEmptyLog() throws Exception
     {
+        // The first empty file we expect to throw as it's invalid
+        // We need to pass the second as well, because allowTruncation will be set to true for the final segment
         runExpecting(() -> {
             CommitLog.instance.recoverFiles(new File[]{
             tmpFile(CommitLogDescriptor.current_version),
