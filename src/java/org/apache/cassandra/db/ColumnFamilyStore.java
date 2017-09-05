@@ -2584,7 +2584,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         List<SSTableReader> truncatedSSTables = new ArrayList<>();
 
-        for (SSTableReader sstable : getSSTables(SSTableSet.LIVE))
+        for (SSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
         {
             if (!sstable.newSince(truncatedAt))
                 truncatedSSTables.add(sstable);
