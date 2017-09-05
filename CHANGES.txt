@@ -1,4 +1,5 @@
 4.0
+ * Allow changing log levels via nodetool for related classes (CASSANDRA-12696)
  * Add stress profile yaml with LWT (CASSANDRA-7960)
  * simplify mx4j configuration (Cassandra-13578)
  * Fix trigger example on 4.0 (CASSANDRA-13796)
@@ -130,6 +131,9 @@
  * Duplicate the buffer before passing it to analyser in SASI operation (CASSANDRA-13512)
  * Properly evict pstmts from prepared statements cache (CASSANDRA-13641)
 Merged from 3.0:
+ * Change repair midpoint logging for tiny ranges (CASSANDRA-13603)
+ * Better handle corrupt final commitlog segment (CASSANDRA-11995)
+ * StreamingHistogram is not thread safe (CASSANDRA-13756)
  * Better tolerate improperly formatted bcrypt hashes (CASSANDRA-13626)
  * Fix race condition in read command serialization (CASSANDRA-13363)
  * Don't skip corrupted sstables on startup (CASSANDRA-13620)

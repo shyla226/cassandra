@@ -174,11 +174,6 @@ public class Client extends SimpleClient
         {
             return new OptionsMessage();
         }
-        else if (msgType.equals("CREDENTIALS"))
-        {
-            System.err.println("[ERROR] CREDENTIALS command is no longer supported, use AUTHENTICATE instead");
-            return null;
-        }
         else if (msgType.equals("AUTHENTICATE"))
         {
             Map<String, String> credentials = readCredentials(iter);
