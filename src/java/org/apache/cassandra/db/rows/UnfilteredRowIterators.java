@@ -164,8 +164,25 @@ public abstract class UnfilteredRowIterators
      */
     public static Flow<Void> digest(FlowableUnfilteredPartition partition, MessageDigest digest, DigestVersion version)
     {
-        digestPartition(partition, digest, version);
-        return partition.content.process(unfiltered -> digestUnfiltered(unfiltered, digest));
+        // We only want to put something in the digest if the partition is not empty.
+        // TODO In pre-TPC, FlowableUnfilteredPartition should not contain empty partition. It's a walkaround
+        // to avoid costly emptyFiltering in Flow. SEE APOLLO-1023
+        if (partition.header.isEmpty() && partition.staticRow().isEmpty())
+        {
+            return partition.content.reduce(true,
+                                            (first, unfiltered) -> {
+                                                if (first)
+                                                    digestPartition(partition, digest, version);
+                                                digestUnfiltered(unfiltered, digest);
+                                                return false;
+                                            })
+                                    .map(b -> null);
+        }
+        else
+        {
+            digestPartition(partition, digest, version);
+            return partition.content.process(unfiltered -> digestUnfiltered(unfiltered, digest));
+        }
     }
 
     /**
