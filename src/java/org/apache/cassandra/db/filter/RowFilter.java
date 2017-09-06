@@ -152,7 +152,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     public Flow<Boolean> isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, int nowInSec)
     {
         // We purge all tombstones as the expressions isSatisfiedBy methods expects it
-        Row purged = row.purge(DeletionPurger.PURGE_ALL, nowInSec);
+        Row purged = row.purge(DeletionPurger.PURGE_ALL, nowInSec, metadata.enforceStrictLiveness());
         if (purged == null)
             return Flow.just(expressions.isEmpty());
 
@@ -312,10 +312,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 {
                     if (unfiltered.isRow())
                     {
-                        Row purged = ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec);
+                        Row purged = ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec, metadata.enforceStrictLiveness());
                         if (purged == null)
                             return Flow.empty();
-
 
                         return Flow.fromIterable(rowLevelExpressions)
                                    .flatMap(e -> e.isSatisfiedBy(metadata, pk, purged))

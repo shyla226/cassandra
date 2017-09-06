@@ -513,13 +513,19 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     {
         private final DeletionPurger purger;
         private final int nowInSec;
+        private final boolean enforceStrictLiveness;
 
-        public PurgeOp(int nowInSec, int gcBefore, Supplier<Integer> oldestUnrepairedTombstone, boolean onlyPurgeRepairedTombstones)
+        public PurgeOp(int nowInSec,
+                       int gcBefore,
+                       Supplier<Integer> oldestUnrepairedTombstone,
+                       boolean onlyPurgeRepairedTombstones,
+                       boolean enforceStrictLiveness)
         {
             this.nowInSec = nowInSec;
             this.purger = (timestamp, localDeletionTime) ->
                           !(onlyPurgeRepairedTombstones && localDeletionTime >= oldestUnrepairedTombstone.get())
                           && localDeletionTime < gcBefore;
+            this.enforceStrictLiveness = enforceStrictLiveness;
         }
 
         public FlowableUnfilteredPartition purgePartition(FlowableUnfilteredPartition partition)
@@ -537,12 +543,12 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
         public Unfiltered purgeUnfiltered(Unfiltered next)
         {
-            return next.purge(purger, nowInSec);
+            return next.purge(purger, nowInSec, enforceStrictLiveness);
         }
 
         public Row applyToStatic(Row row)
         {
-            Row purged = row.purge(purger, nowInSec);
+            Row purged = row.purge(purger, nowInSec, enforceStrictLiveness);
             return purged != null ? purged : Rows.EMPTY_STATIC_ROW;
         }
     }
@@ -556,7 +562,8 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         return iterator.map(new PurgeOp(nowInSec(),
                                         cfs.gcBefore(nowInSec()),
                                         this::oldestUnrepairedTombstone,
-                                        cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones())
+                                        cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones(),
+                                        cfs.metadata().enforceStrictLiveness())
                             ::purgePartition);
     }
 

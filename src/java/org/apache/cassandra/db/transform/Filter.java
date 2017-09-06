@@ -27,10 +27,13 @@ final class Filter extends Transformation
 {
     private final boolean filterEmpty; // generally true except for direct row filtration
     private final int nowInSec;
-    public Filter(boolean filterEmpty, int nowInSec)
+    private final boolean enforceStrictLiveness;
+
+    public Filter(boolean filterEmpty, int nowInSec, boolean enforceStrictLiveness)
     {
         this.filterEmpty = filterEmpty;
         this.nowInSec = nowInSec;
+        this.enforceStrictLiveness = enforceStrictLiveness;
     }
 
     @Override
@@ -52,14 +55,14 @@ final class Filter extends Transformation
         if (row.isEmpty())
             return Rows.EMPTY_STATIC_ROW;
 
-        row = row.purge(DeletionPurger.PURGE_ALL, nowInSec);
+        row = row.purge(DeletionPurger.PURGE_ALL, nowInSec, enforceStrictLiveness);
         return row == null ? Rows.EMPTY_STATIC_ROW : row;
     }
 
     @Override
     protected Row applyToRow(Row row)
     {
-        return row.purge(DeletionPurger.PURGE_ALL, nowInSec);
+        return row.purge(DeletionPurger.PURGE_ALL, nowInSec, enforceStrictLiveness);
     }
 
     @Override

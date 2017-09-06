@@ -132,7 +132,7 @@ public class RangeTombstoneBoundMarker extends AbstractRangeTombstoneMarker<Clus
         deletion.digest(digest);
     }
 
-    public RangeTombstoneMarker purge(DeletionPurger purger, int nowInSec)
+    public RangeTombstoneMarker purge(DeletionPurger purger, int nowInSec, boolean enforceStrictLiveness)
     {
         return purger.shouldPurge(this.deletionTime()) ? null : this;
     }

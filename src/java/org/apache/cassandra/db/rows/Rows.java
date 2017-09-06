@@ -278,6 +278,9 @@ public abstract class Rows
         LivenessInfo mergedInfo = existingInfo.supersedes(updateInfo) ? existingInfo : updateInfo;
 
         long timeDelta = Math.abs(existingInfo.timestamp() - mergedInfo.timestamp());
+        // Math.abs(MIN - 0) = MIN
+        if (timeDelta == Long.MIN_VALUE)
+            timeDelta = Long.MAX_VALUE;
 
         Row.Deletion rowDeletion = existing.deletion().supersedes(update.deletion()) ? existing.deletion() : update.deletion();
 

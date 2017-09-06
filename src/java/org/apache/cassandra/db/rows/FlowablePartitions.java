@@ -424,28 +424,29 @@ public class FlowablePartitions
         }
     }
 
-    private static Row filterStaticRow(Row row, int nowInSec)
+    private static Row filterStaticRow(Row row, int nowInSec, boolean enforStrictLiveness)
     {
         if (row == null || row.isEmpty())
             return Rows.EMPTY_STATIC_ROW;
 
-        row = row.purge(DeletionPurger.PURGE_ALL, nowInSec);
+        row = row.purge(DeletionPurger.PURGE_ALL, nowInSec, enforStrictLiveness);
         return row == null ? Rows.EMPTY_STATIC_ROW : row;
     }
 
     public static FlowablePartition filter(FlowableUnfilteredPartition data, int nowInSec)
     {
-        Row staticRow = data.staticRow.purge(DeletionPurger.PURGE_ALL, nowInSec);
+        boolean enforStrictLiveness = data.metadata().enforceStrictLiveness();
+        Row staticRow = data.staticRow.purge(DeletionPurger.PURGE_ALL, nowInSec, enforStrictLiveness);
         Flow<Row> content = filteredContent(data, nowInSec);
 
         return new FlowablePartition(data.header,
-                                     filterStaticRow(staticRow, nowInSec),
+                                     filterStaticRow(staticRow, nowInSec, enforStrictLiveness),
                                      content);
     }
 
     public static Flow<FlowablePartition> filterAndSkipEmpty(FlowableUnfilteredPartition data, int nowInSec)
     {
-        Row staticRow = filterStaticRow(data.staticRow, nowInSec);
+        Row staticRow = filterStaticRow(data.staticRow, nowInSec, data.metadata().enforceStrictLiveness());
         Flow<Row> content = filteredContent(data, nowInSec);
 
         if (!staticRow.isEmpty())
@@ -461,8 +462,8 @@ public class FlowablePartitions
     private static Flow<Row> filteredContent(FlowableUnfilteredPartition data, int nowInSec)
     {
         return data.content.skippingMap(unfiltered -> unfiltered.isRow()
-                                                      ? ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec)
-                                                      : null);
+                ? ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec, data.metadata().enforceStrictLiveness())
+                : null);
     }
 
     /**

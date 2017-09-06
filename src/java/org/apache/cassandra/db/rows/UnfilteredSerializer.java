@@ -114,6 +114,11 @@ public class UnfilteredSerializer extends VersionDependent<EncodingVersion>
      * Extended flags
      */
     private final static int IS_STATIC               = 0x01; // Whether the encoded row is a static. If there is no extended flag, the row is assumed not static.
+    /**
+     * A shadowable tombstone cannot replace a previous row deletion otherwise it could resurrect a
+     * previously deleted cell not updated by a subsequent update, SEE CASSANDRA-11500
+     */
+    @Deprecated
     private final static int HAS_SHADOWABLE_DELETION = 0x02; // Whether the row deletion is shadowable. If there is no extended flag (or no row deletion), the deletion is assumed not shadowable.
 
     private UnfilteredSerializer(EncodingVersion version)

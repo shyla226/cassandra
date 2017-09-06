@@ -54,7 +54,7 @@ public interface RangeTombstoneMarker extends Unfiltered
         return false;
     }
 
-    public RangeTombstoneMarker purge(DeletionPurger purge, int nowInSec);
+    public RangeTombstoneMarker purge(DeletionPurger purge, int nowInSec, boolean enforceStrictLiveness);
 
     /**
      * Utility class to help merging range tombstone markers coming from multiple inputs (UnfilteredRowIterators).

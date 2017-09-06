@@ -5308,7 +5308,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public static List<PartitionPosition> getDiskBoundaries(ColumnFamilyStore cfs, Directories.DataDirectory[] directories)
     {
-        if (!SPLIT_SSTABLES_BY_TOKEN_RANGE)
+        if (!SPLIT_SSTABLES_BY_TOKEN_RANGE || !cfs.getPartitioner().splitter().isPresent())
             return null;
 
         List<Range<Token>> localRanges = getStartupTokenRanges(cfs.keyspace);

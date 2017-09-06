@@ -151,7 +151,7 @@ public class RangeTombstoneBoundaryMarker extends AbstractRangeTombstoneMarker<C
         startDeletion.digest(digest);
     }
 
-    public RangeTombstoneMarker purge(DeletionPurger purger, int nowInSec)
+    public RangeTombstoneMarker purge(DeletionPurger purger, int nowInSec, boolean enforceStrictLiveness)
     {
         // We can only skip the whole marker if both deletion time are purgeable.
         // If only one of them is, filterTombstoneMarker will deal with it.

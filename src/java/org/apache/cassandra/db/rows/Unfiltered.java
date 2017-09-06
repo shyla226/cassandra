@@ -79,8 +79,9 @@ public interface Unfiltered extends Clusterable
      *
      * @param purger the {@code DeletionPurger} to use to decide what can be purged.
      * @param nowInSec the current time to decide what is deleted and what isn't (in the case of expired cells).
+     * @param enforceStrictLiveness if table is view and has non-key base column in view pk.
      * @return this row but without any deletion info purged by {@code purger}. If the purged row is empty, returns
      * {@code null}.
      */
-    public Unfiltered purge(DeletionPurger purger, int nowInSec);
+    public Unfiltered purge(DeletionPurger purger, int nowInSec, boolean enforceStrictLiveness);
 }
