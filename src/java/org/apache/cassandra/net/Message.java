@@ -174,11 +174,6 @@ public abstract class Message<P>
         {
             return 0;
         }
-
-        TracingAwareExecutor executor()
-        {
-            throw new UnsupportedOperationException();
-        }
     };
 
     private final InetAddress from;
@@ -330,10 +325,8 @@ public abstract class Message<P>
      */
     long lifetimeMillis()
     {
-        return System.currentTimeMillis() - operationStartMillis();
+        return Math.max(System.currentTimeMillis() - operationStartMillis(), 0);
     }
-
-    abstract TracingAwareExecutor executor();
 
     /**
      * Whether the message is a locally delivered one, meaning if {@code to() == from()}.

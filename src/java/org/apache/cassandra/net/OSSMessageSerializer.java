@@ -388,7 +388,7 @@ public class OSSMessageSerializer implements Message.Serializer
         if (isResponse)
         {
             // We unfortunately have to consult the callback to check what serializer to use
-            CallbackInfo<?> info = MessagingService.instance().getRegisteredCallback(id);
+            CallbackInfo<?> info = MessagingService.instance().getRegisteredCallback(id, false, from);
             if (info == null)
             {
                 // reply for expired callback.  we'll have to skip it.

@@ -65,18 +65,6 @@ public class ExpiringMap<K, V>
             return value;
         }
 
-        /**
-         * How long that object has been in the map.
-         *
-         * @param unit the time unit to return the lifetime in.
-         * @return how long the object has beed in the map.
-         */
-        public long lifetime(TimeUnit unit)
-        {
-            long lifetimeNanos = Clock.instance.nanoTime() - createdAtNanos;
-            return unit.convert(lifetimeNanos, TimeUnit.NANOSECONDS);
-        }
-
         public long timeoutMillis()
         {
             return timeout;

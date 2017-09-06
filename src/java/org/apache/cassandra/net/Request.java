@@ -194,9 +194,20 @@ public class Request<P, Q> extends Message<P>
                                      messageData.withPayload(null, -1));
     }
 
-    TracingAwareExecutor executor()
+    /**
+     * The executor to use for handling this request.
+     */
+    TracingAwareExecutor requestExecutor()
     {
         return verb().requestExecutor().get(payload());
+    }
+
+    /**
+     * The executor to use for handling responses to this request.
+     */
+    TracingAwareExecutor responseExecutor()
+    {
+        return verb().responseExecutor().get(payload());
     }
 
     /**

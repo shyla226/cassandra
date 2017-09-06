@@ -46,6 +46,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.db.*;
@@ -263,17 +264,25 @@ public final class MessagingService implements MessagingServiceMBean
 
     private <P, Q> void registerCallback(Request<P, Q> request, MessageCallback<Q> callback)
     {
+        long startTime = request.operationStartMillis();
         long timeout = request.timeoutMillis();
+        TracingAwareExecutor executor = request.responseExecutor();
 
         for (Request.Forward forward : request.forwards())
-            registerCallback(forward.id, forward.to, request.verb(), callback, timeout);
+            registerCallback(forward.id, forward.to, request.verb(), callback, startTime, timeout, executor);
 
-        registerCallback(request.id(), request.to(), request.verb(), callback, timeout);
+        registerCallback(request.id(), request.to(), request.verb(), callback, startTime, timeout, executor);
     }
 
-    private <Q> void registerCallback(int id, InetAddress to, Verb<?, Q> type, MessageCallback<Q> callback, long timeout)
+    private <Q> void registerCallback(int id,
+                                      InetAddress to,
+                                      Verb<?, Q> type,
+                                      MessageCallback<Q> callback,
+                                      long startTimeMillis,
+                                      long timeout,
+                                      TracingAwareExecutor executor)
     {
-        CallbackInfo previous = callbacks.put(id, new CallbackInfo<>(to, callback, type), timeout);
+        CallbackInfo previous = callbacks.put(id, new CallbackInfo<>(to, callback, type, executor, startTimeMillis), timeout);
         assert previous == null : String.format("Callback already exists for id %d! (%s)", id, previous);
     }
 
@@ -376,7 +385,7 @@ public final class MessagingService implements MessagingServiceMBean
                                                                         MessageCallback<Q> callback)
     {
         messageInterceptors.interceptRequest(request,
-                                             rq -> rq.executor().execute(() -> consumer.accept(rq), ExecutorLocals.create()),
+                                             rq -> rq.requestExecutor().execute(() -> consumer.accept(rq), ExecutorLocals.create()),
                                              callback);
     }
 
@@ -473,7 +482,7 @@ public final class MessagingService implements MessagingServiceMBean
      *
      * @param verb the verb for which we're adding latency information.
      * @param address the host that replied to the message for which we're adding latency.
-     * @param latency the latentcy to record in milliseconds
+     * @param latency the latency to record in milliseconds
      */
     void addLatency(Verb<?, ?> verb, InetAddress address, long latency)
     {
@@ -723,19 +732,47 @@ public final class MessagingService implements MessagingServiceMBean
         if (state != null)
             state.trace("{} message received from {}", message.verb(), message.from());
 
-        message.executor().execute(new MessageDeliveryTask(message),
-                                   ExecutorLocals.create(state, ClientWarn.instance.getForMessage(message.id())));
+        ExecutorLocals locals = ExecutorLocals.create(state, ClientWarn.instance.getForMessage(message.id()));
+        if (message.isRequest())
+            receiveRequestInternal((Request<?, ?>) message, locals);
+        else
+            receiveResponseInternal((Response<?>) message, locals);
     }
 
-    // Only required by legacy serialization. Can inline in previous call when we get rid of that.
-    CallbackInfo<?> getRegisteredCallback(int id)
+    private <P, Q> void receiveRequestInternal(Request<P, Q> request, ExecutorLocals locals)
     {
-        return callbacks.get(id).get();
+        request.requestExecutor().execute(MessageDeliveryTask.forRequest(request), locals);
     }
 
-    ExpiringMap.CacheableObject<CallbackInfo<?>> removeRegisteredCallback(Response<?> response)
+    private <Q> void receiveResponseInternal(Response<Q> response, ExecutorLocals locals)
     {
-        return callbacks.remove(response.id());
+        CallbackInfo<Q> info = getRegisteredCallback(response, false);
+        // Ignore expired callback info (we already logged in getRegisteredCallback)
+        if (info != null)
+            info.responseExecutor.execute(MessageDeliveryTask.forResponse(response), locals);
+    }
+
+    // Only required by legacy serialization. Can inline in following metho when we get rid of that.
+    CallbackInfo<?> getRegisteredCallback(int id, boolean remove, InetAddress from)
+    {
+        ExpiringMap.CacheableObject<CallbackInfo<?>> cObj = remove ? callbacks.remove(id) : callbacks.get(id);
+        if (cObj == null)
+        {
+            String msg = "Callback already removed for message {} from {}, ignoring response";
+            logger.trace(msg, id, from);
+            Tracing.trace(msg, id, from);
+            return null;
+        }
+        else
+        {
+            return cObj.get();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    <Q> CallbackInfo<Q> getRegisteredCallback(Response<Q> response, boolean remove)
+    {
+        return (CallbackInfo<Q>) getRegisteredCallback(response.id(), remove, response.from());
     }
 
     public static void validateMagic(int magic) throws IOException
