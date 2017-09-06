@@ -45,6 +45,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -399,11 +400,19 @@ public final class SchemaKeyspace
                         continue;
 
                     DecoratedKey key = partition.partitionKey();
-                    Mutation mutation = mutationMap.computeIfAbsent(key, k -> new Mutation(SchemaConstants.SCHEMA_KEYSPACE_NAME, key));
+                    Mutation mutation = mutationMap.computeIfAbsent(key, k -> {
+                        cmd.metadata().partitionKeyType.validate(key.getKey());
+                        return new Mutation(SchemaConstants.SCHEMA_KEYSPACE_NAME, key);
+                    });
 
-                    mutation.add(makeUpdateForSchema(partition, cmd.columnFilter()));
+                    mutation.add(makeUpdateForSchema(UnfilteredRowIterators.withValidation(partition), cmd.columnFilter()));
+
                 }
             }
+        }
+        catch (Exception e)
+        {
+            logger.error("Can't convert a schema entry to mutation", e);
         }
     }
 
@@ -962,34 +971,56 @@ public final class SchemaKeyspace
         return types.build();
     }
 
-    private static Tables fetchTables(String keyspaceName, Types types)
+   private static Tables fetchTables(String keyspaceName, Types types)
     {
         String query = format("SELECT table_name FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, TABLES);
 
         Tables.Builder tables = org.apache.cassandra.schema.Tables.builder();
         // TODO make async?
+        Set<String> tableSet = new HashSet<>();
         for (UntypedResultSet.Row row : query(query, keyspaceName).blockingGet())
         {
-            String tableName = row.getString("table_name");
+            String tableName = null;
+
             try
             {
-                tables.add(fetchTable(keyspaceName, tableName, types));
+                tableName = row.getString("table_name");
+                if (!tableSet.contains(tableName))
+                {
+                    tables.add(fetchTable(keyspaceName, tableName, types));
+                    tableSet.add(tableName);
+                }
+                else
+                {
+                    throw new DuplicateException(String.format("Found a duplicate entry for the table %s in keyspace %s.", tableName, keyspaceName));
+                }
             }
-            catch (MissingColumns exc)
+            catch (MarshalException | MissingColumns | DuplicateException exc)
             {
                 if (!IGNORE_CORRUPTED_SCHEMA_TABLES)
                 {
-                    logger.error("No columns found for table {}.{} in {}.{}.  This may be due to " +
-                                 "corruption or concurrent dropping and altering of a table.  If this table " +
-                                 "is supposed to be dropped, restart cassandra with -Dcassandra.ignore_corrupted_schema_tables=true " +
-                                 "and run the following query: \"DELETE FROM {}.{} WHERE keyspace_name = '{}' AND table_name = '{}';\"." +
-                                 "If the table is not supposed to be dropped, restore {}.{} sstables from backups.",
-                                 keyspaceName, tableName,
-                                 SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS,
-                                 SchemaConstants.SCHEMA_KEYSPACE_NAME, TABLES,
-                                 keyspaceName, tableName,
-                                 SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS);
+                    if (tableName == null)
+                        logger.error("Can not decode the table name in {} keyspace. This may be due to the sstable corruption." +
+                                     "In order to start Cassandra ignoring this error, run it with -Dcassandra.ignore_corrupted_schema_tables=true", keyspaceName);
+                    else
+                        logger.error("No columns found for table {}.{} in {}.{}.  This may be due to " +
+                                     "corruption or concurrent dropping and altering of a table.  If this table " +
+                                     "is supposed to be dropped, restart cassandra with -Dcassandra.ignore_corrupted_schema_tables=true " +
+                                     "and run the following query: \"DELETE FROM {}.{} WHERE keyspace_name = '{}' AND table_name = '{}';\"." +
+                                     "If the table is not supposed to be dropped, restore {}.{} sstables from backups.",
+                                     keyspaceName, tableName,
+                                     SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS,
+                                     SchemaConstants.SCHEMA_KEYSPACE_NAME, TABLES,
+                                     keyspaceName, tableName,
+                                     SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS);
                     throw exc;
+                }
+                else
+                {
+                    if (tableName == null)
+                        logger.warn("Skipping table in the keyspace {}, because cassandra.ignore_corrupted_schema_tables is set to true.", keyspaceName);
+                    else
+                        logger.warn("Skipping {}.{} table, because cassandra.ignore_corrupted_schema_tables is set to true.", keyspaceName, tableName);
                 }
             }
         }
@@ -1392,6 +1423,14 @@ public final class SchemaKeyspace
     private static class MissingColumns extends RuntimeException
     {
         MissingColumns(String message)
+        {
+            super(message);
+        }
+    }
+
+    private static class DuplicateException extends RuntimeException
+    {
+        DuplicateException(String message)
         {
             super(message);
         }

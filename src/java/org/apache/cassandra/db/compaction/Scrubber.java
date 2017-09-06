@@ -27,6 +27,7 @@ import java.util.*;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -142,7 +143,23 @@ public class Scrubber implements Closeable
 
     private UnfilteredRowIterator withValidation(UnfilteredRowIterator iter, String filename)
     {
+        validatePrimaryKey(iter.partitionKey().getKey(), filename);
         return checkData ? UnfilteredRowIterators.withValidation(iter, filename) : iter;
+    }
+
+    public void validatePrimaryKey(ByteBuffer pk, String filename)
+    {
+        // Collection indexes incorrectly pick up the validator, see APOLLO-418 for details
+        if (cfs.isIndex() && cfs.metadata().partitionKeyType.isCollection())
+            return;
+        try
+        {
+            cfs.metadata().partitionKeyType.validate(pk);
+        }
+        catch (Exception me)
+        {
+            throw new CorruptSSTableException(me, filename);
+        }
     }
 
     public void scrub()
