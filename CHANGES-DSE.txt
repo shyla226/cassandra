@@ -1,5 +1,6 @@
 DSE 5.1.3
 Merged from dse5.0:
+ * Make scrub validate the partition key, add validation to schema mutation creation (APOLLO-969)
  * Group multiple view updates within the same base partition to speedup view build process(APOLLO-969)
  * Add nodetool mark_unrepaired command (APOLLO-692)
  * Make full repair default and disallow incremental repair on MV/CDC tables (APOLLO-596)
