@@ -390,7 +390,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
                 Runnable r;
 
-                while ((r = queue.relaxedPoll()) != null && processed < Short.MAX_VALUE)
+                while (processed < Short.MAX_VALUE && (r = queue.relaxedPoll()) != null)
                 {
                     r.run();
                     ++processed;
