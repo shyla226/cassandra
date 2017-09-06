@@ -115,12 +115,15 @@ public class CompactionController implements AutoCloseable
     {
         if (NEVER_PURGE_TOMBSTONES)
         {
-            logger.debug("not refreshing overlaps - running with -Dcassandra.never_purge_tombstones=true");
+            logger.trace("not refreshing overlaps - running with -Dcassandra.never_purge_tombstones=true");
             return;
         }
 
         if (ignoreOverlaps())
+        {
+            logger.trace("not refreshing overlaps - running with ignoreOverlaps activated");
             return;
+        }
 
         for (SSTableReader reader : overlappingSSTables)
         {
@@ -340,6 +343,18 @@ public class CompactionController implements AutoCloseable
         return limiter != null ? reader.openDataReader(limiter) : reader.openDataReader();
     }
 
+    /**
+     * Is overlapped sstables ignored
+     *
+     * Control whether or not we are taking into account overlapping sstables when looking for fully expired sstables.
+     * In order to reduce the amount of work needed, we look for sstables that can be dropped instead of compacted.
+     * As a safeguard mechanism, for each time range of data in a sstable, we are checking globally to see if all data
+     * of this time range is fully expired before considering to drop the sstable.
+     * This strategy can retain for a long time a lot of sstables on disk (see CASSANDRA-13418) so this option
+     * control whether or not this check should be ignored.
+     *
+     * @return false by default
+     */
     protected boolean ignoreOverlaps()
     {
         return ignoreOverlaps;
