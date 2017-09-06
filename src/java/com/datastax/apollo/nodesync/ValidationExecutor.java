@@ -9,6 +9,7 @@ import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -124,6 +125,11 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     Scheduler asScheduler()
     {
         return wrappingScheduler;
+    }
+
+    Executor asExecutor()
+    {
+        return validationExecutor;
     }
 
     /**
