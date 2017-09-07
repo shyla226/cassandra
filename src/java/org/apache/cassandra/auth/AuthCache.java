@@ -106,18 +106,13 @@ public class AuthCache<K, V> implements AuthCacheMBean
     /**
      * Retrieve an entry from the cache. If the entry is not present, or the
      * cache is disabled, then invoke the load function to compute and store
-     * the entry but only if retrieveIfMissing is true.
-     * <p>
-     * This parameter can be used by callers (sub-classes) to control if the
-     * load function should be invoked, given that in some cases the load
-     * function might block and in this case we do not want to invoke it
-     * on TPC threads.
+     * the entry.
      *
      * @param k - the key of the entry to retrieve
-     * @return the entry or null if retrieveIfMissing is false and the entry is missing
+     * @return the entry
      */
     @Nullable
-    protected V get(K k, String kind)
+    protected V get(K k)
     {
         if (cache == null)
             return loadFunction.apply(k);
@@ -128,8 +123,8 @@ public class AuthCache<K, V> implements AuthCacheMBean
             return ret;
 
         if (TPC.isTPCThread())
-            throw new TPCUtils.WouldBlockException("Cannot retrieve " + kind + " for " + k + ", would block TPC thread");
-
+            throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve data for the key %s from the %s, would block TPC thread",
+                                                                 k, name));
         return cache.get(k);
     }
 

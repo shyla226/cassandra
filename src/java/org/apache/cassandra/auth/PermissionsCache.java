@@ -45,10 +45,9 @@ public class PermissionsCache extends AuthCache<RoleResource, Map<IResource, Per
 
     /**
      * Retrieve the permissions against all resources of a specific role.
-     * Calls from a TPC thread should be prevented.
      */
     public Map<IResource, PermissionSets> getPermissions(RoleResource role)
     {
-        return get(role, "permissions");
+        return get(role);
     }
 }

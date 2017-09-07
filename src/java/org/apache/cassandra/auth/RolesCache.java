@@ -38,56 +38,51 @@ public class RolesCache extends AuthCache<RoleResource, Role> implements RolesCa
 
     /**
      * Retrieve the roles <em>directly</em> assigned to a role.
-     * Calls from a TPC thread should be prevented.
      */
     public Set<RoleResource> getRoles(RoleResource role)
     {
         Role ret = getInternal(role);
-        return ret != null ? ret.memberOf : null;
+        return ret.memberOf;
     }
 
     /**
      * Retrieve the superuser status of a role.
-     * Calls from a TPC thread should be prevented.
      */
     public boolean isSuperuser(RoleResource role)
     {
         Role ret = getInternal(role);
-        return ret != null && ret.isSuper;
+        return ret.isSuper;
     }
 
     /**
      * Retrieve the superuser status of a role.
-     * Calls from a TPC thread should be prevented.
      */
     public boolean canLogin(RoleResource role)
     {
         Role ret = getInternal(role);
-        return ret != null && ret.canLogin;
+        return ret.canLogin;
     }
 
     /**
      * Retrieve the roles assigned to a role.
-     * Calls from a TPC thread should be prevented.
      */
     public Map<String, String> getCustomOptions(RoleResource role)
     {
         Role ret = getInternal(role);
-        return ret != null ? ret.options : null;
+        return ret.options;
     }
 
     /**
      * Retrieve the credentials for a role.
-     * Calls from a TPC thread should be prevented.
      */
     String getCredentials(RoleResource role)
     {
         Role ret = getInternal(role);
-        return ret != null ? ret.hashedPassword : null;
+        return ret.hashedPassword;
     }
 
     private Role getInternal(RoleResource role)
     {
-        return get(role, "roles");
+        return get(role);
     }
 }
