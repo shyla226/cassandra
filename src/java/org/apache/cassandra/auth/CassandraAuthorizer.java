@@ -22,10 +22,8 @@ import java.util.*;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableSet;
 
-import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -156,33 +154,23 @@ public class CassandraAuthorizer implements IAuthorizer
         ByteBuffer roleName = UTF8Serializer.instance.serialize(role.getRoleName());
 
         QueryOptions options = QueryOptions.forInternalCalls(ConsistencyLevel.LOCAL_ONE,
-                                                             Lists.newArrayList(roleName));
+                                                             Collections.singletonList(roleName));
 
         ResultMessage.Rows rows = TPCUtils.blockingGet(permissionsForRoleStatement.execute(QueryState.forInternalCalls(), options, System.nanoTime()));
         UntypedResultSet result = UntypedResultSet.create(rows.result);
 
-        Map<IResource, PermissionSets> resourcePermissions = new HashMap<>();
+        if (result.isEmpty())
+            return Collections.emptyMap();
 
-        IResource resource = null;
-        PermissionSets.Builder builder = null;
+        Map<IResource, PermissionSets> resourcePermissions = new HashMap<>(result.size());
+
         for (UntypedResultSet.Row row : result)
         {
-            IResource rowResource = Resources.fromName(row.getString(RESOURCE));
-            if (resource != null && !rowResource.equals(resource))
-            {
-                resourcePermissions.put(resource, builder.buildSingleton());
-                resource = null;
-            }
-            if (resource == null)
-            {
-                resource = rowResource;
-                builder = PermissionSets.builder();
-            }
-
+            IResource resource = Resources.fromName(row.getString(RESOURCE));
+            PermissionSets.Builder builder = PermissionSets.builder();
             addPermissionsFromRow(row, builder);
-        }
-        if (resource != null)
             resourcePermissions.put(resource, builder.buildSingleton());
+        }
 
         return resourcePermissions;
     }
