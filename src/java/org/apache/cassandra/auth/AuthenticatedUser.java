@@ -22,6 +22,8 @@ import java.util.IdentityHashMap;
 import java.util.Map;
 
 import com.google.common.base.Objects;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 
 /**
  * Returned from IAuthenticator#authenticate(), represents an authenticated user everywhere internally.
@@ -45,17 +47,17 @@ public class AuthenticatedUser
     static
     {
         registerInternalUserRole(SYSTEM_USER, new Role(SYSTEM_USERNAME,
-                                                       Collections.emptySet(),
+                                                       ImmutableSet.of(),
                                                        true,
                                                        false,
-                                                       Collections.emptyMap(),
+                                                       ImmutableMap.of(),
                                                        null));
         registerInternalUserRole(ANONYMOUS_USER, new Role(ANONYMOUS_USERNAME,
-                                                       Collections.emptySet(),
-                                                       false,
-                                                       false,
-                                                       Collections.emptyMap(),
-                                                       null));
+                                                          ImmutableSet.of(),
+                                                          false,
+                                                          false,
+                                                          ImmutableMap.of(),
+                                                          null));
     }
 
     protected static synchronized void registerInternalUserRole(AuthenticatedUser internalUser, Role internalRole)

@@ -30,6 +30,7 @@ import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -196,10 +197,10 @@ public class TestAuthenticator implements IAuthenticator
             public Role getRoleData(RoleResource role)
             {
                 return new Role(role.getRoleName(),
-                                Collections.singleton(role),
+                                ImmutableSet.of(role),
                                 false,
                                 true,
-                                Collections.emptyMap(),
+                                ImmutableMap.of(),
                                 "");
             }
 

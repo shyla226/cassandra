@@ -208,6 +208,8 @@ public interface IRoleManager
     /**
      * Retrieve a composite of role information about <em>direct</em> memberships, superuser status,
      * can-login flag and custom options.
+     * <p>The implementation must never returns null. If the  name cannot be found they must return
+     * {@code Role.NULL_ROLL}.</p>
      */
     Role getRoleData(RoleResource role);
 

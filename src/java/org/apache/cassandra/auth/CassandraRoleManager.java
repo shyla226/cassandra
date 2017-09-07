@@ -21,11 +21,11 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Futures;
@@ -50,6 +50,8 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.mindrot.jbcrypt.BCrypt;
+
+import static org.apache.cassandra.auth.Role.NULL_ROLE;
 
 /**
  * Responsible for the creation, maintenance and deletion of roles
@@ -83,11 +85,16 @@ public class CassandraRoleManager implements IRoleManager
     static final String DEFAULT_SUPERUSER_NAME = "cassandra";
     static final String DEFAULT_SUPERUSER_PASSWORD = "cassandra";
 
-    private static Set<RoleResource> rolesFromRow(UntypedResultSet.Row row)
+    private static ImmutableSet<RoleResource> rolesFromRow(UntypedResultSet.Row row)
     {
-        return row.has("member_of")
-                        ? row.getSet("member_of", UTF8Type.instance).stream().map(RoleResource::role).collect(Collectors.toSet())
-                        : Collections.emptySet();
+        if (!row.has("member_of"))
+            return ImmutableSet.of();
+
+        ImmutableSet.Builder<RoleResource> builder = ImmutableSet.builder();
+        for (String role : row.getSet("member_of", UTF8Type.instance))
+            builder.add(RoleResource.role(role));
+
+        return builder.build();
     }
 
     // 2 ** GENSALT_LOG2_ROUNDS rounds of hashing will be performed.
@@ -105,9 +112,6 @@ public class CassandraRoleManager implements IRoleManager
                                                         GENSALT_LOG2_ROUNDS_PROPERTY));
          return rounds;
     }
-
-    // NullObject returned when a supplied role name not found in AuthKeyspace.ROLES
-    private static final Role NULL_ROLE = new Role("", Collections.emptySet(), false, false, Collections.emptyMap(), "");
 
     private SelectStatement loadRoleStatement;
     private SelectStatement checkRolesStatement;
@@ -432,7 +436,7 @@ public class CassandraRoleManager implements IRoleManager
                                                                                                                Collections.singletonList(ByteBufferUtil.bytes(roleName))),
                                                                                  System.nanoTime()));
         if (rows.result.isEmpty())
-            return NULL_ROLE;
+            return Role.NULL_ROLE;
 
         UntypedResultSet.Row row = UntypedResultSet.create(rows.result).one();
         try
@@ -441,7 +445,7 @@ public class CassandraRoleManager implements IRoleManager
                             rolesFromRow(row),
                             row.getBoolean("is_superuser"),
                             row.getBoolean("can_login"),
-                            Collections.emptyMap(),
+                            ImmutableMap.of(),
                             row.has("salted_hash") ? row.getString("salted_hash") : null
             );
         }

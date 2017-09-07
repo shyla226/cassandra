@@ -8,6 +8,8 @@ import java.util.*;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
 
 import org.junit.*;
@@ -132,10 +134,10 @@ public class QueryStateTest
         public void createRole(AuthenticatedUser performer, RoleResource role, RoleOptions options) throws RequestValidationException, RequestExecutionException
         {
             Role r = new Role(role.getRoleName(),
-                              new HashSet<>(),
+                              ImmutableSet.of(),
                               options.getSuperuser().or(false),
                               options.getLogin().or(false),
-                              Collections.emptyMap(),
+                              ImmutableMap.of(),
                               options.getPassword().or(""));
             roles.put(role, r);
             Auth.invalidateRolesForPermissionsChange(role);
