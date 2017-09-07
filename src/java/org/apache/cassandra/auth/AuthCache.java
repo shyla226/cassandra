@@ -43,23 +43,6 @@ public class AuthCache<K, V> implements AuthCacheMBean
 
     private static final String MBEAN_NAME_BASE = "org.apache.cassandra.auth:type=";
 
-    private static final Object negative = new Object() {
-        public String toString()
-        {
-            return "AuthCache-NEGATIVE-CACHE-ENTRY";
-        }
-
-        public int hashCode()
-        {
-            return 0;
-        }
-
-        public boolean equals(Object obj)
-        {
-            return false;
-        }
-    };
-
     private volatile LoadingCache<K, V> cache;
 
     private final String name;
@@ -140,18 +123,14 @@ public class AuthCache<K, V> implements AuthCacheMBean
             return loadFunction.apply(k);
 
         V ret = cache.getIfPresent(k);
-        if (ret == negative)
-            return null;
+
         if (ret != null)
             return ret;
 
         if (TPC.isTPCThread())
             throw new TPCUtils.WouldBlockException("Cannot retrieve " + kind + " for " + k + ", would block TPC thread");
 
-        ret = cache.get(k);
-        if (ret == null)
-            cache.put(k, (V) negative);
-        return ret;
+        return cache.get(k);
     }
 
     public void invalidate()
