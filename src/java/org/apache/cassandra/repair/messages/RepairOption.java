@@ -267,7 +267,7 @@ public class RepairOption
 
     private final RepairParallelism parallelism;
     private final boolean primaryRange;
-    private boolean incremental;
+    private final boolean incremental;
     private final boolean trace;
     private final int jobThreads;
     private final boolean isSubrangeRepair;
@@ -382,11 +382,6 @@ public class RepairOption
 
     public boolean isInLocalDCOnly() {
         return dataCenters.size() == 1 && dataCenters.contains(DatabaseDescriptor.getLocalDataCenter());
-    }
-
-    public void setIncremental(boolean incremental)
-    {
-        this.incremental = incremental;
     }
 
     @Override

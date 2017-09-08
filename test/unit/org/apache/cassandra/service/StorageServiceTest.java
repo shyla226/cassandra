@@ -34,7 +34,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
-import org.hsqldb.Database;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -85,37 +84,30 @@ public class StorageServiceTest extends CQLTester
     }
 
     @Test
-    public void testShouldFallBackToFullRepair() throws Exception
+    public void testFailIfCannotRunIncrementalRepair() throws Exception
     {
-        //Incremental repair on tables or keyspaces without materialized views should never fall back to full repairs
-        assertFalse(StorageService.instance.shouldFallBackToFullRepair(KS1, new String[]{ UNREPAIRED }));
-        assertFalse(StorageService.instance.shouldFallBackToFullRepair(KS1, new String[]{ REPAIRED }));
-        assertFalse(StorageService.instance.shouldFallBackToFullRepair(KS1, new String[]{ UNREPAIRED, REPAIRED }));
-        assertFalse(StorageService.instance.shouldFallBackToFullRepair(KS1, new String[]{}));
-        assertFalse(StorageService.instance.shouldFallBackToFullRepair(KS2, new String[]{ TABLE3 }));
+        //Tables or keyspaces without materialized views should not throw IllegalArgumentException when trying to run incremental repair
+        StorageService.instance.failIfCannotRunIncrementalRepair(KS1, new String[]{ UNREPAIRED });
+        StorageService.instance.failIfCannotRunIncrementalRepair(KS1, new String[]{ REPAIRED });
+        StorageService.instance.failIfCannotRunIncrementalRepair(KS1, new String[]{ UNREPAIRED, REPAIRED });
+        StorageService.instance.failIfCannotRunIncrementalRepair(KS1, new String[]{});
+        StorageService.instance.failIfCannotRunIncrementalRepair(KS2, new String[]{ TABLE3 });
 
-        //Incremental repairs only on tables/keyspaces with MVs/CDCs can safely fallback to full repairs
-        assertTrue(StorageService.instance.shouldFallBackToFullRepair(KS2, new String[]{ TABLE4 }));
-        assertTrue(StorageService.instance.shouldFallBackToFullRepair(KS2, new String[]{ VIEW1 }));
-        assertTrue(StorageService.instance.shouldFallBackToFullRepair(KS2, new String[]{ VIEW1, TABLE4 }));
-        assertTrue(StorageService.instance.shouldFallBackToFullRepair(KS2, new String[]{ VIEW1, CDC1 }));
-        assertTrue(StorageService.instance.shouldFallBackToFullRepair(KS2, new String[]{ CDC1 }));
-        assertTrue(StorageService.instance.shouldFallBackToFullRepair(KS3, new String[]{ }));
-        assertTrue(StorageService.instance.shouldFallBackToFullRepair(KS3, new String[]{ CDC2, VIEW2 }));
+        //Tables or keyspaces with materialized views should not be allowed to run incremental repair
+        assertThrowsIllegalArgumentException(() -> StorageService.instance.failIfCannotRunIncrementalRepair(KS2, new String[]{ TABLE4 }));
+        assertThrowsIllegalArgumentException(() -> StorageService.instance.failIfCannotRunIncrementalRepair(KS2, new String[]{ VIEW1 }));
+        assertThrowsIllegalArgumentException(() -> StorageService.instance.failIfCannotRunIncrementalRepair(KS2, new String[]{ VIEW1, TABLE4 }));
+        assertThrowsIllegalArgumentException(() -> StorageService.instance.failIfCannotRunIncrementalRepair(KS2, new String[]{ VIEW1, CDC1 }));
+        assertThrowsIllegalArgumentException(() -> StorageService.instance.failIfCannotRunIncrementalRepair(KS2, new String[]{ CDC1 }));
+        assertThrowsIllegalArgumentException(() -> StorageService.instance.failIfCannotRunIncrementalRepair(KS2, new String[]{ }));
+        assertThrowsIllegalArgumentException(() -> StorageService.instance.failIfCannotRunIncrementalRepair(KS2, new String[]{ CDC2, VIEW2 }));
+    }
 
-        //Incremental repair on mixed MVs and non-MVs tables should not be allowed and throw exception
+    private void assertThrowsIllegalArgumentException(Runnable r)
+    {
         try
         {
-            StorageService.instance.shouldFallBackToFullRepair(KS2, new String[]{});
-            fail("Should have thrown IllegalArgumentException");
-        } catch (IllegalArgumentException e)
-        {
-            //pass
-        }
-
-        try
-        {
-            StorageService.instance.shouldFallBackToFullRepair(KS2, new String[]{TABLE3, TABLE4});
+            r.run();
             fail("Should have thrown IllegalArgumentException");
         } catch (IllegalArgumentException e)
         {

@@ -23,6 +23,9 @@ Operations
      now considered an error.
      See `nodetool help rebuild` about which combinations of DCs/racks or endpoints to include or
      exclude are possible. (APOLLO-581)
+   - Nodetool repair will now run full repairs by default, use "-inc" option to run incremental repair.
+   - Incremental repairs are disallowed on tables with Materialized Views or CDC. Run full repairs on these
+     tables.
 
 Upgrading
 ---------

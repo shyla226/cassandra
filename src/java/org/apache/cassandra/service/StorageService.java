@@ -38,7 +38,6 @@ import javax.management.openmbean.TabularData;
 import javax.management.openmbean.TabularDataSupport;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Joiner;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
@@ -3449,11 +3448,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (option.getRanges().isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor() < 2)
             return 0;
 
-        if (option.isIncremental() && shouldFallBackToFullRepair(keyspace, option.getColumnFamilies().toArray(new String[option.getColumnFamilies().size()])))
+        if (option.isIncremental())
         {
-            logger.info("Incremental repair is not supported on tables{} from keyspace {} with materialized views. " +
-                        "Running full repairs instead.", option.getColumnFamilies().isEmpty()? "" : " " + option.getColumnFamilies(), keyspace);
-            option.setIncremental(false);
+            failIfCannotRunIncrementalRepair(keyspace, option.getColumnFamilies().toArray(new String[option.getColumnFamilies().size()]));
         }
 
         // We reject any repair that targets a table on which NodeSync is enabled.
@@ -3490,7 +3487,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
-    protected boolean shouldFallBackToFullRepair(String keyspace, String[] tables)
+    /**
+     * Check if current tables of keyspaces are allowed to run incremental repair
+     *
+     * Currently, only base tables, views or tables with CDC enabled cannot run incremental repair.
+     *
+     * @throws IllegalArgumentException if cannot run incremental repair
+     */
+    protected void failIfCannotRunIncrementalRepair(String keyspace, String[] tables)
     {
         try
         {
@@ -3498,17 +3502,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Set<String> tablesWithViewsOrCdc = tablesToRepair.stream().filter(c -> c.hasViews() || c.metadata.get().isView() ||
                                                                                    c.isCdcEnabled()).map(c -> c.name).collect(Collectors.toSet());
 
-            if (tablesWithViewsOrCdc.isEmpty())
-                return false;
-
-            if (tablesToRepair.size() == tablesWithViewsOrCdc.size())
-                return true;
-
-
-            throw new IllegalArgumentException(String.format("Cannot run a single repair command on tables with CDC/MVs and non-MV/CDC tables (%s) from keyspace %s " +
-                                                             "simultaneously because incremental repair is not supported on tables with materialized views" +
-                                                             "or CDC: %s. Please execute a separate command for repairing tables with and without CDC/MVs.", tablesToRepair,
-                                                             keyspace, tablesWithViewsOrCdc));
+            if (!tablesWithViewsOrCdc.isEmpty())
+            {
+                throw new IllegalArgumentException(String.format("Cannot run incremental repair on tables %s from keyspace %s " +
+                                                         "because incremental repair is not supported on tables with " +
+                                                         "materialized views or CDC-enabled. Please run full repair on these " +
+                                                         "tables.", tablesWithViewsOrCdc.toString(), keyspace));
+            }
         }
         catch (IOException e)
         {

@@ -19,6 +19,7 @@ package org.apache.cassandra.tools.nodetool;
 
 import static com.google.common.collect.Lists.newArrayList;
 import static org.apache.commons.lang3.StringUtils.EMPTY;
+
 import io.airlift.airline.Arguments;
 import io.airlift.airline.Command;
 import io.airlift.airline.Option;
@@ -28,12 +29,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.service.TableInfo;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.messages.RepairOption;
@@ -73,8 +72,15 @@ public class Repair extends NodeToolCmd
     @Option(title = "primary_range", name = {"-pr", "--partitioner-range"}, description = "Use -pr to repair only the first range returned by the partitioner")
     private boolean primaryRange = false;
 
-    @Option(title = "full", name = {"-full", "--full"}, description = "Use -full to issue a full repair.")
-    private boolean fullRepair = false;
+    /**
+     * @deprecated Full repair is default on DSE. Kept only for backward compatiblity with OSS.
+     */
+    @Option(title = "full", name = {"-full", "--full"}, description = "Use -full to issue a full repair. (default)")
+    @Deprecated
+    private boolean fullOption = false;
+
+    @Option(title = "incremental", name = {"-inc", "--inc"}, description = "Use -inc to issue an incremental repair.")
+    private boolean incrementalOption = false;
 
     @Option(title = "force", name = {"-force", "--force"}, description = "Use -force to filter out down endpoints")
     private boolean force = false;
@@ -102,7 +108,7 @@ public class Repair extends NodeToolCmd
         {
             return PreviewKind.REPAIRED;
         }
-        else if (preview && fullRepair)
+        else if (preview && !incrementalOption)
         {
             return PreviewKind.ALL;
         }
@@ -120,99 +126,58 @@ public class Repair extends NodeToolCmd
     public void execute(NodeProbe probe)
     {
         List<String> keyspaces = parseOptionalKeyspace(args, probe, KeyspaceSet.NON_LOCAL_STRATEGY);
-        String[] cfnames = parseOptionalTables(args);
+        String[] tableNames = parseOptionalTables(args);
 
         if (primaryRange && (!specificDataCenters.isEmpty() || !specificHosts.isEmpty()))
             throw new RuntimeException("Primary range repair should be performed on all nodes in the cluster.");
 
+        if (fullOption && incrementalOption)
+        {
+            throw new IllegalArgumentException("Cannot run both full and incremental repair, choose either --full or -inc option.");
+        }
+
         for (String keyspace : keyspaces)
         {
-            Map<String, TableInfo> tablesToRepair = probe.getTableInfos(keyspace, cfnames);
-
             // avoid repairing system_distributed by default (CASSANDRA-9621)
             if ((args == null || args.isEmpty()) && ONLY_EXPLICITLY_REPAIRED.contains(keyspace))
                 continue;
 
-            Set<String> tablesToRunFullRepair = getTablesToRunFullRepair(keyspace, tablesToRepair);
-            Set<String> tablesToRunIncRepair = Sets.difference(tablesToRepair.keySet(), tablesToRunFullRepair);
-
-            if (tablesToRunFullRepair.isEmpty())
+            Map<String, String> options = new HashMap<>();
+            RepairParallelism parallelismDegree = RepairParallelism.PARALLEL;
+            if (sequential)
+                parallelismDegree = RepairParallelism.SEQUENTIAL;
+            else if (dcParallel)
+                parallelismDegree = RepairParallelism.DATACENTER_AWARE;
+            options.put(RepairOption.PARALLELISM_KEY, parallelismDegree.getName());
+            options.put(RepairOption.PRIMARY_RANGE_KEY, Boolean.toString(primaryRange));
+            options.put(RepairOption.INCREMENTAL_KEY, Boolean.toString(incrementalOption));
+            options.put(RepairOption.JOB_THREADS_KEY, Integer.toString(numJobThreads));
+            options.put(RepairOption.TRACE_KEY, Boolean.toString(trace));
+            options.put(RepairOption.COLUMNFAMILIES_KEY, StringUtils.join(tableNames, ","));
+            options.put(RepairOption.PULL_REPAIR_KEY, Boolean.toString(pullRepair));
+            options.put(RepairOption.FORCE_REPAIR_KEY, Boolean.toString(force));
+            options.put(RepairOption.PREVIEW, getPreviewKind().toString());
+            if (!startToken.isEmpty() || !endToken.isEmpty())
             {
-                runRepair(probe, keyspace, cfnames, true);
+                options.put(RepairOption.RANGES_KEY, startToken + ":" + endToken);
             }
-            else if (tablesToRunIncRepair.isEmpty())
+            if (localDC)
             {
-                runRepair(probe, keyspace, cfnames, false);
+                options.put(RepairOption.DATACENTERS_KEY, StringUtils.join(newArrayList(probe.getDataCenter()), ","));
             }
             else
             {
-                runRepair(probe, keyspace, tablesToRunIncRepair.toArray(new String[tablesToRunIncRepair.size()]), true);
-                runRepair(probe, keyspace, tablesToRunFullRepair.toArray(new String[tablesToRunFullRepair.size()]), false);
+                options.put(RepairOption.DATACENTERS_KEY, StringUtils.join(specificDataCenters, ","));
             }
-        }
-    }
-
-    private Set<String> getTablesToRunFullRepair(String keyspace, Map<String, TableInfo> tablesToRepair)
-    {
-        if (fullRepair)
-        {
-            return tablesToRepair.keySet();
-        }
-
-        Set<String> tablesWithViewsOrCdc = tablesToRepair.entrySet().stream()
-                                                                    .filter(e -> e.getValue().isOrHasView() || e.getValue().isCdcEnabled)
-                                                                    .map(e -> e.getKey())
-                                                                    .collect(Collectors.toSet());
-        if (!fullRepair || tablesToRepair.keySet().equals(tablesWithViewsOrCdc))
-        {
-            if (!tablesWithViewsOrCdc.isEmpty())
+            options.put(RepairOption.HOSTS_KEY, StringUtils.join(specificHosts, ","));
+            try
             {
-                System.out.println(String.format("WARN: Incremental repair is not supported on tables with Materialized Views or CDC. Running full repairs on table(s) %s.%s.",
-                                                 keyspace, tablesWithViewsOrCdc));
+                probe.repairAsync(System.out, keyspace, options);
             }
-
-            return tablesWithViewsOrCdc;
-        }
-
-        return tablesWithViewsOrCdc;
-    }
-
-    private void runRepair(NodeProbe probe, String keyspace, String[] cfnames, boolean isIncremental)
-    {
-        Map<String, String> options = new HashMap<>();
-        RepairParallelism parallelismDegree = RepairParallelism.PARALLEL;
-        if (sequential)
-            parallelismDegree = RepairParallelism.SEQUENTIAL;
-        else if (dcParallel)
-            parallelismDegree = RepairParallelism.DATACENTER_AWARE;
-        options.put(RepairOption.PARALLELISM_KEY, parallelismDegree.getName());
-        options.put(RepairOption.PRIMARY_RANGE_KEY, Boolean.toString(primaryRange));
-        options.put(RepairOption.INCREMENTAL_KEY, Boolean.toString(!fullRepair));
-        options.put(RepairOption.JOB_THREADS_KEY, Integer.toString(numJobThreads));
-        options.put(RepairOption.TRACE_KEY, Boolean.toString(trace));
-        options.put(RepairOption.COLUMNFAMILIES_KEY, StringUtils.join(cfnames, ","));
-        options.put(RepairOption.PULL_REPAIR_KEY, Boolean.toString(pullRepair));
-        options.put(RepairOption.FORCE_REPAIR_KEY, Boolean.toString(force));
-        options.put(RepairOption.PREVIEW, getPreviewKind().toString());
-        if (!startToken.isEmpty() || !endToken.isEmpty())
-        {
-            options.put(RepairOption.RANGES_KEY, startToken + ":" + endToken);
-        }
-        if (localDC)
-        {
-            options.put(RepairOption.DATACENTERS_KEY, StringUtils.join(newArrayList(probe.getDataCenter()), ","));
-        }
-        else
-        {
-            options.put(RepairOption.DATACENTERS_KEY, StringUtils.join(specificDataCenters, ","));
-        }
-        options.put(RepairOption.HOSTS_KEY, StringUtils.join(specificHosts, ","));
-        try
-        {
-            probe.repairAsync(System.out, keyspace, options);
-        } catch (Exception e)
-        {
-            throw new RuntimeException("Error occurred during repair", e);
+            catch (Exception e)
+            {
+                throw new RuntimeException("Error occurred during repair", e);
+            }
         }
     }
 }
