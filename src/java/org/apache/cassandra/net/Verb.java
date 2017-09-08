@@ -63,12 +63,14 @@ public abstract class Verb<P, Q>
         private final String name;
         private final ExecutorSupplier<P> requestExecutor;
         private final boolean supportsBackPressure;
+        private final DroppedMessages.Group droppedGroup;
 
         Info(VerbGroup<?> group,
              int groupIdx,
              String name,
              ExecutorSupplier<P> requestExecutor,
-             boolean supportsBackPressure)
+             boolean supportsBackPressure,
+             DroppedMessages.Group droppedGroup)
         {
             assert group != null && name != null && requestExecutor != null;
             this.group = group;
@@ -76,6 +78,7 @@ public abstract class Verb<P, Q>
             this.name = name;
             this.requestExecutor = requestExecutor;
             this.supportsBackPressure = supportsBackPressure;
+            this.droppedGroup = droppedGroup;
         }
 
         @Override
@@ -98,6 +101,9 @@ public abstract class Verb<P, Q>
         this.handler = handler;
 
         assert isOneWay() == (timeoutSupplier == null) : "One-way verbs must not have a timeout supplier, but other verbs must";
+        // Note: excluding info == null is done because some test use that currently. We should fix those test at some
+        // point and remove that, but it's currently a tad more annoying that we'd want to for silly reasons.
+        assert info == null || isOneWay() == (info.droppedGroup == null) : "One-way verbs must not have a dropped group, but other verbs must";
     }
 
     /**
@@ -166,6 +172,17 @@ public abstract class Verb<P, Q>
     boolean supportsBackPressure()
     {
         return info.supportsBackPressure;
+    }
+
+    /**
+     * Unless the verb is one-way, the "dropped group" for the messages of this {@link Verb} (see {@link DroppedMessages}
+     * for details).
+     *
+     * @return the {@link DroppedMessages.Group} for message of this {@link Verb}, or {@code null} for one-way verbs.
+     */
+    DroppedMessages.Group droppedGroup()
+    {
+        return info.droppedGroup;
     }
 
     /**

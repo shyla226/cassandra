@@ -23,6 +23,7 @@ import java.util.function.Function;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.EncodingVersion;
+import org.apache.cassandra.net.DroppedMessages;
 import org.apache.cassandra.net.DroppingResponseException;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.Verbs;
@@ -60,7 +61,7 @@ public class SchemaVerbs extends VerbGroup<SchemaVerbs.SchemaVersion>
     {
         super(id, true, SchemaVersion.class);
 
-        RegistrationHelper helper = helper().stage(Stage.MIGRATION);
+        RegistrationHelper helper = helper().stage(Stage.MIGRATION).droppedGroup(DroppedMessages.Group.SCHEMA);
 
         VERSION = helper.requestResponse("VERSION", EmptyPayload.class, UUID.class)
                         .withResponseSerializer(UUIDSerializer.serializer)

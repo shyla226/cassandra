@@ -103,13 +103,24 @@ public class Request<P, Q> extends Message<P>
     @VisibleForTesting
     public static <P, Q> Request<P, Q> fakeTestRequest(InetAddress to, int id, Verb<P, Q> verb, P payload)
     {
-        return new Request<>(FBUtilities.getBroadcastAddress(),
+        return fakeTestRequest(FBUtilities.getBroadcastAddress(), to, id, verb, payload, System.currentTimeMillis());
+    }
+
+    @VisibleForTesting
+    public static <P, Q> Request<P, Q> fakeTestRequest(InetAddress from,
+                                                       InetAddress to,
+                                                       int id,
+                                                       Verb<P, Q> verb,
+                                                       P payload,
+                                                       long createAtMillis)
+    {
+        return new Request<>(from,
                              to,
                              id,
                              verb,
                              new Data<>(payload,
                                         -1,
-                                        System.currentTimeMillis(),
+                                        createAtMillis,
                                         verb.isOneWay() ? Long.MAX_VALUE : verb.timeoutSupplier().get(payload)));
     }
 

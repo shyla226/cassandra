@@ -74,6 +74,7 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                      .timeout(command -> command instanceof SinglePartitionReadCommand
                                          ? DatabaseDescriptor.getReadRpcTimeout()
                                          : DatabaseDescriptor.getRangeRpcTimeout())
+                     .droppedGroup(DroppedMessages.Group.READ)
                      .handler((from, command, monitor) ->
                               {
                                   final boolean isLocal = from.equals(local);

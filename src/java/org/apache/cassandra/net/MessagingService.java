@@ -35,7 +35,6 @@ import javax.management.ObjectName;
 import javax.net.ssl.SSLHandshakeException;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
@@ -45,7 +44,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
-import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -58,9 +56,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InternalRequestExecutionException;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.ILatencySubscriber;
-import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.ConnectionMetrics;
-import org.apache.cassandra.metrics.DroppedMessageMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.net.interceptors.Interceptor;
 import org.apache.cassandra.net.interceptors.Interceptors;
@@ -102,47 +98,10 @@ public final class MessagingService implements MessagingServiceMBean
     @VisibleForTesting
     final ConcurrentMap<InetAddress, OutboundTcpConnectionPool> connectionManagers = new NonBlockingHashMap<>();
 
-    private static final int LOG_DROPPED_INTERVAL_IN_MS = 5000;
-
     private final List<SocketThread> socketThreads = Lists.newArrayList();
     private final SimpleCondition listenGate;
 
-    private static final class DroppedMessages
-    {
-        DroppedMessageMetrics metrics; // not final for testing reasons only
-        final AtomicInteger droppedInternal;
-        final AtomicInteger droppedCrossNode;
-
-        DroppedMessages(Verb<?, ?> verb)
-        {
-            this(new DroppedMessageMetrics(verb));
-        }
-
-        DroppedMessages(DroppedMessageMetrics metrics)
-        {
-            this.metrics = metrics;
-            this.droppedInternal = new AtomicInteger(0);
-            this.droppedCrossNode = new AtomicInteger(0);
-        }
-
-        @VisibleForTesting
-        void reset(String scope)
-        {
-            this.metrics = new DroppedMessageMetrics(metricName -> new CassandraMetricsRegistry.MetricName("DroppedMessages", metricName, scope));
-            this.droppedInternal.getAndSet(0);
-            this.droppedCrossNode.getAndSet(0);
-        }
-    }
-
-    @VisibleForTesting
-    public void resetDroppedMessagesMap(String scope)
-    {
-        for (DroppedMessages droppedMessages : droppedMessagesMap.values())
-            droppedMessages.reset(scope);
-    }
-
-    // total dropped message counts for server lifetime
-    private final Map<Verb<?, ?>, DroppedMessages> droppedMessagesMap;
+    private final DroppedMessages droppedMessages = new DroppedMessages();
 
     private final List<ILatencySubscriber> subscribers = new ArrayList<>();
 
@@ -174,12 +133,10 @@ public final class MessagingService implements MessagingServiceMBean
 
     private MessagingService(boolean testOnly)
     {
-        this.droppedMessagesMap = initializeDroppedMessageMap();
-
         listenGate = new SimpleCondition();
 
         if (!testOnly)
-            ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::logDroppedMessages, LOG_DROPPED_INTERVAL_IN_MS, LOG_DROPPED_INTERVAL_IN_MS, TimeUnit.MILLISECONDS);
+            droppedMessages.scheduleLogging();
 
         Consumer<Pair<Integer, ExpiringMap.CacheableObject<CallbackInfo<?>>>> timeoutReporter = pair ->
         {
@@ -213,21 +170,6 @@ public final class MessagingService implements MessagingServiceMBean
         }
 
         messageInterceptors.load();
-    }
-
-    private Map<Verb<?, ?>, DroppedMessages> initializeDroppedMessageMap()
-    {
-        ImmutableMap.Builder<Verb<?, ?>, DroppedMessages> builder = ImmutableMap.builder();
-        for (VerbGroup<?> group : Verbs.allGroups())
-        {
-            for (Verb<?, ?> definition : group)
-            {
-                // One way messages don't timeout and are never dropped.
-                if (!definition.isOneWay())
-                    builder.put(definition, new DroppedMessages(definition));
-            }
-        }
-        return builder.build();
     }
 
     public void addInterceptor(Interceptor interceptor)
@@ -861,33 +803,20 @@ public final class MessagingService implements MessagingServiceMBean
         return versions.containsKey(endpoint);
     }
 
-    public void incrementDroppedMessages(Message message)
+    void incrementDroppedMessages(Message<?> message)
     {
         Verb<?, ?> definition = message.verb();
         assert !definition.isOneWay() : "Shouldn't drop a one-way message";
         if (message.isRequest())
         {
-            Object payload = ((Request<?, ?>)message).payload();
+            Object payload = message.payload();
             if (payload instanceof IMutation)
                 updateDroppedMutationCount((IMutation) payload);
         }
 
-        incrementDroppedMessages(definition, message.lifetimeMillis(), !message.isLocal());
+        droppedMessages.onDroppedMessage(message);
     }
 
-    @VisibleForTesting
-    void incrementDroppedMessages(Verb<?, ?> definition, long timeTaken, boolean hasCrossedNode)
-    {
-        DroppedMessages droppedMessages = droppedMessagesMap.get(definition);
-        if (droppedMessages == null)
-        {
-            // This really shouldn't happen or is a bug, but throwing don't feel necessary either
-            NoSpamLogger.log(logger, NoSpamLogger.Level.ERROR, 5, TimeUnit.MINUTES, "Cannot increment dropped message for unregistered message {}", definition);
-            return;
-        }
-
-        incrementDroppedMessages(droppedMessages, timeTaken, hasCrossedNode);
-    }
 
     private void updateDroppedMutationCount(IMutation mutation)
     {
@@ -903,57 +832,6 @@ public final class MessagingService implements MessagingServiceMBean
         }
     }
 
-    private void incrementDroppedMessages(DroppedMessages droppedMessages, long timeTaken, boolean hasCrossedNode)
-    {
-        DroppedMessageMetrics metrics = droppedMessages.metrics;
-        metrics.dropped.mark();
-        if (hasCrossedNode)
-        {
-            droppedMessages.droppedCrossNode.incrementAndGet();
-            metrics.crossNodeDroppedLatency.update(timeTaken, TimeUnit.MILLISECONDS);
-        }
-        else
-        {
-            droppedMessages.droppedInternal.incrementAndGet();
-            metrics.internalDroppedLatency.update(timeTaken, TimeUnit.MILLISECONDS);
-        }
-    }
-
-    private void logDroppedMessages()
-    {
-        List<String> logs = getDroppedMessagesLogs();
-        for (String log : logs)
-            logger.info(log);
-
-        if (logs.size() > 0)
-            StatusLogger.log();
-    }
-
-    @VisibleForTesting
-    List<String> getDroppedMessagesLogs()
-    {
-        List<String> ret = new ArrayList<>();
-        for (Map.Entry<Verb<?, ?>, DroppedMessages> entry : droppedMessagesMap.entrySet())
-        {
-            Verb<?, ?> definition = entry.getKey();
-            DroppedMessages droppedMessages = entry.getValue();
-
-            int droppedInternal = droppedMessages.droppedInternal.getAndSet(0);
-            int droppedCrossNode = droppedMessages.droppedCrossNode.getAndSet(0);
-            if (droppedInternal > 0 || droppedCrossNode > 0)
-            {
-                ret.add(String.format("%s messages were dropped in last %d ms: %d internal and %d cross node."
-                                     + " Mean internal dropped latency: %d ms and Mean cross-node dropped latency: %d ms",
-                                     definition,
-                                     LOG_DROPPED_INTERVAL_IN_MS,
-                                     droppedInternal,
-                                     droppedCrossNode,
-                                     TimeUnit.NANOSECONDS.toMillis((long)droppedMessages.metrics.internalDroppedLatency.getSnapshot().getMean()),
-                                     TimeUnit.NANOSECONDS.toMillis((long)droppedMessages.metrics.crossNodeDroppedLatency.getSnapshot().getMean())));
-            }
-        }
-        return ret;
-    }
 
     @VisibleForTesting
     public static class SocketThread extends Thread
@@ -1144,12 +1022,8 @@ public final class MessagingService implements MessagingServiceMBean
 
     public Map<String, Integer> getDroppedMessages()
     {
-        Map<String, Integer> map = new HashMap<>(droppedMessagesMap.size());
-        for (Map.Entry<Verb<?, ?>, DroppedMessages> entry : droppedMessagesMap.entrySet())
-            map.put(entry.getKey().toString(), (int) entry.getValue().metrics.dropped.getCount());
-        return map;
+        return droppedMessages.getSnapshot();
     }
-
 
     public long getTotalTimeouts()
     {

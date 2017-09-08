@@ -114,22 +114,27 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
 
         WRITE = helper.ackedRequest("WRITE", Mutation.class)
                       .timeout(DatabaseDescriptor::getWriteRpcTimeout)
+                      .droppedGroup(DroppedMessages.Group.MUTATION)
                       .withBackPressure()
                       .handler(WRITE_HANDLER);
         VIEW_WRITE = helper.ackedRequest("VIEW_WRITE", Mutation.class)
                            .timeout(DatabaseDescriptor::getWriteRpcTimeout)
+                           .droppedGroup(DroppedMessages.Group.VIEW_MUTATION)
                            .withBackPressure()
                            .handler(WRITE_HANDLER);
         COUNTER_FORWARDING = helper.ackedRequest("COUNTER_FORWARDING", CounterMutation.class)
                                    .timeout(DatabaseDescriptor::getCounterWriteRpcTimeout)
+                                   .droppedGroup(DroppedMessages.Group.COUNTER_MUTATION)
                                    .withBackPressure()
                                    .handler(COUNTER_FORWARDING_HANDLER);
         READ_REPAIR = helper.ackedRequest("READ_REPAIR", Mutation.class)
                             .timeout(DatabaseDescriptor::getWriteRpcTimeout)
+                            .droppedGroup(DroppedMessages.Group.READ_REPAIR)
                             .handler(WRITE_HANDLER);
         BATCH_STORE = helper.ackedRequest("BATCH_STORE", Batch.class)
                             .stage(Stage.MUTATION)
                             .timeout(DatabaseDescriptor::getWriteRpcTimeout)
+                            .droppedGroup(DroppedMessages.Group.MUTATION)
                             .withBackPressure()
                             .syncHandler((from, batch) -> BatchlogManager.store(batch).blockingAwait());
         BATCH_REMOVE = helper.oneWay("BATCH_REMOVE", UUID.class)

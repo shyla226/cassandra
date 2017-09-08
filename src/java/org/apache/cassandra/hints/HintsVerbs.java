@@ -29,6 +29,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.EncodingVersion;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.UnknownTableException;
+import org.apache.cassandra.net.DroppedMessages;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.Verb.AckedRequest;
 import org.apache.cassandra.net.VerbGroup;
@@ -128,7 +129,7 @@ public class HintsVerbs extends VerbGroup<HintsVerbs.HintsVersion>
     {
         super(id, true, HintsVersion.class);
 
-        RegistrationHelper helper = helper().stage(Stage.MUTATION);
+        RegistrationHelper helper = helper().stage(Stage.MUTATION).droppedGroup(DroppedMessages.Group.HINTS);
 
         HINT = helper.ackedRequest("HINT", HintMessage.class)
                      .timeout(DatabaseDescriptor::getWriteRpcTimeout)
