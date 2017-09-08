@@ -111,7 +111,7 @@ public class DynamicEndpointSnitchBench
         // super stupid pseudo-latency
         long latency = (Thread.currentThread().getId() ^ System.currentTimeMillis()) & 32767;
 
-        ((DynamicEndpointSnitch) snitch).receiveTiming(Verbs.READS.READ, address, latency);
+        ((DynamicEndpointSnitch) snitch).receiveTiming(Verbs.READS.SINGLE_READ, address, latency);
     }
 
     @Benchmark

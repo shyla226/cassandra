@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.util.*;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -48,7 +47,7 @@ public class DynamicEndpointSnitchTest
         for (int round = 0; round < rounds; round++)
         {
             for (int i = 0; i < hosts.size(); i++)
-                dsnitch.receiveTiming(Verbs.READS.READ, hosts.get(i), scores[i]);
+                dsnitch.receiveTiming(Verbs.READS.SINGLE_READ, hosts.get(i), scores[i]);
         }
 
         dsnitch.updateScores();

@@ -619,7 +619,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
         {
             RetryResolver resolver = new RetryResolver(retryCommand, ctx.withConsistency(ConsistencyLevel.ONE));
             ReadCallback<FlowableUnfilteredPartition> handler = ReadCallback.forResolver(resolver, Collections.singletonList(source));
-            MessagingService.instance().send(Verbs.READS.READ.newRequest(source, retryCommand), handler);
+            MessagingService.instance().send(retryCommand.requestTo(source), handler);
 
             return handler.result();
         }

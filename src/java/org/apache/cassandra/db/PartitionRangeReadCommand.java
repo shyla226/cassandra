@@ -18,7 +18,9 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 import com.google.common.collect.Iterables;
@@ -44,20 +46,25 @@ import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.net.Request;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * A read command that selects a (part of a) range of partitions.
  */
 public class PartitionRangeReadCommand extends ReadCommand
 {
-    protected static final SelectionDeserializer selectionDeserializer = new Deserializer();
+    private static final SelectionDeserializer<PartitionRangeReadCommand> selectionDeserializer = new Deserializer();
+    public static final Versioned<ReadVersion, Serializer<PartitionRangeReadCommand>> serializers = ReadVersion.versioned(v -> new ReadCommandSerializer<>(v, selectionDeserializer));
 
     private final DataRange dataRange;
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
@@ -71,7 +78,7 @@ public class PartitionRangeReadCommand extends ReadCommand
                                       DataRange dataRange,
                                       IndexMetadata index)
     {
-        super(Kind.PARTITION_RANGE, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
+        super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         this.dataRange = dataRange;
     }
 
@@ -130,6 +137,16 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              DataLimits.NONE,
                                              range,
                                              null);
+    }
+
+    public Request.Dispatcher<PartitionRangeReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints)
+    {
+        return Verbs.READS.RANGE_READ.newDispatcher(endpoints, this);
+    }
+
+    public Request<PartitionRangeReadCommand, ReadResponse> requestTo(InetAddress endpoint)
+    {
+        return Verbs.READS.RANGE_READ.newRequest(endpoint, this);
     }
 
     public DataRange dataRange()
@@ -413,17 +430,17 @@ public class PartitionRangeReadCommand extends ReadCommand
         return getScheduler().forTaskType(TPCTaskType.READ_RANGE);
     }
 
-    private static class Deserializer extends SelectionDeserializer
+    private static class Deserializer extends SelectionDeserializer<PartitionRangeReadCommand>
     {
-        public ReadCommand deserialize(DataInputPlus in,
-                                       ReadVersion version,
-                                       DigestVersion digestVersion,
-                                       TableMetadata metadata,
-                                       int nowInSec,
-                                       ColumnFilter columnFilter,
-                                       RowFilter rowFilter,
-                                       DataLimits limits,
-                                       IndexMetadata index)
+        public PartitionRangeReadCommand deserialize(DataInputPlus in,
+                                                     ReadVersion version,
+                                                     DigestVersion digestVersion,
+                                                     TableMetadata metadata,
+                                                     int nowInSec,
+                                                     ColumnFilter columnFilter,
+                                                     RowFilter rowFilter,
+                                                     DataLimits limits,
+                                                     IndexMetadata index)
         throws IOException
         {
             DataRange range = DataRange.serializers.get(version).deserialize(in, metadata);

@@ -275,7 +275,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
     public void receiveTiming(Verb<?, ?> verb, InetAddress host, long latency) // this is cheap
     {
         // We're only tracking reads
-        if (verb != Verbs.READS.READ)
+        if (verb.group() != Verbs.READS)
             return;
 
         // prevent the histogram from overflowing

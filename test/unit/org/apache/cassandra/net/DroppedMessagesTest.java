@@ -84,7 +84,7 @@ public class DroppedMessagesTest
         assertEquals(2500, Integer.parseInt(matcher.group(2)));
         assertTrue(Integer.parseInt(matcher.group(3)) > 0);
         assertTrue(Integer.parseInt(matcher.group(4)) > 0);
-        assertEquals(5000, (int) dms.getSnapshot().get(Verbs.READS.READ.droppedGroup().toString()));
+        assertEquals(5000, (int) dms.getSnapshot().get(Verbs.READS.SINGLE_READ.droppedGroup().toString()));
 
         logs = dms.getDroppedMessagesLogs();
         assertEquals(0, logs.size());
@@ -100,7 +100,7 @@ public class DroppedMessagesTest
         assertEquals(1250, Integer.parseInt(matcher.group(2)));
         assertTrue(Integer.parseInt(matcher.group(3)) > 0);
         assertTrue(Integer.parseInt(matcher.group(4)) > 0);
-        assertEquals(7500, (int) dms.getSnapshot().get(Verbs.READS.READ.droppedGroup().toString()));
+        assertEquals(7500, (int) dms.getSnapshot().get(Verbs.READS.SINGLE_READ.droppedGroup().toString()));
     }
 
     private Message<?> fakeMessage(long lifeTime, boolean isCrossNode)
@@ -108,7 +108,7 @@ public class DroppedMessagesTest
         return Request.fakeTestRequest(peer1,
                                        isCrossNode ? peer2 : peer1,
                                        0,
-                                       Verbs.READS.READ,
+                                       Verbs.READS.SINGLE_READ,
                                        null,
                                        System.currentTimeMillis() - lifeTime);
     }

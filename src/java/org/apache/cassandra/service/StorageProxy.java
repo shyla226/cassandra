@@ -1493,7 +1493,7 @@ public class StorageProxy implements StorageProxyMBean
             Collection<InetAddress> contactedReplicas = p.right;
 
             Tracing.trace("Enqueuing full data reads to {}", contactedReplicas);
-            MessagingService.instance().send(Verbs.READS.READ.newDispatcher(contactedReplicas, command), repairHandler);
+            MessagingService.instance().send(command.dispatcherTo(contactedReplicas), repairHandler);
 
             return repairHandler.result().mapError(e -> {
                 if (logger.isTraceEnabled())
@@ -1794,17 +1794,17 @@ public class StorageProxy implements StorageProxyMBean
             if (ctx.withDigests)
             {
                 // Send the data request to the first node, digests to the rest
-                MessagingService.instance().send(Verbs.READS.READ.newRequest(replicas.get(0), rangeCommand), handler);
+                MessagingService.instance().send(rangeCommand.requestTo(replicas.get(0)), handler);
 
                 if (replicas.size() > 1)
                 {
                     ReadCommand digestCommand = rangeCommand.createDigestCommand(DigestVersion.forReplicas(replicas));
-                    MessagingService.instance().send(Verbs.READS.READ.newDispatcher(replicas.subList(1, replicas.size()), digestCommand), handler);
+                    MessagingService.instance().send(digestCommand.dispatcherTo(replicas.subList(1, replicas.size())), handler);
                 }
             }
             else
             {
-                MessagingService.instance().send(Verbs.READS.READ.newDispatcher(replicas, rangeCommand), handler);
+                MessagingService.instance().send(rangeCommand.dispatcherTo(replicas), handler);
             }
             return handler.result()
                           .onErrorResumeNext(e -> {
@@ -1828,7 +1828,7 @@ public class StorageProxy implements StorageProxyMBean
             Collection<InetAddress> endpoints = p.right;
 
             Tracing.trace("Enqueuing full data reads to {}", endpoints);
-            MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command), repairHandler);
+            MessagingService.instance().send(command.dispatcherTo(endpoints), repairHandler);
 
             return repairHandler.result();
         }

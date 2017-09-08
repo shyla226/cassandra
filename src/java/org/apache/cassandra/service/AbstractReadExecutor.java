@@ -115,7 +115,7 @@ public abstract class AbstractReadExecutor
 
     private Completable makeRequests(ReadCommand readCommand, List<InetAddress> endpoints)
     {
-        MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, readCommand), handler);
+        MessagingService.instance().send(readCommand.dispatcherTo(endpoints), handler);
         return Completable.complete();
     }
 
@@ -333,7 +333,7 @@ public abstract class AbstractReadExecutor
                            InetAddress extraReplica = Iterables.getLast(targetReplicas);
                            Tracing.trace("Speculating read retry on {}", extraReplica);
                            logger.trace("Speculating read retry on {}", extraReplica);
-                           MessagingService.instance().send(Verbs.READS.READ.newRequest(extraReplica, retryCommand), handler);
+                           MessagingService.instance().send(retryCommand.requestTo(extraReplica), handler);
                        }
                    }, TPCTaskType.TIMED_SPECULATE, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
 

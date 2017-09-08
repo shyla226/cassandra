@@ -44,7 +44,7 @@ public abstract class ResponseResolver<T>
     ResponseResolver(ReadCommand command, ReadContext ctx, int maxResponseCount)
     {
         // It's a programming error to pass a command here created through ReadCommand.createDigestCommand(). Those digest
-        // commands should be created late when sending request, so only to be passed to Verbs.READ.READ.newRequest(),
+        // commands should be created late when sending request, so only to be passed to Verb#newRequest,
         // but no resolver applies _only_ to digest queries so keeping the raw command here is logical and more intuitive.
         // The reason this matter is that with speculative retries and read repairs, the command passed here might be
         // used to generate new requests, and the assumption when we do so is that we won't get digest queries that way:

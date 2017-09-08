@@ -146,7 +146,7 @@ public class ReadExecutorTest
         assertEquals(0, cfs.metric.speculativeFailedRetries.getCount());
         assertEquals(0, ks.metric.speculativeRetries.getCount());
         assertEquals(0, ks.metric.speculativeFailedRetries.getCount());
-        ReadCommand command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
+        SinglePartitionReadCommand command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
         AbstractReadExecutor executor = new AbstractReadExecutor.SpeculatingReadExecutor(cfs, command, targets, ctx(command, ConsistencyLevel.LOCAL_QUORUM));
         DatabaseDescriptor.setReadRpcTimeout(TimeUnit.DAYS.toMillis(365));
         executor.maybeTryAdditionalReplicas().blockingAwait();
@@ -155,9 +155,9 @@ public class ReadExecutorTest
         // hence the cfs.sampleLatencyNanos + 10 nanoseconds delay
         command.getScheduler().scheduleDirect(() -> {
             //Failures end the read promptly but don't require mock data to be supplied
-            Request<ReadCommand, ReadResponse> request0 = Request.fakeTestRequest(targets.get(0), -1, Verbs.READS.READ, command);
+            Request<SinglePartitionReadCommand, ReadResponse> request0 = Request.fakeTestRequest(targets.get(0), -1, Verbs.READS.SINGLE_READ, command);
             executor.handler.onFailure(request0.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
-            Request<ReadCommand, ReadResponse> request1 = Request.fakeTestRequest(targets.get(1), -1, Verbs.READS.READ, command);
+            Request<SinglePartitionReadCommand, ReadResponse> request1 = Request.fakeTestRequest(targets.get(1), -1, Verbs.READS.SINGLE_READ, command);
             executor.handler.onFailure(request1.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
         }, TPCTaskType.TIMED_SPECULATE, cfs.sampleLatencyNanos + 10, TimeUnit.NANOSECONDS); // see comment above
 

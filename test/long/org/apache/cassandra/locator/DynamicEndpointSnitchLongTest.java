@@ -101,7 +101,7 @@ public class DynamicEndpointSnitchLongTest
             {
                 InetAddress host = hosts.get(random.nextInt(hosts.size()));
                 int score = random.nextInt(SCORE_RANGE);
-                dsnitch.receiveTiming(Verbs.READS.READ, host, score);
+                dsnitch.receiveTiming(Verbs.READS.SINGLE_READ, host, score);
             }
         }
     }

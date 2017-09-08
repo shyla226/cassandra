@@ -33,9 +33,6 @@ import com.google.common.collect.HashBiMap;
 import com.google.common.collect.ImmutableMap;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.ReadResponse;
-import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -64,13 +61,13 @@ public class OSSMessageSerializer implements Message.Serializer
         MUTATION(WRITES.WRITE),
         HINT(HINTS.HINT),
         READ_REPAIR(WRITES.READ_REPAIR),
-        READ(READS.READ),
+        READ(READS.SINGLE_READ),
         REQUEST_RESPONSE(null),
         BATCH_STORE(WRITES.BATCH_STORE),
         BATCH_REMOVE(WRITES.BATCH_REMOVE),
         @Deprecated STREAM_REPLY(null),
         @Deprecated STREAM_REQUEST(null),
-        RANGE_SLICE(READS.READ),
+        RANGE_SLICE(READS.RANGE_READ),
         @Deprecated BOOTSTRAP_TOKEN(null),
         @Deprecated TREE_REQUEST(null),
         @Deprecated TREE_RESPONSE(null),
@@ -122,9 +119,6 @@ public class OSSMessageSerializer implements Message.Serializer
 
     /**
      * Gets the verb corresponding to a particular _request_ definition.
-     * <p>
-     * WARNING: this should not be relied on for READS.READ, because we need the actual payload to decide if we should send
-     * OSSVerb.READ or OSSVerb.RANGE_SLICE.
      */
     private static final Map<Verb<?, ?>, OSSVerb> definitionToVerb;
     static
@@ -132,7 +126,7 @@ public class OSSMessageSerializer implements Message.Serializer
         ImmutableMap.Builder<Verb<?, ?>, OSSVerb> builder = ImmutableMap.builder();
         for (OSSVerb ossVerb : OSSVerb.values())
         {
-            if (ossVerb.verb != null && ossVerb.verb != Verbs.READS.READ)
+            if (ossVerb.verb != null)
                 builder.put(ossVerb.verb, ossVerb);
         }
 
@@ -260,11 +254,6 @@ public class OSSMessageSerializer implements Message.Serializer
             return wasUsingAndInternalResponse((Response<?>)message)
                    ? OSSVerb.INTERNAL_RESPONSE
                    : OSSVerb.REQUEST_RESPONSE;
-
-        if (message.verb() == Verbs.READS.READ)
-            return ((Request<ReadCommand, ReadResponse>)message).payload() instanceof SinglePartitionReadCommand
-                   ? OSSVerb.READ
-                   : OSSVerb.RANGE_SLICE;
 
         return definitionToVerb.get(message.verb());
     }
