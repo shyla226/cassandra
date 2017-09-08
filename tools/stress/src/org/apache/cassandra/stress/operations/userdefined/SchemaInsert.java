@@ -96,6 +96,7 @@ public class SchemaInsert extends SchemaStatement
 
         private void executeStatements()
         {
+            rowCount += stmts.size();
             if (stmts.size() == 0)
             {
                 return;
