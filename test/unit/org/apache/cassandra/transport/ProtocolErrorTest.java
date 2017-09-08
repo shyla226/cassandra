@@ -185,12 +185,15 @@ public class ProtocolErrorTest {
         };
         byte[] body = new byte[0x10];
         ByteBuf buf = Unpooled.wrappedBuffer(incomingFrame, body);
-        Frame decodedFrame = new Frame.Decoder(null).decodeFrame(buf);
         try {
-            decodedFrame.header.type.codec.decode(decodedFrame.body, decodedFrame.header.version);
+            Frame decodedFrame = new Frame.Decoder(null).decodeFrame(buf);
             Assert.fail("Expected protocol error");
-        } catch (ProtocolException e) {
-            Assert.assertTrue(e.getMessage().contains("Unsupported message"));
+        }
+        catch (ErrorMessage.WrappedException e)
+        {
+            Assert.assertEquals(ProtocolException.class, e.getCause().getClass());
+            Assert.assertEquals(1, e.getStreamId());
+            Assert.assertTrue(e.getMessage().contains("Unknown opcode 4"));
         }
     }
 }
