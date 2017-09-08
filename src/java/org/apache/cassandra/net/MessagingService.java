@@ -227,7 +227,6 @@ public final class MessagingService implements MessagingServiceMBean
                     builder.put(definition, new DroppedMessages(definition));
             }
         }
-        builder.put(Tracing.TRACE_MSG_DEF, new DroppedMessages(Tracing.TRACE_MSG_DEF));
         return builder.build();
     }
 

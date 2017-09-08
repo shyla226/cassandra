@@ -22,8 +22,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.concurrent.ExecutorSupplier;
 import org.apache.cassandra.utils.TimeoutSupplier;
 import org.apache.cassandra.utils.versioning.Version;
@@ -31,7 +29,7 @@ import org.apache.cassandra.utils.versioning.Version;
 /**
  * Represents the definition of an inter-node exchange (read request, gossip ack message, etc...).
  * <p>
- * A verb describes a particular type of request, and the response associated to it (if any), as well as informations
+ * A verb describes a particular type of request, and the response associated to it (if any), as well as information
  * associated to this message exchange (timeout, stage to use for executing the request, ...). Most importantly, the verb
  * defines the {@link #handler} that is used to execute its requests.
  * <p>
@@ -55,7 +53,7 @@ public abstract class Verb<P, Q>
     final Consumer<Response<Q>> EMPTY_RESPONSE_CONSUMER = r -> {};
 
     /**
-     * A simple utility class that groups most infos of the verb to avoid code repetition in the subclass definitions
+     * A simple utility class that groups most info of the verb to avoid code repetition in the subclass definitions
      * at the end of this class and in {@link VerbGroup}. This can be ignored otherwise.
      */
     public static class Info<P>
@@ -99,7 +97,7 @@ public abstract class Verb<P, Q>
         this.timeoutSupplier = timeoutSupplier;
         this.handler = handler;
 
-        assert isOneWay() == (timeoutSupplier == null) : "Oneway verbs must not have a timeout supplier, but other verbs must";
+        assert isOneWay() == (timeoutSupplier == null) : "One-way verbs must not have a timeout supplier, but other verbs must";
     }
 
     /**
@@ -202,11 +200,8 @@ public abstract class Verb<P, Q>
 
     /**
      * Creates a request for this verb given the message data.
-     * <p>
-     * Note: this shouldn't be public and one should avoid using this outside of this package, but it's public due to
-     * the crazy hack we're using for tracing, see {@link org.apache.cassandra.tracing.Tracing#TRACE_MSG_DEF}.
      */
-    public Request<P, Q> newRequest(InetAddress to, Message.Data<P> messageData)
+    Request<P, Q> newRequest(InetAddress to, Message.Data<P> messageData)
     {
         return new Request<>(Request.local,
                              to,
@@ -272,7 +267,6 @@ public abstract class Verb<P, Q>
     {
         // The way the code is made, each verb is it's own singleton object, so reference equality is fine and actually
         // what we want. And the only purpose of this (redundant) definition is to make it clear that this is intended,
-        // especially as Tracing.TRACE_MSG_DEF currently rely on us not really accessing anything of the object.
         return this == o;
     }
 

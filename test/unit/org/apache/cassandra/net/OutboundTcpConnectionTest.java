@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.net;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;

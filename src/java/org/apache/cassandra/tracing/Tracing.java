@@ -35,18 +35,14 @@ import io.netty.util.concurrent.FastThreadLocal;
 import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.ExecutorLocal;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.EmptyPayload;
+import org.apache.cassandra.metrics.TracingMetrics;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.Verb.AckedRequest;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.UUIDSerializer;
-import org.apache.cassandra.utils.WrappedRunnable;
 
 
 /**
@@ -55,19 +51,6 @@ import org.apache.cassandra.utils.WrappedRunnable;
  */
 public abstract class Tracing implements ExecutorLocal<TraceState>
 {
-    // A "fake" message definition that exists only to reuse the droppedMessagesMap in MessagingService when the
-    // tracing executor backlog and we have to drop tracing tasks on the floor (see onDroppedTask in particular).
-    // Note that most stuffs are null, so we totally rely on the fact that this definition and its message are never
-    // used for anything else.
-    public static final AckedRequest<EmptyPayload> TRACE_MSG_DEF = new AckedRequest<EmptyPayload>(null, request -> 0, null)
-    {
-        @Override
-        public String toString()
-        {
-            return "_TRACE";
-        }
-    };
-
     public enum TraceType
     {
         NONE,
@@ -105,21 +88,16 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
     private final FastThreadLocal<TraceState> state = new FastThreadLocal<>();
 
     protected final ConcurrentMap<UUID, TraceState> sessions = new ConcurrentHashMap<>();
+    private final TracingMetrics metrics = new TracingMetrics();
 
     public static final Tracing instance;
 
     /**
      * Called by the tracing executor when a tracing task cannot be executed due to a backlog of tracing tasks.
-     *
-     * @param runnable the task whose execution has been rejected.
      */
-    public static void onDroppedTask(Runnable runnable)
+    public void onDroppedTask()
     {
-        long createdAtMillis = runnable instanceof TracingRunnable
-                               ? ((TracingRunnable) runnable).createdAtMillis
-                               : ApproximateTime.currentTimeMillis();
-        Message.Data<EmptyPayload> data = new Message.Data<>(EmptyPayload.instance, 0, createdAtMillis, -1);
-        MessagingService.instance().incrementDroppedMessages(TRACE_MSG_DEF.newRequest(FBUtilities.getBroadcastAddress(), data));
+        metrics.droppedTasks.mark();
     }
 
     static
@@ -401,10 +379,5 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
             TraceType traceType = TraceType.deserialize((byte)in.readUnsignedByte());
             return new SessionInfo(sessionId, traceType);
         }
-    }
-
-    static abstract class TracingRunnable extends WrappedRunnable
-    {
-        final long createdAtMillis = System.currentTimeMillis();
     }
 }
