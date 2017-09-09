@@ -36,6 +36,7 @@ dse 6.0.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from dse5.1:
+ * Fix stress-tool not outputting row/s (APOLLO-1123)
  * Make o.a.c.metrics extend org.codahale.metrics to fix Metrics Reporter (APOLLO-811)
  * Make sure to handle range queries while filtering (APOLLO-546)
  * Allow mapping a single column to multiple SASI indexes (APOLLO-521)
