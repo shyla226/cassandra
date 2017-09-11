@@ -1,4 +1,5 @@
 DSE 5.1.6
+ * Add invalid-sstable-root JVM argument to all relevant test entries in build.xml (DB-1133)
 Merged from dse5.0:
  * Add new rebuild mode reset-no-snapshot (DB-1224)
  * Add 'nodetool abortrebuild' (DB-1234)
