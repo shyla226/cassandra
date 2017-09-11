@@ -19,6 +19,7 @@ package org.apache.cassandra.io.tries;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -325,11 +326,11 @@ implements IncrementalTrieWriter<Value>
         return nodePosition;
     }
 
-    static long uniqueCounter = 0;
+    static final AtomicLong uniqueCounter = new AtomicLong();
 
     static class Node<Value> extends IncrementalTrieWriterBase.BaseNode<Value, Node<Value>>
     {
-        final long uniqueId = uniqueCounter++;
+        final long uniqueId = uniqueCounter.incrementAndGet();
 
         /**
          * Currently calculated size of the branch below this node, not including the node itself.
