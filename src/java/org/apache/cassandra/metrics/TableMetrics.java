@@ -150,6 +150,11 @@ public class TableMetrics
     public final Timer coordinatorReadLatency;
     public final Timer coordinatorScanLatency;
 
+    /** Amount of bytes successfully anti-compacted */
+    public final Counter antiCompactedBytes;
+    /** Amount of bytes that were repaired but could not be anti-compacted due to races with compaction */
+    public final Counter nonAntiCompactedBytes;
+
     /** Time spent waiting for free memtable space, either on- or off-heap */
     public final Histogram waitingOnFreeMemtableSpace;
 
@@ -695,6 +700,9 @@ public class TableMetrics
         rowCacheHit = createTableCounter("RowCacheHit");
         rowCacheMiss = createTableCounter("RowCacheMiss");
         droppedMutations = createTableCounter("DroppedMutations");
+
+        antiCompactedBytes = createTableCounter("AntiCompactedBytes");
+        nonAntiCompactedBytes = createTableCounter("NonAntiCompactedBytes");
 
         casPrepare = new LatencyMetrics(factory, "CasPrepare", cfs.keyspace.metric.casPrepare);
         casPropose = new LatencyMetrics(factory, "CasPropose", cfs.keyspace.metric.casPropose);

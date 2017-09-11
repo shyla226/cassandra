@@ -1,6 +1,7 @@
 DSE 5.1.4
  * Fix stress-tool not outputting row/s (APOLLO-1123)
 Merged from dse5.0:
+ * Add anticompaction metrics and warn users when incremental repair is inefficient (APOLLO-689)
  * Make scrub validate the partition key, add validation to schema mutation creation (APOLLO-657)
 
 DSE 5.1.3

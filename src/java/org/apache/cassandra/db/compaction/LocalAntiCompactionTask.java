@@ -94,9 +94,9 @@ public class LocalAntiCompactionTask implements Runnable
             //Release all SSTables in the unrepaired set
             if (!unrepairedSet.isEmpty())
             {
-                logger.warn("[repair {}] {} SSTable(s) from table {}.{} could not be marked as repaired because they potentially shadow rows compacted during " +
-                            "repair. If this message appears repeatedly, consider running incremental repairs on this table with compactions disabled or " +
-                            "switching to full repairs.", parentSessionId, unrepairedSet.size(), cfs.keyspace.getName(), cfs.name);
+                logger.debug("[repair {}] Not marking {} live SSTable(s) as repaired because they " +
+                            "potentially shadow rows compacted during repair.", parentSessionId,
+                             unrepairedSet.size(), cfs.keyspace.getName(), cfs.name);
 
                 unrepairedSet.forEach(u ->
                                       Sets.union(Collections.singleton(localSSTablesTxn), remoteSSTablesTxns)
