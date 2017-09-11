@@ -27,6 +27,8 @@ Operations
 Upgrading
 ---------
 
+   - Removed support for directly setting JMX remote port via the com.sun.management.jmxremote.port
+     system property, deprecated since 3.6. See CASSANDRA-11725 and APOLLO-1040 for more details.
    - The table system_auth.resource_role_permissons_index is no longer used and should be dropped
      after all nodes are on 6.0.
    - Incremental repairs are no longer supported on tables with materialized views or CDC until

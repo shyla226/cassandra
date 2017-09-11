@@ -33,6 +33,7 @@ import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.io.util.FileUtils;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -69,6 +70,24 @@ public class StartupChecksTest
         if (sstableDir != null)
             FileUtils.deleteRecursive(sstableDir.toFile());
     }
+
+    @Test
+    public void failStartupIfInvalidJmxPropertyFound() throws Exception
+    {
+        startupChecks = startupChecks.withTest(StartupChecks.checkInvalidJmxProperty);
+
+        // When com.sun.management.jmxremote.port is unsert, it should not throw StartupException
+        assertNull(System.getProperty("com.sun.management.jmxremote.port"));
+        startupChecks.verify();
+
+        System.setProperty("com.sun.management.jmxremote.port", "7199");
+        verifyFailure(startupChecks, "The JVM property 'com.sun.management.jmxremote.port' is not allowed. " +
+                                     "Please use cassandra.jmx.remote.port instead and refer to cassandra-env.(sh|ps1) " +
+                                     "for JMX configuration info.");
+        System.clearProperty("com.sun.management.jmxremote.port");
+    }
+
+
 
     @Test
     public void failStartupIfInvalidSSTablesFound() throws Exception

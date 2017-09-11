@@ -80,8 +80,7 @@ public class StartupChecks
     // keyspace. All other checks should not require any schema initialization.
     private final List<StartupCheck> DEFAULT_TESTS = ImmutableList.of(checkJemalloc,
                                                                       checkValidLaunchDate,
-                                                                      checkJMXPorts,
-                                                                      checkJMXProperties,
+                                                                      checkInvalidJmxProperty,
                                                                       inspectJvmOptions,
                                                                       checkNativeLibraryInitialization,
                                                                       initSigarLibrary,
@@ -155,33 +154,20 @@ public class StartupChecks
         }
     };
 
-    public static final StartupCheck checkJMXPorts = new StartupCheck()
+    public static final StartupCheck checkInvalidJmxProperty = new StartupCheck()
     {
-        public void execute(Logger logger)
+        public void execute(Logger logger) throws StartupException
         {
-            String jmxPort = System.getProperty("cassandra.jmx.remote.port");
-            if (jmxPort == null)
-            {
-                logger.warn("JMX is not enabled to receive remote connections. Please see cassandra-env.sh for more info.");
-                jmxPort = System.getProperty("cassandra.jmx.local.port");
-                if (jmxPort == null)
-                    logger.error("cassandra.jmx.local.port missing from cassandra-env.sh, unable to start local JMX service.");
-            }
-            else
-            {
-                logger.info("JMX is enabled to receive remote connections on port: {}", jmxPort);
-            }
-        }
-    };
-
-    public static final StartupCheck checkJMXProperties = new StartupCheck()
-    {
-        public void execute(Logger logger)
-        {
+            // If the standard com.sun.management.jmxremote.port property has been set
+            // then the JVM agent will have already started up a default JMX connector
+            // server, so we don't accept this property anymore.
+            // See: CASSANDRA-11540 & CASSANDRA-11725 & APOLLO-1040
             if (System.getProperty("com.sun.management.jmxremote.port") != null)
             {
-                logger.warn("Use of com.sun.management.jmxremote.port at startup is deprecated. " +
-                            "Please use cassandra.jmx.remote.port instead.");
+                    throw new StartupException(StartupException.ERR_WRONG_CONFIG,
+                                               "The JVM property 'com.sun.management.jmxremote.port' is not allowed. " +
+                                               "Please use cassandra.jmx.remote.port instead and refer to cassandra-env.(sh|ps1) " +
+                                               "for JMX configuration info.");
             }
         }
     };

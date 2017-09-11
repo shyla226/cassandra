@@ -34,6 +34,11 @@ public enum ApplicationState
     HOST_ID,
     TOKENS,
     RPC_READY,
+    NATIVE_TRANSPORT_PORT,
+    NATIVE_TRANSPORT_PORT_SSL,
+    STORAGE_PORT,
+    STORAGE_PORT_SSL,
+    JMX_PORT,
     // pad to allow adding new states to existing cluster
     X1,
     X2,

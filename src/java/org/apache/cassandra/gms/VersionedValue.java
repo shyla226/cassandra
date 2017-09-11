@@ -267,6 +267,31 @@ public class VersionedValue implements Comparable<VersionedValue>
         {
             return new VersionedValue(String.valueOf(value));
         }
+
+        public VersionedValue nativeTransportPort(int port)
+        {
+            return new VersionedValue(String.valueOf(port));
+        }
+
+        public VersionedValue nativeTransportPortSSL(int port)
+        {
+            return new VersionedValue(String.valueOf(port));
+        }
+
+        public VersionedValue storagePort(int port)
+        {
+            return new VersionedValue(String.valueOf(port));
+        }
+
+        public VersionedValue storagePortSSL(int port)
+        {
+            return new VersionedValue(String.valueOf(port));
+        }
+
+        public VersionedValue jmxPort(int port)
+        {
+            return new VersionedValue(String.valueOf(port));
+        }
     }
 
     private static class ValueSerializer implements Serializer<VersionedValue>

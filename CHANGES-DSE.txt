@@ -1,4 +1,5 @@
 dse 6.0.0
+ * Expose ports (storage, native protocol, JMX) in system local and peers tables (APOLLO-1040)
  * Fix trie file construction bugs (APOLLO-1055)
  * Continuous paging backpressure and integration with TPC (APOLLO-707)
  * SystemKeyspace.snapshotOnVersionChange() never called in production code (APOLLO-797)

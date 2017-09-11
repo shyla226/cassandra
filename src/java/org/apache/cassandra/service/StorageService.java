@@ -758,6 +758,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             appStates.put(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(FBUtilities.getBroadcastRpcAddress()));
             appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
 
+            appStates.put(ApplicationState.NATIVE_TRANSPORT_PORT, valueFactory.nativeTransportPort(DatabaseDescriptor.getNativeTransportPort()));
+            appStates.put(ApplicationState.NATIVE_TRANSPORT_PORT_SSL, valueFactory.nativeTransportPortSSL(DatabaseDescriptor.getNativeTransportPortSSL()));
+            appStates.put(ApplicationState.STORAGE_PORT, valueFactory.storagePort(DatabaseDescriptor.getStoragePort()));
+            appStates.put(ApplicationState.STORAGE_PORT_SSL, valueFactory.storagePortSSL(DatabaseDescriptor.getSSLStoragePort()));
+            DatabaseDescriptor.getJMXPort().ifPresent(port -> appStates.put(ApplicationState.JMX_PORT, valueFactory.jmxPort(port)));
+
             // load the persisted ring state. This used to be done earlier in the init process,
             // but now we always perform a shadow round when preparing to join and we have to
             // clear endpoint states after doing that.
@@ -2065,6 +2071,21 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     case NET_VERSION:
                         updateNetVersion(endpoint, value);
                         break;
+                    case NATIVE_TRANSPORT_PORT:
+                        SystemKeyspace.updatePeerInfo(endpoint, "native_transport_port", Integer.parseInt(value.value));
+                        break;
+                    case NATIVE_TRANSPORT_PORT_SSL:
+                        SystemKeyspace.updatePeerInfo(endpoint, "native_transport_port_ssl", Integer.parseInt(value.value));
+                        break;
+                    case STORAGE_PORT:
+                        SystemKeyspace.updatePeerInfo(endpoint, "storage_port", Integer.parseInt(value.value));
+                        break;
+                    case STORAGE_PORT_SSL:
+                        SystemKeyspace.updatePeerInfo(endpoint, "storage_port_ssl", Integer.parseInt(value.value));
+                        break;
+                    case JMX_PORT:
+                        SystemKeyspace.updatePeerInfo(endpoint, "jmx_port", Integer.parseInt(value.value));
+                        break;
                 }
             }
         }
@@ -2132,6 +2153,21 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     break;
                 case HOST_ID:
                     SystemKeyspace.updatePeerInfo(endpoint, "host_id", UUID.fromString(entry.getValue().value));
+                    break;
+                case NATIVE_TRANSPORT_PORT:
+                    SystemKeyspace.updatePeerInfo(endpoint, "native_transport_port", Integer.parseInt(entry.getValue().value));
+                    break;
+                case NATIVE_TRANSPORT_PORT_SSL:
+                    SystemKeyspace.updatePeerInfo(endpoint, "native_transport_port_ssl", Integer.parseInt(entry.getValue().value));
+                    break;
+                case STORAGE_PORT:
+                    SystemKeyspace.updatePeerInfo(endpoint, "storage_port", Integer.parseInt(entry.getValue().value));
+                    break;
+                case STORAGE_PORT_SSL:
+                    SystemKeyspace.updatePeerInfo(endpoint, "storage_port_ssl", Integer.parseInt(entry.getValue().value));
+                    break;
+                case JMX_PORT:
+                    SystemKeyspace.updatePeerInfo(endpoint, "jmx_port", Integer.parseInt(entry.getValue().value));
                     break;
             }
         }

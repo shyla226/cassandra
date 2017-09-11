@@ -133,49 +133,30 @@ public class CassandraDaemon
 
     private void maybeInitJmx()
     {
-        // If the standard com.sun.management.jmxremote.port property has been set
-        // then the JVM agent will have already started up a default JMX connector
-        // server. This behaviour is deprecated, but some clients may be relying
-        // on it, so log a warning and skip setting up the server with the settings
-        // as configured in cassandra-env.(sh|ps1)
-        // See: CASSANDRA-11540 & CASSANDRA-11725
-        if (System.getProperty("com.sun.management.jmxremote.port") != null)
-        {
-            logger.warn("JMX settings in cassandra-env.sh have been bypassed as the JMX connector server is " +
-                        "already initialized. Please refer to cassandra-env.(sh|ps1) for JMX configuration info");
-            return;
-        }
-
         System.setProperty("java.rmi.server.randomIDs", "true");
 
         // If a remote port has been specified then use that to set up a JMX
-        // connector server which can be accessed remotely. Otherwise, look
-        // for the local port property and create a server which is bound
-        // only to the loopback address. Auth options are applied to both
-        // remote and local-only servers, but currently SSL is only
-        // available for remote.
+        // connector server which can be accessed remotely. Otherwise, create
+        // a server which is bound only to the loopback address. Auth options
+        // are applied to both remote and local-only servers, but currently SSL
+        // is only available for remote.
         // If neither is remote nor local port is set in cassandra-env.(sh|ps)
-        // then JMX is effectively  disabled.
-        boolean localOnly = false;
-        String jmxPort = System.getProperty("cassandra.jmx.remote.port");
-
-        if (jmxPort == null)
-        {
-            localOnly = true;
-            jmxPort = System.getProperty("cassandra.jmx.local.port");
-        }
-
-        if (jmxPort == null)
-            return;
-
-        try
-        {
-            jmxServer = JMXServerUtils.createJMXServer(Integer.parseInt(jmxPort), localOnly);
-        }
-        catch (IOException e)
-        {
-            exitOrFail(1, e.getMessage(), e.getCause());
-        }
+        // then JMX is effectively disabled.
+        DatabaseDescriptor.getJMXPort()
+                          .ifPresent(port ->
+                                     {
+                                         boolean localOnly = DatabaseDescriptor.isJMXLocalOnly();
+                                         try
+                                         {
+                                             jmxServer = JMXServerUtils.createJMXServer(port, localOnly);
+                                         }
+                                         catch (IOException e)
+                                         {
+                                             exitOrFail(StartupException.ERR_WRONG_MACHINE_STATE,
+                                                        e.getMessage(),
+                                                        e.getCause());
+                                         }
+                                     });
     }
 
     static final CassandraDaemon instance = new CassandraDaemon();

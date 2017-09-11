@@ -156,6 +156,11 @@ public final class SystemKeyspace
               + "schema_version uuid,"
               + "tokens set<varchar>,"
               + "truncated_at map<uuid, blob>,"
+              + "native_transport_port int,"
+              + "native_transport_port_ssl int,"
+              + "storage_port int,"
+              + "storage_port_ssl int,"
+              + "jmx_port int,"
 
               // DSE-specific extra columns:
               + "dse_version text,"
@@ -181,6 +186,11 @@ public final class SystemKeyspace
               + "rpc_address inet,"
               + "schema_version uuid,"
               + "tokens set<varchar>,"
+              + "native_transport_port int,"
+              + "native_transport_port_ssl int,"
+              + "storage_port int,"
+              + "storage_port_ssl int,"
+              + "jmx_port int,"
 
               // DSE-specific extra columns:
               + "dse_version text,"
@@ -404,8 +414,13 @@ public final class SystemKeyspace
                      "partitioner," +
                      "rpc_address," +
                      "broadcast_address," +
-                     "listen_address" +
-                     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                     "listen_address," +
+                     "native_transport_port," +
+                     "native_transport_port_ssl," +
+                     "storage_port," +
+                     "storage_port_ssl," +
+                     "jmx_port" +
+                     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
         // TODO make async
         executeOnceInternal(format(req, LOCAL),
@@ -419,7 +434,12 @@ public final class SystemKeyspace
                             DatabaseDescriptor.getPartitioner().getClass().getName(),
                             DatabaseDescriptor.getRpcAddress(),
                             FBUtilities.getBroadcastAddress(),
-                            FBUtilities.getLocalAddress()).blockingGet();
+                            FBUtilities.getLocalAddress(),
+                            DatabaseDescriptor.getNativeTransportPort(),
+                            DatabaseDescriptor.getNativeTransportPortSSL(),
+                            DatabaseDescriptor.getStoragePort(),
+                            DatabaseDescriptor.getSSLStoragePort(),
+                            DatabaseDescriptor.getJMXPort().orElse(null)).blockingGet();
     }
 
     public static void updateCompactionHistory(String ksname,

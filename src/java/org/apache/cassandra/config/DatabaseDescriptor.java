@@ -91,6 +91,9 @@ public class DatabaseDescriptor
     private static SeedProvider seedProvider;
     private static IInternodeAuthenticator internodeAuthenticator = new AllowAllInternodeAuthenticator();
 
+    private static boolean jmxLocalOnly;
+    private static Integer jmxPort;
+
     /* Hashing strategy Random or OPHF */
     private static IPartitioner partitioner;
     private static String paritionerName;
@@ -830,6 +833,42 @@ public class DatabaseDescriptor
             if (rpcAddress.isAnyLocalAddress())
                 throw new ConfigurationException("If rpc_address is set to a wildcard address (" + config.rpc_address + "), then " +
                                                  "you must set broadcast_rpc_address to a value other than " + config.rpc_address, false);
+        }
+
+        /* JMX port */
+        String propertyName = Config.PROPERTY_PREFIX + "jmx.remote.port";
+        String propertyValue = System.getProperty(propertyName);
+        if (propertyValue != null)
+        {
+            jmxLocalOnly = false;
+            logger.info("JMX is enabled to receive remote connections on port: {}", jmxPort);
+        }
+        else
+        {
+            logger.warn("JMX is not enabled to receive remote connections. Please see cassandra-env.sh for more info.");
+
+            propertyName = Config.PROPERTY_PREFIX + "jmx.local.port";
+            propertyValue = System.getProperty(propertyName);
+            if (propertyValue == null)
+            {
+                logger.error(propertyName + " missing from cassandra-env.sh, unable to start local JMX service.");
+            }
+            else
+            {
+                jmxLocalOnly = true;
+            }
+        }
+
+        if (propertyValue != null)
+        {
+            try
+            {
+                jmxPort = Integer.parseInt(propertyValue);
+            }
+            catch (NumberFormatException e)
+            {
+                throw new ConfigurationException("Unparseable JMX port at property'" + propertyName + "': " + propertyValue, false);
+            }
         }
     }
 
@@ -2538,5 +2577,15 @@ public class DatabaseDescriptor
     public static void setCDCEnabled(boolean cdcEnabled)
     {
         conf.cdc_enabled = cdcEnabled;
+    }
+
+    public static Optional<Integer> getJMXPort()
+    {
+        return Optional.ofNullable(jmxPort);
+    }
+
+    public static boolean isJMXLocalOnly()
+    {
+        return jmxLocalOnly;
     }
 }
