@@ -33,6 +33,10 @@ Upgrading
      its limitations are addressed. An incremental repair triggered on a base table or
      materialized view run a full repair instead. See CASSANDRA-12888 for details.
 
+Deprecation
+-----------
+    - Removed org.apache.cassandra.metrics.Table.{AntiCompactedBytes|NonAntiCompactedBytes} metrics
+
 4.0
 ===
 
