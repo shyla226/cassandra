@@ -478,6 +478,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                 {
                     String query = ReadCommand.this.toCQLString();
                     Tracing.trace("Scanned over {} tombstones for query {}; query aborted (see tombstone_failure_threshold)", failureThreshold, query);
+                    metric.tombstoneFailures.inc();
                     throw new TombstoneOverwhelmingException(tombstones, query, ReadCommand.this.metadata(), currentKey, clustering);
                 }
             }
@@ -494,6 +495,11 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                 {
                     String msg = String.format("Read %d live rows and %d tombstone cells for query %1.512s (see tombstone_warn_threshold)", liveRows, tombstones, ReadCommand.this.toCQLString());
                     ClientWarn.instance.warn(msg);
+                    if (tombstones < failureThreshold)
+                    {
+                        metric.tombstoneWarnings.inc();
+                    }
+
                     logger.warn(msg);
                 }
 

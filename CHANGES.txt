@@ -1,4 +1,6 @@
 4.0
+ * Add keyspace and table name in schema validation exception (CASSANDRA-13845)
+ * Emit metrics whenever we hit tombstone failures and warn thresholds (CASSANDRA-13771)
  * Allow changing log levels via nodetool for related classes (CASSANDRA-12696)
  * Add stress profile yaml with LWT (CASSANDRA-7960)
  * Reduce memory copies and object creations when acting on ByteBufs (CASSANDRA-13789)
