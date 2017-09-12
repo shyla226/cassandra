@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.sun.jna.LastErrorException;
+import io.netty.channel.epoll.AIOEpollFileChannel;
 import sun.nio.ch.FileChannelImpl;
 
 import static org.apache.cassandra.utils.NativeLibrary.OSType.LINUX;
@@ -363,7 +364,9 @@ public final class NativeLibrary
     {
         try
         {
-            return getfd((FileDescriptor)FILE_ASYNC_CHANNEL_FD_FIELD.get(channel));
+            return channel instanceof AIOEpollFileChannel
+                   ? ((AIOEpollFileChannel)channel).getFd()
+                   : getfd((FileDescriptor) FILE_ASYNC_CHANNEL_FD_FIELD.get(channel));
         }
         catch (IllegalArgumentException|IllegalAccessException e)
         {

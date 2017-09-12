@@ -53,7 +53,14 @@ abstract class AbstractChannelProxy<T extends Channel> extends SharedCloseableIm
 
     public abstract long transferTo(long position, long count, WritableByteChannel target);
 
-    public abstract int getFileDescriptor();
+    /**
+     * Drop the page cache from the given {@code offset} for the given {@code length}, if
+     * the channel uses the page cache. For direct asynchronous channels, this is a no-op.
+     *
+     * @param offset - the start position
+     * @param len - the size of the data to be dropped from the page cache
+     */
+    public abstract void tryToSkipCache(long offset, long len);
 
     public String filePath()
     {

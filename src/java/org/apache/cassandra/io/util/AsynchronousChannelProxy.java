@@ -209,8 +209,24 @@ public final class AsynchronousChannelProxy extends AbstractChannelProxy<Asynchr
         return new AsynchronousChannelProxy(this);
     }
 
-    public int getFileDescriptor()
+    @Override
+    public void tryToSkipCache(long offset, long len)
     {
-        return NativeLibrary.getfd(channel);
+        int fd;
+
+        if (channel instanceof AIOEpollFileChannel)
+        {
+            AIOEpollFileChannel epollChannel =  (AIOEpollFileChannel)channel;
+            if (epollChannel.isDirect())
+                return; // direct AIO channels bypass the page cache
+
+            fd = epollChannel.getFd();
+        }
+        else
+        {
+            fd = NativeLibrary.getfd(channel);
+        }
+
+        NativeLibrary.trySkipCache(fd, offset, len, filePath);
     }
 }
