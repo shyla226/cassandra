@@ -129,7 +129,8 @@ public class HintsVerbs extends VerbGroup<HintsVerbs.HintsVersion>
     {
         super(id, true, HintsVersion.class);
 
-        RegistrationHelper helper = helper().stage(Stage.MUTATION).droppedGroup(DroppedMessages.Group.HINTS);
+        RegistrationHelper helper = helper().stage(Stage.MUTATION)
+                                            .droppedGroup(DroppedMessages.Group.HINTS);
 
         HINT = helper.ackedRequest("HINT", HintMessage.class)
                      .timeout(DatabaseDescriptor::getWriteRpcTimeout)

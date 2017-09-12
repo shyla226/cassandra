@@ -27,7 +27,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import com.datastax.driver.core.schemabuilder.Drop;
 import org.apache.cassandra.concurrent.ExecutorSupplier;
 import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.concurrent.Stage;

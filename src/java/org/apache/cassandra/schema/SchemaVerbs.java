@@ -61,7 +61,8 @@ public class SchemaVerbs extends VerbGroup<SchemaVerbs.SchemaVersion>
     {
         super(id, true, SchemaVersion.class);
 
-        RegistrationHelper helper = helper().stage(Stage.MIGRATION).droppedGroup(DroppedMessages.Group.SCHEMA);
+        RegistrationHelper helper = helper().stage(Stage.MIGRATION)
+                                            .droppedGroup(DroppedMessages.Group.SCHEMA);
 
         VERSION = helper.requestResponse("VERSION", EmptyPayload.class, UUID.class)
                         .withResponseSerializer(UUIDSerializer.serializer)

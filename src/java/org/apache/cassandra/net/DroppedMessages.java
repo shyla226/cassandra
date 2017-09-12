@@ -37,13 +37,13 @@ import org.apache.cassandra.utils.StatusLogger;
 /**
  * Records messages dropped by the messaging service.
  * <p>
- * To make this more user friendly/useful, we count dropped messages by "dropped group" ({@link Group} below). Those
- * group differ from {@link VerbGroup} because verb groups is a grouping that make sense internally, but the grouping
- * here is mean to be meaningful for end user. Further, we sometime want to count separately messages of the same
- * {@link Verb} base on more specific criteria; typically, for reads, we distinguish single partition and range reads
+ * To make this more user friendly/useful, we count dropped messages by "dropped group" ({@link Group} below). These
+ * groups differ from {@link VerbGroup} groups, because verb grouping makes sense internally, but the grouping
+ * here is meant to be meaningful for end users. Further, we sometime want to count separately messages of the same
+ * {@link Verb} based on more specific criteria; typically, for reads, we distinguish single partition and range reads
  * because they have different timeouts and tend to be used for different type of tasks, so counting the numbers dropped
- * separately make sense. Also, we're trying to preserve "some" backward compatibility from pre-APOLLO-497, which
- * explains some of the naming of those groups.
+ * separately makes sense. Also, we're trying to preserve "some" backward compatibility from pre-APOLLO-497, which
+ * explains some of the naming of these groups.
  */
 public class DroppedMessages
 {

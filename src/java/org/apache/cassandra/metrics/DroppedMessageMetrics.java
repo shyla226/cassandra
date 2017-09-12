@@ -25,7 +25,8 @@ import org.apache.cassandra.net.DroppedMessages;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
- * Metrics for dropped messages by verb "dropped group".
+ * Metrics for dropped messages, stored in {@link DroppedMessages} by verb "dropped group",
+ * that is by {@link DroppedMessages.Group}.
  */
 public class DroppedMessageMetrics
 {

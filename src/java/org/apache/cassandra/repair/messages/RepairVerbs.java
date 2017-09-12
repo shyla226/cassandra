@@ -86,7 +86,8 @@ public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
     {
         super(id, true, RepairVersion.class);
 
-        RegistrationHelper helper = helper().stage(Stage.ANTI_ENTROPY).droppedGroup(DroppedMessages.Group.REPAIR);
+        RegistrationHelper helper = helper().stage(Stage.ANTI_ENTROPY)
+                                            .droppedGroup(DroppedMessages.Group.REPAIR);
 
         VALIDATION_REQUEST = helper.oneWay("VALIDATION_REQUEST", ValidationRequest.class)
                                    .handler(withCleanup(ActiveRepairService.instance::handleValidationRequest));

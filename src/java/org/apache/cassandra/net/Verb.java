@@ -101,7 +101,7 @@ public abstract class Verb<P, Q>
         this.handler = handler;
 
         assert isOneWay() == (timeoutSupplier == null) : "One-way verbs must not have a timeout supplier, but other verbs must";
-        // Note: excluding info == null is done because some test use that currently. We should fix those test at some
+        // Note: excluding info == null is done because some tests use that currently. We should fix those tests at some
         // point and remove that, but it's currently a tad more annoying that we'd want to for silly reasons.
         assert info == null || isOneWay() == (info.droppedGroup == null) : "One-way verbs must not have a dropped group, but other verbs must";
     }
@@ -283,7 +283,7 @@ public abstract class Verb<P, Q>
     public final boolean equals(Object o)
     {
         // The way the code is made, each verb is it's own singleton object, so reference equality is fine and actually
-        // what we want. And the only purpose of this (redundant) definition is to make it clear that this is intended,
+        // what we want. And the only purpose of this (redundant) definition is to make it clear that this is intended.
         return this == o;
     }
 
