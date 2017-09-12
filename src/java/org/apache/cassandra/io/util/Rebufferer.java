@@ -92,6 +92,12 @@ public interface Rebufferer extends ReaderFileProxy
             //Registers a callback to be issued when the async buffer is ready
             assert asyncBuffer != null;
 
+            if (asyncBuffer.isCancelled())
+            {
+                onError.apply(new RuntimeException("Chunk cache read was cancelled, file invalidated?"));
+                return;
+            }
+
             if (asyncBuffer.isDone() && !asyncBuffer.isCompletedExceptionally())
             {
                 onReady.run();

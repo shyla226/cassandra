@@ -111,6 +111,7 @@ public class ChunkCache
         private final ByteBuffer buffer;
         private final long offset;
         private final AtomicInteger references;
+        private volatile boolean invalidated = false;
 
         public Buffer(Key key, ByteBuffer buffer, long offset)
         {
@@ -124,6 +125,8 @@ public class ChunkCache
 
         Buffer reference()
         {
+            assert !invalidated;
+
             int refCount;
             do
             {
@@ -155,10 +158,34 @@ public class ChunkCache
         @Override
         public void release()
         {
+            release(false);
+        }
+
+        void release(boolean fromInvalidate)
+        {
             //The read from disk read may be in flight
             //We need to keep this buffer till the async callback has fired
-            if (references.decrementAndGet() == 0)
+            int ref = references.decrementAndGet();
+            if (ref == 0)
+            {
                 BufferPool.put(buffer);
+
+                // If the key was not referenced but still
+                // in the cache invalidate it
+                if (!fromInvalidate && !invalidated)
+                {
+                    //Force it out of the cache buffer it was freed and complain
+                    CompletableFuture<Buffer> existing = instance.cache.getIfPresent(key);
+                    if (existing != null && existing.isDone() && existing.join() == this)
+                    {
+                        logger.trace("{} was released without being removed from cache, forcing out", key);
+                        instance.cache.synchronous().invalidate(key);
+                    }
+                }
+            }
+
+            if (fromInvalidate)
+                invalidated = true;
         }
 
         public String toString()
@@ -170,11 +197,11 @@ public class ChunkCache
     public ChunkCache()
     {
         cache = Caffeine.newBuilder()
-                .maximumWeight(cacheSize)
-                .executor(TPC.getWrappedExecutor())
-                .weigher((key, buffer) -> ((Buffer) buffer).buffer.capacity())
-                .removalListener(this)
-                .buildAsync(this);
+                        .maximumWeight(cacheSize)
+                        .executor(TPC.getWrappedExecutor())
+                        .weigher((key, buffer) -> ((Buffer) buffer).buffer.capacity())
+                        .removalListener(this)
+                        .buildAsync(this);
         metrics = new CacheMissMetrics("ChunkCache", this);
     }
 
@@ -206,7 +233,7 @@ public class ChunkCache
     @Override
     public void onRemoval(Key key, Buffer buffer, RemovalCause cause)
     {
-        buffer.release();
+        buffer.release(true);
     }
 
     public void close()
@@ -234,6 +261,7 @@ public class ChunkCache
 
     public void invalidateFile(String fileName)
     {
+        logger.trace("Invalidating {} from ChunkCache", fileName);
         cache.synchronous().invalidateAll(Iterables.filter(cache.synchronous().asMap().keySet(), x -> x.path.equals(fileName)));
     }
 
@@ -276,6 +304,8 @@ public class ChunkCache
         {
             try
             {
+                assert !TPC.isTPCThread();
+
                 metrics.requests.mark();
                 long pageAlignedPos = position & alignmentMask;
                 Buffer buf = null;
@@ -292,7 +322,10 @@ public class ChunkCache
                     page = cache.get(pageKey).join();
 
                     if (page != null && buf == null && ++spin == 1024)
-                        logger.error("Spinning for {}", pageKey);
+                    {
+                        logger.error("Spinning for {}, forcing out of cache", pageKey);
+                        cache.synchronous().invalidate(pageKey);
+                    }
                 }
 
                 return buf;
