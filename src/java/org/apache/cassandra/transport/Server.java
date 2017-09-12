@@ -47,7 +47,6 @@ import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
 import org.apache.cassandra.security.SSLFactory;
@@ -139,7 +138,7 @@ public class Server implements CassandraDaemon.Server
 
         // Bind and start to accept incoming connections.
         logger.info("Using Netty Version: {}", Version.identify().entrySet());
-        logger.info("Netty Epoll = {}, AIO = {}, SSD detected = {}", TPC.USE_EPOLL, TPC.USE_AIO, FileUtils.isSSD());
+        logger.info("Netty Epoll = {}, AIO = {}, SSD = {}", TPC.USE_EPOLL, TPC.USE_AIO, DatabaseDescriptor.isSSD());
         logger.info("Starting listening for CQL clients on {} ({})...", socket, this.useSSL ? "encrypted" : "unencrypted");
 
         ChannelFuture bindFuture = bootstrap.bind(socket);

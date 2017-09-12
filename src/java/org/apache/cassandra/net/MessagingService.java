@@ -1058,7 +1058,7 @@ public final class MessagingService implements MessagingServiceMBean
         // dirty hack for clean shutdown on OSX w/ Java >= 1.8.0_20
         // see https://bugs.openjdk.java.net/browse/JDK-8050499;
         // also CASSANDRA-12513
-        if ("Mac OS X".equals(System.getProperty("os.name")))
+        if (FBUtilities.isMacOSX)
         {
             switch (e.getMessage())
             {

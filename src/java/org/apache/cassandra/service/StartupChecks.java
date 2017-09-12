@@ -29,9 +29,13 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 
+import io.netty.channel.epoll.Aio;
+import io.netty.channel.unix.FileDescriptor;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -91,7 +95,9 @@ public class StartupChecks
                                                                       checkDatacenter,
                                                                       checkRack,
                                                                       checkLegacyAuthTables,
-                                                                      checkObsoleteAuthTables);
+                                                                      checkObsoleteAuthTables,
+                                                                      warnOnUnsupportedPlatform,
+                                                                      warnOnLackOfAIO);
 
     public StartupChecks withDefaultTests()
     {
@@ -441,6 +447,129 @@ public class StartupChecks
                         Joiner.on(", ").join(existingTables),
                         SchemaConstants.AUTH_KEYSPACE_NAME);
     };
+
+    private static final StartupCheck warnOnUnsupportedPlatform = (logger) ->
+    {
+        if (FBUtilities.isLinux)
+            return;
+
+        String url = "(see http://docs.datastax.com/en/landing_page/doc/landing_page/supportedPlatforms.html for details)";
+        String warning = "this could result in instabilities, degraded performance and/or unsupported features.";
+
+        if (FBUtilities.isWindows)
+            logger.warn("Please note that Microsoft Windows is not officially supported by DataStax {}; {}", url, warning);
+        else if (FBUtilities.isMacOSX)
+            logger.warn("Please note that Mac OS X is only supported by DataStax for development, not production {}", url);
+        else
+            logger.warn("Please note that you operating system ({}) does not seem to be officially supported by DataStax {}; {}",
+                        FBUtilities.OPERATING_SYSTEM, url, warning);
+    };
+
+    /**
+     * If (true) AIO isn't available/enabled (possibly only on some data directory due to not supporting O_DIRECT),
+     * performance is going to be rather bad so we warn the user about it.
+     * <p>
+     * Note: this check <b>must</b> run after the {@link #checkDataDirs} one as it assumes all data directories exists.
+     */
+    private static final StartupCheck warnOnLackOfAIO = (logger) ->
+    {
+        // Only linux is supported in production and we already have warned if this isn't linux in
+        // warnOnUnsupportedPlatform. No point in piling on here.
+        if (!FBUtilities.isLinux)
+            return;
+
+        // Not using EPoll on Linux is sub-optimal 1) it's known to perform better at least for network I/O and 2) this
+        // is the event loop we've spend time optimizing/perf testing.
+        if (!TPC.USE_EPOLL)
+        {
+            if (!Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true")))
+                logger.warn("EPoll has been manually disabled (through the 'cassandra.native.epoll.enabled' system property). "
+                            + "This may result in subpar performance.");
+            else
+                logger.warn("EPoll doesn't seem to be available: this may result in subpar performance.");
+        }
+        else if (DatabaseDescriptor.isSSD())
+        {
+            if (TPC.USE_AIO)
+            {
+                // Even if (true) AIO is available/enabled on the system, it will only work properly on file-systems that support
+                // O_DIRECT (see http://lse.sourceforge.net/io/aio.html). We will properly fall-back to java fake-asynchronous IO
+                // when that is the case ({@link AsynchronousChannelProxy#openFileChannel}) but as it means the user may not
+                // experience full AIO performance, we're warning him here.
+                warnOnDataDirNotSupportingODirect(logger);
+            }
+            else
+            {
+                if (!Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "true")))
+                    logger.warn("Asynchronous I/O has been manually disabled (through the 'cassandra.native.aio.enabled' system property). "
+                                + "This may result in subpar performance.");
+                else // Means !Aio.isAvailable()
+                    logger.warn("Asynchronous I/O doesn't seem to be available: this may result in subpar performance.");
+            }
+        }
+        else
+        {
+            // We don't want to use Asynchronous I/O on HDD, because it doesn't provide benefits _but_ risk filling the
+            // I/O queue if not throttled properly. Also note that since AIO is disabled on HDD by default (see TPC.USE_AIO
+            // definition), having it enabled means the user forced it.
+            if (TPC.USE_AIO)
+                logger.warn("Forcing Asynchronous I/O as requested with the 'cassandra.native.aio.enabled' system property "
+                            + " despite not using SSDs; please note that this is not the recommended configuration.");
+        }
+    };
+
+    private static void warnOnDataDirNotSupportingODirect(Logger logger)
+    {
+        Set<String>  locationsWithoutODirect = new HashSet<>();
+        for (String dataDir : DatabaseDescriptor.getAllDataFileLocations())
+        {
+            File dir = new File(dataDir);
+            try
+            {
+                File tmp = File.createTempFile("apollo", null, dir);
+                try
+                {
+                    // This is part where Netty opens the file
+                    FileDescriptor.from(tmp, FileDescriptor.O_DIRECT).close();
+                }
+                catch (IOException e)
+                {
+                    if (e.getMessage().contains("Invalid argument"))
+                        locationsWithoutODirect.add(dataDir);
+                    else
+                        throw e;
+                }
+                finally
+                {
+                    // Because this run after the checkDataDirs check, we should have proper permission and deletion
+                    // shouldn't fail. But better safe than sorry, so if it happens, inform the user it's safe to remove.
+                    if (!tmp.delete())
+                        logger.warn("Wasn't able to delete empty temporary file {} for an unknown reason; "
+                                    + "while this shouldn't happen, this is of no consequence outside of the fact that "
+                                    + "you will need to delete this (empty and now unused) file manually.", tmp);
+                }
+            }
+            catch (IOException e)
+            {
+                // Also shouldn't happen, but if it does, no point in freaking people out with an obscure error, we're
+                // no doing anything important here (if, for instance, there is something very wrong with that data
+                // directories, user will get more meaningful error soon enough). Just mark the dir without O_DIRECT
+                // since we haven't validated it does support it.
+                logger.debug("Unexpected error while trying to read empty file for O_DIRECT check", e);
+                locationsWithoutODirect.add(dataDir);
+            }
+        }
+
+        if (locationsWithoutODirect.isEmpty())
+            return;
+
+        boolean noODirect = locationsWithoutODirect.size() == DatabaseDescriptor.getAllDataFileLocations().length;
+        logger.warn("Asynchronous I/O is available/enabled but {} of the configured data directories{} are on "
+                    + "file systems supporting O_DIRECT; This will result in subpar performance{}.",
+                    noODirect ? "none" : "some",
+                    noODirect ? "" : String.format(" (%s)", locationsWithoutODirect),
+                    noODirect ? "" : " for operations involving the aforementioned data directories");
+    }
 
     /**
      * Returns the specified tables that exists in the Auth keyspace.

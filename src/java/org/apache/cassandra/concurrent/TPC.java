@@ -35,7 +35,6 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.TPCAggregatedStageMetrics;
 import org.apache.cassandra.rx.RxSubscriptionDebugger;
 import org.apache.cassandra.metrics.TPCTotalMetrics;
@@ -77,7 +76,7 @@ public class TPC
                                             && Epoll.isAvailable();
     public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "true"))
                                           && Aio.isAvailable() && USE_EPOLL &&
-                                          (Boolean.parseBoolean(System.getProperty("cassandra.native.aio.force", "false")) || FileUtils.isSSD());
+                                          (Boolean.parseBoolean(System.getProperty("cassandra.native.aio.force", "false")) || DatabaseDescriptor.isSSD());
     public static final int AIO_BLOCK_SIZE = 512;
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task

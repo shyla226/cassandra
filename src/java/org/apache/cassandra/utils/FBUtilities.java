@@ -55,8 +55,6 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
-import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.FileUtils;
 
 import org.codehaus.jackson.JsonFactory;
@@ -71,9 +69,10 @@ public class FBUtilities
     public static final BigInteger TWO = new BigInteger("2");
     private static final String DEFAULT_TRIGGER_DIR = "triggers";
 
-    private static final String OPERATING_SYSTEM = System.getProperty("os.name").toLowerCase();
+    public static final String OPERATING_SYSTEM = System.getProperty("os.name").toLowerCase();
     public static final boolean isWindows = OPERATING_SYSTEM.contains("windows");
     public static final boolean isLinux = OPERATING_SYSTEM.contains("linux");
+    public static final boolean isMacOSX = OPERATING_SYSTEM.contains("mac os x");
 
     private static volatile InetAddress localInetAddress;
     private static volatile InetAddress broadcastInetAddress;

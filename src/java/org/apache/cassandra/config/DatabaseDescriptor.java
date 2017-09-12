@@ -687,6 +687,9 @@ public class DatabaseDescriptor
                 diskOptimizationStrategy = new SpinningDiskOptimizationStrategy();
                 break;
         }
+        logger.info("Assuming {} based on disk_optimization_strategy YAML property. Please update this property if this is "
+                    + "incorrect as a number of optimizations depend on it and an incorrect value may result in degraded performances.",
+                    diskOptimizationStrategy instanceof SsdDiskOptimizationStrategy ? "Solid-State drives (SSD)" : "Spinning disks (non-SSD)");
 
         if (conf.max_memory_to_lock_mb < 0)
             throw new ConfigurationException("max_memory_to_lock_mb must be be >= 0");
@@ -2119,6 +2122,12 @@ public class DatabaseDescriptor
     public static DiskOptimizationStrategy getDiskOptimizationStrategy()
     {
         return diskOptimizationStrategy;
+    }
+
+    public static boolean isSSD()
+    {
+        //return getDiskOptimizationStrategy() instanceof SsdDiskOptimizationStrategy;
+        return FileUtils.isSSD();
     }
 
     public static double getDiskOptimizationEstimatePercentile()

@@ -627,6 +627,7 @@ public final class FileUtils
         return dirToDisk;
     }
 
+
     /**
      * Detects if a given device (i.e. sda) is rotational or ssd
      * @param device the name of the root device "sdb"
