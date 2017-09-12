@@ -17,15 +17,22 @@
  */
 package org.apache.cassandra.transport.messages;
 
+import java.util.UUID;
+
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Single;
+
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 public class PrepareMessage extends Message.Request
 {
@@ -89,31 +96,54 @@ public class PrepareMessage extends Message.Request
         this.keyspace = keyspace;
     }
 
-    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(Single<QueryState> state, long queryStartNanoTime)
     {
         try
         {
-            if (state.shouldTraceRequest(isTracingRequested()))
-            {
-                state.createTracingSession(getCustomPayload());
-                Tracing.instance.begin("Preparing CQL3 query", state.getClientAddress(), ImmutableMap.of("query", query));
-            }
+            final UUID tracingID = setUpTracing();
+            QueryHandler handler = ClientState.getCQLQueryHandler();
 
-            return ClientState.getCQLQueryHandler().prepare(query,
-                                                            state.cloneWithKeyspaceIfSet(keyspace),
-                                                            getCustomPayload())
-                              .map(response ->
+            return state.flatMap( s ->
+            {
+                checkIsLoggedIn(s);
+
+                Single<ResultMessage> resp = Single.defer(() ->
+                {
+                    return handler.prepare(query,
+                                           s.cloneWithKeyspaceIfSet(keyspace),
+                                           getCustomPayload())
+                                  .map(response ->
                                   {
-                                      response.setTracingId(state.getPreparedTracingSession());
+                                      response.setTracingId(tracingID);
                                       return response;
                                   })
-                              .flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
+                                  .flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
+                });
+
+                // If some Auth data was not in the caches we might be on an IO thread. In which case we need to switch
+                // back to the TPC thread.
+                if (!TPC.isTPCThread())
+                    return RxThreads.subscribeOn(resp, TPC.bestTPCScheduler(), TPCTaskType.EXECUTE_STATEMENT);
+
+                return resp;
+            });
         }
         catch (Exception e)
         {
             JVMStabilityInspector.inspectThrowable(e);
             return Single.just(ErrorMessage.fromException(e));
         }
+    }
+
+    private UUID setUpTracing()
+    {
+        if(!shouldTraceRequest())
+            return null;
+
+        final UUID sessionId = Tracing.instance.newSession(getCustomPayload());
+
+        Tracing.instance.begin("Preparing CQL3 query", getClientAddress(), ImmutableMap.of("query", query));
+        return sessionId;
     }
 
     @Override

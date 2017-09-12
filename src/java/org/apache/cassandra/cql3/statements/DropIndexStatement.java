@@ -26,7 +26,6 @@ import org.apache.cassandra.db.KeyspaceNotDefinedException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
@@ -34,6 +33,8 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 import org.apache.cassandra.transport.messages.ResultMessage;
+
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 public class DropIndexStatement extends SchemaAlteringStatement
 {
@@ -53,13 +54,14 @@ public class DropIndexStatement extends SchemaAlteringStatement
         return metadata == null ? null : metadata.name;
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
         TableMetadata metadata = lookupIndexedTable();
         if (metadata == null)
             return;
 
-        state.hasColumnFamilyAccess(metadata.keyspace, metadata.name, CorePermission.ALTER);
+        state.checkTablePermission(metadata.keyspace, metadata.name, CorePermission.ALTER);
     }
 
     public void validate(QueryState state)
@@ -112,10 +114,9 @@ public class DropIndexStatement extends SchemaAlteringStatement
                   .orElseGet(() -> {
                       if (ifExists)
                           return null;
-                      else
-                          throw new InvalidRequestException(String.format("Index '%s' could not be found in any " +
-                                                                          "of the tables of keyspace '%s'",
-                                                                          indexName, keyspace()));
+
+                      throw invalidRequest("Index '%s' could not be found in any of the tables of keyspace '%s'",
+                                           indexName, keyspace());
                   });
     }
 }

@@ -22,6 +22,7 @@ import io.reactivex.Maybe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -49,9 +50,11 @@ public class DropTriggerStatement extends SchemaAlteringStatement
         this.ifExists = ifExists;
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.ensureIsSuper("Only superusers are allowed to perfrom DROP TRIGGER queries");
+        if (DatabaseDescriptor.getAuthenticator().requireAuthentication() && !state.isSuper())
+            throw new UnauthorizedException("Only superusers are allowed to perform DROP TRIGGER queries");
     }
 
     public void validate(QueryState state) throws RequestValidationException

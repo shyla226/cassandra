@@ -66,7 +66,7 @@ public abstract class AuthenticationStatement extends ParsedStatement implements
     {
         try
         {
-            state.ensureHasPermission(required, resource);
+            state.checkPermission(resource, required);
         }
         catch (UnauthorizedException e)
         {

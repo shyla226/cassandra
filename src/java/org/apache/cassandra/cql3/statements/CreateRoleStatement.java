@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import io.reactivex.Single;
-
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -29,6 +27,10 @@ import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
+
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+
+import io.reactivex.Single;
 
 public class CreateRoleStatement extends AuthenticationStatement
 {
@@ -43,15 +45,16 @@ public class CreateRoleStatement extends AuthenticationStatement
         this.ifNotExists = ifNotExists;
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException
+    @Override
+    public void checkAccess(QueryState state)
     {
         // validate login first to avoid leaking role existence to anonymous users.
-        state.ensureNotAnonymous();
+        state.checkNotAnonymous();
 
         if (!ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            throw new InvalidRequestException(String.format("%s already exists", role.getRoleName()));
+            throw invalidRequest("%s already exists", role.getRoleName());
 
-        super.checkPermission(state, CorePermission.CREATE, RoleResource.root());
+        checkPermission(state, CorePermission.CREATE, RoleResource.root());
         if (opts.getSuperuser().isPresent())
         {
             if (opts.getSuperuser().get() && !state.isSuper())
@@ -77,7 +80,7 @@ public class CreateRoleStatement extends AuthenticationStatement
 
             DatabaseDescriptor.getRoleManager().createRole(state.getUser(), role, opts);
             grantPermissionsToCreator(state);
-            return (ResultMessage)(new ResultMessage.Void());
+            return new ResultMessage.Void();
         });
     }
 
@@ -103,7 +106,6 @@ public class CreateRoleStatement extends AuthenticationStatement
                                  this.role,
                                  executor,
                                  GrantMode.GRANT);
-                Auth.invalidateRolesForPermissionsChange(executor).blockingAwait();
             }
             catch (UnsupportedOperationException e)
             {

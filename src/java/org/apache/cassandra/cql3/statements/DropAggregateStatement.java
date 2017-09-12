@@ -28,7 +28,6 @@ import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.ClientState;
@@ -67,9 +66,10 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
         Schema.validateKeyspaceNotSystem(functionName.keyspace);
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.hasKeyspaceAccess(functionName.keyspace, CorePermission.DROP);
+        state.checkKeyspacePermission(functionName.keyspace, CorePermission.DROP);
     }
 
     public void validate(QueryState state) throws RequestValidationException

@@ -18,6 +18,7 @@
 package org.apache.cassandra.auth;
 
 import java.util.*;
+import java.util.Map.Entry;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 
@@ -36,13 +37,64 @@ public class RolesCache extends AuthCache<RoleResource, Role> implements RolesCa
               () -> DatabaseDescriptor.getAuthenticator().requireAuthentication());
     }
 
-    /**
-     * Retrieve the roles <em>directly</em> assigned to a role.
-     */
-    public Set<RoleResource> getRoles(RoleResource role)
+    public Map<RoleResource, Role> getRolesIfPresent(RoleResource primaryRole)
     {
-        Role ret = getInternal(role);
-        return ret.memberOf;
+        Role primary = getIfPresent(primaryRole);
+
+        if (primary == null)
+            return null;
+
+        if (primary.memberOf.isEmpty())
+            return Collections.singletonMap(primaryRole, primary);
+
+        Map<RoleResource, Role> map = new HashMap<>();
+        map.put(primaryRole, primary);
+        return collectRolesIfPresent(primary.memberOf, map);
+    }
+
+    public Map<RoleResource, Role> collectRolesIfPresent(Set<RoleResource> roleResources, Map<RoleResource, Role> map)
+    {
+        if (!roleResources.isEmpty())
+        {
+            Map<RoleResource, Role> roles = getAllPresent(roleResources);
+            if (roles.size() != roleResources.size())
+                return null;
+
+            for (Entry<RoleResource, Role> entry : roles.entrySet())
+            {
+                map.put(entry.getKey(), entry.getValue());
+                map = collectRolesIfPresent(entry.getValue().memberOf, map);
+                if (map == null)
+                    return null;
+            }
+        }
+        return map;
+    }
+
+    public Map<RoleResource, Role> getRoles(RoleResource primaryRole)
+    {
+        Role primary = get(primaryRole);
+
+        if (primary.memberOf.isEmpty())
+            return Collections.singletonMap(primaryRole, primary);
+
+        Map<RoleResource, Role> set = new HashMap<>();
+        set.put(primaryRole, primary);
+        return collectRoles(primary.memberOf, set);
+    }
+
+    private Map<RoleResource, Role> collectRoles(Set<RoleResource> roleResources, Map<RoleResource, Role> map)
+    {
+        if (!roleResources.isEmpty())
+        {
+            Map<RoleResource, Role> roles = getAll(roleResources);
+
+            for (Entry<RoleResource, Role> entry : roles.entrySet())
+            {
+                map.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return map;
     }
 
     /**
@@ -70,15 +122,6 @@ public class RolesCache extends AuthCache<RoleResource, Role> implements RolesCa
     {
         Role ret = getInternal(role);
         return ret.options;
-    }
-
-    /**
-     * Retrieve the credentials for a role.
-     */
-    String getCredentials(RoleResource role)
-    {
-        Role ret = getInternal(role);
-        return ret.hashedPassword;
     }
 
     private Role getInternal(RoleResource role)

@@ -30,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.mindrot.jbcrypt.BCrypt;
@@ -75,7 +76,7 @@ public class PasswordAuthenticator implements IAuthenticator
 
     private AuthenticatedUser authenticate(String username, String password) throws AuthenticationException
     {
-        String hash = Auth.getCredentials(RoleResource.role(username));
+        String hash = DatabaseDescriptor.getAuthManager().getCredentials(username).blockingGet();
         if (hash == null || hash.isEmpty() || !checkpw(password, hash))
             throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
 

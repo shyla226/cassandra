@@ -19,17 +19,16 @@ package org.apache.cassandra.cql3;
 
 import javax.annotation.Nullable;
 
-import io.reactivex.Scheduler;
-import io.reactivex.Single;
-import org.apache.cassandra.concurrent.TPCUtils;
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.concurrent.TPCUtils.WouldBlockException;
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
+
+import io.reactivex.Scheduler;
+import io.reactivex.Single;
 
 public interface CQLStatement
 {
@@ -41,17 +40,12 @@ public interface CQLStatement
     /**
      * Perform any access verification necessary for the statement.
      * <p>
-     * <b>Important:</b> implementation of this method may have to block under some circumstances (typically, some
-     * permissions are not in cache and must be queried). If implementations of this method need to block, they should
-     * first check if they are running on a TPC thread, and if that's the case, they must throw {@link WouldBlockException},
-     * in which case the access will be checked again on a non-TPC thread (on which it is ok to block). This behavior
-     * can be simplified by using the methods in {@link TPCUtils}.
-     * <p>
-     * TODO: we should probably change this to be explicitly (potentially) asynchronous so it's less error-prone.
-     *
-     * @param state the current client state
+     * <b>Important:</b> this method is meant for simple user access check that should never block (internally it may be
+     * executed on TPC threads regardless of the scheduler returned by {@link CQLStatement#getScheduler()}).
+     * </p>
+     * @param state the query state
      */
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException;
+    public void checkAccess(QueryState state);
 
     /**
      * Perform additional validation required by the statement.

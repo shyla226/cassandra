@@ -19,6 +19,10 @@
 package org.apache.cassandra.auth;
 
 import java.lang.management.ManagementFactory;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
@@ -117,15 +121,33 @@ public class AuthCache<K, V> implements AuthCacheMBean
         if (cache == null)
             return loadFunction.apply(k);
 
-        V ret = cache.getIfPresent(k);
-
-        if (ret != null)
-            return ret;
-
-        if (TPC.isTPCThread())
-            throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve data for the key %s from the %s, would block TPC thread",
-                                                                 k, name));
         return cache.get(k);
+    }
+
+    @Nullable
+    protected V getIfPresent(K k)
+    {
+        return cache == null ? null : cache.getIfPresent(k);
+    }
+
+    protected Map<K, V> getAllPresent(Collection<K> keys)
+    {
+        if (cache == null)
+            return Collections.emptyMap();
+
+        return cache.getAllPresent(keys);
+    }
+
+    public Map<K, V> getAll(Collection<K> keys)
+    {
+        if (cache == null)
+        {
+            Map<K, V> map = new HashMap<>(keys.size());
+            keys.forEach(key -> map.put(key, loadFunction.apply(key)));
+            return map;
+        }
+
+        return cache.getAll(keys);
     }
 
     public void invalidate()

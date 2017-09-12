@@ -20,10 +20,10 @@ package org.apache.cassandra.cql3.statements;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
+
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -46,9 +46,9 @@ public class UseStatement extends ParsedStatement implements CQLStatement
         return new Prepared(this);
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.getClientState().validateLogin();
     }
 
     public void validate(QueryState state) throws InvalidRequestException

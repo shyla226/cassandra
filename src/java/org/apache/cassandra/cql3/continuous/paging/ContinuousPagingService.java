@@ -54,6 +54,7 @@ import org.apache.cassandra.metrics.ContinuousPagingMetrics;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.pager.PagingState;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Frame;
 import org.apache.cassandra.transport.Message;
@@ -228,13 +229,13 @@ public class ContinuousPagingService
     /**
      * Cancel an ongoing continuous paging session.
      *
-     * @param queryState - the queryState
+     * @param remoteAddress - the socket address
      * @param streamId - the initial frame id of the continuous paging request message
      * @return true if the session was cancelled, false if the session was not found
      */
-    public static boolean cancel(QueryState queryState, int streamId)
+    public static boolean cancel(InetSocketAddress remoteAddress, int streamId)
     {
-        SessionKey key = new SessionKey(queryState.getClientState().getRemoteAddress(), streamId);
+        SessionKey key = new SessionKey(remoteAddress, streamId);
         ContinuousPagingSession session = removeSession(key);
         if (session == null)
         {
@@ -267,7 +268,7 @@ public class ContinuousPagingService
      * requested by the client. If the session was suspended because all previously requested pages were sent,
      * then it will be resumed, see also {@link ContinuousPagingSession#updateBackpressure(int)}.
      *
-     * @param state - the query state
+     * @param remoteAddress - the socket address
      * @param streamId - the initial stream id of the continuous paging request message
      * @param nextPages - the number of additional pages requested, must be positive.
      *
@@ -275,9 +276,9 @@ public class ContinuousPagingService
      *              or already had numPagesRequested set to the max
      * @throws RequestValidationException if nextPages is <= 0
      */
-    public static boolean updateBackpressure(QueryState state, int streamId, int nextPages)
+    public static boolean updateBackpressure(InetSocketAddress remoteAddress, int streamId, int nextPages)
     {
-        SessionKey key = new SessionKey(state.getClientState().getRemoteAddress(), streamId);
+        SessionKey key = new SessionKey(remoteAddress, streamId);
 
         if (nextPages <= 0)
             throw RequestValidations.invalidRequest(String.format("Cannot update next_pages for continuous paging session %s, expected positive value but got %d", key, nextPages));
@@ -445,7 +446,8 @@ public class ContinuousPagingService
                 metadata.setPagingResult(pagingResult);
                 EncodedPage response = new EncodedPage(metadata, numRows, buf);
                 response.setWarnings(ClientWarn.instance.getWarnings());
-                response.setTracingId(state.getPreparedTracingSession());
+                if (Tracing.isTracing())
+                    response.setTracingId(Tracing.instance.getSessionId());
 
                 return makeFrame(response, EncodedPage.codec, version, state.getStreamId());
             }

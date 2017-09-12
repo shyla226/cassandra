@@ -21,6 +21,8 @@ import io.reactivex.Maybe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -51,9 +53,11 @@ public class CreateTriggerStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.ensureIsSuper("Only superusers are allowed to perform CREATE TRIGGER queries");
+        if (DatabaseDescriptor.getAuthenticator().requireAuthentication() && !state.isSuper())
+            throw new UnauthorizedException("Only superusers are allowed to perform CREATE TRIGGER queries");
     }
 
     public void validate(QueryState state) throws RequestValidationException

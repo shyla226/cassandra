@@ -1576,7 +1576,7 @@ public abstract class DseTestRunner
                 DatabaseDescriptor.getAuthenticator().setup();
                 DatabaseDescriptor.getAuthorizer().setup();
 
-                Auth.setupCaches();
+                DatabaseDescriptor.getAuthManager().invalidateCaches();
 
                 return "SUCCEEDED";
             }

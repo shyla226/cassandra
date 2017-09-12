@@ -51,6 +51,8 @@ import com.datastax.driver.core.exceptions.UnauthorizedException;
 
 import io.reactivex.Single;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -464,24 +466,10 @@ public abstract class CQLTester
 
     protected static void requireAuthentication()
     {
-        setDDField("authenticator", new PasswordAuthenticator());
-        setDDField("authorizer", new CassandraAuthorizer());
-        setDDField("roleManager", new CassandraRoleManager());
+        DatabaseDescriptor.setAuthenticator(new PasswordAuthenticator());
+        DatabaseDescriptor.setAuthManager(new AuthManager(new CassandraRoleManager(), new CassandraAuthorizer()));
 
         System.setProperty("cassandra.superuser_setup_delay_ms", "0");
-    }
-
-    protected static void setDDField(String fieldName, Object value)
-    {
-        Field field = FBUtilities.getProtectedField(DatabaseDescriptor.class, fieldName);
-        try
-        {
-            field.set(null, value);
-        }
-        catch (IllegalAccessException e)
-        {
-            fail("Error setting " + field.getType().getSimpleName() + " instance for test");
-        }
     }
 
     public static void requireNetwork() throws ConfigurationException
@@ -941,7 +929,7 @@ public abstract class CQLTester
 
             ClientState state = ClientState.forInternalCalls();
             state.setKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME);
-            QueryState queryState = new QueryState(state);
+            QueryState queryState = new QueryState(state, UserRolesAndPermissions.SYSTEM);
 
             ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(query, queryState);
             prepared.statement.validate(queryState);

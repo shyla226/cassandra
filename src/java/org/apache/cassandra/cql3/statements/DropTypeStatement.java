@@ -50,9 +50,10 @@ public class DropTypeStatement extends SchemaAlteringStatement
             name.setKeyspace(state.getKeyspace());
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.hasKeyspaceAccess(keyspace(), CorePermission.DROP);
+        state.checkKeyspacePermission(keyspace(), CorePermission.DROP);
     }
 
     public void validate(QueryState state) throws RequestValidationException

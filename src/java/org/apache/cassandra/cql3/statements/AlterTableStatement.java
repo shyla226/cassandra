@@ -22,7 +22,6 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 
-import io.reactivex.Completable;
 import io.reactivex.Maybe;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.*;
@@ -74,9 +73,9 @@ public class AlterTableStatement extends SchemaAlteringStatement
         this.deleteTimestamp = deleteTimestamp;
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state)
     {
-        state.hasColumnFamilyAccess(keyspace(), columnFamily(), CorePermission.ALTER);
+        state.checkTablePermission(keyspace(), columnFamily(), CorePermission.ALTER);
     }
 
     public void validate(QueryState state)

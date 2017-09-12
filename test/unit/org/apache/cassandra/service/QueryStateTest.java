@@ -16,6 +16,7 @@ import org.junit.*;
 
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.*;
@@ -23,24 +24,20 @@ import org.apache.cassandra.exceptions.*;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import static org.apache.cassandra.auth.Role.NULL_ROLE;
+
 public class QueryStateTest
 {
-    private static TestRoleManager roleManager;
-    private static TestAuthorizer authorizer;
-    private static TestAuthenticator authenticator;
+    private static IAuthorizer authorizer;
 
     @Before
     public void setupTest()
     {
-        roleManager = new TestRoleManager();
-        authorizer = new TestAuthorizer();
-        authenticator = new TestAuthenticator();
-
         DatabaseDescriptor.setConfig(new Config());
+        DatabaseDescriptor.setAuthenticator(new TestAuthenticator());
+        DatabaseDescriptor.setAuthManager(new AuthManager(new TestRoleManager(), new TestAuthorizer()));
 
-        DatabaseDescriptor.setRoleManager(roleManager);
-        DatabaseDescriptor.setAuthorizer(authorizer);
-        DatabaseDescriptor.setAuthenticator(authenticator);
+        authorizer = DatabaseDescriptor.getAuthorizer();
     }
 
     @Test
@@ -48,7 +45,6 @@ public class QueryStateTest
     {
         DatabaseDescriptor.setPermissionsValidity(0);
         DatabaseDescriptor.setRolesValidity(0);
-        Auth.setupCaches();
 
         grantRevoke();
     }
@@ -58,7 +54,6 @@ public class QueryStateTest
     {
         DatabaseDescriptor.setPermissionsValidity(100);
         DatabaseDescriptor.setRolesValidity(100);
-        Auth.setupCaches();
 
         grantRevoke();
     }
@@ -69,7 +64,7 @@ public class QueryStateTest
         DataResource ks = DataResource.keyspace("ks");
 
         System.out.println("before queryState 1");
-        QueryState queryState = QueryState.forExternalCalls(user);
+        QueryState queryState = getQueryState(user);
         // lazy init!
         queryState.getUser();
 
@@ -77,44 +72,53 @@ public class QueryStateTest
         authorizer.grant(null, Collections.singleton(CorePermission.EXECUTE), ks, user.getPrimaryRole(), GrantMode.GRANT);
 
         System.out.println("test 1");
-        assertFalse(queryState.authorize(ks, CorePermission.EXECUTE));
+        assertFalse(queryState.hasDataPermission(ks, CorePermission.EXECUTE));
 
         System.out.println("before queryState 2");
-        queryState = QueryState.forExternalCalls(user);
+        queryState = getQueryState(user);
         System.out.println("test 1");
-        assertTrue(queryState.authorize(ks, CorePermission.EXECUTE));
+        assertTrue(queryState.hasDataPermission(ks, CorePermission.EXECUTE));
 
         //
 
         System.out.println("before grant SELECT");
         authorizer.grant(null, Collections.singleton(CorePermission.SELECT), ks, user.getPrimaryRole(), GrantMode.GRANT);
         System.out.println("test 1");
-        assertTrue(queryState.authorize(ks, CorePermission.EXECUTE));
+        assertTrue(queryState.hasDataPermission(ks, CorePermission.EXECUTE));
         System.out.println("test 2");
-        assertFalse(queryState.authorize(ks, CorePermission.SELECT));
+        assertFalse(queryState.hasDataPermission(ks, CorePermission.SELECT));
 
         System.out.println("before queryState 3");
-        queryState = QueryState.forExternalCalls(user);
+        queryState = getQueryState(user);
         System.out.println("test 1");
-        assertTrue(queryState.authorize(ks, CorePermission.EXECUTE));
+        assertTrue(queryState.hasDataPermission(ks, CorePermission.EXECUTE));
         System.out.println("test 2");
-        assertTrue(queryState.authorize(ks, CorePermission.SELECT));
+        assertTrue(queryState.hasDataPermission(ks, CorePermission.SELECT));
 
         //
 
         System.out.println("before revoke EXECUTE");
         authorizer.revoke(null, Collections.singleton(CorePermission.EXECUTE), ks, user.getPrimaryRole(), GrantMode.GRANT);
         System.out.println("test 1");
-        assertTrue(queryState.authorize(ks, CorePermission.EXECUTE));
+        assertTrue(queryState.hasDataPermission(ks, CorePermission.EXECUTE));
         System.out.println("test 2");
-        assertTrue(queryState.authorize(ks, CorePermission.SELECT));
+        assertTrue(queryState.hasDataPermission(ks, CorePermission.SELECT));
 
         System.out.println("before queryState 4");
-        queryState = QueryState.forExternalCalls(user);
+        queryState = getQueryState(user);
         System.out.println("test 1");
-        assertFalse(queryState.authorize(ks, CorePermission.EXECUTE));
+        assertFalse(queryState.hasDataPermission(ks, CorePermission.EXECUTE));
         System.out.println("test 2");
-        assertTrue(queryState.authorize(ks, CorePermission.SELECT));
+        assertTrue(queryState.hasDataPermission(ks, CorePermission.SELECT));
+    }
+
+    private QueryState getQueryState(AuthenticatedUser user)
+    {
+        UserRolesAndPermissions userRolesAndPermissions = DatabaseDescriptor.getAuthManager()
+                                                                            .getUserRolesAndPermissions(user)
+                                                                            .blockingGet();
+        QueryState queryState = new QueryState(ClientState.forExternalCalls(user), userRolesAndPermissions);
+        return queryState;
     }
 
     public static class TestRoleManager implements IRoleManager
@@ -140,13 +144,11 @@ public class QueryStateTest
                               ImmutableMap.of(),
                               options.getPassword().or(""));
             roles.put(role, r);
-            Auth.invalidateRolesForPermissionsChange(role);
         }
 
         public void dropRole(AuthenticatedUser performer, RoleResource role) throws RequestValidationException, RequestExecutionException
         {
             roles.remove(role);
-            Auth.invalidateRolesForPermissionsChange(role);
         }
 
         public void alterRole(AuthenticatedUser performer, RoleResource role, RoleOptions options) throws RequestValidationException, RequestExecutionException
@@ -158,23 +160,51 @@ public class QueryStateTest
         {
             Role r = roles.get(grantee);
             r.memberOf.add(role);
-            Auth.invalidateRolesForPermissionsChange(role, grantee);
         }
 
         public void revokeRole(AuthenticatedUser performer, RoleResource role, RoleResource revokee) throws RequestValidationException, RequestExecutionException
         {
             Role r = roles.get(revokee);
             r.memberOf.remove(role);
-            Auth.invalidateRolesForPermissionsChange(role, revokee);
         }
 
         public Set<RoleResource> getRoles(RoleResource grantee, boolean includeInherited) throws RequestValidationException, RequestExecutionException
         {
             Set<RoleResource> all = new HashSet<>();
-            Role r = roles.get(grantee);
-            if (includeInherited)
-                throw new UnsupportedOperationException();
+            Role r = getRoleData(grantee);
+            if (r != Role.NULL_ROLE)
+            {
+                all.add(grantee);
+                collectRoles(r, all, includeInherited);
+            }
             return all;
+        }
+
+        /*
+         * Retrieve all roles granted to the given role. includeInherited specifies
+         * whether to include only those roles granted directly or all inherited roles.
+         */
+        private void collectRoles(Role role, Set<RoleResource> collected, boolean includeInherited) throws RequestValidationException, RequestExecutionException
+        {
+            for (RoleResource memberOf : role.memberOf)
+            {
+                Role granted = getRoleData(memberOf);
+                if (granted.equals(NULL_ROLE))
+                    continue;
+                collected.add(RoleResource.role(granted.name));
+                if (includeInherited)
+                    collectRoles(granted, collected, true);
+            }
+        }
+
+        private void addRoles(Set<RoleResource> toAdd, Set<RoleResource> all)
+        {
+            for (RoleResource resource : toAdd)
+            {
+                all.add(resource);
+                Role r = roles.get(resource);
+                addRoles(r.memberOf, all);
+            }
         }
 
         public Set<RoleResource> getAllRoles() throws RequestValidationException, RequestExecutionException
@@ -211,7 +241,8 @@ public class QueryStateTest
 
         public Role getRoleData(RoleResource role)
         {
-            return roles.get(role);
+            Role r = roles.get(role);
+            return r == null ? Role.NULL_ROLE : roles.get(role);
         }
 
         public Set<? extends IResource> protectedResources()
@@ -264,7 +295,6 @@ public class QueryStateTest
             }
             resourcePermissions.put(resource, builder.build());
             roleResourcePermissions.put(grantee, Collections.unmodifiableMap(resourcePermissions));
-            Auth.invalidateRolesForPermissionsChange(grantee);
         }
 
         public void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee, GrantMode... grantModes) throws RequestValidationException, RequestExecutionException
@@ -302,7 +332,6 @@ public class QueryStateTest
                 roleResourcePermissions.remove(revokee);
             else
                 roleResourcePermissions.put(revokee, Collections.unmodifiableMap(resourcePermissions));
-            Auth.invalidateRolesForPermissionsChange(revokee);
         }
 
         public Set<PermissionDetails> list(Set<Permission> permissions, IResource resource, RoleResource grantee) throws RequestValidationException, RequestExecutionException

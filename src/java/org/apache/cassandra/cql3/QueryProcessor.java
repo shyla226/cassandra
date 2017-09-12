@@ -41,6 +41,7 @@ import org.antlr.runtime.RecognitionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -135,7 +136,7 @@ public class QueryProcessor implements QueryHandler
         {
             ClientState state = ClientState.forInternalCalls();
             state.setKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME);
-            this.queryState = new QueryState(state);
+            this.queryState = new QueryState(state, UserRolesAndPermissions.SYSTEM);
         }
     }
 

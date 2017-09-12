@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.auth.jmx;
 
-import java.lang.reflect.Field;
 import java.nio.file.Paths;
 import java.rmi.server.RMISocketFactory;
 import java.util.HashMap;
@@ -51,6 +50,7 @@ public class JMXAuthTest extends CQLTester
 {
     private static JMXConnectorServer jmxServer;
     private static MBeanServerConnection connection;
+    private static StubAuthorizer authorizer;
     private RoleResource role;
     private String tableName;
     private JMXResource tableMBean;
@@ -72,18 +72,12 @@ public class JMXAuthTest extends CQLTester
 
     private static void setupAuthorizer()
     {
-        try
-        {
-            IAuthorizer authorizer = new StubAuthorizer();
-            Field authorizerField = DatabaseDescriptor.class.getDeclaredField("authorizer");
-            authorizerField.setAccessible(true);
-            authorizerField.set(null, authorizer);
-            DatabaseDescriptor.setPermissionsValidity(0);
-        }
-        catch (IllegalAccessException | NoSuchFieldException e)
-        {
-            throw new RuntimeException(e);
-        }
+        authorizer = new StubAuthorizer();
+        AuthManager authManager = new AuthManager(new CassandraRoleManager(), authorizer);
+
+        DatabaseDescriptor.setAuthenticator(new AllowAllAuthenticator());
+        DatabaseDescriptor.setAuthManager(authManager);
+        DatabaseDescriptor.setPermissionsValidity(0);
     }
 
     private static void setupJMXServer() throws Exception
@@ -212,7 +206,6 @@ public class JMXAuthTest extends CQLTester
                                                  resource,
                                                  role,
                                                  GrantMode.GRANT);
-        Auth.invalidateRolesForPermissionsChange(role).blockingAwait();
     }
 
     private void assertAuthorized(MBeanAction action)
@@ -235,7 +228,8 @@ public class JMXAuthTest extends CQLTester
 
     private void clearAllPermissions()
     {
-        ((StubAuthorizer) DatabaseDescriptor.getAuthorizer()).clear();
+        authorizer.clear();
+        DatabaseDescriptor.getAuthManager().invalidateCaches();
     }
 
     public static class StubLoginModule implements LoginModule

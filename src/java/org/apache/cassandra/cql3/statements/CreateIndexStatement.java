@@ -34,7 +34,6 @@ import org.apache.cassandra.cql3.IndexName;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -72,9 +71,10 @@ public class CreateIndexStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.hasColumnFamilyAccess(keyspace(), columnFamily(), CorePermission.ALTER);
+        state.checkTablePermission(keyspace(), columnFamily(), CorePermission.ALTER);
     }
 
     public void validate(QueryState state) throws RequestValidationException

@@ -24,7 +24,6 @@ import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -44,11 +43,12 @@ public class AlterViewStatement extends SchemaAlteringStatement
         this.attrs = attrs;
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
         TableMetadataRef baseTable = View.findBaseTable(keyspace(), columnFamily());
         if (baseTable != null)
-            state.hasColumnFamilyAccess(keyspace(), baseTable.name, CorePermission.ALTER);
+            state.checkTablePermission(keyspace(), baseTable.name, CorePermission.ALTER);
     }
 
     public void validate(QueryState state)

@@ -50,9 +50,10 @@ public class TruncateStatement extends CFStatement implements CQLStatement
         return new Prepared(this);
     }
 
-    public void checkAccess(QueryState state) throws InvalidRequestException, UnauthorizedException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.hasColumnFamilyAccess(keyspace(), columnFamily(), CorePermission.MODIFY);
+        state.checkTablePermission(keyspace(), columnFamily(), CorePermission.MODIFY);
     }
 
     public void validate(QueryState state) throws InvalidRequestException

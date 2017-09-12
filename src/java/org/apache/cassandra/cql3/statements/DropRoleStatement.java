@@ -22,12 +22,13 @@ import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
+
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 public class DropRoleStatement extends AuthenticationStatement
 {
@@ -40,24 +41,26 @@ public class DropRoleStatement extends AuthenticationStatement
         this.ifExists = ifExists;
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException
+    @Override
+    public void checkAccess(QueryState state)
     {
         // validate login first to avoid leaking user existence to anonymous users.
-        state.ensureNotAnonymous();
+        state.checkNotAnonymous();
 
-        if (!ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            throw new InvalidRequestException(String.format("%s doesn't exist", role.getRoleName()));
+        IRoleManager roleManager = DatabaseDescriptor.getRoleManager();
 
-        AuthenticatedUser user = state.getUser();
-        if (user != null && user.getName().equals(role.getRoleName()))
-            throw new InvalidRequestException("Cannot DROP primary role for current login");
+        if (!ifExists && !roleManager.isExistingRole(role))
+            throw invalidRequest("%s doesn't exist", role.getRoleName());
+
+        if (state != null && state.getUserName().equals(role.getRoleName()))
+            throw invalidRequest("Cannot DROP primary role for current login");
 
         super.checkPermission(state, CorePermission.DROP, role);
 
         // We only check superuser status for existing roles to avoid
         // caching info about roles which don't exist (CASSANDRA-9189)
-        if (DatabaseDescriptor.getRoleManager().isExistingRole(role)
-            && Auth.hasSuperuserStatusUncached(role)
+        if (roleManager.isExistingRole(role)
+            && roleManager.hasSuperuserStatus(role)
             && !state.isSuper())
             throw new UnauthorizedException("Only superusers can drop a role with superuser status");
     }
@@ -74,15 +77,9 @@ public class DropRoleStatement extends AuthenticationStatement
             if (ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
                 return new ResultMessage.Void();
 
-            // clean up grants and permissions of/on the dropped role.
             DatabaseDescriptor.getRoleManager().dropRole(state.getUser(), role);
-            DatabaseDescriptor.getAuthorizer().revokeAllFrom(role);
-            DatabaseDescriptor.getAuthorizer().revokeAllOn(role);
 
-            // TODO the blockingAwait it not really nice
-            Auth.invalidateRolesForPermissionsChange(role).blockingAwait();
-
-            return (ResultMessage)(new ResultMessage.Void());
+            return new ResultMessage.Void();
         });
     }
 }

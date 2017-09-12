@@ -49,7 +49,9 @@ public class CustomPayloadMirroringQueryHandler implements QueryHandler
                              });
     }
 
-    public Single<ResultMessage.Prepared> prepare(String query, QueryState queryState, Map<String, ByteBuffer> customPayload)
+    public Single<ResultMessage.Prepared> prepare(String query,
+                                                  QueryState queryState,
+                                                  Map<String, ByteBuffer> customPayload)
     {
         Single<ResultMessage.Prepared> observable = queryProcessor.prepare(query, queryState, customPayload);
         return observable.map(prepared -> {

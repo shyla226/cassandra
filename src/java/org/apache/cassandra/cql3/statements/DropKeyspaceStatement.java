@@ -21,9 +21,7 @@ import io.reactivex.Maybe;
 
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.QueryState;
@@ -41,9 +39,10 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
         this.ifExists = ifExists;
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.hasKeyspaceAccess(keyspace, CorePermission.DROP);
+        state.checkAllKeyspacesPermission(CorePermission.DROP);
     }
 
     public void validate(QueryState state) throws RequestValidationException

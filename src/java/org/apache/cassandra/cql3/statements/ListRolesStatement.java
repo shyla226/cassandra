@@ -28,6 +28,7 @@ import io.reactivex.Single;
 
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.*;
@@ -40,6 +41,8 @@ import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
+
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 public class ListRolesStatement extends AuthorizationStatement
 {
@@ -72,19 +75,19 @@ public class ListRolesStatement extends AuthorizationStatement
     {
     }
 
-    public void checkAccess(QueryState state) throws InvalidRequestException
+    public void checkAccess(QueryState state)
     {
-        state.ensureNotAnonymous();
+        state.checkNotAnonymous();
 
         if ((grantee != null) && !DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
-            throw new InvalidRequestException(String.format("%s doesn't exist", grantee));
+            throw invalidRequest("%s doesn't exist", grantee);
     }
 
     public Single<ResultMessage> execute(QueryState state) throws RequestValidationException, RequestExecutionException
     {
         return Single.defer(() -> {
             // If the executing user has DESCRIBE permission on the root roles resource, let them list any and all roles
-            boolean hasRootLevelSelect = state.authorize(RoleResource.root(), CorePermission.DESCRIBE);
+            boolean hasRootLevelSelect = state.hasRolePermission(RoleResource.root(), CorePermission.DESCRIBE);
             if (hasRootLevelSelect)
             {
                 if (grantee == null)

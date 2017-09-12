@@ -68,9 +68,10 @@ public class CreateTypeStatement extends SchemaAlteringStatement
         columnTypes.add(type);
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.hasKeyspaceAccess(keyspace(), CorePermission.CREATE);
+        state.checkKeyspacePermission(keyspace(), CorePermission.CREATE);
     }
 
     public void validate(QueryState state) throws RequestValidationException

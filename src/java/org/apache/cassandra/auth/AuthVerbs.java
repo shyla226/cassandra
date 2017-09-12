@@ -8,6 +8,7 @@ package org.apache.cassandra.auth;
 import java.util.function.Function;
 
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.EncodingVersion;
 import org.apache.cassandra.net.Verb.OneWay;
 import org.apache.cassandra.net.VerbGroup;
@@ -26,7 +27,8 @@ public class AuthVerbs extends VerbGroup<AuthVerbs.AuthVersion>
         RegistrationHelper helper = helper().stage(Stage.AUTHZ);
 
         INVALIDATE = helper.oneWay("INVALIDATE_ROLE", RoleInvalidation.class)
-                           .handler((from, invalidation) -> Auth.handleRoleInvalidation(invalidation));
+                           .handler((from, invalidation) -> DatabaseDescriptor.getAuthManager()
+                                                                              .handleRoleInvalidation(invalidation));
     }
 
     public enum AuthVersion implements Version<AuthVersion>

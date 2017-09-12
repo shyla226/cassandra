@@ -32,10 +32,10 @@ import org.apache.cassandra.utils.MD5Digest;
 public interface QueryHandler
 {
     Single<ResultMessage> process(String query,
-                                            QueryState state,
-                                            QueryOptions options,
-                                            Map<String, ByteBuffer> customPayload,
-                                            long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
+                                  QueryState state,
+                                  QueryOptions options,
+                                  Map<String, ByteBuffer> customPayload,
+                                  long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
 
     Single<ResultMessage.Prepared> prepare(String query,
                                            QueryState queryState,
@@ -44,14 +44,14 @@ public interface QueryHandler
     ParsedStatement.Prepared getPrepared(MD5Digest id);
 
     Single<ResultMessage> processPrepared(CQLStatement statement,
-                                                    QueryState state,
-                                                    QueryOptions options,
-                                                    Map<String, ByteBuffer> customPayload,
-                                                    long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
+                                          QueryState state,
+                                          QueryOptions options,
+                                          Map<String, ByteBuffer> customPayload,
+                                          long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
 
     Single<ResultMessage> processBatch(BatchStatement statement,
-                                                 QueryState state,
-                                                 BatchQueryOptions options,
-                                                 Map<String, ByteBuffer> customPayload,
-                                                 long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
+                                       QueryState state,
+                                       BatchQueryOptions options,
+                                       Map<String, ByteBuffer> customPayload,
+                                       long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
 }

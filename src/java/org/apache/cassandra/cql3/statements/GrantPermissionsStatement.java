@@ -40,9 +40,6 @@ public class GrantPermissionsStatement extends PermissionsManagementStatement
         return Single.fromCallable(() -> {
             DatabaseDescriptor.getAuthorizer().grant(state.getUser(), permissions, resource, grantee, grantMode);
 
-            // TODO the blockingAwait it not really nice
-            Auth.invalidateRolesForPermissionsChange(grantee).blockingAwait();
-
             return new ResultMessage.Void();
         });
     }

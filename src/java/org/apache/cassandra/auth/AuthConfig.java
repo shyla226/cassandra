@@ -55,8 +55,6 @@ public final class AuthConfig
         if (conf.authorizer != null)
             authorizer = FBUtilities.newAuthorizer(conf.authorizer);
 
-        DatabaseDescriptor.setAuthorizer(authorizer);
-
         // role manager
 
         IRoleManager roleManager;
@@ -67,8 +65,6 @@ public final class AuthConfig
 
         if (authenticator instanceof PasswordAuthenticator && !(roleManager instanceof CassandraRoleManager))
             throw new ConfigurationException("CassandraRoleManager must be used with PasswordAuthenticator", false);
-
-        DatabaseDescriptor.setRoleManager(roleManager);
 
         // authenticator
 
@@ -89,5 +85,7 @@ public final class AuthConfig
                                              "can't be used with " + conf.authorizer + " which does currently require " +
                                              "authorization.  You need to either choose new classes or update their " +
                                              "configurations so they are compatible.");
+
+        DatabaseDescriptor.setAuthManager(new AuthManager(roleManager, authorizer));
     }
 }

@@ -27,6 +27,15 @@ import org.apache.cassandra.exceptions.*;
 public interface IAuthorizer
 {
     /**
+     * Return this {@code IAuthenticator} name.
+     * @return this {@code IAuthenticator} name.
+     */
+    default String getName()
+    {
+        return getClass().getName();
+    }
+
+    /**
      * Whether or not the authorizer will attempt authorization.
      * If false the authorizer will not be called for authorization of resources.
      */

@@ -27,6 +27,15 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 public interface IAuthenticator
 {
     /**
+     * Return this {@code IAuthenticator} name.
+     * @return this {@code IAuthenticator} name.
+     */
+    default String getName()
+    {
+        return getClass().getName();
+    }
+
+    /**
      * Whether or not the authenticator requires explicit login.
      * If false will instantiate user with AuthenticatedUser.ANONYMOUS_USER.
      */

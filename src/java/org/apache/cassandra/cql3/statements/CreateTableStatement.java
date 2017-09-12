@@ -72,9 +72,10 @@ public class CreateTableStatement extends SchemaAlteringStatement
         this.id = id;
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.hasKeyspaceAccess(keyspace(), CorePermission.CREATE);
+        state.checkKeyspacePermission(keyspace(), CorePermission.CREATE);
     }
 
     public void validate(QueryState state)
@@ -110,7 +111,6 @@ public class CreateTableStatement extends SchemaAlteringStatement
                              resource,
                              role,
                              GrantMode.GRANT);
-            Auth.invalidateRolesForPermissionsChange(role).blockingAwait();
         }
         catch (RequestExecutionException e)
         {

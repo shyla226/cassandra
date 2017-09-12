@@ -353,7 +353,6 @@ public class CassandraRoleManager implements IRoleManager
                                                              escape(hashpw(DEFAULT_SUPERUSER_PASSWORD))),
                                                consistencyForRole(DEFAULT_SUPERUSER_NAME));
                 logger.info("Created default superuser role '{}'", DEFAULT_SUPERUSER_NAME);
-                Auth.invalidateRolesForPermissionsChange(RoleResource.role(DEFAULT_SUPERUSER_NAME));
             }
         }
         catch (RequestExecutionException e)

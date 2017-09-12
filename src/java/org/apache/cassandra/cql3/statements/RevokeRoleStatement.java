@@ -18,7 +18,6 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
-import org.apache.cassandra.auth.Auth;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -37,9 +36,6 @@ public class RevokeRoleStatement extends RoleManagementStatement
     {
         return Single.fromCallable(() -> {
             DatabaseDescriptor.getRoleManager().revokeRole(state.getUser(), role, grantee);
-
-            // TODO the blockingAwait it not really nice
-            Auth.invalidateRolesForPermissionsChange(role, grantee).blockingAwait();
 
             return new ResultMessage.Void();
         });

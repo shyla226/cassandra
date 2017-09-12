@@ -114,7 +114,6 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
                              resource,
                              role,
                              GrantMode.GRANT);
-            Auth.invalidateRolesForPermissionsChange(role).blockingAwait();
         }
         catch (RequestExecutionException e)
         {
@@ -122,14 +121,14 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
         }
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    public void checkAccess(QueryState state)
     {
         if (Schema.instance.findFunction(functionName, argTypes).isPresent() && orReplace)
-            state.ensureHasPermission(CorePermission.ALTER, FunctionResource.function(functionName.keyspace,
-                                                                                  functionName.name,
-                                                                                  argTypes));
+            state.checkFunctionPermission(FunctionResource.function(functionName.keyspace,
+                                                                                         functionName.name,
+                                                                                         argTypes), CorePermission.ALTER);
         else
-            state.ensureHasPermission(CorePermission.CREATE, FunctionResource.keyspace(functionName.keyspace));
+            state.checkFunctionPermission(FunctionResource.keyspace(functionName.keyspace), CorePermission.CREATE);
     }
 
     public void validate(QueryState state) throws InvalidRequestException

@@ -32,6 +32,8 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+
 public class ListPermissionsStatement extends AuthorizationStatement
 {
     private static final String KS = SchemaConstants.AUTH_KEYSPACE_NAME;
@@ -65,25 +67,26 @@ public class ListPermissionsStatement extends AuthorizationStatement
 
     }
 
+    @Override
     public void checkAccess(QueryState state)
     {
         // a check to ensure the existence of the user isn't being leaked by user existence check.
-        state.ensureNotAnonymous();
+        state.checkNotAnonymous();
 
         if (resource != null)
         {
             resource = maybeCorrectResource(resource, state.getClientState());
             if (!resource.exists())
-                throw new InvalidRequestException(String.format("%s doesn't exist", resource));
+                throw invalidRequest("%s doesn't exist", resource);
         }
 
         if ((grantee != null) && !DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
-            throw new InvalidRequestException(String.format("%s doesn't exist", grantee));
+            throw invalidRequest("%s doesn't exist", grantee);
 
         // If the user requesting 'LIST PERMISSIONS' is not a superuser OR their username doesn't match 'grantee', we
         // throw UnauthorizedException. So only a superuser can view everybody's permissions. Regular users are only
         // allowed to see their own permissions.
-        if (!(state.isSuper() || state.getUser().isSystem()) && !state.getRoles().contains(grantee))
+        if (!(state.isSuper() || state.isSystem()) && !state.hasRole(grantee))
             throw new UnauthorizedException(String.format("You are not authorized to view %s's permissions",
                                                           grantee == null ? "everyone" : grantee.getRoleName()));
     }

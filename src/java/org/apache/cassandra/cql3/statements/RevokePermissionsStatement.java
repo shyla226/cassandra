@@ -40,9 +40,6 @@ public class RevokePermissionsStatement extends PermissionsManagementStatement
         return Single.fromCallable(() -> {
             DatabaseDescriptor.getAuthorizer().revoke(state.getUser(), permissions, resource, grantee, grantMode);
 
-            // TODO the blockingAwait it not really nice
-            Auth.invalidateRolesForPermissionsChange(grantee).blockingAwait();
-
             return new ResultMessage.Void();
         });
     }

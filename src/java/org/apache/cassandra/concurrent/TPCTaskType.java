@@ -62,7 +62,8 @@ public enum TPCTaskType
     HINT_RECEIVE,
     HINT_SUBMIT,
     ROW_CACHE_LOAD,
-    COUNTER_CACHE_LOAD;
+    COUNTER_CACHE_LOAD,
+    AUTHORIZATION;
 
     public final boolean pendable;
 

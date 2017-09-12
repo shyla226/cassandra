@@ -37,7 +37,8 @@ public abstract class RoleManagementStatement extends AuthenticationStatement
         this.grantee = RoleResource.role(grantee.getName());
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException
+    @Override
+    public void checkAccess(QueryState state)
     {
         try
         {
@@ -45,14 +46,14 @@ public abstract class RoleManagementStatement extends AuthenticationStatement
         }
         catch (UnauthorizedException noAuthorizePermission)
         {
-            if (!state.hasGrantOption(CorePermission.AUTHORIZE, role))
+            if (!state.hasGrantPermission(role, CorePermission.AUTHORIZE))
                 throw noAuthorizePermission;
         }
     }
 
     public void validate(QueryState state) throws RequestValidationException
     {
-        state.ensureNotAnonymous();
+        state.checkNotAnonymous();
 
         if (!DatabaseDescriptor.getRoleManager().isExistingRole(role))
             throw new InvalidRequestException(String.format("%s doesn't exist", role.getRoleName()));

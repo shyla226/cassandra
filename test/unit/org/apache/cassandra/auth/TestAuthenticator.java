@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.auth;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.net.InetAddress;
 import java.util.Collections;
 import java.util.List;
@@ -50,21 +48,7 @@ public class TestAuthenticator implements IAuthenticator
     {
         TestAuthenticator authenticator = new TestAuthenticator(credentials);
         DatabaseDescriptor.setAuthenticator(authenticator);
-        DatabaseDescriptor.setRoleManager(authenticator.getRoleManager());
-
-        try
-        {
-            Field fField = Field.class.getDeclaredField("modifiers");
-            fField.setAccessible(true);
-            Field fRolesCache = Auth.class.getDeclaredField("rolesCache");
-            fField.setInt(fRolesCache, fField.getInt(fRolesCache) &~ Modifier.FINAL);
-            fRolesCache.setAccessible(true);
-            fRolesCache.set(null, new RolesCache(authenticator.getRoleManager()));
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
-        }
+        DatabaseDescriptor.setAuthManager(new AuthManager(authenticator.getRoleManager(), new AllowAllAuthorizer()));
     }
 
     private TestAuthenticator(Map<String, String> credentials)
@@ -197,7 +181,7 @@ public class TestAuthenticator implements IAuthenticator
             public Role getRoleData(RoleResource role)
             {
                 return new Role(role.getRoleName(),
-                                ImmutableSet.of(role),
+                                ImmutableSet.of(),
                                 false,
                                 true,
                                 ImmutableMap.of(),

@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.transport;
 
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -25,6 +27,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.channel.Channel;
+import io.reactivex.Single;
+
 import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -50,7 +54,7 @@ public class ServerConnection extends Connection
         this.inFlightRequests = new AtomicLong(0L);
     }
 
-    public QueryState validateNewMessage(Message.Request request, ProtocolVersion version)
+    public Single<QueryState> validateNewMessage(Message.Request request, ProtocolVersion version)
     {
         Message.Type type = request.type;
 
@@ -71,7 +75,13 @@ public class ServerConnection extends Connection
             default:
                 throw new AssertionError();
         }
-        return new QueryState(clientState, request.getStreamId());
+
+        if (clientState.getUser() == null)
+            return Single.just(new QueryState(clientState, null));
+
+        return DatabaseDescriptor.getAuthManager()
+                                 .getUserRolesAndPermissions(clientState.getUser())
+                                 .map(u -> new QueryState(clientState, request.getStreamId(), u));
     }
 
     public void applyStateTransition(Message.Type requestType, Message.Type responseType)
@@ -104,10 +114,10 @@ public class ServerConnection extends Connection
         }
     }
 
-    public IAuthenticator.SaslNegotiator getSaslNegotiator(QueryState queryState)
+    public IAuthenticator.SaslNegotiator getSaslNegotiator()
     {
         if (saslNegotiator == null)
-            saslNegotiator = DatabaseDescriptor.getAuthenticator().newSaslNegotiator(queryState.getClientAddress());
+            saslNegotiator = DatabaseDescriptor.getAuthenticator().newSaslNegotiator(getClientAddress());
         return saslNegotiator;
     }
 
@@ -129,6 +139,19 @@ public class ServerConnection extends Connection
     public void onRequestCompleted()
     {
         inFlightRequests.decrementAndGet();
+    }
+
+    protected InetSocketAddress getRemoteAddress()
+    {
+        return clientState.isInternal
+             ? null
+             : clientState.getRemoteAddress();
+    }
+
+    protected final InetAddress getClientAddress()
+    {
+        InetSocketAddress socketAddress = getRemoteAddress();
+        return socketAddress == null ? null : socketAddress.getAddress();
     }
 
     /**

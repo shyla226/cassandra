@@ -72,7 +72,7 @@ public class AuthResponse extends Message.Request
     }
 
     @Override
-    public Single<? extends Response> execute(QueryState queryState, long queryStartNanoTime)
+    public Single<? extends Response> execute(Single<QueryState> queryState, long queryStartNanoTime)
     {
         // both password authenticator and role manager call blockingGet()
         // in several places, so we need to move away from core threads or it will deadlock
@@ -81,12 +81,14 @@ public class AuthResponse extends Message.Request
             {
                 try
                 {
-                    IAuthenticator.SaslNegotiator negotiator = ((ServerConnection) connection).getSaslNegotiator(queryState);
+                    IAuthenticator.SaslNegotiator negotiator = ((ServerConnection) connection).getSaslNegotiator();
                     byte[] challenge = negotiator.evaluateResponse(token);
                     if (negotiator.isComplete())
                     {
                         AuthenticatedUser user = negotiator.getAuthenticatedUser();
-                        queryState.getClientState().login(user);
+                        // As the user is not logged in yet we know that no Auth data has to be fetched and that
+                        // we can safely call blockingGet()
+                        queryState.blockingGet().getClientState().login(user);
                         AuthMetrics.instance.markSuccess();
                         // authentication is complete, send a ready message to the client
                         return new AuthSuccess(challenge);

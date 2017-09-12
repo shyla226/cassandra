@@ -69,9 +69,10 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
         return new Renames(name, renames);
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.hasKeyspaceAccess(keyspace(), CorePermission.ALTER);
+        state.checkKeyspacePermission(keyspace(), CorePermission.ALTER);
     }
 
     public void validate(QueryState state) throws RequestValidationException

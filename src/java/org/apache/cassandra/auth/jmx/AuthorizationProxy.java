@@ -105,14 +105,18 @@ public class AuthorizationProxy implements InvocationHandler
      Used to check whether the Role associated with the authenticated Subject has superuser
      status. By default, just delegates to Roles::hasSuperuserStatus, but can be overridden for testing.
      */
-    protected Function<RoleResource, Boolean> isSuperuser = Auth::hasSuperuserStatus;
+    protected Function<RoleResource, Boolean> isSuperuser = r -> DatabaseDescriptor.getAuthManager()
+                                                                                   .hasSuperUserStatus(r)
+                                                                                   .blockingGet();
 
     /*
      Used to retrieve the set of all permissions granted to a given role. By default, this fetches
      the permissions from the local cache, which in turn loads them from the configured IAuthorizer
      but can be overridden for testing.
      */
-    protected Function<RoleResource, Map<IResource, PermissionSets>> getPermissions = Auth::getPermissions;
+    protected Function<RoleResource, Map<IResource, PermissionSets>> getPermissions = r -> DatabaseDescriptor.getAuthManager()
+                                                                                                             .getPermissions(r)
+                                                                                                             .blockingGet();
 
     /*
      Used to decide whether authorization is enabled or not, usually this depends on the configured
@@ -271,7 +275,7 @@ public class AuthorizationProxy implements InvocationHandler
 
         logger.trace("JMX invocation of {} on {} requires permission {}", methodName, targetBean, requiredPermission);
 
-        Set<RoleResource> roles = Auth.getRoles(subject);
+        Set<RoleResource> roles = DatabaseDescriptor.getAuthManager().getRoles(subject).blockingGet();
 
         PermissionSets.Builder permissions = PermissionSets.builder();
 
@@ -344,7 +348,7 @@ public class AuthorizationProxy implements InvocationHandler
     {
         PermissionSets.Builder permissions = PermissionSets.builder();
         List<? extends IResource> chain = Resources.chain(resource);
-        for (RoleResource role : Auth.getRoles(subject))
+        for (RoleResource role : DatabaseDescriptor.getAuthManager().getRoles(subject).blockingGet())
             permissions.addChainPermissions(chain, getPermissions.apply(role));
         return permissions.build().hasEffectivePermission(permission);
     }

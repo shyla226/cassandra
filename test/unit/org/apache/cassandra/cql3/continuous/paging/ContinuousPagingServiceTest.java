@@ -11,6 +11,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.reactivex.Scheduler;
+
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.config.ContinuousPagingConfig;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
@@ -49,7 +51,7 @@ public class ContinuousPagingServiceTest
     {
         // Always set the direct event loop, so that the cancellation can be processed:
         test.channel.setEventLoop(new ContinuousPagingTestStubs.DirectEventLoop());
-        ContinuousPagingService.cancel(test.queryState, test.streamId);
+        ContinuousPagingService.cancel(null, test.streamId);
     }
 
     @Test(expected = ContinuousBackPressureException.class)
@@ -110,10 +112,10 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        boolean ret = ContinuousPagingService.updateBackpressure(test.queryState, test.streamId, 2);
+        boolean ret = ContinuousPagingService.updateBackpressure(null, test.streamId, 2);
         assertTrue(ret); // correct stream id
 
-        ret = ContinuousPagingService.updateBackpressure(test.queryState, test.streamId + 1, 2);
+        ret = ContinuousPagingService.updateBackpressure(null, test.streamId + 1, 2);
         assertFalse(ret); // wrong stream id
     }
 
@@ -124,7 +126,7 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        ContinuousPagingService.updateBackpressure(test.queryState,
+        ContinuousPagingService.updateBackpressure(null,
                                                    test.streamId,
                                                    0); // numPagesReceived should be positive
     }
@@ -136,7 +138,7 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        ContinuousPagingService.updateBackpressure(test.queryState,
+        ContinuousPagingService.updateBackpressure(null,
                                                    test.streamId,
                                                    -1); // numPagesReceived should be positive
     }
@@ -148,7 +150,7 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        boolean ret = ContinuousPagingService.updateBackpressure(test.queryState,
+        boolean ret = ContinuousPagingService.updateBackpressure(null,
                                                                  test.streamId,
                                                                  Integer.MAX_VALUE);
 
@@ -162,7 +164,7 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        boolean ret = ContinuousPagingService.updateBackpressure(test.queryState,
+        boolean ret = ContinuousPagingService.updateBackpressure(null,
                                                                  test.streamId,
                                                                  1);
 
@@ -176,7 +178,7 @@ public class ContinuousPagingServiceTest
 
         test.build();
 
-        boolean ret = ContinuousPagingService.updateBackpressure(test.queryState,
+        boolean ret = ContinuousPagingService.updateBackpressure(null,
                                                                  test.streamId,
                                                                  1);
 
@@ -239,7 +241,7 @@ public class ContinuousPagingServiceTest
 
         test.executor.onSchedule = (state, bldr) -> builder.set(bldr);
 
-        ContinuousPagingService.updateBackpressure(test.queryState,
+        ContinuousPagingService.updateBackpressure(null,
                                                    test.streamId,
                                                    3);
 
@@ -422,7 +424,7 @@ public class ContinuousPagingServiceTest
         ResultBuilder build()
         {
             this.timeSource = new TestTimeSource();
-            this.queryState = new QueryState(ClientState.forInternalCalls(), streamId);
+            this.queryState = new QueryState(ClientState.forInternalCalls(), streamId, UserRolesAndPermissions.SYSTEM);
             this.queryOptions = QueryOptions.create(ConsistencyLevel.ONE,
                                                     Arrays.asList(ByteBufferUtil.bytes("testColumn")),
                                                     false,

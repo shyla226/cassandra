@@ -17,18 +17,17 @@
  */
 package org.apache.cassandra.auth;
 
-import java.lang.reflect.Field;
 import java.util.*;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
+
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.*;
-import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -74,7 +73,7 @@ public class RoleOptionsTest
         setupRoleManager(roleManager);
         RoleOptions opts = new RoleOptions();
         opts.setOption(IRoleManager.Option.PASSWORD, "test");
-        assertInvalidOptions(opts, String.format("%s doesn't support PASSWORD", roleManager.getClass().getName()));
+        assertInvalidOptions(opts, String.format("%s doesn't support PASSWORD", roleManager.getName()));
     }
 
     @Test
@@ -120,15 +119,9 @@ public class RoleOptionsTest
 
     private void setupRoleManager(IRoleManager manager)
     {
-        Field field = FBUtilities.getProtectedField(DatabaseDescriptor.class, "roleManager");
-        try
-        {
-            field.set(null, manager);
-        }
-        catch (IllegalAccessException e)
-        {
-            fail("Error setting IRoleManager instance for test");
-        }
+        DatabaseDescriptor.setAuthenticator(new AllowAllAuthenticator());
+        AuthManager authManager = new AuthManager(manager, new AllowAllAuthorizer());
+        DatabaseDescriptor.setAuthManager(authManager);
     }
 
     private IRoleManager getRoleManager(final IRoleManager.Option...supportedOptions)

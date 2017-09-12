@@ -25,7 +25,6 @@ import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.QueryState;
@@ -41,11 +40,12 @@ public class DropViewStatement extends SchemaAlteringStatement
         this.ifExists = ifExists;
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
         TableMetadataRef baseTable = View.findBaseTable(keyspace(), columnFamily());
         if (baseTable != null)
-            state.hasColumnFamilyAccess(keyspace(), baseTable.name, CorePermission.ALTER);
+            state.checkTablePermission(keyspace(), baseTable.name, CorePermission.ALTER);
     }
 
     public void validate(QueryState state)

@@ -47,18 +47,21 @@ public class AlterRoleStatement extends AuthenticationStatement
 
     }
 
-    public void checkAccess(QueryState state) throws UnauthorizedException
+    @Override
+    public void checkAccess(QueryState state)
     {
+        IRoleManager roleManager = DatabaseDescriptor.getRoleManager();
+
         // validate login first to avoid leaking user existence to anonymous users.
-        state.ensureNotAnonymous();
-        if (!DatabaseDescriptor.getRoleManager().isExistingRole(role))
+        state.checkNotAnonymous();
+        if (!roleManager.isExistingRole(role))
             throw new InvalidRequestException(String.format("%s doesn't exist", role.getRoleName()));
 
-        boolean isSuper = state.isSuper();
-
-        if (opts.getSuperuser().isPresent() && state.getRoles().contains(role))
+        if (opts.getSuperuser().isPresent() && state.hasRole(role))
             throw new UnauthorizedException("You aren't allowed to alter your own superuser " +
                                             "status or that of a role granted to you");
+
+        boolean isSuper = state.isSuper();
 
         if (opts.getSuperuser().isPresent() && !isSuper)
             throw new UnauthorizedException("Only superusers are allowed to alter superuser status");
@@ -68,11 +71,11 @@ public class AlterRoleStatement extends AuthenticationStatement
             return;
 
         // a role may only modify the subset of its own attributes as determined by IRoleManager#alterableOptions
-        if (state.getUser().getName().equals(role.getRoleName()))
+        if (state.getUserName().equals(role.getRoleName()))
         {
             for (Option option : opts.getOptions().keySet())
             {
-                if (!DatabaseDescriptor.getRoleManager().alterableOptions().contains(option))
+                if (!roleManager.alterableOptions().contains(option))
                     throw new UnauthorizedException(String.format("You aren't allowed to alter %s", option));
             }
         }
@@ -89,11 +92,8 @@ public class AlterRoleStatement extends AuthenticationStatement
             if (!opts.isEmpty())
             {
                 DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
-
-                // TODO the blockingAwait it not really nice
-                Auth.invalidateRolesForPermissionsChange(role).blockingAwait();
             }
-            return (ResultMessage) (new ResultMessage.Void());
+            return new ResultMessage.Void();
         });
     }
 }

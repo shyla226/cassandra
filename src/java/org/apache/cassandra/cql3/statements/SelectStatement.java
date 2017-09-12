@@ -70,7 +70,6 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -273,21 +272,22 @@ public class SelectStatement implements CQLStatement
         return boundTerms;
     }
 
-    public void checkAccess(QueryState state) throws InvalidRequestException, UnauthorizedException
+    @Override
+    public void checkAccess(QueryState state)
     {
         if (table.isView())
         {
             TableMetadataRef baseTable = View.findBaseTable(keyspace(), columnFamily());
             if (baseTable != null)
-                state.hasColumnFamilyAccess(baseTable, CorePermission.SELECT);
+                state.checkTablePermission(baseTable, CorePermission.SELECT);
         }
         else
         {
-            state.hasColumnFamilyAccess(table, CorePermission.SELECT);
+            state.checkTablePermission(table, CorePermission.SELECT);
         }
 
         for (Function function : getFunctions())
-            state.ensureHasPermission(CorePermission.EXECUTE, function);
+            state.checkFunctionPermission(function, CorePermission.EXECUTE);
     }
 
     public void validate(QueryState state) throws InvalidRequestException

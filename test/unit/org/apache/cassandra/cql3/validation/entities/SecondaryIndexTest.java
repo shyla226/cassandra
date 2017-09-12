@@ -46,7 +46,6 @@ import org.apache.cassandra.index.StubIndex;
 import org.apache.cassandra.index.internal.CustomCassandraIndex;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;

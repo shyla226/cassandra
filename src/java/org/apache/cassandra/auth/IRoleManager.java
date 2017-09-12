@@ -46,6 +46,15 @@ public interface IRoleManager
     }
 
     /**
+     * Return this {@code IRoleManager} name.
+     * @return this {@code IRoleManager} name.
+     */
+    default String getName()
+    {
+        return getClass().getName();
+    }
+
+    /**
      * Set of options supported by CREATE ROLE and ALTER ROLE queries.
      * Should never return null - always return an empty set instead.
      */
@@ -233,4 +242,19 @@ public interface IRoleManager
      * For example, use this method to create any required keyspaces/column families.
      */
     Future<?> setup();
+
+   /**
+    * Returns true if the supplied role or any other role granted to it
+    * (directly or indirectly) has superuser status.
+    *
+    * @param role the primary role
+    * @return {@code true} if the role has superuser status, {@code false} otherwise
+    */
+    default boolean hasSuperuserStatus(RoleResource role)
+    {
+        for (RoleResource r : this.getRoles(role, true))
+            if (isSuper(r))
+                return true;
+        return false;
+    }
 }

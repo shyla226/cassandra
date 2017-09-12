@@ -12,6 +12,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import com.google.common.base.MoreObjects;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.permission.Permissions;
 
@@ -94,6 +96,16 @@ public final class PermissionSets
         result = 31 * result + restricted.hashCode();
         result = 31 * result + grantables.hashCode();
         return result;
+    }
+
+    @Override
+    public String toString()
+    {
+        return MoreObjects.toStringHelper(this)
+                          .add("granted", granted)
+                          .add("restricted", restricted)
+                          .add("grantables", grantables)
+                          .toString();
     }
 
     public static Builder builder()

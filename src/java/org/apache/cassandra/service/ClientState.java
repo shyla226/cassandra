@@ -19,23 +19,18 @@ package org.apache.cassandra.service;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.transport.Connection;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
@@ -48,29 +43,6 @@ public class ClientState
 {
     private static final Logger logger = LoggerFactory.getLogger(ClientState.class);
     public static final CassandraVersion DEFAULT_CQL_VERSION = org.apache.cassandra.cql3.QueryProcessor.CQL_VERSION;
-
-    static final Set<IResource> READABLE_SYSTEM_RESOURCES = new HashSet<>();
-    static final Set<IResource> PROTECTED_AUTH_RESOURCES = new HashSet<>();
-    static final Set<IResource> DROPPABLE_SYSTEM_TABLES = new HashSet<>();
-    static
-    {
-        // We want these system cfs to be always readable to authenticated users since many tools rely on them
-        // (nodetool, cqlsh, bulkloader, etc.)
-        for (String cf : SystemKeyspace.readableSystemResources())
-            READABLE_SYSTEM_RESOURCES.add(DataResource.table(SchemaConstants.SYSTEM_KEYSPACE_NAME, cf));
-
-        SchemaKeyspace.ALL.forEach(table -> READABLE_SYSTEM_RESOURCES.add(DataResource.table(SchemaConstants.SCHEMA_KEYSPACE_NAME, table)));
-
-        // neither clients nor tools need authentication/authorization
-        if (DatabaseDescriptor.isDaemonInitialized())
-        {
-            PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getAuthenticator().protectedResources());
-            PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getAuthorizer().protectedResources());
-            PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getRoleManager().protectedResources());
-        }
-
-        DROPPABLE_SYSTEM_TABLES.add(DataResource.table(SchemaConstants.AUTH_KEYSPACE_NAME, "resource_role_permissons_index"));
-    }
 
     // Current user for the session
     private volatile AuthenticatedUser user;
@@ -381,16 +353,10 @@ public class ClientState
         // Login privilege is not inherited via granted roles, so just
         // verify that the role with the credentials that were actually
         // supplied has it
-        if (user.isAnonymous() || Auth.canLogin(user.getLoginRole()))
+        if (user.isAnonymous() || DatabaseDescriptor.getAuthManager().canLogin(user.getLoginRole()).blockingGet())
             this.user = user;
         else
             throw new AuthenticationException(String.format("%s is not permitted to log in", user.getName()));
-    }
-
-    public void validateLogin() throws UnauthorizedException
-    {
-        if (user == null)
-            throw new UnauthorizedException("You have not logged in");
     }
 
     public AuthenticatedUser getUser()
