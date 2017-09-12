@@ -46,7 +46,7 @@ import org.apache.cassandra.utils.versioning.Version;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 import static org.junit.Assert.assertEquals;
 
-public class BatchTest
+public class BatchlogTest
 {
     private static final String KEYSPACE = "BatchRequestTest";
     private static final String CF_STANDARD = "Standard";
