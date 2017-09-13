@@ -136,7 +136,7 @@ if [ "$JVM_VERSION" \> "1.8.9" ] ; then
     # Java 9+
     # See description of https://bugs.openjdk.java.net/browse/JDK-8046148 for details about the syntax
     # The following is the equivalent to -XX:+PrintGCDetails -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=10 -XX:GCLogFileSize=10M
-    if ! grep -q "^-Xlog:gc" $CASSANDRA_CONF/jvm9.options ; then
+    if ! grep -q "^-[X]log:gc" $CASSANDRA_CONF/jvm9.options ; then # [X] to prevent ccm from replacing this line
         # only add -Xlog:gc if it's not mentioned in jvm9.options file
         mkdir -p ${CASSANDRA_HOME}/logs
         JVM_OPTS="$JVM_OPTS -Xlog:gc=info,heap=trace,age=debug,safepoint=info,promotion=trace:file=${CASSANDRA_HOME}/logs/gc.log:time,uptime,pid,tid,level:filecount=10,filesize=10240"
@@ -151,7 +151,7 @@ if [ "$JVM_VERSION" \> "1.8.9" ] ; then
     JVM_OPTS="$JVM_OPTS $JVM9_OPTS"
 else
     # Java 8
-    if ! grep -q "^-Xloggc" $CASSANDRA_CONF/jvm8.options ; then
+    if ! grep -q "^-[X]loggc" $CASSANDRA_CONF/jvm8.options ; then # [X] to prevent ccm from replacing this line
         # only add -Xlog:gc if it's not mentioned in jvm9.options file
         JVM_OPTS="$JVM_OPTS -Xloggc:${CASSANDRA_HOME}/logs/gc.log"
     fi
