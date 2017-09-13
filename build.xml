@@ -1929,14 +1929,6 @@
   <!-- setup additional java runtime arguments -->
   <target name="setup-java9">
 
-    <fail message="Java 8 is required to the build the project, the compiled code works against Java 8 and 9.">
-        <condition>
-            <not>
-                <equals arg1="${ant.java.version}" arg2="1.8" />
-            </not>
-        </condition>
-    </fail>
-
     <!--
     OLD list
     <property name="java9-jvmargs" value="
