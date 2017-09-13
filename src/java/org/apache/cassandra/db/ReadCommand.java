@@ -641,6 +641,11 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
         public void serialize(T command, DataOutputPlus out) throws IOException
         {
+            // The "kind" of the command: 0->single partition, 1->partition range. Was never really needed since we
+            // can distinguish based on the Verb used and so removed in newer versions.
+            if (version.compareTo(ReadVersion.DSE_60) < 0)
+                out.writeByte(command instanceof SinglePartitionReadCommand ? 0 : 1);
+
             out.writeByte(digestFlag(command.isDigestQuery()) | indexFlag(null != command.indexMetadata()));
             if (command.isDigestQuery())
                 out.writeUnsignedVInt(digestVersionInt(command.digestVersion()));
@@ -657,6 +662,9 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
         public T deserialize(DataInputPlus in) throws IOException
         {
+            if (version.compareTo(ReadVersion.DSE_60) < 0)
+                in.readByte(); // See comment in serialize(), we don't need this.
+
             int flags = in.readByte();
             boolean isDigest = isDigest(flags);
             // Shouldn't happen or it's a user error (see comment above) but
@@ -700,7 +708,8 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
         public long serializedSize(T command)
         {
-            return 2 // kind + flags
+            return 1 // flags
+                   + (version.compareTo(ReadVersion.DSE_60) < 0 ? 1 : 0) // kind for older versions
                    + (command.isDigestQuery() ? TypeSizes.sizeofUnsignedVInt(digestVersionInt(command.digestVersion())) : 0)
                    + command.metadata().id.serializedSize()
                    + TypeSizes.sizeof(command.nowInSec())
