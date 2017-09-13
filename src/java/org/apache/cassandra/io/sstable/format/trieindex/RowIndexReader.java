@@ -111,7 +111,7 @@ class RowIndexReader extends Walker<RowIndexReader>
 
     static IndexInfo readPayload(ByteBuffer buf, int ppos, int bits)
     {
-        long dataOffset; 
+        long dataOffset;
         if (bits == 0)
             return null;
         int bytes = bits & ~FLAG_OPEN_MARKER;

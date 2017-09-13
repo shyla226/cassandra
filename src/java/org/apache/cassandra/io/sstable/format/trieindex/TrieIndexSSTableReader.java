@@ -39,6 +39,7 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
+import org.apache.cassandra.io.sstable.format.IndexFileEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
@@ -48,12 +49,14 @@ import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.MmapRebufferer;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.concurrent.Ref;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * SSTableReaders are open()ed by Keyspace.onStart; after that they are created by SSTableWriter.renameAndOpen.
@@ -400,5 +403,15 @@ class TrieIndexSSTableReader extends SSTableReader
         if (partitionIndex == null)
             return null;
         return new ScrubIterator(partitionIndex, rowIndexFile);
+    }
+
+    @Override
+    public Flow<IndexFileEntry> coveredKeysFlow(RandomAccessReader dataFileReader,
+                                                PartitionPosition left,
+                                                boolean inclusiveLeft,
+                                                PartitionPosition right,
+                                                boolean inclusiveRight)
+    {
+        return new TrieIndexFileFlow(dataFileReader, this, left, inclusiveLeft ? -1 : 0, right, inclusiveRight ? 0 : -1);
     }
 }

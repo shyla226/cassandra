@@ -25,8 +25,7 @@ import java.util.List;
 
 import com.google.common.collect.Iterables;
 
-import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.concurrent.IOScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
@@ -81,7 +80,7 @@ public class PartitionRangeReadCommand extends ReadCommand
     // We access the scheduler/operationExecutor multiple times for each command (at least twice for every replica
     // involved in the request and response executor in Messaging) and re-doing their computation is unnecessary so
     // caching their value here. Note that we don't serialize those in any way, they are just recomputed in the ctor.
-    private final transient IOScheduler scheduler;
+    private final transient TPCScheduler scheduler;
     private final transient TracingAwareExecutor operationExecutor;
 
     private PartitionRangeReadCommand(DigestVersion digestVersion,
@@ -96,7 +95,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         this.dataRange = dataRange;
 
-        this.scheduler = TPC.ioScheduler();
+        this.scheduler = TPC.bestTPCScheduler();
         this.operationExecutor = scheduler.forTaskType(TPCTaskType.READ_RANGE);
     }
 
@@ -305,11 +304,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         SSTableReadsListener readCountUpdater = newReadCountUpdater();
         for (SSTableReader sstable : view.sstables)
         {
-            // Since opened sstable scanner always needs to be closed, make sure it's only opened when
-            // the flow is processed.
-            iterators.add(Flow.defer(() -> FlowablePartitions.fromPartitions(
-                                               sstable.getScanner(columnFilter(), dataRange(), readCountUpdater),
-                                               Schedulers.io())));
+            iterators.add(sstable.getAsyncScanner(columnFilter(), dataRange(), readCountUpdater));
             if (!sstable.isRepaired())
                 oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
         }

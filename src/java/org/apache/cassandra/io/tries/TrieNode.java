@@ -29,7 +29,7 @@ import org.apache.cassandra.utils.SizedInts;
  *
  * The serialization methods take as argument a generic {@code SerializationNode} and provide a method {@code typeFor}
  * for choosing a suitable type to represent it, which can then be used to calculate size and write the node. When
- * caller is certain all chilren of the node can fit within the same page, the {@code inpageTypeFor} method can be used
+ * caller is certain all children of the node can fit within the same page, the {@code inpageTypeFor} method can be used
  * instead to achieve better packing.
  *
  * To read a file containing trie nodes, one would use {@code at} to identify the node type and then the various
@@ -49,7 +49,7 @@ import org.apache.cassandra.utils.SizedInts;
  *
  * For each of the transition-carrying types we also have "in-page" versions where transition targets are the 12 lowest
  * bits of the position within the same page. To save one further byte, the single in-page version cannot carry a
- * payload. 
+ * payload.
  *
  * This class is effectively an enumeration; abstract class permits instances to extends each other and reuse code.
  */
@@ -560,7 +560,7 @@ public abstract class TrieNode
                 writeBytes(dest, -node.serializedPositionDelta(i, nodePosition));
         }
     };
-    
+
     static final Sparse12 SPARSE_12 = new Sparse12();
     static class Sparse12 extends Sparse
     {
@@ -841,7 +841,7 @@ public abstract class TrieNode
         {
             dest.writeLong(ofs);
         }
-        
+
         @Override
         boolean fits(long delta)
         {

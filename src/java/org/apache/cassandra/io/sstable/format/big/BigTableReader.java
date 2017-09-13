@@ -40,7 +40,6 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.compaction.MemoryOnlyStrategy;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
@@ -48,7 +47,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
-import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
+import org.apache.cassandra.io.sstable.format.IndexFileEntry;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
@@ -56,8 +55,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
-import org.apache.cassandra.io.util.AsynchronousChannelProxy;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -68,6 +67,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.concurrent.Ref;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * SSTableReaders are open()ed by Keyspace.onStart; after that they are created by SSTableWriter.renameAndOpen.
@@ -628,6 +628,16 @@ public class BigTableReader extends SSTableReader
         if (ifile == null)
             return null;
         return new ScrubIterator(ifile, rowIndexEntrySerializer);
+    }
+
+    @Override
+    public Flow<IndexFileEntry> coveredKeysFlow(RandomAccessReader dfile,
+                                                PartitionPosition left,
+                                                boolean inclusiveLeft,
+                                                PartitionPosition right,
+                                                boolean inclusiveRight)
+    {
+        return new BigIndexFileFlow(this, left, inclusiveLeft ? -1 : 0, right, inclusiveRight ? 0 : -1);
     }
 
     protected FileHandle[] getFilesToBeLocked()

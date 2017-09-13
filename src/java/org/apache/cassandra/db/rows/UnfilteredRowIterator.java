@@ -52,4 +52,13 @@ public interface UnfilteredRowIterator extends PartitionTrait, BaseRowIterator<U
             && staticRow().isEmpty()
             && !hasNext();
     }
+
+    /**
+     * Implemented by sub-classes that are used by {@link org.apache.cassandra.io.sstable.format.AsyncPartitionReader.PartitionReader}
+     * ant that must reset their internal state in the case of {@link org.apache.cassandra.io.util.Rebufferer.NotInCacheException}.
+     */
+    public default void resetReaderState()
+    {
+
+    }
 }

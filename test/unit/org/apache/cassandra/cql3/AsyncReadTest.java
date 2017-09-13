@@ -19,19 +19,22 @@ package org.apache.cassandra.cql3;
 
 import java.util.Arrays;
 import java.util.Random;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import org.apache.cassandra.cache.ChunkCache;
-import org.apache.cassandra.io.util.AsynchronousChannelProxy;
-import org.apache.cassandra.io.util.Rebufferer;
-import org.apache.cassandra.io.util.RebuffererFactory;
+import org.apache.cassandra.cache.ChunkCacheMocks;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.config.DatabaseDescriptor;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 
 
 /**
@@ -68,7 +71,7 @@ public class AsyncReadTest extends CQLTester
             if (j > COUNT)
                 j = COUNT;
             Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = 1 and c >= ? and c < ?", i, j));
-            Assert.assertEquals(j - i, rows.length);
+            assertEquals(j - i, rows.length);
         }
     }
 
@@ -90,7 +93,7 @@ public class AsyncReadTest extends CQLTester
             if (j > COUNT)
                 j = COUNT;
             Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = 1 and c >= ? and c < ? ORDER BY c DESC", i, j));
-            Assert.assertEquals("Lookup between " + i + " and " + j + " count " + COUNT, j - i, rows.length);
+            assertEquals("Lookup between " + i + " and " + j + " count " + COUNT, j - i, rows.length);
         }
     }
 
@@ -125,7 +128,7 @@ public class AsyncReadTest extends CQLTester
             {
                 int ii = i;
                 Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = ? and c IN (" + s + ")", i));
-                Assert.assertEquals("k = " + i + " IN " + s + " count " + COUNT, MULT * Arrays.stream(arr).filter(x -> x % 3 == ii).count(), rows.length);
+                assertEquals("k = " + i + " IN " + s + " count " + COUNT, MULT * Arrays.stream(arr).filter(x -> x % 3 == ii).count(), rows.length);
             }
         }
     }
@@ -159,7 +162,7 @@ public class AsyncReadTest extends CQLTester
             {
                 int ii = i;
                 Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = ? and c IN (" + s + ") ORDER BY c DESC", i));
-                Assert.assertEquals("k = " + i + " IN " + s + " count " + COUNT, MULT * Arrays.stream(arr).filter(x -> x % 3 == ii).count(), rows.length);
+                assertEquals("k = " + i + " IN " + s + " count " + COUNT, MULT * Arrays.stream(arr).filter(x -> x % 3 == ii).count(), rows.length);
             }
         }
     }
@@ -172,18 +175,18 @@ public class AsyncReadTest extends CQLTester
         int STEP = 32;
 
         for (int i = 0; i < COUNT; i++)
-            execute("INSERT INTO %s (k, c, v, d) VALUES (?, ?, ?, ?)", i/STEP, i%STEP, i, generateString(10 << (i % 12)));
+            execute("INSERT INTO %s (k, c, v, d) VALUES (?, ?, ?, ?)", i / STEP, i % STEP, i, generateString(10 << (i % 12)));
         flush();
 
         interceptCache();
         for (int rep = 0; rep < REPS; ++rep)
         {
             int i = rand.nextInt(COUNT);
-            Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = ? and c >= ?", i/STEP, i%STEP));
+            Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = ? and c >= ?", i / STEP, i % STEP));
             int max = STEP;
             if (i / STEP == COUNT / STEP)
                 max = COUNT % STEP;
-            Assert.assertEquals(max - (i % STEP), rows.length);
+            assertEquals(max - (i % STEP), rows.length);
         }
     }
 
@@ -195,16 +198,124 @@ public class AsyncReadTest extends CQLTester
         int STEP = 32;
 
         for (int i = 0; i < COUNT; i++)
-            execute("INSERT INTO %s (k, c, v, d) VALUES (?, ?, ?, ?)", i/STEP, i%STEP, i, generateString(10 << (i % 12)));
+            execute("INSERT INTO %s (k, c, v, d) VALUES (?, ?, ?, ?)", i / STEP, i % STEP, i, generateString(10 << (i % 12)));
         flush();
 
         interceptCache();
         for (int rep = 0; rep < REPS; ++rep)
         {
             int i = rand.nextInt(COUNT);
-            Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = ? and c < ? ORDER BY c DESC", i/STEP, i%STEP));
-            Assert.assertEquals(i % STEP, rows.length);
+            Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = ? and c < ? ORDER BY c DESC", i / STEP, i % STEP));
+            assertEquals(i % STEP, rows.length);
         }
+    }
+
+    @Test
+    public void testRangeQueries() throws Throwable
+    {
+        interceptCache();
+
+        createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
+        int PARTITIONS = 20;
+        int ROWS = 10;
+        for (int i = 0; i < PARTITIONS; i++)
+            for (int j = 0; j < ROWS; j++)
+                execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", i, j, i * j);
+
+        flush();
+
+        for (int rep = 0; rep < REPS; ++rep)
+        {
+            Object[][] rows = getRows(execute("SELECT * FROM %s"));
+            assertEquals(PARTITIONS * ROWS, rows.length);
+        }
+
+        for (int rep = 0; rep < REPS; ++rep)
+        {
+            int from = rand.nextInt(PARTITIONS - 2);
+            int to = 2 + from + rand.nextInt(PARTITIONS - from - 2);
+
+            Object[][] rows = getRows(execute("SELECT k, c, v FROM %s WHERE k <= ? and k >= ? ALLOW FILTERING", to, from));
+            assertEquals((to - from + 1) * ROWS, rows.length);
+
+            rows = getRows(execute("SELECT k, c, v FROM %s WHERE k < ? and k >= ? ALLOW FILTERING", to, from));
+            assertEquals((to - from) * ROWS, rows.length);
+
+            rows = getRows(execute("SELECT k, c, v FROM %s WHERE k <= ? and k > ? ALLOW FILTERING", to, from));
+            assertEquals((to - from) * ROWS, rows.length);
+
+            rows = getRows(execute("SELECT k, c, v FROM %s WHERE k < ? and k > ? ALLOW FILTERING", to, from));
+            assertEquals((to - from - 1) * ROWS, rows.length);
+        }
+    }
+
+    @Test
+    public void testParallelFullScans() throws Throwable
+    {
+        testParallelFullScans(false);
+    }
+
+    @Test
+    public void testParallelFullScansWithCompactions() throws Throwable
+    {
+        testParallelFullScans(true);
+    }
+
+    private void testParallelFullScans(boolean compactWhilstReading) throws Throwable
+    {
+        DatabaseDescriptor.setSSTablePreempiveOpenIntervalInMB(2);
+        interceptCache();
+
+        createTable("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY (k, c))");
+        int PARTITIONS = 100;
+        int ROWS = 10;
+        String junk = RandomStringUtils.random(512); // just some junk to make the sstables larger
+
+        // do not compact whilst flushing, we want to compact when reading or not at all
+        disableCompaction();
+
+        for (int j = 0; j < ROWS; j++)
+        {
+            for (int i = 0; i < PARTITIONS; i++)
+                execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", i, j, junk);
+
+            flush(); // each sstable should have all partitions, with one row each
+        }
+
+        final CountDownLatch latch = new CountDownLatch(REPS);
+        final AtomicReference<Throwable> error = new AtomicReference<>(null);
+
+        for (int i = 0; i < REPS; i++)
+        {
+            TPC.ioScheduler().scheduleDirect(() -> {
+                 try
+                 {
+                     for (int rep = 0; rep < REPS; ++rep)
+                     {
+                         Object[][] rows = getRows(execute("SELECT * FROM %s"));
+                         assertEquals(PARTITIONS * ROWS, rows.length);
+                     }
+                 }
+                 catch (Throwable err)
+                 {
+                     error.compareAndSet(null, err);
+                 }
+                 finally
+                 {
+                     latch.countDown();
+                 }
+             });
+        }
+
+        // compact whilst reading if required
+        if (compactWhilstReading)
+        {
+            Thread.sleep(5); // give a chance to the queries to start
+            compact();
+        }
+
+        latch.await(1, TimeUnit.MINUTES);
+        assertNull(error.get());
     }
 
     String generateString(int length)
@@ -217,104 +328,12 @@ public class AsyncReadTest extends CQLTester
 
     public void interceptCache()
     {
-        ChunkCache.instance.intercept(rf -> new TestRebuffererFactory(rf));
+        ChunkCacheMocks.interceptCache(rand);
     }
 
     @After
     public void clearIntercept()
     {
-        ChunkCache.instance.enable(true);
-    }
-
-    class TestRebuffererFactory implements RebuffererFactory
-    {
-        final RebuffererFactory wrapped;
-
-        TestRebuffererFactory(RebuffererFactory wrapped)
-        {
-            this.wrapped = wrapped;
-        }
-
-        public void close()
-        {
-            wrapped.close();
-        }
-
-        public AsynchronousChannelProxy channel()
-        {
-            return wrapped.channel();
-        }
-
-        public long fileLength()
-        {
-            return wrapped.fileLength();
-        }
-
-        public double getCrcCheckChance()
-        {
-            return wrapped.getCrcCheckChance();
-        }
-
-        public Rebufferer instantiateRebufferer()
-        {
-            return new TestRebufferer(wrapped.instantiateRebufferer());
-        }
-    }
-
-    class TestRebufferer implements Rebufferer
-    {
-        final Rebufferer wrapped;
-
-        TestRebufferer(Rebufferer wrapped)
-        {
-            this.wrapped = wrapped;
-        }
-
-        public void close()
-        {
-            wrapped.close();
-        }
-
-        public AsynchronousChannelProxy channel()
-        {
-            return wrapped.channel();
-        }
-
-        public long fileLength()
-        {
-            return wrapped.fileLength();
-        }
-
-        public double getCrcCheckChance()
-        {
-            return wrapped.getCrcCheckChance();
-        }
-
-        public BufferHolder rebuffer(long position)
-        {
-            return wrapped.rebuffer(position);
-        }
-
-        public void closeReader()
-        {
-            wrapped.closeReader();
-        }
-
-        public BufferHolder rebuffer(long position, ReaderConstraint constraint)
-        {
-            if (constraint == ReaderConstraint.IN_CACHE_ONLY && rand.nextDouble() < 0.25)
-            {
-                CompletableFuture<ChunkCache.Buffer> buf = new CompletableFuture<ChunkCache.Buffer>();
-
-                if (rand.nextDouble() < 0.5)
-                    buf.complete(null); // mark ready, so that reload starts immediately
-                else
-                    ForkJoinPool.commonPool().submit(() -> buf.complete(null)); // switch thread from time to time
-                                                                                      // to avoid stack overflow
-
-                throw new NotInCacheException(buf);
-            }
-            return wrapped.rebuffer(position, constraint);
-        }
+        ChunkCacheMocks.clearIntercept();
     }
 }

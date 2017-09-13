@@ -183,6 +183,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
                                 : createReaderInternal(indexEntry, file, shouldCloseFile, rc);
     }
 
+    @Override
     public void resetReaderState()
     {
         assert reader != null;

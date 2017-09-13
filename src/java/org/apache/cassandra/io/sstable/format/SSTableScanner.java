@@ -116,14 +116,14 @@ class SSTableScanner implements ISSTableScanner
         return boundsList;
     }
 
-    private static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, DataRange dataRange)
+    static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, DataRange dataRange)
     {
         List<AbstractBounds<PartitionPosition>> boundsList = new ArrayList<>(2);
         addRange(sstable, dataRange.keyRange(), boundsList);
         return boundsList;
     }
 
-    private static AbstractBounds<PartitionPosition> fullRange(SSTableReader sstable)
+    static AbstractBounds<PartitionPosition> fullRange(SSTableReader sstable)
     {
         return new Bounds<>(sstable.first, sstable.last);
     }
