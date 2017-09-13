@@ -76,6 +76,7 @@ implements BasePartitionIterator<R>
         return fail;
     }
 
+    @SuppressWarnings("resource")
     public final boolean hasNext()
     {
         BaseRowIterator<?> next = null;

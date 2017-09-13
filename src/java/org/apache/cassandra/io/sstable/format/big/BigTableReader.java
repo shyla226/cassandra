@@ -273,6 +273,7 @@ public class BigTableReader extends SSTableReader
         return iterator(null, key, rie, slices, selectedColumns, reversed, Rebufferer.ReaderConstraint.NONE);
     }
 
+    @SuppressWarnings("resource")
     public UnfilteredRowIterator iterator(FileDataInput file,
                                           DecoratedKey key,
                                           RowIndexEntry indexEntry,

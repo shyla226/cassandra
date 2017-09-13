@@ -208,6 +208,7 @@ public class PartitionUpdate extends AbstractBTreePartition
      * Warning: this method does not close the provided iterator, it is up to
      * the caller to close it.
      */
+    @SuppressWarnings("resource")
     public static PartitionUpdate fromIterator(UnfilteredRowIterator iterator, ColumnFilter filter)
     {
         iterator = UnfilteredRowIterators.withOnlyQueriedData(iterator, filter);
@@ -227,6 +228,7 @@ public class PartitionUpdate extends AbstractBTreePartition
      * Warning: this method does not close the provided iterator, it is up to
      * the caller to close it.
      */
+    @SuppressWarnings("resource")
     public static PartitionUpdate fromIterator(RowIterator iterator, ColumnFilter filter)
     {
         iterator = RowIterators.withOnlyQueriedData(iterator, filter);
@@ -248,6 +250,7 @@ public class PartitionUpdate extends AbstractBTreePartition
      *
      * @return the deserialized update or {@code null} if {@code bytes == null}.
      */
+    @SuppressWarnings("resource")
     public static PartitionUpdate fromBytes(ByteBuffer bytes, EncodingVersion version)
     {
         if (bytes == null)

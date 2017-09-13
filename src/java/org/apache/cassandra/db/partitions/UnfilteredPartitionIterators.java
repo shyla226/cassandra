@@ -105,6 +105,7 @@ public abstract class UnfilteredPartitionIterators
         return Transformation.apply(toReturn, new Close());
     }
 
+    @SuppressWarnings("resource")
     public static UnfilteredPartitionIterator concat(final List<UnfilteredPartitionIterator> iterators, TableMetadata metadata)
     {
         if (iterators.isEmpty())
@@ -152,6 +153,7 @@ public abstract class UnfilteredPartitionIterators
         return FilteredPartitions.filter(iterator, nowInSec);
     }
 
+    @SuppressWarnings("resource")
     public static UnfilteredPartitionIterator merge(final List<? extends UnfilteredPartitionIterator> iterators, final int nowInSec, final MergeListener listener)
     {
         assert listener != null;
@@ -220,6 +222,7 @@ public abstract class UnfilteredPartitionIterators
             toMerge.set(idx, current);
         }
 
+        @SuppressWarnings("resource")
         public UnfilteredRowIterator getReduced()
         {
             UnfilteredRowIterators.MergeListener rowListener = listener.getRowMergeListener(partitionKey, toMerge);

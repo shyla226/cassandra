@@ -245,6 +245,7 @@ public abstract class UnfilteredRowIterators
      * {@code iter2} come after the ones of {@code iter1} (that is, that concatenating the iterator
      * make sense).
      */
+    @SuppressWarnings("resource")
     public static UnfilteredRowIterator concat(final UnfilteredRowIterator iter1, final UnfilteredRowIterator iter2)
     {
         assert iter1.metadata().id.equals(iter2.metadata().id)

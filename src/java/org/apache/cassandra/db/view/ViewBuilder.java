@@ -71,6 +71,7 @@ public class ViewBuilder extends CompactionInfo.Holder
         compactionId = UUIDGen.getTimeUUID();
     }
 
+    @SuppressWarnings("resource")
     private void buildKey(DecoratedKey key)
     {
         ReadQuery selectQuery = view.getReadQuery();

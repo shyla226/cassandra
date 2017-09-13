@@ -154,6 +154,7 @@ class AsyncPartitionReader
         /**
          * This method must be async-read-safe.
          */
+        @SuppressWarnings("resource")
         void performRead(boolean isRetry) throws Exception
         {
             if (issued)
