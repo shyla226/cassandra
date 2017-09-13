@@ -93,7 +93,7 @@ public class LongLeveledCompactionStrategyTest
         checkEmpty(repaired);
 
         // Mark all SSTables as repaired
-        store.mutateRepairedAt(store.getLiveSSTables(), System.currentTimeMillis(), null);
+        store.getCompactionStrategyManager().mutateRepaired(store.getLiveSSTables(), System.currentTimeMillis(), null);
 
         // Make sure there are no unrepaired sstables
         checkEmpty(unrepaired);

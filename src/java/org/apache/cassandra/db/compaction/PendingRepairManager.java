@@ -435,7 +435,7 @@ class PendingRepairManager
             boolean completed = false;
             try
             {
-                cfs.mutateRepairedAt(transaction.originals(), repairedAt, ActiveRepairService.NO_PENDING_REPAIR);
+                cfs.getCompactionStrategyManager().mutateRepaired(transaction.originals(), repairedAt, ActiveRepairService.NO_PENDING_REPAIR);
                 completed = true;
             }
             finally

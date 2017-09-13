@@ -684,7 +684,7 @@ public class CompactionManager implements CompactionManagerMBean
                     sstableIterator.remove();
                 }
             }
-            cfs.mutateRepairedAt(sstablesToMutateRepairStatus, repairedAt, pendingRepair);
+            cfs.getCompactionStrategyManager().mutateRepaired(sstablesToMutateRepairStatus, repairedAt, pendingRepair);
             cfs.metric.bytesMutatedAnticompaction.inc(SSTableReader.getTotalBytes(sstablesToMutateRepairStatus));
             txn.cancel(Sets.union(nonAnticompacting, sstablesToMutateRepairStatus));
             validatedForRepair.release(Sets.union(nonAnticompacting, sstablesToMutateRepairStatus));

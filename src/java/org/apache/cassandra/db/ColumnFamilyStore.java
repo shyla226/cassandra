@@ -2764,31 +2764,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return new TableInfo(hasViews(), metadata.get().isView(), getLiveSSTables().stream().anyMatch(s -> s.isRepaired()), isCdcEnabled());
     }
 
-    public int mutateRepairedAt(Collection<SSTableReader> sstables, long repairedAt, UUID pendingRepair) throws IOException
-    {
-        Set<SSTableReader> changedStatus = new HashSet<>(sstables.size());
-        for (SSTableReader sstable : sstables)
-        {
-            assert metadata.get().id.equals(sstable.metadata().id);
-            Pair<Long, UUID> previousStatus = Pair.create(sstable.getSSTableMetadata().repairedAt, sstable.getSSTableMetadata().pendingRepair);
-            logger.info("Setting repaired at to {} and {}", repairedAt, pendingRepair);
-            sstable.descriptor.getMetadataSerializer().mutateRepaired(sstable.descriptor, repairedAt, pendingRepair);
-            sstable.reloadSSTableMetadata();
-            if (!previousStatus.equals(Pair.create(sstable.getSSTableMetadata().repairedAt, sstable.getSSTableMetadata().pendingRepair)))
-            {
-                changedStatus.add(sstable);
-            }
-        }
-        getTracker().notifySSTableRepairedStatusChanged(changedStatus);
-        return changedStatus.size();
-    }
-
     public int forceMarkAllSSTablesAsUnrepaired()
     {
         return runWithCompactionsDisabled(() ->
                                    {
                                        Set<SSTableReader> repairedSSTables = getLiveSSTables().stream().filter(SSTableReader::isRepaired).collect(Collectors.toSet());
-                                       int mutated = mutateRepairedAt(repairedSSTables, ActiveRepairService.UNREPAIRED_SSTABLE, null);
+                                       int mutated = getCompactionStrategyManager().mutateRepaired(repairedSSTables, ActiveRepairService.UNREPAIRED_SSTABLE, null);
                                        logger.debug("Marked {} sstables from table {}.{} as repaired.", mutated, keyspace.getName(), name);
                                    return mutated;
                                    }, true, true);

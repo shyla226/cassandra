@@ -308,6 +308,6 @@ public class RepairedDataTombstonesTest extends CQLTester
 
     public static void repair(ColumnFamilyStore cfs, SSTableReader sstable) throws IOException
     {
-        cfs.mutateRepairedAt(Collections.singleton(sstable), 1, null);
+        cfs.getCompactionStrategyManager().mutateRepaired(Collections.singleton(sstable), 1, null);
     }
 }
