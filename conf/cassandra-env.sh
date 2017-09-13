@@ -142,6 +142,13 @@ if [ "$JVM_VERSION" \> "1.8.9" ] ; then
         JVM_OPTS="$JVM_OPTS -Xlog:gc=info,heap=trace,age=debug,safepoint=info,promotion=trace:file=${CASSANDRA_HOME}/logs/gc.log:time,uptime,pid,tid,level:filecount=10,filesize=10240"
     fi
     readJvmOps "jvm9.options"
+    JVM9_OPTS="$JVM9_OPTS -Djdk.attach.allowAttachSelf=true"
+    JVM9_OPTS="$JVM9_OPTS --add-exports java.base/jdk.internal.ref=ALL-UNNAMED"
+    JVM9_OPTS="$JVM9_OPTS --add-exports java.base/sun.nio.ch=ALL-UNNAMED"
+    JVM9_OPTS="$JVM9_OPTS --add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED"
+    JVM9_OPTS="$JVM9_OPTS --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED"
+    JVM9_OPTS="$JVM9_OPTS --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS $JVM9_OPTS"
 else
     # Java 8
     if ! grep -q "^-Xloggc" $CASSANDRA_CONF/jvm8.options ; then
