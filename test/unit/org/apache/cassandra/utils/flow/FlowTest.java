@@ -21,13 +21,16 @@ package org.apache.cassandra.utils.flow;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.collect.Ordering;
+
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.reactivex.functions.Function;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.LineNumberInference;
 import org.apache.cassandra.utils.Pair;
@@ -273,6 +276,36 @@ public class FlowTest
         {
             assertStacktraceMessage(e.getSuppressed()[0].getMessage(), new Object[]{ inc, multiplyByTwo, multiplyByThree, divideByZero, reduceToSum });
         }
+    }
+
+    @Test
+    public void observeOnTest() throws Exception
+    {
+        AtomicReference<String> currentThread = new AtomicReference<>();
+        AtomicReference<String> transformedThread1 = new AtomicReference<>();
+        AtomicReference<String> transformedThread2 = new AtomicReference<>();
+
+        Flow.fromIterable(Arrays.asList("ignored"))
+            .map(ignored ->
+            {
+                currentThread.set(Thread.currentThread().getName());
+                return ignored;
+            })
+            .observeOn(Schedulers.newThread())
+            .map(ignored ->
+            {
+                transformedThread1.set(Thread.currentThread().getName());
+                return ignored;
+            })
+            .observeOn(Schedulers.newThread())
+            .reduceBlocking("ignored", (i, o) ->
+            {
+                transformedThread2.set(Thread.currentThread().getName());
+                return o;
+            });
+
+        Assert.assertNotEquals(currentThread.get(), transformedThread1.get());
+        Assert.assertNotEquals(transformedThread1.get(), transformedThread2.get());
     }
 
     static void assertStacktraceMessage(String msg, Object[] tags)
