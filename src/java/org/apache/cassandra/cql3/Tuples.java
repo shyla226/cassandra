@@ -50,7 +50,7 @@ public class Tuples
         return new ColumnSpecification(column.ksName,
                                        column.cfName,
                                        new ColumnIdentifier(String.format("%s[%d]", column.name, component), true),
-                                       ((TupleType)column.type).type(component));
+                                       (getTupleType(column.type)).type(component));
     }
 
     /**
@@ -85,7 +85,7 @@ public class Tuples
 
                 values.add(value);
             }
-            DelayedValue value = new DelayedValue((TupleType)receiver.type, values);
+            DelayedValue value = new DelayedValue(getTupleType(receiver.type), values);
             return allTerminal ? value.bind(QueryOptions.DEFAULT) : value;
         }
 
@@ -267,7 +267,7 @@ public class Tuples
                 List<?> l = type.getSerializer().deserializeForNativeProtocol(value, options.getProtocolVersion());
 
                 assert type.getElementsType() instanceof TupleType;
-                TupleType tupleType = (TupleType) type.getElementsType();
+                TupleType tupleType = Tuples.getTupleType(type.getElementsType());
 
                 // type.split(bytes)
                 List<List<ByteBuffer>> elements = new ArrayList<>(l.size());
@@ -396,7 +396,7 @@ public class Tuples
             ByteBuffer value = options.getValues().get(bindIndex);
             if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
                 throw new InvalidRequestException(String.format("Invalid unset value for tuple %s", receiver.name));
-            return value == null ? null : Value.fromSerialized(value, (TupleType)receiver.type);
+            return value == null ? null : Value.fromSerialized(value, getTupleType(receiver.type));
         }
     }
 
@@ -477,10 +477,10 @@ public class Tuples
     public static void validateTupleAssignableTo(ColumnSpecification receiver,
                                                  List<? extends AssignmentTestable> elements)
     {
-        if (!(receiver.type instanceof TupleType))
+        if (!checkIfTupleType(receiver.type))
             throw invalidRequest("Invalid tuple type literal for %s of type %s", receiver.name, receiver.type.asCQL3Type());
 
-        TupleType tt = (TupleType)receiver.type;
+        TupleType tt = getTupleType(receiver.type);
         for (int i = 0; i < elements.size(); i++)
         {
             if (i >= tt.size())
@@ -515,5 +515,17 @@ public class Tuples
         {
             return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
         }
+    }
+
+    public static boolean checkIfTupleType(AbstractType<?> tuple)
+    {
+        return (tuple instanceof TupleType) ||
+               (tuple instanceof ReversedType && ((ReversedType) tuple).baseType instanceof TupleType);
+
+    }
+
+    public static TupleType getTupleType(AbstractType<?> tuple)
+    {
+        return (tuple instanceof ReversedType ? ((TupleType) ((ReversedType) tuple).baseType) : (TupleType)tuple);
     }
 }
