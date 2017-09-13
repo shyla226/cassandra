@@ -171,6 +171,13 @@ public class DatabaseDescriptorRefTest
 
             protected Class<?> findClass(String name) throws ClassNotFoundException
             {
+                if (name.startsWith("java."))
+                    // Java 9 does not allow a "custom" class loader (i.e. user code)
+                    // to define classes in protected packages (like java, java.sql, etc).
+                    // Therefore we have to delegate the call to the delegate class loader
+                    // itself.
+                    return delegate.loadClass(name);
+
                 Class<?> cls = classMap.get(name);
                 if (cls != null)
                     return cls;
