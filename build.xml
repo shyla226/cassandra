@@ -1928,7 +1928,6 @@
 
   <!-- setup additional java runtime arguments -->
   <target name="setup-java9">
-    <property name="java9-jvmargs" value="--add-exports java.base/jdk.internal.ref=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/java.io=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/java.util.concurrent=ALL-UNNAMED --add-exports java.management/com.sun.jmx.remote.internal=ALL-UNNAMED --add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED --add-exports jdk.scripting.nashorn/jdk.nashorn.internal.objects=ALL-UNNAMED --add-exports jdk.scripting.nashorn/jdk.nashorn.internal.runtime=ALL-UNNAMED --add-exports jdk.scripting.nashorn/jdk.nashorn.internal.runtime.options=ALL-UNNAMED"/>
 
     <fail message="Java 8 is required to the build the project, the compiled code works against Java 8 and 9.">
         <condition>
@@ -1938,6 +1937,30 @@
         </condition>
     </fail>
 
+    <!--
+    OLD list
+    <property name="java9-jvmargs" value="
+    - -add-exports java.base/jdk.internal.ref=ALL-UNNAMED
+    - -add-opens java.base/sun.nio.ch=ALL-UNNAMED
+    - -add-opens java.base/java.nio=ALL-UNNAMED
+    - -add-opens java.base/java.io=ALL-UNNAMED
+    - -add-opens java.base/java.lang=ALL-UNNAMED
+    - -add-opens java.base/java.util=ALL-UNNAMED
+    - -add-opens java.base/java.util.concurrent=ALL-UNNAMED
+    - -add-exports java.management/com.sun.jmx.remote.internal=ALL-UNNAMED
+    - -add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED
+    - -add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED
+    - -add-exports java.rmi/sun.rmi.server=ALL-UNNAMED
+    - -add-exports jdk.scripting.nashorn/jdk.nashorn.internal.objects=ALL-UNNAMED
+    - -add-exports jdk.scripting.nashorn/jdk.nashorn.internal.runtime=ALL-UNNAMED
+    - -add-exports jdk.scripting.nashorn/jdk.nashorn.internal.runtime.options=ALL-UNNAMED"/>
+    -->
+    <condition property="java9-jvmargs" else="" value="-Djdk.attach.allowAttachSelf=true --add-exports java.sql/java.sql=ALL-UNNAMED --add-exports java.base/jdk.internal.ref=ALL-UNNAMED --add-exports java.base/sun.nio.ch=ALL-UNNAMED --add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED">
+      <not>
+        <equals arg1="${ant.java.version}" arg2="1.8" />
+      </not>
+    </condition>
+    <echo message="supp args: ${java9-jvmargs}"/>
 
     <!--
     At the moment, compiling with Java 9 does not work.
