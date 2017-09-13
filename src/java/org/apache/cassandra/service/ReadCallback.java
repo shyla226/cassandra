@@ -310,7 +310,7 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
             final DataResolver repairResolver = new DataResolver(command(), readContext(), endpoints.size());
             AsyncRepairCallback repairHandler = new AsyncRepairCallback(repairResolver, endpoints.size());
             repairHandler.onResponse(dataResponse);
-            MessagingService.instance().send(Verbs.READS.READ.newDispatcher(subtractTarget(endpoints, dataResponse.from()), command()), repairHandler);
+            MessagingService.instance().send(command().dispatcherTo(subtractTarget(endpoints, dataResponse.from())), repairHandler);
         }
     }
 

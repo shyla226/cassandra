@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.BoundsVersion;
+import org.apache.cassandra.net.DroppedMessages;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.Verb.AckedRequest;
 import org.apache.cassandra.net.Verb.OneWay;
@@ -85,7 +86,8 @@ public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
     {
         super(id, true, RepairVersion.class);
 
-        RegistrationHelper helper = helper().stage(Stage.ANTI_ENTROPY);
+        RegistrationHelper helper = helper().stage(Stage.ANTI_ENTROPY)
+                                            .droppedGroup(DroppedMessages.Group.REPAIR);
 
         VALIDATION_REQUEST = helper.oneWay("VALIDATION_REQUEST", ValidationRequest.class)
                                    .handler(withCleanup(ActiveRepairService.instance::handleValidationRequest));

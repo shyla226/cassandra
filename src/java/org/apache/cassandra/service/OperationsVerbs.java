@@ -30,6 +30,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SnapshotCommand;
 import org.apache.cassandra.db.Truncation;
 import org.apache.cassandra.io.FSError;
+import org.apache.cassandra.net.DroppedMessages;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.Verb.RequestResponse;
 import org.apache.cassandra.net.Verbs;
@@ -68,6 +69,7 @@ public class OperationsVerbs extends VerbGroup<OperationsVerbs.OperationsVersion
 
         TRUNCATE = helper.requestResponse("TRUNCATE", Truncation.class, TruncateResponse.class)
                          .stage(Stage.MUTATION)
+                         .droppedGroup(DroppedMessages.Group.TRUNCATE)
                          .timeout(DatabaseDescriptor::getTruncateRpcTimeout)
                          .syncHandler((from, t) ->
                                       {
@@ -88,6 +90,7 @@ public class OperationsVerbs extends VerbGroup<OperationsVerbs.OperationsVersion
 
         SNAPSHOT = helper.ackedRequest("SNAPSHOT", SnapshotCommand.class)
                          .stage(Stage.MISC)
+                         .droppedGroup(DroppedMessages.Group.SNAPSHOT)
                          .timeout(DatabaseDescriptor::getRpcTimeout)
                          .syncHandler((from, command) ->
                                       {
@@ -99,6 +102,7 @@ public class OperationsVerbs extends VerbGroup<OperationsVerbs.OperationsVersion
 
         REPLICATION_FINISHED = helper.ackedRequest("REPLICATION_FINISHED", EmptyPayload.class)
                                      .stage(Stage.MISC)
+                                     .droppedGroup(DroppedMessages.Group.OTHER)
                                      .timeout(DatabaseDescriptor::getRpcTimeout)
                                      .syncHandler((from, x) -> StorageService.instance.confirmReplication(from));
     }

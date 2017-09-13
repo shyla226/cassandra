@@ -1219,7 +1219,7 @@ public class DataResolverTest
         final Flow<FlowableUnfilteredPartition> partitions = cmd.applyController(controller -> FlowablePartitions.fromPartitions(partitionIterator, null));
         return Response.testResponse(from,
                                      FBUtilities.getBroadcastAddress(),
-                                     Verbs.READS.READ,
+                                     Verbs.READS.SINGLE_READ,
                                      ReadResponse.createRemoteDataResponse(partitions, cmd));
     }
 
@@ -1304,7 +1304,7 @@ public class DataResolverTest
                     context.drop(message);
                     return;
                 }
-                else if (request.verb() == Verbs.READS.READ)
+                else if (request.verb().group() == Verbs.READS)
                 {
                     List<Response<ReadResponse>> responses = shortReadResponses.get(message.to());
                     if (responses != null && !responses.isEmpty())

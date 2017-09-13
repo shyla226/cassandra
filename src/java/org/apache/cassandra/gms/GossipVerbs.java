@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.net.DroppedMessages;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.Verb.AckedRequest;
 import org.apache.cassandra.net.Verb.OneWay;
@@ -58,7 +59,8 @@ public class GossipVerbs extends VerbGroup<GossipVerbs.GossipVersion>
         super(id, true, GossipVersion.class);
 
         RegistrationHelper helper = helper()
-                                    .stage(Stage.GOSSIP);
+                                    .stage(Stage.GOSSIP)
+                                    .droppedGroup(DroppedMessages.Group.OTHER);
 
         SYN = helper.oneWay("SYN", GossipDigestSyn.class)
                     .handler(new SynHandler());

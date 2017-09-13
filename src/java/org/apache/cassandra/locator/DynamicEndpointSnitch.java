@@ -275,7 +275,8 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
     public void receiveTiming(Verb<?, ?> verb, InetAddress host, long latency) // this is cheap
     {
         // We're only tracking reads
-        if (verb != Verbs.READS.READ)
+        // Side-note: this is really a reference equality (VerbGroup doesn't override equals()), but somehow "Eclipse Code Analysis" freaks out if we use one.
+        if (!verb.group().equals(Verbs.READS))
             return;
 
         // prevent the histogram from overflowing

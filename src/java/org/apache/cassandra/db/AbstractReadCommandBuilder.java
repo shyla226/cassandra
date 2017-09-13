@@ -32,7 +32,7 @@ import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.utils.FBUtilities;
 
-public abstract class AbstractReadCommandBuilder
+public abstract class AbstractReadCommandBuilder<T extends ReadCommand>
 {
     protected final ColumnFamilyStore cfs;
     protected int nowInSeconds;
@@ -57,41 +57,41 @@ public abstract class AbstractReadCommandBuilder
         this.nowInSeconds = FBUtilities.nowInSeconds();
     }
 
-    public AbstractReadCommandBuilder withNowInSeconds(int nowInSec)
+    public AbstractReadCommandBuilder<T> withNowInSeconds(int nowInSec)
     {
         this.nowInSeconds = nowInSec;
         return this;
     }
 
-    public AbstractReadCommandBuilder fromIncl(Object... values)
+    public AbstractReadCommandBuilder<T> fromIncl(Object... values)
     {
         assert lowerClusteringBound == null && clusterings == null;
         this.lowerClusteringBound = ClusteringBound.create(cfs.metadata().comparator, true, true, values);
         return this;
     }
 
-    public AbstractReadCommandBuilder fromExcl(Object... values)
+    public AbstractReadCommandBuilder<T> fromExcl(Object... values)
     {
         assert lowerClusteringBound == null && clusterings == null;
         this.lowerClusteringBound = ClusteringBound.create(cfs.metadata().comparator, true, false, values);
         return this;
     }
 
-    public AbstractReadCommandBuilder toIncl(Object... values)
+    public AbstractReadCommandBuilder<T> toIncl(Object... values)
     {
         assert upperClusteringBound == null && clusterings == null;
         this.upperClusteringBound = ClusteringBound.create(cfs.metadata().comparator, false, true, values);
         return this;
     }
 
-    public AbstractReadCommandBuilder toExcl(Object... values)
+    public AbstractReadCommandBuilder<T> toExcl(Object... values)
     {
         assert upperClusteringBound == null && clusterings == null;
         this.upperClusteringBound = ClusteringBound.create(cfs.metadata().comparator, false, false, values);
         return this;
     }
 
-    public AbstractReadCommandBuilder includeRow(Object... values)
+    public AbstractReadCommandBuilder<T> includeRow(Object... values)
     {
         assert lowerClusteringBound == null && upperClusteringBound == null;
 
@@ -102,37 +102,37 @@ public abstract class AbstractReadCommandBuilder
         return this;
     }
 
-    public AbstractReadCommandBuilder clusterings(NavigableSet<Clustering> clusterings)
+    public AbstractReadCommandBuilder<T> clusterings(NavigableSet<Clustering> clusterings)
     {
         this.clusterings = clusterings;
         return this;
     }
 
-    public AbstractReadCommandBuilder reverse()
+    public AbstractReadCommandBuilder<T> reverse()
     {
         this.reversed = true;
         return this;
     }
 
-    public AbstractReadCommandBuilder withLimit(int newLimit)
+    public AbstractReadCommandBuilder<T> withLimit(int newLimit)
     {
         this.rowLimit = newLimit;
         return this;
     }
     
-    public AbstractReadCommandBuilder withPartitionLimit(int newLimit)
+    public AbstractReadCommandBuilder<T> withPartitionLimit(int newLimit)
     {
         this.partitionLimit = newLimit;
         return this;
     }
 
-    public AbstractReadCommandBuilder withPagingLimit(PageSize newLimit)
+    public AbstractReadCommandBuilder<T> withPagingLimit(PageSize newLimit)
     {
         this.pagingLimit = newLimit;
         return this;
     }
 
-    public AbstractReadCommandBuilder columns(String... columns)
+    public AbstractReadCommandBuilder<T> columns(String... columns)
     {
         if (this.columns == null)
             this.columns = new HashSet<>();
@@ -175,7 +175,7 @@ public abstract class AbstractReadCommandBuilder
         throw new AssertionError();
     }
 
-    public AbstractReadCommandBuilder filterOn(String column, Operator op, Object value)
+    public AbstractReadCommandBuilder<T> filterOn(String column, Operator op, Object value)
     {
         ColumnMetadata def = cfs.metadata().getColumn(ColumnIdentifier.getInterned(column, true));
         assert def != null;
@@ -231,9 +231,9 @@ public abstract class AbstractReadCommandBuilder
         return limits;
     }
 
-    public abstract ReadCommand build();
+    public abstract T build();
 
-    public static class SinglePartitionBuilder extends AbstractReadCommandBuilder
+    public static class SinglePartitionBuilder extends AbstractReadCommandBuilder<SinglePartitionReadCommand>
     {
         private final DecoratedKey partitionKey;
 
@@ -244,44 +244,13 @@ public abstract class AbstractReadCommandBuilder
         }
 
         @Override
-        public ReadCommand build()
+        public SinglePartitionReadCommand build()
         {
             return SinglePartitionReadCommand.create(cfs.metadata(), nowInSeconds, makeColumnFilter(), filter, makeLimits(), partitionKey, makeFilter());
         }
     }
 
-    public static class SinglePartitionSliceBuilder extends AbstractReadCommandBuilder
-    {
-        private final DecoratedKey partitionKey;
-        private Slices.Builder sliceBuilder;
-
-        public SinglePartitionSliceBuilder(ColumnFamilyStore cfs, DecoratedKey key)
-        {
-            super(cfs);
-            this.partitionKey = key;
-            sliceBuilder = new Slices.Builder(cfs.getComparator());
-        }
-
-        public SinglePartitionSliceBuilder addSlice(Slice slice)
-        {
-            sliceBuilder.add(slice);
-            return this;
-        }
-
-        @Override
-        protected ClusteringIndexFilter makeFilter()
-        {
-            return new ClusteringIndexSliceFilter(sliceBuilder.build(), reversed);
-        }
-
-        @Override
-        public ReadCommand build()
-        {
-            return SinglePartitionReadCommand.create(cfs.metadata(), nowInSeconds, makeColumnFilter(), filter, makeLimits(), partitionKey, makeFilter());
-        }
-    }
-
-    public static class PartitionRangeBuilder extends AbstractReadCommandBuilder
+    public static class PartitionRangeBuilder extends AbstractReadCommandBuilder<PartitionRangeReadCommand>
     {
         private DecoratedKey startKey;
         private boolean startInclusive;
@@ -326,7 +295,7 @@ public abstract class AbstractReadCommandBuilder
         }
 
         @Override
-        public ReadCommand build()
+        public PartitionRangeReadCommand build()
         {
             PartitionPosition start = startKey;
             if (start == null)

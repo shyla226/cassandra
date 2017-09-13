@@ -37,7 +37,6 @@ import java.util.regex.Matcher;
 import com.google.common.collect.Iterables;
 
 import com.codahale.metrics.Snapshot;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -98,51 +97,12 @@ public class MessagingServiceTest
         DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateInterval);
     }
 
-    private static int metricScopeId = 0;
-
     @Before
     public void before() throws UnknownHostException
     {
-        messagingService.resetDroppedMessagesMap(Integer.toString(metricScopeId++));
         MockBackPressureStrategy.applied = false;
         messagingService.destroyConnectionPool(InetAddress.getByName("127.0.0.2"));
         messagingService.destroyConnectionPool(InetAddress.getByName("127.0.0.3"));
-    }
-
-    @Test
-    public void testDroppedMessages()
-    {
-        Verb<?, ?> def = Verbs.READS.READ;
-
-        for (int i = 1; i <= 5000; i++)
-            messagingService.incrementDroppedMessages(def, i, i % 2 == 0);
-
-        List<String> logs = messagingService.getDroppedMessagesLogs();
-        assertEquals(1, logs.size());
-        Pattern regexp = Pattern.compile("READ messages were dropped in last 5000 ms: (\\d+) internal and (\\d+) cross node. Mean internal dropped latency: (\\d+) ms and Mean cross-node dropped latency: (\\d+) ms");
-        Matcher matcher = regexp.matcher(logs.get(0));
-        assertTrue(matcher.find());
-        assertEquals(2500, Integer.parseInt(matcher.group(1)));
-        assertEquals(2500, Integer.parseInt(matcher.group(2)));
-        assertTrue(Integer.parseInt(matcher.group(3)) > 0);
-        assertTrue(Integer.parseInt(matcher.group(4)) > 0);
-        assertEquals(5000, (int) messagingService.getDroppedMessages().get(def.toString()));
-
-        logs = messagingService.getDroppedMessagesLogs();
-        assertEquals(0, logs.size());
-
-        for (int i = 0; i < 2500; i++)
-            messagingService.incrementDroppedMessages(def, i, i % 2 == 0);
-
-        logs = messagingService.getDroppedMessagesLogs();
-        assertEquals(1, logs.size());
-        matcher = regexp.matcher(logs.get(0));
-        assertTrue(matcher.find());
-        assertEquals(1250, Integer.parseInt(matcher.group(1)));
-        assertEquals(1250, Integer.parseInt(matcher.group(2)));
-        assertTrue(Integer.parseInt(matcher.group(3)) > 0);
-        assertTrue(Integer.parseInt(matcher.group(4)) > 0);
-        assertEquals(7500, (int) messagingService.getDroppedMessages().get(def.toString()));
     }
 
     @Test

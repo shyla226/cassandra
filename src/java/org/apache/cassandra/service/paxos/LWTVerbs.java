@@ -56,7 +56,8 @@ public class LWTVerbs extends VerbGroup<LWTVerbs.LWTVersion>
     {
         super(id, false, LWTVersion.class);
 
-        RegistrationHelper helper = helper().stage(Stage.MUTATION);
+        RegistrationHelper helper = helper().stage(Stage.MUTATION)
+                                            .droppedGroup(DroppedMessages.Group.LWT);
 
         PREPARE = helper.requestResponse("PREPARE", Commit.class, PrepareResponse.class)
                         .timeout(DatabaseDescriptor::getWriteRpcTimeout)

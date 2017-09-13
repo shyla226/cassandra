@@ -18,6 +18,8 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.util.Collection;
 import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
@@ -27,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.functions.Function;
+import org.apache.cassandra.net.Request;
 import org.apache.cassandra.utils.flow.Flow;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.Scheduleable;
@@ -54,7 +57,6 @@ import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.versioning.VersionDependent;
-import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * General interface for storage-engine read commands (common to both range and
@@ -66,9 +68,6 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 {
     protected static final Logger logger = LoggerFactory.getLogger(ReadCommand.class);
 
-    public static final Versioned<ReadVersion, Serializer<ReadCommand>> serializers = ReadVersion.versioned(ReadCommandSerializer::new);
-
-    private final Kind kind;
     private final TableMetadata metadata;
     private final int nowInSec;
 
@@ -83,34 +82,20 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     @Nullable
     private final DigestVersion digestVersion;
 
-    protected static abstract class SelectionDeserializer
+    protected static abstract class SelectionDeserializer<T extends ReadCommand>
     {
-        public abstract ReadCommand deserialize(DataInputPlus in,
-                                                ReadVersion version,
-                                                DigestVersion digestVersion,
-                                                TableMetadata metadata,
-                                                int nowInSec,
-                                                ColumnFilter columnFilter,
-                                                RowFilter rowFilter,
-                                                DataLimits limits,
-                                                IndexMetadata index) throws IOException;
+        public abstract T deserialize(DataInputPlus in,
+                                      ReadVersion version,
+                                      DigestVersion digestVersion,
+                                      TableMetadata metadata,
+                                      int nowInSec,
+                                      ColumnFilter columnFilter,
+                                      RowFilter rowFilter,
+                                      DataLimits limits,
+                                      IndexMetadata index) throws IOException;
     }
 
-    protected enum Kind
-    {
-        SINGLE_PARTITION (SinglePartitionReadCommand.selectionDeserializer),
-        PARTITION_RANGE  (PartitionRangeReadCommand.selectionDeserializer);
-
-        private final SelectionDeserializer selectionDeserializer;
-
-        Kind(SelectionDeserializer selectionDeserializer)
-        {
-            this.selectionDeserializer = selectionDeserializer;
-        }
-    }
-
-    protected ReadCommand(Kind kind,
-                          DigestVersion digestVersion,
+    protected ReadCommand(DigestVersion digestVersion,
                           TableMetadata metadata,
                           int nowInSec,
                           ColumnFilter columnFilter,
@@ -118,7 +103,6 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                           DataLimits limits,
                           IndexMetadata index)
     {
-        this.kind = kind;
         this.digestVersion = digestVersion;
         this.metadata = metadata;
         this.nowInSec = nowInSec;
@@ -130,6 +114,9 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
     protected abstract void serializeSelection(DataOutputPlus out, ReadVersion version) throws IOException;
     protected abstract long selectionSerializedSize(ReadVersion version);
+
+    public abstract Request.Dispatcher<? extends ReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints);
+    public abstract Request<? extends ReadCommand, ReadResponse> requestTo(InetAddress endpoint);
 
     /**
      * Creates a new <code>ReadCommand</code> instance with new limits.
@@ -289,14 +276,14 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
      * @param forLocalDelivery - if the response is to be delivered locally (optimized path)
      * @return An appropriate response, either of type digest or data.
      */
-    public Single<ReadResponse> createResponse(Flow<FlowableUnfilteredPartition> partitions, boolean forLocalDelivery)
+    Single<ReadResponse> createResponse(Flow<FlowableUnfilteredPartition> partitions, boolean forLocalDelivery)
     {
         return isDigestQuery()
                ? ReadResponse.createDigestResponse(partitions, this)
                : ReadResponse.createDataResponse(partitions, this, forLocalDelivery);
     }
 
-    public long indexSerializedSize()
+    long indexSerializedSize()
     {
         return null != index
                ? IndexMetadata.serializer.serializedSize(index)
@@ -594,11 +581,14 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         return sb.toString();
     }
 
-    private static class ReadCommandSerializer extends VersionDependent<ReadVersion> implements Serializer<ReadCommand>
+    protected static class ReadCommandSerializer<T extends ReadCommand> extends VersionDependent<ReadVersion> implements Serializer<T>
     {
-        private ReadCommandSerializer(ReadVersion version)
+        private final SelectionDeserializer<T> selectionDeserializer;
+
+        protected ReadCommandSerializer(ReadVersion version, SelectionDeserializer<T> selectionDeserializer)
         {
             super(version);
+            this.selectionDeserializer = selectionDeserializer;
         }
 
         private static int digestFlag(boolean isDigest)
@@ -649,26 +639,32 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             return ms.<ReadVersion>groupVersion(Verbs.Group.READS).digestVersion;
         }
 
-        public void serialize(ReadCommand command, DataOutputPlus out) throws IOException
+        public void serialize(T command, DataOutputPlus out) throws IOException
         {
-            out.writeByte(command.kind.ordinal());
+            // The "kind" of the command: 0->single partition, 1->partition range. Was never really needed since we
+            // can distinguish based on the Verb used and so removed in newer versions.
+            if (version.compareTo(ReadVersion.DSE_60) < 0)
+                out.writeByte(command instanceof SinglePartitionReadCommand ? 0 : 1);
+
             out.writeByte(digestFlag(command.isDigestQuery()) | indexFlag(null != command.indexMetadata()));
             if (command.isDigestQuery())
                 out.writeUnsignedVInt(digestVersionInt(command.digestVersion()));
-            command.metadata.id.serialize(out);
+            command.metadata().id.serialize(out);
             out.writeInt(command.nowInSec());
             ColumnFilter.serializers.get(version).serialize(command.columnFilter(), out);
             RowFilter.serializers.get(version).serialize(command.rowFilter(), out);
-            DataLimits.serializers.get(version).serialize(command.limits(), out, command.metadata.comparator);
-            if (null != command.index)
-                IndexMetadata.serializer.serialize(command.index, out);
+            DataLimits.serializers.get(version).serialize(command.limits(), out, command.metadata().comparator);
+            if (null != command.indexMetadata())
+                IndexMetadata.serializer.serialize(command.indexMetadata(), out);
 
             command.serializeSelection(out, version);
         }
 
-        public ReadCommand deserialize(DataInputPlus in) throws IOException
+        public T deserialize(DataInputPlus in) throws IOException
         {
-            Kind kind = Kind.values()[in.readByte()];
+            if (version.compareTo(ReadVersion.DSE_60) < 0)
+                in.readByte(); // See comment in serialize(), we don't need this.
+
             int flags = in.readByte();
             boolean isDigest = isDigest(flags);
             // Shouldn't happen or it's a user error (see comment above) but
@@ -690,7 +686,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
             IndexMetadata index = hasIndex ? deserializeIndexMetadata(in, metadata) : null;
 
-            return kind.selectionDeserializer.deserialize(in, version, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
+            return selectionDeserializer.deserialize(in, version, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         }
 
         private IndexMetadata deserializeIndexMetadata(DataInputPlus in, TableMetadata metadata) throws IOException
@@ -710,15 +706,16 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             }
         }
 
-        public long serializedSize(ReadCommand command)
+        public long serializedSize(T command)
         {
-            return 2 // kind + flags
+            return 1 // flags
+                   + (version.compareTo(ReadVersion.DSE_60) < 0 ? 1 : 0) // kind for older versions
                    + (command.isDigestQuery() ? TypeSizes.sizeofUnsignedVInt(digestVersionInt(command.digestVersion())) : 0)
-                   + command.metadata.id.serializedSize()
+                   + command.metadata().id.serializedSize()
                    + TypeSizes.sizeof(command.nowInSec())
                    + ColumnFilter.serializers.get(version).serializedSize(command.columnFilter())
                    + RowFilter.serializers.get(version).serializedSize(command.rowFilter())
-                   + DataLimits.serializers.get(version).serializedSize(command.limits(), command.metadata.comparator)
+                   + DataLimits.serializers.get(version).serializedSize(command.limits(), command.metadata().comparator)
                    + command.selectionSerializedSize(version)
                    + command.indexSerializedSize();
         }

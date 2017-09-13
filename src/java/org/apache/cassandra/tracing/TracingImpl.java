@@ -24,8 +24,8 @@ import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.UUID;
 
-import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.utils.WrappedRunnable;
 
 
 /**
@@ -105,7 +105,7 @@ class TracingImpl extends Tracing
     {
         final String threadName = Thread.currentThread().getName();
 
-        StageManager.tracingExecutor.execute(new TracingRunnable()
+        StageManager.tracingExecutor.execute(new WrappedRunnable()
         {
             public void runMayThrow()
             {

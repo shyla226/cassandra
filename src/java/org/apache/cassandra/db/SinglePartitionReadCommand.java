@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
 
@@ -52,6 +53,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.net.Request;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -63,16 +66,19 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.SearchIterator;
+import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.Threads;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * A read command that selects a (part of a) single partition.
  */
 public class SinglePartitionReadCommand extends ReadCommand
 {
-    protected static final SelectionDeserializer selectionDeserializer = new Deserializer();
+    private static final SelectionDeserializer<SinglePartitionReadCommand> selectionDeserializer = new Deserializer();
+    public static final Versioned<ReadVersion, Serializer<SinglePartitionReadCommand>> serializers = ReadVersion.versioned(v -> new ReadCommandSerializer<>(v, selectionDeserializer));
 
     private final DecoratedKey partitionKey;
     private final ClusteringIndexFilter clusteringIndexFilter;
@@ -106,7 +112,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                        ClusteringIndexFilter clusteringIndexFilter,
                                        IndexMetadata index)
     {
-        super(Kind.SINGLE_PARTITION, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
+        super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         assert partitionKey.getPartitioner() == metadata.partitioner;
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
@@ -128,6 +134,16 @@ public class SinglePartitionReadCommand extends ReadCommand
         namesFilter = null;
         onlyUnrepaired = true;
         timeOrderedResult = null;
+    }
+
+    public Request.Dispatcher<SinglePartitionReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints)
+    {
+        return Verbs.READS.SINGLE_READ.newDispatcher(endpoints, this);
+    }
+
+    public Request<SinglePartitionReadCommand, ReadResponse> requestTo(InetAddress endpoint)
+    {
+        return Verbs.READS.SINGLE_READ.newRequest(endpoint, this);
     }
 
     /**
@@ -1222,17 +1238,17 @@ public class SinglePartitionReadCommand extends ReadCommand
         }
     }
 
-    private static class Deserializer extends SelectionDeserializer
+    private static class Deserializer extends SelectionDeserializer<SinglePartitionReadCommand>
     {
-        public ReadCommand deserialize(DataInputPlus in,
-                                       ReadVersion version,
-                                       DigestVersion digestVersion,
-                                       TableMetadata metadata,
-                                       int nowInSec,
-                                       ColumnFilter columnFilter,
-                                       RowFilter rowFilter,
-                                       DataLimits limits,
-                                       IndexMetadata index)
+        public SinglePartitionReadCommand deserialize(DataInputPlus in,
+                                                      ReadVersion version,
+                                                      DigestVersion digestVersion,
+                                                      TableMetadata metadata,
+                                                      int nowInSec,
+                                                      ColumnFilter columnFilter,
+                                                      RowFilter rowFilter,
+                                                      DataLimits limits,
+                                                      IndexMetadata index)
         throws IOException
         {
             DecoratedKey key = metadata.partitioner.decorateKey(metadata.partitionKeyType.readValue(in, DatabaseDescriptor.getMaxValueSize()));

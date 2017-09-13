@@ -209,10 +209,17 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
         private int idx;
         private final int[] versionCodes = new int[versionClass.getEnumConstants().length];
         private Stage defaultStage;
+        private DroppedMessages.Group defaultDroppedGroup;
 
         public RegistrationHelper stage(Stage defaultStage)
         {
             this.defaultStage = defaultStage;
+            return this;
+        }
+
+        public RegistrationHelper droppedGroup(DroppedMessages.Group defaultDroppedGroup)
+        {
+            this.defaultDroppedGroup = defaultDroppedGroup;
             return this;
         }
 
@@ -251,6 +258,8 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
             private Function<V, Serializer<P>> requestSerializerFct;
             private Function<V, Serializer<Q>> responseSerializerFct;
 
+            private DroppedMessages.Group droppedGroup;
+
             private V sinceVersion;
             private V untilVersion;
 
@@ -266,6 +275,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
                 this.responseSerializer = maybeGetSerializer(responseClass);
                 this.requestSerializerFct = maybeGetVersionedSerializers(requestClass);
                 this.responseSerializerFct = maybeGetVersionedSerializers(responseClass);
+                this.droppedGroup = defaultDroppedGroup;
             }
 
             @SuppressWarnings("unchecked")
@@ -295,6 +305,12 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
             public T stage(Stage stage)
             {
                 this.requestExecutor = (p) -> StageManager.getStage(stage);
+                return us();
+            }
+
+            public T droppedGroup(DroppedMessages.Group droppedGroup)
+            {
+                this.droppedGroup = droppedGroup;
                 return us();
             }
 
@@ -358,8 +374,10 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
                     throw new IllegalStateException("Unless the request payload implements the Scheduleable interface, a request stage is required (either at the RegistrationHelper lever or at the VerbBuilder one)");
                 if (isOneWay && supportsBackPressure)
                     throw new IllegalStateException("Back pressure doesn't make sense for one-way message (no response is sent so we can't keep track of in-flight requests to an host)");
+                if (!isOneWay && droppedGroup == null)
+                    throw new IllegalStateException("Missing 'dropped group', should be indicated either at the RegistrationHelper lever or at the VerbBuilder one");
 
-                return new Verb.Info(VerbGroup.this, groupIdx, name, requestExecutor, supportsBackPressure);
+                return new Verb.Info<>(VerbGroup.this, groupIdx, name, requestExecutor, supportsBackPressure, isOneWay ? null : droppedGroup);
             }
 
             TimeoutSupplier<P> timeoutSupplier()

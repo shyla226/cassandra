@@ -242,7 +242,7 @@ public class ReadReconciliationObserverTest extends CQLTester
 
     private Response<ReadResponse> response(InetAddress peer, ReadResponse payload)
     {
-        return Response.testResponse(peer, FBUtilities.getBroadcastAddress(), Verbs.READS.READ, payload);
+        return Response.testResponse(peer, FBUtilities.getBroadcastAddress(), Verbs.READS.SINGLE_READ, payload);
     }
 
     private ReadContext readContext(ReadCommand command, boolean useDigests)

@@ -62,7 +62,31 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
         }
     }
 
-    public final RequestResponse<ReadCommand, ReadResponse> READ;
+    public final RequestResponse<SinglePartitionReadCommand, ReadResponse> SINGLE_READ;
+    public final RequestResponse<PartitionRangeReadCommand, ReadResponse> RANGE_READ;
+
+    private static <T extends ReadCommand> VerbHandlers.MonitoredRequestResponse<T, ReadResponse> readHandler()
+    {
+        return (from, command, monitor) ->
+        {
+            final boolean isLocal = from.equals(local);
+
+            // Note that we want to allow locally delivered reads no matter what
+            if (StorageService.instance.isBootstrapMode() && !isLocal)
+                throw new RuntimeException("Cannot service reads while bootstrapping!");
+
+            // Monitoring tests want to artificially slow down their reads, but we don't want this
+            // to impact the queries drivers do on system/schema tables
+            if (Monitor.isTesting() && !SchemaConstants.isUserKeyspace(command.metadata().keyspace))
+                monitor = null;
+
+            CompletableFuture<ReadResponse> result = new CompletableFuture<>();
+            command.createResponse(command.executeLocally(monitor), isLocal)
+                   .subscribe(result::complete, result::completeExceptionally);
+
+            return result;
+        };
+    }
 
     public ReadVerbs(Verbs.Group id)
     {
@@ -70,28 +94,13 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
 
         RegistrationHelper helper = helper();
 
-        READ = helper.monitoredRequestResponse("READ", ReadCommand.class, ReadResponse.class)
-                     .timeout(command -> command instanceof SinglePartitionReadCommand
-                                         ? DatabaseDescriptor.getReadRpcTimeout()
-                                         : DatabaseDescriptor.getRangeRpcTimeout())
-                     .handler((from, command, monitor) ->
-                              {
-                                  final boolean isLocal = from.equals(local);
-
-                                  // Note that we want to allow locally delivered reads no matter what
-                                  if (StorageService.instance.isBootstrapMode() && !isLocal)
-                                      throw new RuntimeException("Cannot service reads while bootstrapping!");
-
-                                  // Monitoring tests want to artificially slow down their reads, but we don't want this
-                                  // to impact the queries drivers do on system/schema tables
-                                  if (Monitor.isTesting() && !SchemaConstants.isUserKeyspace(command.metadata().keyspace))
-                                      monitor = null;
-
-                                  CompletableFuture<ReadResponse> result = new CompletableFuture<>();
-                                  command.createResponse(command.executeLocally(monitor), isLocal)
-                                         .subscribe(result::complete, result::completeExceptionally);
-
-                                  return result;
-                              });
+        SINGLE_READ = helper.monitoredRequestResponse("SINGLE_READ", SinglePartitionReadCommand.class, ReadResponse.class)
+                            .timeout(DatabaseDescriptor::getReadRpcTimeout)
+                            .droppedGroup(DroppedMessages.Group.READ)
+                            .handler(readHandler());
+        RANGE_READ = helper.monitoredRequestResponse("RANGE_READ", PartitionRangeReadCommand.class, ReadResponse.class)
+                     .timeout(DatabaseDescriptor::getRangeRpcTimeout)
+                     .droppedGroup(DroppedMessages.Group.RANGE_SLICE)
+                     .handler(readHandler());
     }
 }

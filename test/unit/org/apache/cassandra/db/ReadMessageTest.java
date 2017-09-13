@@ -94,10 +94,10 @@ public class ReadMessageTest
     }
 
     @Test
-    public void testMakeReadMessage() throws IOException
+    public void testMakeSinglePartitionReadMessage() throws IOException
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_FOR_READ_TEST);
-        ReadCommand rm, rm2;
+        SinglePartitionReadCommand rm, rm2;
 
         rm = Util.cmd(cfs, Util.dk("key1"))
                  .includeRow("col1", "col2")
@@ -111,6 +111,13 @@ public class ReadMessageTest
                  .build();
         rm2 = serializeAndDeserializeReadMessage(rm);
         assertEquals(rm.toString(), rm2.toString());
+    }
+
+    @Test
+    public void testMakePartitionRangeReadMessage() throws IOException
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_FOR_READ_TEST);
+        PartitionRangeReadCommand rm, rm2;
 
         rm = Util.cmd(cfs)
                  .build();
@@ -146,9 +153,9 @@ public class ReadMessageTest
         assertEquals(rm.toString(), rm2.toString());
     }
 
-    private ReadCommand serializeAndDeserializeReadMessage(ReadCommand rm) throws IOException
+    private SinglePartitionReadCommand serializeAndDeserializeReadMessage(SinglePartitionReadCommand rm) throws IOException
     {
-        Serializer<ReadCommand> rms = ReadCommand.serializers.get(Version.last(ReadVerbs.ReadVersion.class));
+        Serializer<SinglePartitionReadCommand> rms = SinglePartitionReadCommand.serializers.get(Version.last(ReadVerbs.ReadVersion.class));
         DataOutputBuffer out = new DataOutputBuffer();
 
         rms.serialize(rm, out);
@@ -157,6 +164,16 @@ public class ReadMessageTest
         return rms.deserialize(dis);
     }
 
+    private PartitionRangeReadCommand serializeAndDeserializeReadMessage(PartitionRangeReadCommand rm) throws IOException
+    {
+        Serializer<PartitionRangeReadCommand> rms = PartitionRangeReadCommand.serializers.get(Version.last(ReadVerbs.ReadVersion.class));
+        DataOutputBuffer out = new DataOutputBuffer();
+
+        rms.serialize(rm, out);
+
+        DataInputPlus dis = new DataInputBuffer(out.getData());
+        return rms.deserialize(dis);
+    }
 
     @Test
     public void testGetColumn()

@@ -17,12 +17,16 @@
  */
 package org.apache.cassandra.metrics;
 
-import org.apache.cassandra.net.Verb;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.apache.cassandra.net.DroppedMessages;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
- * Metrics for dropped messages by verb.
+ * Metrics for dropped messages, stored in {@link DroppedMessages} by verb "dropped group",
+ * that is by {@link DroppedMessages.Group}.
  */
 public class DroppedMessageMetrics
 {
@@ -35,15 +39,46 @@ public class DroppedMessageMetrics
     /** The cross node dropped latency */
     public final Timer crossNodeDroppedLatency;
 
-    public DroppedMessageMetrics(Verb<?, ?> verb)
-    {
-        this(new DefaultNameFactory("DroppedMessage", verb.toString()));
-    }
+    // The two following counters are not exposed through JMX per-set, but are used to log dropped messages at regular
+    // interval, and are reset each time they are logged (which is why we can't rely on the metrics above). See
+    // MessagingService#getDroppedMessagesLogs for details.
+    /** Dropped messages that were locally delivered (from == to) */
+    private final AtomicInteger internalDropped;
+    /** Dropped messages that crossed node boundary (from != to)  */
+    private final AtomicInteger crossNodeDropped;
 
-    public DroppedMessageMetrics(MetricNameFactory factory)
+    public DroppedMessageMetrics(DroppedMessages.Group group)
     {
+        MetricNameFactory factory = new DefaultNameFactory("DroppedMessage", group.toString());
         dropped = Metrics.meter(factory.createMetricName("Dropped"));
         internalDroppedLatency = Metrics.timer(factory.createMetricName("InternalDroppedLatency"));
         crossNodeDroppedLatency = Metrics.timer(factory.createMetricName("CrossNodeDroppedLatency"));
+        internalDropped = new AtomicInteger();
+        crossNodeDropped = new AtomicInteger();
+    }
+
+    public void onMessageDropped(long timeTakenMillis, boolean hasCrossedNode)
+    {
+        dropped.mark();
+        if (hasCrossedNode)
+        {
+            crossNodeDropped.incrementAndGet();
+            crossNodeDroppedLatency.update(timeTakenMillis, TimeUnit.MILLISECONDS);
+        }
+        else
+        {
+            internalDropped.incrementAndGet();
+            internalDroppedLatency.update(timeTakenMillis, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    public int getAndResetInternalDropped()
+    {
+        return internalDropped.getAndSet(0);
+    }
+
+    public int getAndResetCrossNodeDropped()
+    {
+        return crossNodeDropped.getAndSet(0);
     }
 }

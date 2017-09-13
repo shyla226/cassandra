@@ -26,7 +26,6 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
-import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.interceptors.Interceptor;
@@ -91,10 +90,9 @@ public abstract class Message<P>
 
     /**
      * Groups data contained in a message that we often have to pass around without modification.
-     * This class mainly serves in making the code more readable. It also shouldn't be public, but is due to the Tracing
-     * ugly hack, {@link Tracing#TRACE_MSG_DEF}.
+     * This class mainly serves in making the code more readable.
      */
-    public static class Data<P>
+    static class Data<P>
     {
         private final P payload;
         // The size of the payload serialized in the current messaging version. This is cached here because we need this
@@ -124,14 +122,10 @@ public abstract class Message<P>
             this.tracingInfo = tracingInfo;
         }
 
-        /**
-         * Only public because of the tracing ugly hack (see comment on {@link Tracing#TRACE_MSG_DEF} for details on
-         * said hack).
-         */
-        public Data(P payload,
-                    long payloadSize,
-                    long createdAtMillis,
-                    long timeoutMillis)
+        Data(P payload,
+             long payloadSize,
+             long createdAtMillis,
+             long timeoutMillis)
         {
             this(payload,
                  payloadSize,

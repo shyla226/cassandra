@@ -22,8 +22,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.concurrent.ExecutorSupplier;
 import org.apache.cassandra.utils.TimeoutSupplier;
 import org.apache.cassandra.utils.versioning.Version;
@@ -31,7 +29,7 @@ import org.apache.cassandra.utils.versioning.Version;
 /**
  * Represents the definition of an inter-node exchange (read request, gossip ack message, etc...).
  * <p>
- * A verb describes a particular type of request, and the response associated to it (if any), as well as informations
+ * A verb describes a particular type of request, and the response associated to it (if any), as well as information
  * associated to this message exchange (timeout, stage to use for executing the request, ...). Most importantly, the verb
  * defines the {@link #handler} that is used to execute its requests.
  * <p>
@@ -55,7 +53,7 @@ public abstract class Verb<P, Q>
     final Consumer<Response<Q>> EMPTY_RESPONSE_CONSUMER = r -> {};
 
     /**
-     * A simple utility class that groups most infos of the verb to avoid code repetition in the subclass definitions
+     * A simple utility class that groups most info of the verb to avoid code repetition in the subclass definitions
      * at the end of this class and in {@link VerbGroup}. This can be ignored otherwise.
      */
     public static class Info<P>
@@ -65,12 +63,14 @@ public abstract class Verb<P, Q>
         private final String name;
         private final ExecutorSupplier<P> requestExecutor;
         private final boolean supportsBackPressure;
+        private final DroppedMessages.Group droppedGroup;
 
         Info(VerbGroup<?> group,
              int groupIdx,
              String name,
              ExecutorSupplier<P> requestExecutor,
-             boolean supportsBackPressure)
+             boolean supportsBackPressure,
+             DroppedMessages.Group droppedGroup)
         {
             assert group != null && name != null && requestExecutor != null;
             this.group = group;
@@ -78,6 +78,7 @@ public abstract class Verb<P, Q>
             this.name = name;
             this.requestExecutor = requestExecutor;
             this.supportsBackPressure = supportsBackPressure;
+            this.droppedGroup = droppedGroup;
         }
 
         @Override
@@ -99,7 +100,10 @@ public abstract class Verb<P, Q>
         this.timeoutSupplier = timeoutSupplier;
         this.handler = handler;
 
-        assert isOneWay() == (timeoutSupplier == null) : "Oneway verbs must not have a timeout supplier, but other verbs must";
+        assert isOneWay() == (timeoutSupplier == null) : "One-way verbs must not have a timeout supplier, but other verbs must";
+        // Note: excluding info == null is done because some tests use that currently. We should fix those tests at some
+        // point and remove that, but it's currently a tad more annoying that we'd want to for silly reasons.
+        assert info == null || isOneWay() == (info.droppedGroup == null) : "One-way verbs must not have a dropped group, but other verbs must";
     }
 
     /**
@@ -171,6 +175,17 @@ public abstract class Verb<P, Q>
     }
 
     /**
+     * Unless the verb is one-way, the "dropped group" for the messages of this {@link Verb} (see {@link DroppedMessages}
+     * for details).
+     *
+     * @return the {@link DroppedMessages.Group} for message of this {@link Verb}, or {@code null} for one-way verbs.
+     */
+    DroppedMessages.Group droppedGroup()
+    {
+        return info.droppedGroup;
+    }
+
+    /**
      * Whether this verb defines one-way exchanges, that is no responses is sent for the requests.
      */
     public abstract boolean isOneWay();
@@ -202,11 +217,8 @@ public abstract class Verb<P, Q>
 
     /**
      * Creates a request for this verb given the message data.
-     * <p>
-     * Note: this shouldn't be public and one should avoid using this outside of this package, but it's public due to
-     * the crazy hack we're using for tracing, see {@link org.apache.cassandra.tracing.Tracing#TRACE_MSG_DEF}.
      */
-    public Request<P, Q> newRequest(InetAddress to, Message.Data<P> messageData)
+    Request<P, Q> newRequest(InetAddress to, Message.Data<P> messageData)
     {
         return new Request<>(Request.local,
                              to,
@@ -271,8 +283,7 @@ public abstract class Verb<P, Q>
     public final boolean equals(Object o)
     {
         // The way the code is made, each verb is it's own singleton object, so reference equality is fine and actually
-        // what we want. And the only purpose of this (redundant) definition is to make it clear that this is intended,
-        // especially as Tracing.TRACE_MSG_DEF currently rely on us not really accessing anything of the object.
+        // what we want. And the only purpose of this (redundant) definition is to make it clear that this is intended.
         return this == o;
     }
 

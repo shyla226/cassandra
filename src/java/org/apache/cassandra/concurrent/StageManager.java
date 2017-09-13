@@ -65,7 +65,7 @@ public class StageManager
 
     private static ThreadPoolExecutor tracingExecutor()
     {
-        RejectedExecutionHandler reh = (r, executor) -> Tracing.onDroppedTask(r);
+        RejectedExecutionHandler reh = (r, executor) -> Tracing.instance.onDroppedTask();
         return new ThreadPoolExecutor(1,
                                       1,
                                       KEEPALIVE,
