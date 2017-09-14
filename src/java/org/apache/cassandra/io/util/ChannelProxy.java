@@ -125,8 +125,9 @@ public final class ChannelProxy extends AbstractChannelProxy<FileChannel>
         }
     }
 
-    public int getFileDescriptor()
+    @Override
+    public void tryToSkipCache(long offset, long len)
     {
-        return NativeLibrary.getfd(channel);
+        NativeLibrary.trySkipCache(NativeLibrary.getfd(channel), offset, len, filePath);
     }
 }

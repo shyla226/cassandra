@@ -33,7 +33,6 @@ import org.apache.cassandra.db.mos.MemoryLockedBuffer;
 import org.apache.cassandra.db.mos.MemoryOnlyStatus;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
-import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -200,7 +199,8 @@ public class FileHandle extends SharedCloseableImpl
             else
                 return metadata.chunkFor(before).offset;
         }).orElse(before);
-        NativeLibrary.trySkipCache(channel.getFileDescriptor(), 0, position, path());
+
+        channel.tryToSkipCache(0, position);
     }
 
     private Rebufferer instantiateRebufferer(RateLimiter limiter)
