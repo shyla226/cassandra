@@ -28,6 +28,7 @@ import com.google.common.collect.PeekingIterator;
 
 import io.reactivex.Completable;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.*;
@@ -107,7 +108,7 @@ public class TableViews extends AbstractCollection<View>
         for (ColumnFamilyStore viewCfs : allViewsCfs())
         {
             viewCfs.discardSSTables(truncatedAt);
-            SystemKeyspace.saveTruncationRecord(viewCfs, truncatedAt, replayAfter);
+            TPCUtils.blockingAwait(SystemKeyspace.saveTruncationRecord(viewCfs, truncatedAt, replayAfter));
         }
     }
 

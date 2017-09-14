@@ -29,6 +29,7 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import io.reactivex.Completable;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.index.TargetParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -629,7 +630,7 @@ public class CustomCassandraIndex implements Index
 
     private boolean isBuilt()
     {
-        return SystemKeyspace.isIndexBuilt(baseCfs.keyspace.getName(), metadata.name);
+        return TPCUtils.blockingGet(SystemKeyspace.isIndexBuilt(baseCfs.keyspace.getName(), metadata.name));
     }
 
     private boolean isPrimaryKeyIndex()

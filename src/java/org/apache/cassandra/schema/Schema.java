@@ -19,6 +19,7 @@ package org.apache.cassandra.schema;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
@@ -26,6 +27,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.MapDifference;
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -111,7 +113,7 @@ public final class Schema
     {
         load(SchemaKeyspace.fetchNonSystemKeyspaces());
         if (updateVersion)
-            updateVersion();
+            TPCUtils.blockingAwait(updateVersion());
     }
 
     /**
@@ -536,10 +538,10 @@ public final class Schema
      * Read schema from system keyspace and calculate MD5 digest of every row, resulting digest
      * will be converted into UUID which would act as content-based version of the schema.
      */
-    public void updateVersion()
+    public CompletableFuture<Void> updateVersion()
     {
         version = SchemaKeyspace.calculateSchemaDigest();
-        SystemKeyspace.updateSchemaVersion(version);
+        return SystemKeyspace.updateSchemaVersion(version);
     }
 
     /*
@@ -547,7 +549,7 @@ public final class Schema
      */
     public void updateVersionAndAnnounce()
     {
-        updateVersion();
+        TPCUtils.blockingAwait(updateVersion());
         MigrationManager.passiveAnnounce(version);
     }
 

@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -102,7 +103,7 @@ public class QueryProcessor implements QueryHandler
                                  {
                                      metrics.preparedStatementsEvicted.inc();
                                      lastMinuteEvictionsCount.incrementAndGet();
-                                     SystemKeyspace.removePreparedStatement(md5Digest);
+                                     SystemKeyspace.removePreparedStatement(md5Digest); // fut not waited on
                                  }
                              }).build();
 
@@ -143,24 +144,26 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    public static void preloadPreparedStatement()
+    public static void preloadPreparedStatementBlocking()
     {
-        ClientState clientState = ClientState.forInternalCalls();
-        int count = 0;
-        for (Pair<String, String> useKeyspaceAndCQL : SystemKeyspace.loadPreparedStatements())
-        {
-            try
+        final ClientState clientState = ClientState.forInternalCalls();
+        TPCUtils.blockingAwait(SystemKeyspace.loadPreparedStatements().thenAccept(results -> {
+            int count = 0;
+            for (Pair<String, String> useKeyspaceAndCQL : results)
             {
-                clientState.setKeyspace(useKeyspaceAndCQL.left);
-                prepare(useKeyspaceAndCQL.right, clientState);
-                count++;
+                try
+                {
+                    clientState.setKeyspace(useKeyspaceAndCQL.left);
+                    prepare(useKeyspaceAndCQL.right, clientState);
+                    count++;
+                }
+                catch (RequestValidationException e)
+                {
+                    logger.warn("prepared statement recreation error: {}", useKeyspaceAndCQL.right, e);
+                }
             }
-            catch (RequestValidationException e)
-            {
-                logger.warn("prepared statement recreation error: {}", useKeyspaceAndCQL.right, e);
-            }
-        }
-        logger.info("Preloaded {} prepared statements", count);
+            logger.info("Preloaded {} prepared statements", count);
+       }));
     }
 
     /**
@@ -172,7 +175,7 @@ public class QueryProcessor implements QueryHandler
     {
         preparedStatements.invalidateAll();
         if (!memoryOnly)
-            SystemKeyspace.resetPreparedStatements();
+            SystemKeyspace.resetPreparedStatementsBlocking();
     }
 
     private static QueryState internalQueryState()
@@ -680,6 +683,11 @@ public class QueryProcessor implements QueryHandler
             removeInvalidPersistentPreparedStatements(preparedStatements.asMap().entrySet().iterator(), ksName, cfName);
         }
 
+        private static void removePreparedStatementBlocking(MD5Digest key)
+        {
+            TPCUtils.blockingAwait(SystemKeyspace.removePreparedStatement(key));
+        }
+
         private static void removeInvalidPreparedStatementsForFunction(String ksName, String functionName)
         {
             Predicate<Function> matchesFunction = f -> ksName.equals(f.name().keyspace) && functionName.equals(f.name().name);
@@ -690,7 +698,7 @@ public class QueryProcessor implements QueryHandler
                 Map.Entry<MD5Digest, ParsedStatement.Prepared> pstmt = iter.next();
                 if (Iterables.any(pstmt.getValue().statement.getFunctions(), matchesFunction))
                 {
-                    SystemKeyspace.removePreparedStatement(pstmt.getKey());
+                    removePreparedStatementBlocking(pstmt.getKey());
                     iter.remove();
                 }
             }
@@ -708,7 +716,7 @@ public class QueryProcessor implements QueryHandler
                 Map.Entry<MD5Digest, ParsedStatement.Prepared> entry = iterator.next();
                 if (shouldInvalidate(ksName, cfName, entry.getValue().statement))
                 {
-                    SystemKeyspace.removePreparedStatement(entry.getKey());
+                    removePreparedStatementBlocking(entry.getKey());
                     iterator.remove();
                 }
             }

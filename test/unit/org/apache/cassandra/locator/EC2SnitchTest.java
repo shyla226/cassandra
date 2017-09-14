@@ -24,8 +24,8 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -34,6 +34,7 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
@@ -104,13 +105,14 @@ public class EC2SnitchTest
     }
 
     @Test
-    public void testEc2MRSnitch() throws UnknownHostException
+    public void testEc2MRSnitch() throws UnknownHostException, InterruptedException, ExecutionException
     {
         InetAddress me = InetAddress.getByName("127.0.0.2");
         InetAddress com_ip = InetAddress.getByName("127.0.0.3");
 
         OutboundTcpConnectionPool pool = MessagingService.instance().getConnectionPool(me).join();
         Assert.assertEquals(me, pool.endPoint());
+        SystemKeyspace.updatePreferredIP(me, com_ip).get();
         pool.reset(com_ip);
         Assert.assertEquals(com_ip, pool.endPoint());
 

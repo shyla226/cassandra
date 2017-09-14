@@ -522,7 +522,7 @@ public class ViewTest extends CQLTester
         createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND c IS NOT NULL AND intval IS NOT NULL PRIMARY KEY (intval, c, k)");
 
 
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv"))
+        while (!isViewBuiltBlocking(keyspace(), "mv"))
             Thread.sleep(1000);
 
         assertRows(execute("SELECT count(*) from %s WHERE k = ?", 0), row(1024L));
@@ -559,14 +559,14 @@ public class ViewTest extends CQLTester
         //Check the builder works
         createView("mv_test2", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE textval2 IS NOT NULL AND k IS NOT NULL AND asciival IS NOT NULL AND bigintval IS NOT NULL AND textval1 IS NOT NULL PRIMARY KEY ((textval2, k), asciival, bigintval, textval1)");
 
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test2"))
+        while (!isViewBuiltBlocking(keyspace(), "mv_test2"))
             Thread.sleep(10);
 
         Assert.assertEquals(100, execute("select * from mv_test2").size());
 
         createView("mv_test3", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE textval2 IS NOT NULL AND k IS NOT NULL AND asciival IS NOT NULL AND bigintval IS NOT NULL AND textval1 IS NOT NULL PRIMARY KEY ((textval2, k), bigintval, textval1, asciival)");
 
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test3"))
+        while (!isViewBuiltBlocking(keyspace(), "mv_test3"))
             Thread.sleep(10);
 
         Assert.assertEquals(100, execute("select * from mv_test3").size());
@@ -1382,7 +1382,7 @@ public class ViewTest extends CQLTester
         //Compact the base table
         FBUtilities.waitOnFutures(futures);
 
-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+        while (!isViewBuiltBlocking(keyspace(), "mv_test"))
             Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
 
         assertRows(execute("SELECT count(*) FROM mv_test"), row(1024L));

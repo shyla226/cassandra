@@ -37,6 +37,7 @@ import java.util.regex.Matcher;
 import com.google.common.collect.Iterables;
 
 import com.codahale.metrics.Snapshot;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -89,6 +90,8 @@ public class MessagingServiceTest
 
         withBackPressure = Verbs.WRITES.WRITE;
         withoutBackPressure = Verbs.GOSSIP.ACK; // one-way message, so can't suppor back-pressure;
+
+        SystemKeyspace.finishStartupBlocking();
     }
 
     @AfterClass

@@ -34,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Completable;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -692,7 +693,7 @@ public abstract class CassandraIndex implements Index
 
     private boolean isBuilt()
     {
-        return SystemKeyspace.isIndexBuilt(baseCfs.keyspace.getName(), metadata.name);
+        return TPCUtils.blockingGet(SystemKeyspace.isIndexBuilt(baseCfs.keyspace.getName(), metadata.name));
     }
 
     private boolean isPrimaryKeyIndex()

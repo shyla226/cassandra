@@ -3,6 +3,7 @@ package org.apache.cassandra.index.internal;
 import io.reactivex.Completable;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -221,12 +222,12 @@ public class TableBackedCustomIndex implements Index
 
     private boolean isBuilt()
     {
-        return SystemKeyspace.isIndexBuilt(baseCfs.keyspace.getName(), getIndexName());
+        return TPCUtils.blockingGet(SystemKeyspace.isIndexBuilt(baseCfs.keyspace.getName(), getIndexName()));
     }
 
     private void markBuilt()
     {
-        SystemKeyspace.setIndexBuilt(baseCfs.keyspace.getName(), getIndexName());
+        TPCUtils.blockingAwait(SystemKeyspace.setIndexBuilt(baseCfs.keyspace.getName(), getIndexName()));
     }
 
     private Callable<?> getBuildIndexTask()

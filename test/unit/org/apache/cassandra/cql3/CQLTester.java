@@ -255,10 +255,10 @@ public abstract class CQLTester
             ThreadAwareSecurityManager.install();
 
             Keyspace.setInitialized();
-            SystemKeyspace.persistLocalMetadata();
+            TPCUtils.blockingAwait(SystemKeyspace.persistLocalMetadata());
 
-            SystemKeyspace.finishStartup();
-            SystemKeyspace.persistLocalMetadata();
+            SystemKeyspace.finishStartupBlocking();
+            TPCUtils.blockingAwait(SystemKeyspace.persistLocalMetadata());
             StorageService.instance.populateTokenMetadata();
 
             preJoinHook.run();
@@ -473,8 +473,8 @@ public abstract class CQLTester
             return;
         }
 
-        SystemKeyspace.finishStartup();
-        SystemKeyspace.persistLocalMetadata();
+        SystemKeyspace.finishStartupBlocking();
+        TPCUtils.blockingAwait(SystemKeyspace.persistLocalMetadata());
         StorageService.instance.populateTokenMetadata();
         StorageService.instance.initServer();
         Gossiper.instance.register(StorageService.instance);
@@ -873,6 +873,11 @@ public abstract class CQLTester
         String fullQuery = String.format(query, KEYSPACE);
         logger.info(fullQuery);
         schemaChange(fullQuery);
+    }
+
+    protected static boolean isViewBuiltBlocking(String keyspaceName, String viewName)
+    {
+        return TPCUtils.blockingGet(SystemKeyspace.isViewBuilt(keyspaceName, viewName));
     }
 
     /**

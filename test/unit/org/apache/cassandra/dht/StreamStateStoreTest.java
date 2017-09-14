@@ -23,7 +23,6 @@ import java.util.Collections;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.streaming.DefaultConnectionFactory;
 import org.apache.cassandra.streaming.PreviewKind;
@@ -59,18 +58,18 @@ public class StreamStateStoreTest
         StreamStateStore store = new StreamStateStore();
         // session complete event that is not completed makes data not available for keyspace/ranges
         store.handleStreamEvent(new StreamEvent.SessionCompleteEvent(session));
-        assertFalse(store.isDataAvailable("keyspace1", factory.fromString("50")));
+        assertFalse(store.isDataAvailableBlocking("keyspace1", factory.fromString("50")));
 
         // successfully completed session adds available keyspace/ranges
         session.state(StreamSession.State.COMPLETE);
         store.handleStreamEvent(new StreamEvent.SessionCompleteEvent(session));
         // check if token in range (0, 100] appears available.
-        assertTrue(store.isDataAvailable("keyspace1", factory.fromString("50")));
+        assertTrue(store.isDataAvailableBlocking("keyspace1", factory.fromString("50")));
         // check if token out of range returns false
-        assertFalse(store.isDataAvailable("keyspace1", factory.fromString("0")));
-        assertFalse(store.isDataAvailable("keyspace1", factory.fromString("101")));
+        assertFalse(store.isDataAvailableBlocking("keyspace1", factory.fromString("0")));
+        assertFalse(store.isDataAvailableBlocking("keyspace1", factory.fromString("101")));
         // check if different keyspace returns false
-        assertFalse(store.isDataAvailable("keyspace2", factory.fromString("50")));
+        assertFalse(store.isDataAvailableBlocking("keyspace2", factory.fromString("50")));
 
         // add different range within the same keyspace
         Range<Token> range2 = new Range<>(factory.fromString("100"), factory.fromString("200"));
@@ -80,8 +79,8 @@ public class StreamStateStoreTest
         store.handleStreamEvent(new StreamEvent.SessionCompleteEvent(session));
 
         // newly added range should be available
-        assertTrue(store.isDataAvailable("keyspace1", factory.fromString("101")));
+        assertTrue(store.isDataAvailableBlocking("keyspace1", factory.fromString("101")));
         // as well as the old one
-        assertTrue(store.isDataAvailable("keyspace1", factory.fromString("50")));
+        assertTrue(store.isDataAvailableBlocking("keyspace1", factory.fromString("50")));
     }
 }

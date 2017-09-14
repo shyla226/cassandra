@@ -25,6 +25,7 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.utils.UUIDGen;
 import org.slf4j.Logger;
@@ -69,7 +70,7 @@ public class HintedHandoffMetrics
             if (difference == 0)
                 continue;
             logger.warn("{} has {} dropped hints, because node is down past configured hint window.", entry.getKey(), difference);
-            SystemKeyspace.updateHintsDropped(entry.getKey(), UUIDGen.getTimeUUID(), (int) difference);
+            TPCUtils.blockingAwait(SystemKeyspace.updateHintsDropped(entry.getKey(), UUIDGen.getTimeUUID(), (int) difference));
         }
     }
 

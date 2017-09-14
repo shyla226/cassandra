@@ -41,7 +41,7 @@ public class MockMessagingServiceTest
     public static void initCluster() throws ConfigurationException
     {
         SchemaLoader.prepareServer();
-        SystemKeyspace.finishStartup();
+        SystemKeyspace.finishStartupBlocking();
         StorageService.instance.initServer();
     }
 

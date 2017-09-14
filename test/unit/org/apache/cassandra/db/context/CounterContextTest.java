@@ -27,6 +27,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClockAndCount;
 import org.apache.cassandra.db.SystemKeyspace;
@@ -57,7 +58,7 @@ public class CounterContextTest
     public static void setup()
     {
         DatabaseDescriptor.daemonInitialization();
-        SystemKeyspace.setLocalHostIdBlocking();
+        TPCUtils.blockingGet(SystemKeyspace.setLocalHostId());
     }
 
     @Test

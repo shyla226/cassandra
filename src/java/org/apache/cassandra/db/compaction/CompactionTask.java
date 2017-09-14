@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Predicate;
@@ -33,6 +34,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
@@ -256,7 +258,7 @@ public class CompactionTask extends AbstractCompactionTask
                 for (int i = 0; i < mergedRowCounts.length; i++)
                     totalSourceRows += mergedRowCounts[i] * (i + 1);
 
-                String mergeSummary = updateCompactionHistory(cfs.keyspace.getName(), cfs.getTableName(), mergedRowCounts, startsize, endsize);
+                String mergeSummary = TPCUtils.blockingGet(updateCompactionHistory(cfs.keyspace.getName(), cfs.getTableName(), mergedRowCounts, startsize, endsize));
                 logger.debug(String.format("Compacted (%s) %d sstables to [%s] to level=%d.  %s to %s (~%d%% of original) in %,dms.  Read Throughput = %s, Write Throughput = %s, Row Throughput = ~%,d/s.  %,d total partitions merged to %,d.  Partition merge counts were {%s}",
                                            taskId,
                                            transaction.originals().size(),
@@ -291,7 +293,7 @@ public class CompactionTask extends AbstractCompactionTask
         return new DefaultCompactionWriter(cfs, directories, transaction, nonExpiredSSTables, keepOriginals, getLevel());
     }
 
-    public static String updateCompactionHistory(String keyspaceName, String columnFamilyName, long[] mergedRowCounts, long startSize, long endSize)
+    public static CompletableFuture<String> updateCompactionHistory(String keyspaceName, String columnFamilyName, long[] mergedRowCounts, long startSize, long endSize)
     {
         StringBuilder mergeSummary = new StringBuilder(mergedRowCounts.length * 10);
         Map<Integer, Long> mergedRows = new HashMap<>();
@@ -305,8 +307,9 @@ public class CompactionTask extends AbstractCompactionTask
             mergeSummary.append(String.format("%d:%d, ", rows, count));
             mergedRows.put(rows, count);
         }
-        SystemKeyspace.updateCompactionHistory(keyspaceName, columnFamilyName, System.currentTimeMillis(), startSize, endSize, mergedRows);
-        return mergeSummary.toString();
+
+        return SystemKeyspace.updateCompactionHistory(keyspaceName, columnFamilyName, System.currentTimeMillis(), startSize, endSize, mergedRows)
+                             .thenApply(resultSet -> mergeSummary.toString());
     }
 
     protected Directories getDirectories()

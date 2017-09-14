@@ -234,14 +234,34 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     final NodeSyncService nodeSyncService = new NodeSyncService();
 
+    private void setBootstrapStateBlocking(SystemKeyspace.BootstrapState state)
+    {
+        TPCUtils.blockingAwait(SystemKeyspace.setBootstrapState(state));
+    }
+
+    private Multimap<InetAddress, Token> loadTokensBlocking()
+    {
+        return TPCUtils.blockingGet(SystemKeyspace.loadTokens());
+    }
+
+    private void updateTokensBlocking(InetAddress endpoint, Collection<Token> tokens)
+    {
+        TPCUtils.blockingAwait(SystemKeyspace.updateTokens(endpoint, tokens));
+    }
+
+    private void updateTokensBlocking(Collection<Token> tokens)
+    {
+        TPCUtils.blockingAwait(SystemKeyspace.updateTokens(tokens));
+    }
+
     /** This method updates the local token on disk  */
     public void setTokens(Collection<Token> tokens)
     {
         assert tokens != null && !tokens.isEmpty() : "Node needs at least one token.";
         if (logger.isDebugEnabled())
             logger.debug("Setting tokens to {}", tokens);
-        SystemKeyspace.updateTokens(tokens);
-        Collection<Token> localTokens = getLocalTokens();
+        updateTokensBlocking(tokens);
+        Collection<Token> localTokens = getLocalTokensBlocking();
         setGossipTokens(localTokens);
         tokenMetadata.updateNormalTokens(tokens, FBUtilities.getBroadcastAddress());
         setMode(Mode.NORMAL, false);
@@ -310,7 +330,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             checkServiceAllowedToStart("gossip");
 
             logger.warn("Starting gossip by operator request");
-            Collection<Token> tokens = SystemKeyspace.getSavedTokens();
+            Collection<Token> tokens = getSavedTokensBlocking();
 
             boolean validTokens = tokens != null && !tokens.isEmpty();
 
@@ -479,7 +499,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (isReplacingSameAddress())
         {
             localHostId = Gossiper.instance.getHostId(replaceAddress, epStates);
-            SystemKeyspace.setLocalHostIdBlocking(localHostId); // use the replacee's host Id as our own so we receive hints, etc
+            TPCUtils.blockingGet(SystemKeyspace.setLocalHostId(localHostId)); // use the replaced host Id as our own so we receive hints, etc
         }
 
         return localHostId;
@@ -544,9 +564,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (Boolean.parseBoolean(System.getProperty("cassandra.load_ring_state", "true")))
         {
             logger.info("Populating token metadata from system tables");
-            Multimap<InetAddress, Token> loadedTokens = SystemKeyspace.loadTokens();
+            Multimap<InetAddress, Token> loadedTokens = loadTokensBlocking();
             if (!shouldBootstrap()) // if we have not completed bootstrapping, we should not add ourselves as a normal token
-                loadedTokens.putAll(FBUtilities.getBroadcastAddress(), SystemKeyspace.getSavedTokens());
+                loadedTokens.putAll(FBUtilities.getBroadcastAddress(), getSavedTokensBlocking());
             for (InetAddress ep : loadedTokens.keySet())
                 tokenMetadata.updateNormalTokens(loadedTokens.get(ep), ep);
 
@@ -561,6 +581,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public synchronized void initServer(int delay) throws ConfigurationException
     {
+        // Cassandra daemon has already called this but many tests call initServer() directly and for these
+        // tests we need to ensure SystemKeyspace has been initialized, so we call it again, which is safe
+        SystemKeyspace.finishStartupBlocking();
+
         logger.info("Cassandra version: {}", FBUtilities.getReleaseVersionString());
         logger.info("CQL supported versions: {} (default: {})",
                 StringUtils.join(ClientState.getCQLSupportedVersion(), ", "), ClientState.DEFAULT_CQL_VERSION);
@@ -626,7 +650,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         else
         {
-            Collection<Token> tokens = SystemKeyspace.getSavedTokens();
+            Collection<Token> tokens = getSavedTokensBlocking();
             if (!tokens.isEmpty())
             {
                 tokenMetadata.updateNormalTokens(tokens, FBUtilities.getBroadcastAddress());
@@ -648,14 +672,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (Boolean.parseBoolean(System.getProperty("cassandra.load_ring_state", "true")))
         {
             logger.info("Loading persisted ring state");
-            Multimap<InetAddress, Token> loadedTokens = SystemKeyspace.loadTokens();
-            Map<InetAddress, UUID> loadedHostIds = SystemKeyspace.loadHostIds();
+            Multimap<InetAddress, Token> loadedTokens = loadTokensBlocking();
+            Map<InetAddress, UUID> loadedHostIds = SystemKeyspace.getHostIds();
             for (InetAddress ep : loadedTokens.keySet())
             {
                 if (ep.equals(FBUtilities.getBroadcastAddress()))
                 {
                     // entry has been mistakenly added, delete it
-                    SystemKeyspace.removeEndpoint(ep);
+                    removeEndpointBlocking(ep, false);
                 }
                 else
                 {
@@ -707,7 +731,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 if (Boolean.getBoolean("cassandra.override_decommission"))
                 {
                     logger.warn("This node was decommissioned, but overriding by operator request.");
-                    SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.COMPLETED);
+                    setBootstrapStateBlocking(SystemKeyspace.BootstrapState.COMPLETED);
                 }
                 else
                     throw new ConfigurationException("This node was decommissioned and will not rejoin the ring unless cassandra.override_decommission=true has been set, or all existing data is removed and the node is bootstrapped again");
@@ -719,7 +743,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (!MessagingService.instance().isListening())
                 MessagingService.instance().listen();
 
-            UUID localHostId = SystemKeyspace.setLocalHostIdBlocking();
+            UUID localHostId = TPCUtils.blockingGet(SystemKeyspace.setLocalHostId());
 
             if (replacing)
             {
@@ -730,7 +754,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 {
                     // Will not do replace procedure, persist the tokens we're taking over locally
                     // so that they don't get clobbered with auto generated ones in joinTokenRing
-                    SystemKeyspace.updateTokens(bootstrapTokens);
+                    updateTokensBlocking(bootstrapTokens);
                 }
                 else if (isReplacingSameAddress())
                 {
@@ -770,7 +794,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             logger.info("Starting up server gossip");
             Gossiper.instance.register(this);
-            Gossiper.instance.start(SystemKeyspace.incrementAndGetGeneration(), appStates); // needed for node-ring gathering.
+            int generation = TPCUtils.blockingGet(SystemKeyspace.incrementAndGetGeneration());
+            Gossiper.instance.start(generation, appStates); // needed for node-ring gathering.
             gossipActive = true;
             // gossip snitch infos (local DC and rack)
             gossipSnitchInfo();
@@ -839,7 +864,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (SystemKeyspace.bootstrapInProgress())
                 logger.warn("Detected previous bootstrap failure; retrying");
             else
-                SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.IN_PROGRESS);
+                setBootstrapStateBlocking(SystemKeyspace.BootstrapState.IN_PROGRESS);
             setMode(Mode.JOINING, "waiting for ring information", true);
             waitForSchema(delay);
             setMode(Mode.JOINING, "schema complete, ready to bootstrap", true);
@@ -923,7 +948,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         else
         {
-            bootstrapTokens = SystemKeyspace.getSavedTokens();
+            bootstrapTokens = getSavedTokensBlocking();
             if (bootstrapTokens.isEmpty())
             {
                 bootstrapTokens = BootStrapper.getBootstrapTokens(tokenMetadata, FBUtilities.getBroadcastAddress(), delay);
@@ -1001,7 +1026,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         else if (isSurveyMode)
         {
             logger.info("Leaving write survey mode and joining ring at operator request");
-            finishJoiningRing(resumedBootstrap, SystemKeyspace.getSavedTokens());
+            finishJoiningRing(resumedBootstrap, getSavedTokensBlocking());
             isSurveyMode = false;
         }
     }
@@ -1017,7 +1042,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         // start participating in the ring.
         setMode(Mode.JOINING, "Finish joining ring", true);
-        SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.COMPLETED);
+        setBootstrapStateBlocking(SystemKeyspace.BootstrapState.COMPLETED);
         executePreJoinTasks(didBootstrap);
         setTokens(tokens);
 
@@ -1542,7 +1567,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private boolean bootstrap(final Collection<Token> tokens)
     {
         isBootstrapMode = true;
-        SystemKeyspace.updateTokens(tokens); // DON'T use setToken, that makes us part of the ring locally which is incorrect until we are done bootstrapping
+        updateTokensBlocking(tokens); // DON'T use setToken, that makes us part of the ring locally which is incorrect until we are done bootstrapping
 
         if (!replacing || !isReplacingSameAddress())
         {
@@ -1560,7 +1585,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             // Dont set any state for the node which is bootstrapping the existing token...
             tokenMetadata.updateNormalTokens(tokens, FBUtilities.getBroadcastAddress());
-            SystemKeyspace.removeEndpoint(DatabaseDescriptor.getReplaceAddress());
+            removeEndpointBlocking(DatabaseDescriptor.getReplaceAddress(), false);
         }
         if (!Gossiper.instance.seenAnySeed())
             throw new IllegalStateException("Unable to contact any seeds!");
@@ -1568,7 +1593,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (Boolean.getBoolean("cassandra.reset_bootstrap_progress"))
         {
             logger.info("Resetting bootstrap progress to start fresh");
-            SystemKeyspace.resetAvailableRanges();
+            SystemKeyspace.resetAvailableRangesBlocking();
         }
 
         setMode(Mode.JOINING, "Starting to bootstrap...", true);
@@ -1605,19 +1630,22 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * All MVs have been created during bootstrap, so mark them as built
      */
-    private void markViewsAsBuilt() {
+    private void markViewsAsBuiltBlocking() {
+        ArrayList<CompletableFuture> futures = new ArrayList<>();
         for (String keyspace : Schema.instance.getUserKeyspaces())
         {
             for (ViewMetadata view: Schema.instance.getKeyspaceMetadata(keyspace).views)
-                SystemKeyspace.finishViewBuildStatus(view.keyspace, view.name);
+                futures.add(SystemKeyspace.finishViewBuildStatus(view.keyspace, view.name));
         }
+
+        TPCUtils.blockingAwait(CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])));
     }
 
     /**
      * Called when bootstrap did finish successfully
      */
     private void bootstrapFinished() {
-        markViewsAsBuilt();
+        markViewsAsBuiltBlocking();
         isBootstrapMode = false;
     }
 
@@ -1628,7 +1656,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.info("Resuming bootstrap...");
 
             // get bootstrap tokens saved in system keyspace
-            final Collection<Token> tokens = SystemKeyspace.getSavedTokens();
+            final Collection<Token> tokens = getSavedTokensBlocking();
             // already bootstrapped ranges are filtered during bootstrap
             BootStrapper bootstrapper = new BootStrapper(FBUtilities.getBroadcastAddress(), tokens, tokenMetadata);
             bootstrapper.addProgressListener(progressSupport);
@@ -2037,20 +2065,20 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 switch (state)
                 {
                     case RELEASE_VERSION:
-                        SystemKeyspace.updatePeerInfo(endpoint, "release_version", value.value);
+                        updatePeerInfoBlocking(endpoint, "release_version", value.value);
                         break;
                     case DC:
                         updateTopology(endpoint);
-                        SystemKeyspace.updatePeerInfo(endpoint, "data_center", value.value);
+                        updatePeerInfoBlocking(endpoint, "data_center", value.value);
                         break;
                     case RACK:
                         updateTopology(endpoint);
-                        SystemKeyspace.updatePeerInfo(endpoint, "rack", value.value);
+                        updatePeerInfoBlocking(endpoint, "rack", value.value);
                         break;
                     case RPC_ADDRESS:
                         try
                         {
-                            SystemKeyspace.updatePeerInfo(endpoint, "rpc_address", InetAddress.getByName(value.value));
+                            updatePeerInfoBlocking(endpoint, "rpc_address", InetAddress.getByName(value.value));
                         }
                         catch (UnknownHostException e)
                         {
@@ -2058,11 +2086,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         }
                         break;
                     case SCHEMA:
-                        SystemKeyspace.updatePeerInfo(endpoint, "schema_version", UUID.fromString(value.value));
+                        updatePeerInfoBlocking(endpoint, "schema_version", UUID.fromString(value.value));
                         MigrationManager.instance.scheduleSchemaPull(endpoint, epState);
                         break;
                     case HOST_ID:
-                        SystemKeyspace.updatePeerInfo(endpoint, "host_id", UUID.fromString(value.value));
+                        updatePeerInfoBlocking(endpoint, "host_id", UUID.fromString(value.value));
                         break;
                     case RPC_READY:
                         notifyRpcChange(endpoint, epState.isRpcReady());
@@ -2121,7 +2149,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         getTokenMetadata().updateTopology();
     }
 
-    private void updatePeerInfo(InetAddress endpoint)
+    private void updatePeerInfoBlocking(InetAddress ep, String columnName, Object value)
+    {
+        TPCUtils.blockingAwait(SystemKeyspace.updatePeerInfo(ep, columnName, value));
+    }
+
+    private void updatePeerInfoBlocking(InetAddress endpoint)
     {
         EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
         for (Map.Entry<ApplicationState, VersionedValue> entry : epState.states())
@@ -2129,18 +2162,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             switch (entry.getKey())
             {
                 case RELEASE_VERSION:
-                    SystemKeyspace.updatePeerInfo(endpoint, "release_version", entry.getValue().value);
+                    updatePeerInfoBlocking(endpoint, "release_version", entry.getValue().value);
                     break;
                 case DC:
-                    SystemKeyspace.updatePeerInfo(endpoint, "data_center", entry.getValue().value);
+                    updatePeerInfoBlocking(endpoint, "data_center", entry.getValue().value);
                     break;
                 case RACK:
-                    SystemKeyspace.updatePeerInfo(endpoint, "rack", entry.getValue().value);
+                    updatePeerInfoBlocking(endpoint, "rack", entry.getValue().value);
                     break;
                 case RPC_ADDRESS:
                     try
                     {
-                        SystemKeyspace.updatePeerInfo(endpoint, "rpc_address", InetAddress.getByName(entry.getValue().value));
+                        updatePeerInfoBlocking(endpoint, "rpc_address", InetAddress.getByName(entry.getValue().value));
                     }
                     catch (UnknownHostException e)
                     {
@@ -2148,10 +2181,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     }
                     break;
                 case SCHEMA:
-                    SystemKeyspace.updatePeerInfo(endpoint, "schema_version", UUID.fromString(entry.getValue().value));
+                    updatePeerInfoBlocking(endpoint, "schema_version", UUID.fromString(entry.getValue().value));
                     break;
                 case HOST_ID:
-                    SystemKeyspace.updatePeerInfo(endpoint, "host_id", UUID.fromString(entry.getValue().value));
+                    updatePeerInfoBlocking(endpoint, "host_id", UUID.fromString(entry.getValue().value));
                     break;
                 case NATIVE_TRANSPORT_PORT:
                     SystemKeyspace.updatePeerInfo(endpoint, "native_transport_port", Integer.parseInt(entry.getValue().value));
@@ -2380,7 +2413,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.warn("Node {} is currently being replaced by node {}.", endpoint, replacementNode.get());
         }
 
-        updatePeerInfo(endpoint);
+        updatePeerInfoBlocking(endpoint);
         // Order Matters, TM.updateHostID() should be called before TM.updateNormalToken(), (see CASSANDRA-4300).
         UUID hostId = Gossiper.instance.getHostId(endpoint);
         InetAddress existing = tokenMetadata.getEndpointForHostId(hostId);
@@ -2465,12 +2498,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         tokenMetadata.updateNormalTokens(tokensToUpdateInMetadata, endpoint);
         for (InetAddress ep : endpointsToRemove)
         {
-            removeEndpoint(ep);
+            removeEndpointBlocking(ep);
             if (replacing && DatabaseDescriptor.getReplaceAddress().equals(ep))
                 Gossiper.instance.replacementQuarantine(ep); // quarantine locally longer than normally; see CASSANDRA-8260
         }
         if (!tokensToUpdateInSystemKeyspace.isEmpty())
-            SystemKeyspace.updateTokens(endpoint, tokensToUpdateInSystemKeyspace);
+            updateTokensBlocking(endpoint, tokensToUpdateInSystemKeyspace);
 
         if (isMoving || operationMode == Mode.MOVING)
         {
@@ -2605,7 +2638,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             if (VersionedValue.REMOVED_TOKEN.equals(pieces[0]))
                 addExpireTimeIfFound(endpoint, extractExpireTime(pieces));
-            removeEndpoint(endpoint);
+            removeEndpointBlocking(endpoint);
         }
     }
 
@@ -2617,7 +2650,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (hostId != null && tokenMetadata.isMember(endpoint))
             HintsService.instance.excise(hostId);
 
-        removeEndpoint(endpoint);
+        removeEndpointBlocking(endpoint);
         tokenMetadata.removeEndpoint(endpoint);
         if (!tokens.isEmpty())
             tokenMetadata.removeBootstrapTokens(tokens);
@@ -2634,11 +2667,19 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * unlike excise we just need this endpoint gone without going through any notifications
      **/
-    private void removeEndpoint(InetAddress endpoint)
+    private void removeEndpointBlocking(InetAddress endpoint)
     {
-        Gossiper.instance.removeEndpoint(endpoint);
-        SystemKeyspace.removeEndpoint(endpoint);
+        removeEndpointBlocking(endpoint, true);
     }
+
+    private void removeEndpointBlocking(InetAddress endpoint, boolean notifyGossip)
+    {
+        if (notifyGossip)
+            Gossiper.instance.removeEndpoint(endpoint);
+
+        TPCUtils.blockingAwait(SystemKeyspace.removeEndpoint(endpoint));
+    }
+
 
     protected void addExpireTimeIfFound(InetAddress endpoint, long expireTime)
     {
@@ -2893,9 +2934,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         throw new UnsupportedOperationException();
     }
 
-    public Collection<Token> getLocalTokens()
+    private Collection<Token> getSavedTokensBlocking()
     {
-        Collection<Token> tokens = SystemKeyspace.getSavedTokens();
+        return TPCUtils.blockingGet(SystemKeyspace.getSavedTokens());
+    }
+
+    private Collection<Token> getLocalTokensBlocking()
+    {
+        Collection<Token> tokens = getSavedTokensBlocking();
         logger.debug("Got tokens {}", tokens);
 
         assert tokens != null && !tokens.isEmpty(); // should not be called before initServer sets this
@@ -3890,7 +3936,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      */
     private void startLeaving()
     {
-        Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.leaving(getLocalTokens()));
+        Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.leaving(getLocalTokensBlocking()));
         tokenMetadata.addLeavingEndpoint(FBUtilities.getBroadcastAddress());
         PendingRangeCalculatorService.instance.update();
     }
@@ -3969,7 +4015,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         logger.info("failed to shutdown message service: {}", ioe);
                     }
                     StageManager.shutdownNow();
-                    SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.DECOMMISSIONED);
+                    setBootstrapStateBlocking(SystemKeyspace.BootstrapState.DECOMMISSIONED);
                     setMode(Mode.DECOMMISSIONED, true);
                     // let op be responsible for killing the process
                 }
@@ -3993,11 +4039,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private void leaveRing()
     {
-        SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.NEEDS_BOOTSTRAP);
+        setBootstrapStateBlocking(SystemKeyspace.BootstrapState.NEEDS_BOOTSTRAP);
         tokenMetadata.removeEndpoint(FBUtilities.getBroadcastAddress());
         PendingRangeCalculatorService.instance.update();
 
-        Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.left(getLocalTokens(), Gossiper.computeExpireTime()));
+        Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.left(getLocalTokensBlocking(), Gossiper.computeExpireTime()));
         int delay = Math.max(RING_DELAY, Gossiper.intervalInMillis * 2);
         logger.info("Announcing that I have left the ring for {}ms", delay);
         Uninterruptibles.sleepUninterruptibly(delay, TimeUnit.MILLISECONDS);
@@ -4021,7 +4067,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         // Start with BatchLog replay, which may create hints but no writes since this is no longer a valid endpoint.
         Future<?> batchlogReplay = BatchlogManager.instance.startBatchlogReplay();
-        Future<StreamState> streamSuccess = streamRanges(rangesToStream);
+        Future<StreamState> streamSuccess = streamRangesBlocking(rangesToStream);
 
         // Wait for batch log to complete before streaming hints.
         logger.debug("waiting for batch log processing.");
@@ -4121,7 +4167,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
 
         Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.moving(newToken));
-        setMode(Mode.MOVING, String.format("Moving %s from %s to %s.", localAddress, getLocalTokens().iterator().next(), newToken), true);
+        setMode(Mode.MOVING, String.format("Moving %s from %s to %s.", localAddress, getLocalTokensBlocking().iterator().next(), newToken), true);
 
         setMode(Mode.MOVING, String.format("Sleeping %s ms before start streaming/fetching ranges", RING_DELAY), true);
         Uninterruptibles.sleepUninterruptibly(RING_DELAY, TimeUnit.MILLISECONDS);
@@ -4148,7 +4194,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         setTokens(Collections.singleton(newToken)); // setting new token as we have everything settled
 
         if (logger.isDebugEnabled())
-            logger.debug("Successfully moved to new token {}", getLocalTokens().iterator().next());
+            logger.debug("Successfully moved to new token {}", getLocalTokensBlocking().iterator().next());
     }
 
     private class RangeRelocator
@@ -4884,7 +4930,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public Map<String, String> getViewBuildStatuses(String keyspace, String view)
     {
-        Map<UUID, String> coreViewStatus = SystemDistributedKeyspace.viewStatus(keyspace, view);
+        Map<UUID, String> coreViewStatus = TPCUtils.blockingGet(SystemDistributedKeyspace.viewStatus(keyspace, view));
         Map<InetAddress, UUID> hostIdToEndpoint = tokenMetadata.getEndpointToHostIdMapForReading();
         Map<String, String> result = new HashMap<>();
 
@@ -4993,7 +5039,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * @param rangesToStreamByKeyspace keyspaces and data ranges with endpoints included for each
      * @return async Future for whether stream was success
      */
-    private Future<StreamState> streamRanges(Map<String, Multimap<Range<Token>, InetAddress>> rangesToStreamByKeyspace)
+    private Future<StreamState> streamRangesBlocking(Map<String, Multimap<Range<Token>, InetAddress>> rangesToStreamByKeyspace)
     {
         // First, we build a list of ranges to stream to each host, per table
         Map<String, Map<InetAddress, List<Range<Token>>>> sessionsToStreamByKeyspace = new HashMap<>();
@@ -5006,9 +5052,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (rangesWithEndpoints.isEmpty())
                 continue;
 
-            Map<InetAddress, Set<Range<Token>>> transferredRangePerKeyspace = SystemKeyspace.getTransferredRanges("Unbootstrap",
-                                                                                                                  keyspace,
-                                                                                                                  StorageService.instance.getTokenMetadata().partitioner);
+            Map<InetAddress, Set<Range<Token>>> transferredRangePerKeyspace =
+                TPCUtils.blockingGet(SystemKeyspace.getTransferredRanges("Unbootstrap",
+                                                                         keyspace,
+                                                                         StorageService.instance.getTokenMetadata().partitioner));
             Map<InetAddress, List<Range<Token>>> rangesPerEndpoint = new HashMap<>();
             for (Map.Entry<Range<Token>, InetAddress> endPointEntry : rangesWithEndpoints.entries())
             {

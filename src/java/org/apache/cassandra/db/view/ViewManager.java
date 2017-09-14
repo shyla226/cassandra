@@ -27,6 +27,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.db.*;
@@ -159,8 +160,8 @@ public class ViewManager
             return;
 
         forTable(view.getDefinition().baseTableId).removeByName(name);
-        SystemKeyspace.setViewRemoved(keyspace.getName(), view.name);
-        SystemDistributedKeyspace.setViewRemoved(keyspace.getName(), view.name);
+        TPCUtils.blockingAwait(SystemKeyspace.setViewRemoved(keyspace.getName(), view.name));
+        TPCUtils.blockingAwait(SystemDistributedKeyspace.setViewRemoved(keyspace.getName(), view.name));
     }
 
     public View getByName(String name)

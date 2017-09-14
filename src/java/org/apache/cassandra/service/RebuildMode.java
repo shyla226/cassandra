@@ -4,7 +4,10 @@
 package org.apache.cassandra.service;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -39,14 +42,21 @@ enum RebuildMode
         public void beforeStreaming(List<String> keyspaces)
         {
             // reset the locally available ranges for the keyspaces
-            keyspaces.forEach(SystemKeyspace::resetAvailableRanges);
+            List<CompletableFuture> futures = keyspaces.stream()
+                                                       .map(SystemKeyspace::resetAvailableRanges)
+                                                       .collect(Collectors.toList());
+            TPCUtils.blockingAwait(CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])));
         }
 
         @Override
         public void beforeStreaming(Map<String, Collection<Range<Token>>> rangesPerKeyspaces)
         {
             // reset the locally available ranges for the keyspaces
-            rangesPerKeyspaces.forEach(SystemKeyspace::resetAvailableRanges);
+            List<CompletableFuture> futures = rangesPerKeyspaces.entrySet()
+                                                                .stream()
+                                                                .map(entry -> SystemKeyspace.resetAvailableRanges(entry.getKey(), entry.getValue()))
+                                                                .collect(Collectors.toList());
+            TPCUtils.blockingAwait(CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])));
         }
     },
 
@@ -61,7 +71,7 @@ enum RebuildMode
             for (String keyspaceName : keyspaces)
             {
                 // reset the locally available ranges for the keyspaces
-                SystemKeyspace.resetAvailableRanges(keyspaceName);
+                TPCUtils.blockingAwait(SystemKeyspace.resetAvailableRanges(keyspaceName));
 
                 // truncate the tables for the keyspaces (local, not cluster wide)
                 Keyspace.open(keyspaceName).getColumnFamilyStores().forEach(ColumnFamilyStore::truncateBlocking);

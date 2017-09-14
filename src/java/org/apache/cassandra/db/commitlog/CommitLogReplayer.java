@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.config.Config;
@@ -47,6 +48,7 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.WrappedRunnable;
 
 public class CommitLogReplayer implements CommitLogReadHandler
@@ -93,6 +95,9 @@ public class CommitLogReplayer implements CommitLogReadHandler
 
     public static CommitLogReplayer construct(CommitLog commitLog)
     {
+        // make sure the truncation records are available, even though the CL has not been replayed
+        Map<TableId, Pair<CommitLogPosition, Long>> truncationRecords = TPCUtils.blockingGet(SystemKeyspace.readTruncationRecords());
+
         // compute per-CF and global replay intervals
         Map<TableId, IntervalSet<CommitLogPosition>> cfPersisted = new HashMap<>();
         ReplayFilter replayFilter = ReplayFilter.create();
@@ -100,14 +105,15 @@ public class CommitLogReplayer implements CommitLogReadHandler
         for (ColumnFamilyStore cfs : ColumnFamilyStore.all())
         {
             // but, if we've truncated the cf in question, then we need to need to start replay after the truncation
-            CommitLogPosition truncatedAt = SystemKeyspace.getTruncatedPosition(cfs.metadata.id);
+            Pair<CommitLogPosition, Long> truncationRecord = truncationRecords.get(cfs.metadata.id);
+            CommitLogPosition truncatedAt = truncationRecord == null ? null : truncationRecord.left;
             if (truncatedAt != null)
             {
                 // Point in time restore is taken to mean that the tables need to be replayed even if they were
                 // deleted at a later point in time. Any truncation record after that point must thus be cleared prior
                 // to replay (CASSANDRA-9195).
                 long restoreTime = commitLog.archiver.restorePointInTime;
-                long truncatedTime = SystemKeyspace.getTruncatedAt(cfs.metadata.id);
+                long truncatedTime = truncationRecord.right;
                 if (truncatedTime > restoreTime)
                 {
                     if (replayFilter.includes(cfs.metadata))
@@ -115,7 +121,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
                         logger.info("Restore point in time is before latest truncation of table {}.{}. Clearing truncation record.",
                                     cfs.metadata.keyspace,
                                     cfs.metadata.name);
-                        SystemKeyspace.removeTruncationRecord(cfs.metadata.id);
+                        TPCUtils.blockingAwait(SystemKeyspace.removeTruncationRecord(cfs.metadata.id));
                         truncatedAt = null;
                     }
                 }

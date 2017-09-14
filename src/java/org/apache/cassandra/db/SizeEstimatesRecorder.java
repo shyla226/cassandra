@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.db.lifecycle.SSTableIntervalTree;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -124,7 +125,7 @@ public class SizeEstimatesRecorder extends SchemaChangeListener implements Runna
         }
 
         // atomically update the estimates.
-        SystemKeyspace.updateSizeEstimates(table.metadata.keyspace, table.metadata.name, estimates);
+        TPCUtils.blockingAwait(SystemKeyspace.updateSizeEstimates(table.metadata.keyspace, table.metadata.name, estimates));
     }
 
     private long estimatePartitionsCount(Collection<SSTableReader> sstables, Range<Token> range)
@@ -150,6 +151,6 @@ public class SizeEstimatesRecorder extends SchemaChangeListener implements Runna
     @Override
     public void onDropTable(String keyspace, String table)
     {
-        SystemKeyspace.clearSizeEstimates(keyspace, table);
+        TPCUtils.blockingAwait(SystemKeyspace.clearSizeEstimates(keyspace, table));
     }
 }

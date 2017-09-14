@@ -45,6 +45,7 @@ import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
@@ -1551,7 +1552,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         tidy.setup(this, trackHotness);
         tidy.addCloseable(dataFile);
         tidy.addCloseable(bf);
-        this.readMeter = tidy.global.readMeter;
     }
 
     @VisibleForTesting
@@ -1639,17 +1639,29 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         private Ref<GlobalTidy> globalRef;
         private GlobalTidy global;
 
-        private volatile boolean setup;
+        // this ensures that the readMeter is available when it is required.
+        // It needs to be awaited before cleaning.
+        private volatile CompletableFuture<Void> setupFuture;
 
         void setup(SSTableReader reader, boolean trackHotness)
         {
-            this.setup = true;
             toClose = new ArrayList<>();
             // get a new reference to the shared descriptor-type tidy
             this.globalRef = GlobalTidy.get(reader);
             this.global = globalRef.get();
+            this.setupFuture = ensureReadMeter(trackHotness)
+                               // this does mean we may miss some read updates but so be it, as
+                               // long as we wait on the future before cleaing so that the readMeter
+                               // is cleaned
+                               .thenAccept(done ->  reader.readMeter = global.readMeter);
+        }
+
+        CompletableFuture<Void> ensureReadMeter(boolean trackHotness)
+        {
             if (trackHotness)
-                global.ensureReadMeter();
+                return global.ensureReadMeter();
+            else
+                return TPCUtils.completedFuture(null);
         }
 
         InstanceTidier(Descriptor descriptor, TableId tableId)
@@ -1667,10 +1679,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         public void tidy()
         {
             if (logger.isTraceEnabled())
-                logger.trace("Running instance tidier for {} with setup {}", descriptor, setup);
+                logger.trace("Running instance tidier for {} with setup {}", descriptor, setupFuture != null);
 
             // don't try to cleanup if the sstablereader was never fully constructed
-            if (!setup)
+            if (setupFuture == null)
                 return;
 
             final ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(tableId);
@@ -1689,6 +1701,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 {
                     if (logger.isTraceEnabled())
                         logger.trace("Async instance tidier for {}, before barrier", descriptor);
+
+                    // wait on setup future, just in case it has not completed yet
+                    TPCUtils.blockingAwait(setupFuture);
 
                     if (barrier != null)
                         barrier.await();
@@ -1740,10 +1755,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             this.desc = reader.descriptor;
         }
 
-        void ensureReadMeter()
+        CompletableFuture<Void> ensureReadMeter()
         {
             if (readMeter != null)
-                return;
+                return TPCUtils.completedFuture(null);
 
             // Don't track read rates for tables in the system keyspace and don't bother trying to load or persist
             // the read meter when in client mode.
@@ -1752,11 +1767,17 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             {
                 readMeter = null;
                 readMeterSyncFuture = NULL;
-                return;
+                return TPCUtils.completedFuture(null);
             }
 
-            readMeter = SystemKeyspace.getSSTableReadMeter(desc.ksname, desc.cfname, desc.generation);
-            // sync the average read rate to system.sstable_activity every five minutes, starting one minute from now
+            return SystemKeyspace.getSSTableReadMeter(desc.ksname, desc.cfname, desc.generation)
+                                 .thenAccept(this::setReadMeter);
+        }
+
+        // sync the average read rate to system.sstable_activity every five minutes, starting one minute from now
+        private void setReadMeter(RestorableMeter readMeter)
+        {
+            this.readMeter = readMeter;
             try
             {
                 readMeterSyncFuture = new WeakReference<>(readHotnessTrackerExecutor.scheduleAtFixedRate(new Runnable()
@@ -1766,7 +1787,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                         if (obsoletion == null)
                         {
                             meterSyncThrottle.acquire();
-                            SystemKeyspace.persistSSTableReadMeter(desc.ksname, desc.cfname, desc.generation, readMeter);
+                            TPCUtils.blockingAwait(SystemKeyspace.persistSSTableReadMeter(desc.ksname, desc.cfname, desc.generation, readMeter));
                         }
                     }
                 }, 1, 5, TimeUnit.MINUTES));

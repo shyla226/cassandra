@@ -40,6 +40,7 @@ import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.schema.TableMetadata;
@@ -1899,14 +1900,7 @@ public class CompactionManager implements CompactionManagerMBean
 
     public TabularData getCompactionHistory()
     {
-        try
-        {
-            return SystemKeyspace.getCompactionHistory();
-        }
-        catch (OpenDataException e)
-        {
-            throw new RuntimeException(e);
-        }
+        return TPCUtils.blockingGet(SystemKeyspace.getCompactionHistory());
     }
 
     public long getTotalBytesCompacted()

@@ -53,6 +53,7 @@ import io.reactivex.internal.operators.completable.CompletableEmpty;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.statements.IndexTarget;
@@ -196,7 +197,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         // we call add for every index definition in the collection as
         // some may not have been created here yet, only added to schema
         for (IndexMetadata tableIndex : tableIndexes)
-            addIndex(tableIndex, false);
+            addIndex(tableIndex, false); // fut. not waited on
     }
 
     private Future<?> reloadIndex(IndexMetadata indexDef)
@@ -344,7 +345,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public void markAllIndexesRemoved()
     {
-        getBuiltIndexNames().forEach(this::markIndexRemoved);
+        getBuiltIndexNamesBlocking().forEach(this::markIndexRemoved);
     }
 
     /**
@@ -627,7 +628,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                 toRebuildIndexes.remove(indexName);
 
                             if (counter.getAndIncrement() == 0 && DatabaseDescriptor.isDaemonInitialized() && !isNewCF)
-                                SystemKeyspace.setIndexRemoved(keyspaceName, indexName);
+                                TPCUtils.blockingAwait(SystemKeyspace.setIndexRemoved(keyspaceName, indexName));
                         });
     }
 
@@ -652,7 +653,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             {
                 inProgressBuilds.remove(indexName);
                 if (!toRebuildIndexes.contains(indexName) && DatabaseDescriptor.isDaemonInitialized())
-                    SystemKeyspace.setIndexBuilt(baseCfs.keyspace.getName(), indexName);
+                    TPCUtils.blockingAwait(SystemKeyspace.setIndexBuilt(baseCfs.keyspace.getName(), indexName));
             }
         }
     }
@@ -674,7 +675,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             counter.decrementAndGet();
 
             if (DatabaseDescriptor.isDaemonInitialized())
-                SystemKeyspace.setIndexRemoved(baseCfs.keyspace.getName(), indexName);
+                TPCUtils.blockingAwait(SystemKeyspace.setIndexRemoved(baseCfs.keyspace.getName(), indexName));
 
             toRebuildIndexes.add(indexName);
         }
@@ -697,7 +698,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     private synchronized void markIndexRemoved(String indexName)
     {
-        SystemKeyspace.setIndexRemoved(baseCfs.keyspace.getName(), indexName);
+        TPCUtils.blockingAwait(SystemKeyspace.setIndexRemoved(baseCfs.keyspace.getName(), indexName));
         queryableIndexes.remove(indexName);
         toRebuildIndexes.remove(indexName);
         inProgressBuilds.remove(indexName);
@@ -820,13 +821,13 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * @return all indexes which are marked as built and ready to use
      */
-    public List<String> getBuiltIndexNames()
+    public List<String> getBuiltIndexNamesBlocking()
     {
         Set<String> allIndexNames = new HashSet<>();
         indexes.values().stream()
                         .map(i -> i.getIndexMetadata().name)
                         .forEach(allIndexNames::add);
-        return SystemKeyspace.getBuiltIndexes(baseCfs.keyspace.getName(), allIndexNames);
+        return TPCUtils.blockingGet(SystemKeyspace.getBuiltIndexes(baseCfs.keyspace.getName(), allIndexNames));
     }
 
     /**

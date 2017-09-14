@@ -17,8 +17,12 @@
  */
 package org.apache.cassandra.dht;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.streaming.StreamEvent;
 import org.apache.cassandra.streaming.StreamEventHandler;
@@ -30,7 +34,7 @@ import org.apache.cassandra.streaming.StreamState;
  */
 public class StreamStateStore implements StreamEventHandler
 {
-    public Set<Range<Token>> getAvailableRanges(String keyspace, IPartitioner partitioner)
+    public CompletableFuture<Set<Range<Token>>> getAvailableRanges(String keyspace, IPartitioner partitioner)
     {
         return SystemKeyspace.getAvailableRanges(keyspace, partitioner);
     }
@@ -42,9 +46,9 @@ public class StreamStateStore implements StreamEventHandler
      * @param token token to check
      * @return true if given token in the keyspace is already streamed and ready to be served.
      */
-    public boolean isDataAvailable(String keyspace, Token token)
+    boolean isDataAvailableBlocking(String keyspace, Token token)
     {
-        Set<Range<Token>> availableRanges = getAvailableRanges(keyspace, token.getPartitioner());
+        Set<Range<Token>> availableRanges = TPCUtils.blockingGet(getAvailableRanges(keyspace, token.getPartitioner()));
         for (Range<Token> range : availableRanges)
         {
             if (range.contains(token))
@@ -67,14 +71,20 @@ public class StreamStateStore implements StreamEventHandler
             if (se.success)
             {
                 Set<String> keyspaces = se.transferredRangesPerKeyspace.keySet();
+                List<CompletableFuture> futures = new ArrayList<>(keyspaces.size() + se.requests.size());
                 for (String keyspace : keyspaces)
                 {
-                    SystemKeyspace.updateTransferredRanges(se.streamOperation, se.peer, keyspace, se.transferredRangesPerKeyspace.get(keyspace));
+                    futures.add(SystemKeyspace.updateTransferredRanges(se.streamOperation,
+                                                                       se.peer,
+                                                                       keyspace,
+                                                                       se.transferredRangesPerKeyspace.get(keyspace)));
                 }
                 for (StreamRequest request : se.requests)
                 {
-                    SystemKeyspace.updateAvailableRanges(request.keyspace, request.ranges);
+                    futures.add(SystemKeyspace.updateAvailableRanges(request.keyspace, request.ranges));
                 }
+
+                TPCUtils.blockingAwait(CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])));
             }
         }
     }

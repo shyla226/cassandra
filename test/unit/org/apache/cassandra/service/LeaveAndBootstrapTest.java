@@ -33,6 +33,7 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.Util.PartitionerSwitcher;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.Schema;
@@ -664,8 +665,8 @@ public class LeaveAndBootstrapTest
         Util.createInitialRing(ss, partitioner, endpointTokens, new ArrayList<Token>(), hosts, new ArrayList<UUID>(), 2);
 
         InetAddress toRemove = hosts.get(1);
-        SystemKeyspace.updatePeerInfo(toRemove, "data_center", "dc42");
-        SystemKeyspace.updatePeerInfo(toRemove, "rack", "rack42");
+        TPCUtils.blockingAwait(SystemKeyspace.updatePeerInfo(toRemove, "data_center", "dc42"));
+        TPCUtils.blockingAwait(SystemKeyspace.updatePeerInfo(toRemove, "rack", "rack42"));
         assertEquals("rack42", SystemKeyspace.loadDcRackInfo().get(toRemove).get("rack"));
 
         // mark the node as removed

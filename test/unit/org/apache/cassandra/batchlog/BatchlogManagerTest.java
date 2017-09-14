@@ -29,6 +29,7 @@ import org.junit.*;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.Util.PartitionerSwitcher;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -225,9 +226,9 @@ public class BatchlogManagerTest extends CQLTester
             long timestamp = System.currentTimeMillis() - BatchlogManager.getBatchlogTimeout();
 
             if (i == 500)
-                SystemKeyspace.saveTruncationRecord(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2),
-                                                    timestamp,
-                                                    CommitLogPosition.NONE);
+                TPCUtils.blockingAwait(SystemKeyspace.saveTruncationRecord(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2),
+                                                                           timestamp,
+                                                                           CommitLogPosition.NONE));
 
             // Adjust the timestamp (slightly) to make the test deterministic.
             if (i >= 500)

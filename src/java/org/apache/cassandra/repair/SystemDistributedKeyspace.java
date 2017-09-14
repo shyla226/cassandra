@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Joiner;
@@ -40,6 +41,7 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -233,7 +235,7 @@ public final class SystemDistributedKeyspace
                                       Joiner.on("','").join(cfnames),
                                       Joiner.on("','").join(ranges),
                                       toCQLMap(options.asMap(), RepairOption.RANGES_KEY, RepairOption.COLUMNFAMILIES_KEY));
-        processSilent(fmtQry);
+        processSilentBlocking(fmtQry);
     }
 
     private static String toCQLMap(Map<String, String> options, String ... ignore)
@@ -263,14 +265,14 @@ public final class SystemDistributedKeyspace
         t.printStackTrace(pw);
         String fmtQuery = format(query, DISTRIBUTED_KEYSPACE_NAME, PARENT_REPAIR_HISTORY, parent_id.toString());
         String message = t.getMessage();
-        processSilent(fmtQuery, message != null ? message : "", sw.toString());
+        processSilentBlocking(fmtQuery, message != null ? message : "", sw.toString());
     }
 
     public static void successfulParentRepair(UUID parent_id, Collection<Range<Token>> successfulRanges)
     {
         String query = "UPDATE %s.%s SET finished_at = toTimestamp(now()), successful_ranges = {'%s'} WHERE parent_id=%s";
         String fmtQuery = format(query, DISTRIBUTED_KEYSPACE_NAME, PARENT_REPAIR_HISTORY, Joiner.on("','").join(successfulRanges), parent_id.toString());
-        processSilent(fmtQuery);
+        processSilentBlocking(fmtQuery);
     }
 
     public static void startRepairs(UUID id, UUID parent_id, String keyspaceName, String[] cfnames, Collection<Range<Token>> ranges, Iterable<InetAddress> endpoints)
@@ -299,7 +301,7 @@ public final class SystemDistributedKeyspace
                                               coordinator,
                                               Joiner.on("', '").join(participants),
                                               RepairState.STARTED.toString());
-                processSilent(fmtQry);
+                processSilentBlocking(fmtQry);
             }
         }
     }
@@ -318,7 +320,7 @@ public final class SystemDistributedKeyspace
                                         keyspaceName,
                                         cfname,
                                         id.toString());
-        processSilent(fmtQuery);
+        processSilentBlocking(fmtQuery);
     }
 
     public static void failedRepairJob(UUID id, String keyspaceName, String cfname, Throwable t)
@@ -332,65 +334,56 @@ public final class SystemDistributedKeyspace
                                       keyspaceName,
                                       cfname,
                                       id.toString());
-        processSilent(fmtQry, t.getMessage(), sw.toString());
+        processSilentBlocking(fmtQry, t.getMessage(), sw.toString());
     }
 
-    public static void startViewBuild(String keyspace, String view, UUID hostId)
+    public static CompletableFuture<Void> startViewBuild(String keyspace, String view, UUID hostId)
     {
         String query = "INSERT INTO %s.%s (keyspace_name, view_name, host_id, status) VALUES (?, ?, ?, ?)";
-        QueryProcessor.process(format(query, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS),
-                               ConsistencyLevel.ONE,
-                               Lists.newArrayList(bytes(keyspace),
-                                                  bytes(view),
-                                                  bytes(hostId),
-                                                  bytes(BuildStatus.STARTED.toString()))).blockingGet();
+        return TPCUtils.toFutureVoid(QueryProcessor.process(format(query, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS),
+                                                            ConsistencyLevel.ONE,
+                                                            Lists.newArrayList(bytes(keyspace),
+                                                                               bytes(view),
+                                                                               bytes(hostId),
+                                                                               bytes(BuildStatus.STARTED.toString()))));
     }
 
-    public static void successfulViewBuild(String keyspace, String view, UUID hostId)
+    public static CompletableFuture<Void> successfulViewBuild(String keyspace, String view, UUID hostId)
     {
         String query = "UPDATE %s.%s SET status = ? WHERE keyspace_name = ? AND view_name = ? AND host_id = ?";
-        QueryProcessor.process(format(query, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS),
-                               ConsistencyLevel.ONE,
-                               Lists.newArrayList(bytes(BuildStatus.SUCCESS.toString()),
-                                                  bytes(keyspace),
-                                                  bytes(view),
-                                                  bytes(hostId))).blockingGet();
+        return TPCUtils.toFutureVoid(QueryProcessor.process(format(query, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS),
+                                                            ConsistencyLevel.ONE,
+                                                            Lists.newArrayList(bytes(BuildStatus.SUCCESS.toString()),
+                                                                               bytes(keyspace),
+                                                                               bytes(view),
+                                                                               bytes(hostId))));
     }
 
-    public static Map<UUID, String> viewStatus(String keyspace, String view)
+    public static CompletableFuture<Map<UUID, String>> viewStatus(String keyspace, String view)
     {
-        String query = "SELECT host_id, status FROM %s.%s WHERE keyspace_name = ? AND view_name = ?";
-        UntypedResultSet results;
-        try
-        {
-            results = QueryProcessor.execute(format(query, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS),
-                                             ConsistencyLevel.ONE,
-                                             keyspace,
-                                             view);
-        }
-        catch (Exception e)
-        {
-            return Collections.emptyMap();
-        }
+        String query = format("SELECT host_id, status FROM %s.%s WHERE keyspace_name = ? AND view_name = ?", SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS);
+        return TPCUtils.toFuture(QueryProcessor.executeInternalAsync(query, ConsistencyLevel.ONE, keyspace, view))
+                       .handle((results, error) -> {
+                           if (error != null)
+                               return Collections.emptyMap();
 
-
-        Map<UUID, String> status = new HashMap<>();
-        for (UntypedResultSet.Row row : results)
-        {
-            status.put(row.getUUID("host_id"), row.getString("status"));
-        }
-        return status;
+                           Map<UUID, String> status = new HashMap<>();
+                           for (UntypedResultSet.Row row : results)
+                           {
+                               status.put(row.getUUID("host_id"), row.getString("status"));
+                           }
+                           return status;
+                       });
     }
 
-    public static void setViewRemoved(String keyspaceName, String viewName)
+    public static CompletableFuture<Void> setViewRemoved(String keyspaceName, String viewName)
     {
-        String buildReq = "DELETE FROM %s.%s WHERE keyspace_name = ? AND view_name = ?";
-        // TODO make async?
-        QueryProcessor.executeInternal(format(buildReq, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS), keyspaceName, viewName);
-        forceBlockingFlush(VIEW_BUILD_STATUS);
+        String buildReq = format("DELETE FROM %s.%s WHERE keyspace_name = ? AND view_name = ?", SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS);
+        return TPCUtils.toFuture(QueryProcessor.executeInternalAsync(buildReq, keyspaceName, viewName))
+                       .thenCompose(resultSet -> forceFlush(VIEW_BUILD_STATUS));
     }
 
-    private static void processSilent(String fmtQry, String... values)
+    private static void processSilentBlocking(String fmtQry, String... values)
     {
         try
         {
@@ -399,7 +392,7 @@ public final class SystemDistributedKeyspace
             {
                 valueList.add(bytes(v));
             }
-            QueryProcessor.process(fmtQry, ConsistencyLevel.ONE, valueList).blockingGet();
+            TPCUtils.blockingGet(QueryProcessor.process(fmtQry, ConsistencyLevel.ONE, valueList));
         }
         catch (Throwable t)
         {
@@ -669,10 +662,12 @@ public final class SystemDistributedKeyspace
         );
     }
 
-    public static void forceBlockingFlush(String table)
+    private static CompletableFuture<Void> forceFlush(String table)
     {
         if (!DatabaseDescriptor.isUnsafeSystem())
-            Keyspace.open(DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(table).forceFlush().blockingGet();
+            return TPCUtils.toFutureVoid(Keyspace.open(DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(table).forceFlush());
+
+        return TPCUtils.completedFuture();
     }
 
     private enum RepairState
