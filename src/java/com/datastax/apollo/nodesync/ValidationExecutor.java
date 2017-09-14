@@ -27,6 +27,8 @@ import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
+import org.apache.cassandra.concurrent.TracingAwareExecutorService;
 import org.apache.cassandra.config.NodeSyncConfig;
 import org.apache.cassandra.utils.collection.History;
 import org.apache.cassandra.utils.units.RateUnit;
@@ -91,7 +93,8 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     private final NodeSyncConfig config;
 
     /** The thread pool at the heart of this executor. */
-    private final ThreadPoolExecutor validationExecutor;
+    private final DebuggableThreadPoolExecutor validationExecutor;
+
     private final Scheduler wrappingScheduler; // Rx Scheduler on top of validationExecutor because that's what Flow use for now
     /** Executor used to schedule the {@link Controller} at regular intervals. */
     private final ScheduledExecutorService updaterExecutor = Executors.newSingleThreadScheduledExecutor(new NamedThreadFactory("NodeSyncController"));
@@ -127,7 +130,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         return wrappingScheduler;
     }
 
-    Executor asExecutor()
+    TracingAwareExecutorService asExecutor()
     {
         return validationExecutor;
     }
