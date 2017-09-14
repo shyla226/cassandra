@@ -1,4 +1,5 @@
 DSE 5.1.4
+ * Always define execution_profiles in cqlsh.py (APOLLO-1150)
  * Fix stress-tool not outputting row/s (APOLLO-1123)
 Merged from dse5.0:
  * Backport CASSANDRA-13079: Warn user to run full repair when increasing replication factor (APOLLO-602)

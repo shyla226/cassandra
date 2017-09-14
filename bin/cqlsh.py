@@ -476,18 +476,21 @@ class Shell(cmd.Cmd):
         self.consistency_level = dse.ConsistencyLevel.ONE
         self.serial_consistency_level = dse.ConsistencyLevel.SERIAL
 
+        execution_profile = ExecutionProfile(load_balancing_policy=WhiteListRoundRobinPolicy([self.hostname]),
+                                             row_factory=ordered_dict_factory,
+                                             request_timeout=request_timeout,
+                                             consistency_level=self.consistency_level,
+                                             serial_consistency_level=self.serial_consistency_level)
+
+        self.execution_profiles = {EXEC_PROFILE_DEFAULT: execution_profile}
+
         if use_conn:
             self.conn = use_conn
         else:
             kwargs = {}
             if protocol_version is not None:
                 kwargs['protocol_version'] = protocol_version
-            self.execution_profiles = {EXEC_PROFILE_DEFAULT:
-                                       ExecutionProfile(load_balancing_policy=WhiteListRoundRobinPolicy([self.hostname]),
-                                                        row_factory=ordered_dict_factory,
-                                                        request_timeout=request_timeout,
-                                                        consistency_level=self.consistency_level,
-                                                        serial_consistency_level=self.serial_consistency_level)}
+
             self.conn = Cluster(contact_points=(self.hostname,), port=self.port, cql_version=cqlver,
                                 auth_provider=self.auth_provider,
                                 ssl_options=sslhandling.ssl_settings(hostname, CONFIG_FILE) if ssl else None,
