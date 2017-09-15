@@ -96,7 +96,7 @@ public class AlterKeyspaceStatement extends SchemaAlteringStatement
                                                                                                         DatabaseDescriptor.getEndpointSnitch(),
                                                                                                         params.replication.options);
         if (newStrategy.getReplicationFactor() > oldStrategy.getReplicationFactor())
-            ClientWarn.instance.warn("When increasing replication factor you need to run a full (-full) repair to distribute the data.");
+            ClientWarn.instance.warn("When increasing replication factor you need to run a a non-incremental repair on all nodes to distribute the data (nodetool repair -pr).");
     }
 
     public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
