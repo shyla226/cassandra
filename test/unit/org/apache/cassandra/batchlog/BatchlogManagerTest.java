@@ -128,8 +128,19 @@ public class BatchlogManagerTest extends CQLTester
     }
 
     @Test
-    @SuppressWarnings("deprecation")
     public void testReplay() throws Exception
+    {
+        doTestReplay(true);
+    }
+
+    @Test
+    public void testReplayNoFlush() throws Exception
+    {
+        doTestReplay(false);
+    }
+
+    @SuppressWarnings("deprecation")
+    private void doTestReplay(boolean flush) throws Exception
     {
         long initialAllBatches = BatchlogManager.instance.countAllBatches();
         long initialReplayedBatches = BatchlogManager.instance.getTotalBatchesReplayed();
@@ -156,8 +167,11 @@ public class BatchlogManagerTest extends CQLTester
             BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), timestamp * 1000, mutations)).blockingAwait();
         }
 
-        // Flush the batchlog to disk (see CASSANDRA-6822).
-        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceBlockingFlush();
+        if (flush)
+        {
+            // Flush the batchlog to disk (see CASSANDRA-6822).
+            Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceBlockingFlush();
+         }
 
         assertEquals(100, BatchlogManager.instance.countAllBatches() - initialAllBatches);
         assertEquals(0, BatchlogManager.instance.getTotalBatchesReplayed() - initialReplayedBatches);

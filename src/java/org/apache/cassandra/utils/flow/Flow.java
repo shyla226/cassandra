@@ -46,6 +46,7 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.CompletableSource;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.SingleObserver;
 import io.reactivex.disposables.Disposable;
@@ -88,6 +89,45 @@ public abstract class Flow<T>
     // Flow manipulation methods and implementations follow
 
     public static final boolean DEBUG_ENABLED = Boolean.getBoolean("cassandra.debugflow");
+
+    /**
+     * Op for applying any other subsequent operations/transformations on a (potentially) different scheduler.
+     *
+     * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
+     */
+    static class SchedulingTransformer<I> extends FlowTransformNext<I, I>
+    {
+        final Scheduler scheduler;
+
+        public SchedulingTransformer(Flow<I> source, Scheduler scheduler)
+        {
+            super(source);
+            this.scheduler = scheduler;
+        }
+
+        @Override
+        public void onNext(I next)
+        {
+            if (TPC.isOnScheduler(scheduler))
+                subscriber.onNext(next);
+            else
+                scheduler.scheduleDirect(() -> subscriber.onNext(next));
+        }
+
+        public String toString()
+        {
+            return formatTrace(getClass().getSimpleName(), scheduler, subscriber);
+        }
+    }
+
+    /**
+     * Applies any subsequent transformations (i.e. map, reduce...) on the given scheduler
+     * (similarly to RxJava's observeOn()).
+     */
+    public Flow<T> observeOn(Scheduler scheduler)
+    {
+        return new SchedulingTransformer<>(this, scheduler);
+    }
 
     /**
      * Op for element-wise transformation.
