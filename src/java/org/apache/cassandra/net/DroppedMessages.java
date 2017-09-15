@@ -59,7 +59,7 @@ public class DroppedMessages
         RANGE_SLICE,
         READ_REPAIR,
         LWT,
-        HINTS,
+        HINT,
         TRUNCATE,
         SNAPSHOT,
         SCHEMA,
