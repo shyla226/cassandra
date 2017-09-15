@@ -25,16 +25,14 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.*;
-import java.util.regex.Matcher;
 
 import com.google.common.collect.Iterables;
+import com.google.common.util.concurrent.Uninterruptibles;
 
 import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.db.SystemKeyspace;
@@ -46,7 +44,6 @@ import org.apache.cassandra.db.monitoring.ApproximateTime;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 
-
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -57,6 +54,7 @@ import static org.junit.Assert.*;
 public class MessagingServiceTest
 {
     private final static long ONE_SECOND = TimeUnit.NANOSECONDS.convert(1, TimeUnit.SECONDS);
+    private final static long TEN_SECONDS = TimeUnit.NANOSECONDS.convert(10, TimeUnit.SECONDS);
     public static final IInternodeAuthenticator ALLOW_NOTHING_AUTHENTICATOR = new IInternodeAuthenticator()
     {
         public boolean authenticate(InetAddress remoteAddress, int remotePort)
@@ -104,6 +102,7 @@ public class MessagingServiceTest
     public void before() throws UnknownHostException
     {
         MockBackPressureStrategy.applied = false;
+        MockBackPressureStrategy.sleep = 0;
         messagingService.destroyConnectionPool(InetAddress.getByName("127.0.0.2"));
         messagingService.destroyConnectionPool(InetAddress.getByName("127.0.0.3"));
     }
@@ -256,6 +255,16 @@ public class MessagingServiceTest
         assertFalse(MockBackPressureStrategy.applied);
     }
 
+    @Test
+    public void testBackPressureIsWaitedFor() throws UnknownHostException
+    {
+        MockBackPressureStrategy.sleep = TimeUnit.SECONDS.convert(TEN_SECONDS, TimeUnit.NANOSECONDS);
+
+        DatabaseDescriptor.setBackPressureEnabled(true);
+        messagingService.applyBackPressure(Arrays.asList(InetAddress.getByName("127.0.0.2")), TEN_SECONDS).join();
+        assertTrue(MockBackPressureStrategy.applied);
+    }
+
     private static void addDCLatency(long sentAt, long nowTime) throws IOException
     {
         MessagingService.instance().metrics.addTimeTaken(InetAddress.getLocalHost(), nowTime - sentAt);
@@ -264,6 +273,7 @@ public class MessagingServiceTest
     public static class MockBackPressureStrategy implements BackPressureStrategy<MockBackPressureStrategy.MockBackPressureState>
     {
         public static volatile boolean applied = false;
+        public static volatile long sleep = 0;
 
         public MockBackPressureStrategy(Map<String, Object> args)
         {
@@ -272,10 +282,15 @@ public class MessagingServiceTest
         @Override
         public CompletableFuture<Void> apply(Set<MockBackPressureState> states, long timeout, TimeUnit unit)
         {
-            if (!Iterables.isEmpty(states))
-                applied = true;
+            return CompletableFuture.supplyAsync(() ->
+            {
+                Uninterruptibles.sleepUninterruptibly(sleep, TimeUnit.SECONDS);
 
-            return CompletableFuture.completedFuture(null);
+                if (!Iterables.isEmpty(states))
+                    applied = true;
+            
+                return null;
+            });
         }
 
         @Override
