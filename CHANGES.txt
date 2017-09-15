@@ -1,4 +1,6 @@
 4.0
+ * Fix problem with min_compress_ratio: 1 and disallow ratio < 1 (CASSANDRA-13703)
+ * Add extra information to SASI timeout exception (CASSANDRA-13677)
  * Rework CompactionStrategyManager.getScanners synchronization (CASSANDRA-13786)
  * Add additional unit tests for batch behavior, TTLs, Timestamps (CASSANDRA-13846)
  * Add keyspace and table name in schema validation exception (CASSANDRA-13845)

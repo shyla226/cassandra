@@ -166,7 +166,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
                             //CASSANDRA-10520 adds this threshold where we skip decompressing if
                             //the compression ratio is not enough of a win to be worth it.
-                            if (chunk.length < maxCompressedLength)
+                            if (chunk.length <= maxCompressedLength)
                             {
                                 try
                                 {
