@@ -531,59 +531,51 @@ public class StorageProxy implements StorageProxyMBean
 
         Completable ret = Completable.concat(responseHandlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
         return ret.onErrorResumeNext(ex -> {
-            try
-            {
-                if (logger.isTraceEnabled())
-                    logger.trace("Failed to wait for handlers", ex);
+            if (logger.isTraceEnabled())
+                logger.trace("Failed to wait for handlers", ex);
 
-                if (ex instanceof WriteTimeoutException || ex instanceof WriteFailureException)
+            if (ex instanceof WriteTimeoutException || ex instanceof WriteFailureException)
+            {
+                if (consistencyLevel == ConsistencyLevel.ANY)
                 {
-                    if (consistencyLevel == ConsistencyLevel.ANY)
+                    hintMutations(mutations);
+                    return Completable.complete(); // do not propagate the exception
+                }
+                else
+                {
+                    if (ex instanceof WriteFailureException)
                     {
-                        hintMutations(mutations);
-                        return Completable.complete(); // do not propagate the exception
+                        writeMetrics.failures.mark();
+                        writeMetricsMap.get(consistencyLevel).failures.mark();
+                        WriteFailureException fe = (WriteFailureException) ex;
+                        Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
+                                      fe.received,
+                                      fe.blockFor,
+                                      fe.failureReasonByEndpoint.size());
                     }
                     else
                     {
-                        if (ex instanceof WriteFailureException)
-                        {
-                            writeMetrics.failures.mark();
-                            writeMetricsMap.get(consistencyLevel).failures.mark();
-                            WriteFailureException fe = (WriteFailureException) ex;
-                            Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
-                                          fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
-                        }
-                        else
-                        {
-                            writeMetrics.timeouts.mark();
-                            writeMetricsMap.get(consistencyLevel).timeouts.mark();
-                            WriteTimeoutException te = (WriteTimeoutException) ex;
-                            Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
-                        }
+                        writeMetrics.timeouts.mark();
+                        writeMetricsMap.get(consistencyLevel).timeouts.mark();
+                        WriteTimeoutException te = (WriteTimeoutException) ex;
+                        Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
                     }
                 }
-                else if (ex instanceof UnavailableException)
-                {
-                    writeMetrics.unavailables.mark();
-                    writeMetricsMap.get(consistencyLevel).unavailables.mark();
-                    Tracing.trace("Unavailable");
-                }
-                else if (ex instanceof OverloadedException)
-                {
-                    writeMetrics.unavailables.mark();
-                    writeMetricsMap.get(consistencyLevel).unavailables.mark();
-                    Tracing.trace("Overloaded");
-                }
-
-                return Completable.error(ex);
             }
-            finally
+            else if (ex instanceof UnavailableException)
             {
-                long latency = System.nanoTime() - startTime;
-                writeMetrics.addNano(latency);
-                writeMetricsMap.get(consistencyLevel).addNano(latency);
+                writeMetrics.unavailables.mark();
+                writeMetricsMap.get(consistencyLevel).unavailables.mark();
+                Tracing.trace("Unavailable");
             }
-        }).toSingleDefault(new ResultMessage.Void());
+            else if (ex instanceof OverloadedException)
+            {
+                writeMetrics.unavailables.mark();
+                writeMetricsMap.get(consistencyLevel).unavailables.mark();
+                Tracing.trace("Overloaded");
+            }
+            return Completable.error(ex);
+        }).doFinally(() -> recordLatency(consistencyLevel, startTime)).toSingleDefault(new ResultMessage.Void());
     }
 
     /**
@@ -866,11 +858,7 @@ public class StorageProxy implements StorageProxyMBean
                 Tracing.trace("Write failure; received {} of {} required replies", wfe.received, wfe.blockFor);
             }
             return Completable.error(e);
-        }).doFinally(() -> {
-            long latency = System.nanoTime() - startTime;
-            writeMetrics.addNano(latency);
-            writeMetricsMap.get(consistencyLevel).addNano(latency);
-        });
+        }).doFinally(() -> recordLatency(consistencyLevel, startTime));
     }
 
     /**
@@ -1870,6 +1858,19 @@ public class StorageProxy implements StorageProxyMBean
         long latency = System.nanoTime() - start;
         rangeMetrics.addNano(latency);
         Keyspace.openAndGetStore(command.metadata()).metric.coordinatorScanLatency.update(latency, TimeUnit.NANOSECONDS);
+    }
+
+    /**
+     * Record the write latency
+     *
+     * @param cl - consistency level used for write
+     * @param start - start time of the write
+     */
+    private static void recordLatency(ConsistencyLevel cl, long start)
+    {
+        long latency = System.nanoTime() - start;
+        writeMetrics.addNano(latency);
+        writeMetricsMap.get(cl).addNano(latency);
     }
 
     public static Flow<FlowablePartition> getRangeSlice(PartitionRangeReadCommand command, ReadContext ctx)
