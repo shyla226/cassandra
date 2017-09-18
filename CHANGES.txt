@@ -1,4 +1,5 @@
 4.0
+ * Use compaction threshold for STCS in L0 (CASSANDRA-13861)
  * Fix problem with min_compress_ratio: 1 and disallow ratio < 1 (CASSANDRA-13703)
  * Add extra information to SASI timeout exception (CASSANDRA-13677)
  * Rework CompactionStrategyManager.getScanners synchronization (CASSANDRA-13786)
@@ -128,6 +129,7 @@
  * CQLSH: Don't pause when capturing data (CASSANDRA-13743)
 
 3.11.1
+ * AbstractTokenTreeBuilder#serializedSize returns wrong value when there is a single leaf and overflow collisions (CASSANDRA-3.11)
  * BTree.Builder memory leak (CASSANDRA-13754)
  * Revert CASSANDRA-10368 of supporting non-pk column filtering due to correctness (CASSANDRA-13798)
  * Add a skip read validation flag to cassandra-stress (CASSANDRA-13772)
@@ -138,6 +140,8 @@
  * Duplicate the buffer before passing it to analyser in SASI operation (CASSANDRA-13512)
  * Properly evict pstmts from prepared statements cache (CASSANDRA-13641)
 Merged from 3.0:
+ * Make isBuilt volatile in PartitionUpdate (CASSANDRA-13619)
+ * Prevent integer overflow of timestamps in CellTest and RowsTest (CASSANDRA-13866)
  * Don't block RepairJob execution on validation futures (CASSANDRA-13797)
  * Wait for all management tasks to complete before shutting down CLSM (CASSANDRA-13123)
  * INSERT statement fails when Tuple type is used as clustering column with default DESC order (CASSANDRA-13717)
