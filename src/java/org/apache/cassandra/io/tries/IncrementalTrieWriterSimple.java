@@ -84,7 +84,7 @@ implements IncrementalTrieWriter<Value>
 
     static class Node<Value> extends IncrementalTrieWriterBase.BaseNode<Value, Node<Value>>
     {
-        Node(byte transition)
+        Node(int transition)
         {
             super(transition);
         }
@@ -92,7 +92,7 @@ implements IncrementalTrieWriter<Value>
         @Override
         Node<Value> newNode(byte transition)
         {
-            return new Node<Value>(transition);
+            return new Node<Value>(transition & 0xFF);
         }
 
         public long serializedPositionDelta(int i, long nodePosition)

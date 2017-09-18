@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
@@ -322,7 +323,7 @@ public class PartitionIndexTest
             File file = File.createTempFile("ColumnTrieReaderTest", "");
             SequentialWriter writer = new SequentialWriter(file, SequentialWriterOption.newBuilder().finishOnClose(true).build());
             List<DecoratedKey> list = Lists.newArrayList();
-            int parts = 5;
+            int parts = 15;
             try (FileHandle.Builder fhBuilder = new FileHandle.Builder(file.getPath())
                                                 .bufferSize(PageAware.PAGE_SIZE)
                                                 .withChunkCache(ChunkCache.instance)
@@ -333,7 +334,7 @@ public class PartitionIndexTest
                 writer.setPostFlushListener(() -> builder.markPartitionIndexSynced(writer.getLastFlushOffset()));
                 for (int i = 0; i < COUNT; i++)
                 {
-                    DecoratedKey key = generateRandomKey();
+                    DecoratedKey key = generateRandomLengthKey();
                     list.add(key);
                 }
                 Collections.sort(list);
@@ -626,6 +627,23 @@ public class PartitionIndexTest
     {
         UUID uuid = UUID.randomUUID();
         return partitioner.decorateKey(ByteBufferUtil.bytes(uuid));
+    }
+
+    DecoratedKey generateRandomLengthKey()
+    {
+        Random rand = ThreadLocalRandom.current();
+        int length = nextPowerRandom(rand, 100, 10, 2);     // favor long strings
+        StringBuilder s = new StringBuilder();
+        for (int i = 0; i < length; ++i)
+            s.append(alphabet.charAt(nextPowerRandom(rand, 0, alphabet.length(), 2))); // favor clashes at a
+
+        return partitioner.decorateKey(ByteBufferUtil.bytes(s.toString()));
+    }
+
+    int nextPowerRandom(Random rand, int x0, int x1, double power)
+    {
+        double r = Math.pow(rand.nextDouble(), power);
+        return x0 + (int) ((x1 - x0) * r);
     }
 
     private static final String alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";

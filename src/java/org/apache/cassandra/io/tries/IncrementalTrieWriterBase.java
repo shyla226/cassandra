@@ -152,10 +152,10 @@ implements IncrementalTrieWriter<Value>
     {
         Value payload;
         List<Node> children;
-        final byte transition;
+        final int transition;
         long filePos = -1;
 
-        BaseNode(byte transition)
+        BaseNode(int transition)
         {
             children = new ArrayList<>();
             this.transition = transition;
@@ -196,7 +196,7 @@ implements IncrementalTrieWriter<Value>
             payload = null;
         }
 
-        public byte transition(int i)
+        public int transition(int i)
         {
             return children.get(i).transition;
         }

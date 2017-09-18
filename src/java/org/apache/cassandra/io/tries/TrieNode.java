@@ -135,6 +135,7 @@ public abstract class TrieNode
 
         int bitsPerPointerIndex = 0;
         long delta = node.maxPositionDelta(nodePosition);
+        assert delta < 0;
         while (!singles[bitsPerPointerIndex].fits(-delta))
             ++bitsPerPointerIndex;
 
@@ -366,7 +367,7 @@ public abstract class TrieNode
         @Override
         boolean fits(long delta)
         {
-            return delta > 0 && delta <= 0xF;
+            return 0 <= delta && delta <= 0xF;
         }
 
         @Override
@@ -436,7 +437,7 @@ public abstract class TrieNode
         @Override
         boolean fits(long delta)
         {
-            return delta > 0 && delta <= 0xFFF;
+            return 0 <= delta && delta <= 0xFFF;
         }
 
         @Override
@@ -617,6 +618,12 @@ public abstract class TrieNode
                 dest.writeShort((short) (pd << 4));
             }
         }
+
+        @Override
+        boolean fits(long delta)
+        {
+            return 0 <= delta && delta <= 0xFFF;
+        }
     };
 
     static final Dense DENSE_16 = new Dense(2);
@@ -714,8 +721,8 @@ public abstract class TrieNode
 
         public int sizeofNode(SerializationNode<?> node)
         {
-            int l = node.transition(0) & 0xFF;
-            int r = node.transition(node.childCount() - 1) & 0xFF;
+            int l = node.transition(0);
+            int r = node.transition(node.childCount() - 1);
             return 3 + (r - l + 1) * bytesPerPointer;
         }
 
@@ -724,14 +731,15 @@ public abstract class TrieNode
         {
             int childCount = node.childCount();
             dest.writeByte((ordinal << 4) + (payloadBits & 0x0F));
-            int l = node.transition(0) & 0xFF;
-            int r = node.transition(childCount - 1) & 0xFF;
+            int l = node.transition(0);
+            int r = node.transition(childCount - 1);
+            assert 0 <= l && l <= r && r <= 255;
             dest.writeByte(l);
             dest.writeByte(r - l);      // r is included, i.e. this is len - 1
 
             for (int i = 0; i < childCount; ++i)
             {
-                int next = node.transition(i) & 0xFF;
+                int next = node.transition(i);
                 while (l < next)
                 {
                     writeBytes(dest, NULL_VALUE);
@@ -769,8 +777,8 @@ public abstract class TrieNode
 
         public int sizeofNode(SerializationNode<?> node)
         {
-            int l = node.transition(0) & 0xFF;
-            int r = node.transition(node.childCount() - 1) & 0xFF;
+            int l = node.transition(0);
+            int r = node.transition(node.childCount() - 1);
             return 3 + ((r - l + 1) * 3 + 1) / 2;
         }
 
@@ -779,8 +787,9 @@ public abstract class TrieNode
         {
             int childCount = node.childCount();
             dest.writeByte((ordinal << 4) + (payloadBits & 0x0F));
-            int l = node.transition(0) & 0xFF;
-            int r = node.transition(childCount - 1) & 0xFF;
+            int l = node.transition(0);
+            int r = node.transition(childCount - 1);
+            assert 0 <= l && l <= r && r <= 255;
             dest.writeByte(l);
             dest.writeByte(r - l);      // r is included, i.e. this is len - 1
 
@@ -788,7 +797,7 @@ public abstract class TrieNode
             int start = l;
             for (int i = 0; i < childCount; ++i)
             {
-                int next = node.transition(i) & 0xFF;
+                int next = node.transition(i);
                 while (l < next)
                 {
                     carry = write12Bits(dest, NULL_VALUE, l - start, carry);
@@ -802,6 +811,11 @@ public abstract class TrieNode
                 dest.writeByte(carry);
         }
 
+        @Override
+        boolean fits(long delta)
+        {
+            return 0 <= delta && delta <= 0xFFF;
+        }
     };
 
     static final LongDense LONG_DENSE = new LongDense();
@@ -846,7 +860,7 @@ public abstract class TrieNode
 
     static int write12Bits(DataOutput dest, int value, int index, int carry) throws IOException
     {
-        assert value >= 0 && value < (1 << 12);
+        assert 0 <= value && value <= 0xFFF;
         if ((index & 1) == 0)
         {
             dest.writeByte(value >> 4);
@@ -871,9 +885,9 @@ public abstract class TrieNode
         SizedInts.write(dest, ofs, bytesPerPointer);
     }
 
-    boolean fits(long ofs)
+    boolean fits(long delta)
     {
-        return ofs >= 0 && ofs < (1L << (bytesPerPointer * 8));
+        return 0 <= delta && delta < (1L << (bytesPerPointer * 8));
     }
 
     public String toString()
@@ -904,6 +918,8 @@ public abstract class TrieNode
     static final TrieNode[] denses = new TrieNode[] { DENSE_12, DENSE_12, DENSE_12, DENSE_16, DENSE_24, DENSE_32, DENSE_40, LONG_DENSE };
     static
     {
+        assert sparses.length == singles.length;
+        assert denses.length == singles.length;
         assert values.length <= 16;
         for (int i = 0; i < values.length; ++i)
             values[i].ordinal = i;

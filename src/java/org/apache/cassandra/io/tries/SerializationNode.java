@@ -19,9 +19,20 @@ package org.apache.cassandra.io.tries;
 
 public interface SerializationNode<Value>
 {
+    /**
+     * The number of children of the node.
+     */
     int childCount();
+
+    /**
+     * The payload of the node if the node has any associated, otherwise null.
+     */
     Value payload();
-    byte transition(int i);
+
+    /**
+     * The transition character for the child at position i. Must be an integer between 0 and 255.
+     */
+    int transition(int i);
 
     /**
      * Returns the distance between this node's position and the child at index i.
@@ -34,7 +45,7 @@ public interface SerializationNode<Value>
 
     /**
      * Returns the furthest distance that needs to be written to store this node, i.e.
-     *   min(i, nodePosition) for 0 <= i < childCount()
+     *   min(serializedPositionDelta(i, nodePosition) for 0 <= i < childCount())
      * Given separately as the loop above can be inefficient (e.g. when children are not yet written).
      */
     long maxPositionDelta(long nodePosition);

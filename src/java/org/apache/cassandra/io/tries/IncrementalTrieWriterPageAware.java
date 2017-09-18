@@ -75,13 +75,13 @@ implements IncrementalTrieWriter<Value>
         if (c != 0)
             return c;
 
-        // Make sure item we use for comparison key comes greater than all equals.
-        c = Long.compare(l.filePos, r.filePos);
-        if (c != 0)
-            return c;
+        // Then order by character, which serves several purposes:
+        // - enforces inequality to make sure equal sizes aren't treated as duplicates,
+        // - makes sure the item we use for comparison key comes greater than all equal-sized nodes,
+        // - orders equal sized items so that most recently processed (and potentially having closer children) comes
+        //   last and is thus the first one picked for layout.
+        c = Integer.compare(l.transition, r.transition);
 
-        // Then enforce inequality to allow duplicates.
-        c = Long.compare(l.uniqueId, r.uniqueId);
         assert c != 0 || l == r;
         return c;
     };
@@ -170,8 +170,7 @@ implements IncrementalTrieWriter<Value>
                 children.add(child);
 
         int bytesLeft = bytesLeftInPage();
-        Node<Value> cmp = new Node<Value>((byte) 0);
-        cmp.filePos = 0;        // goes after all equal-sized unplaced nodes (whose filePos is -1)
+        Node<Value> cmp = new Node<Value>(256); // goes after all equal-sized unplaced nodes (whose transition character is 0-255)
         cmp.nodeSize = 0;
         while (!children.isEmpty())
         {
@@ -233,8 +232,9 @@ implements IncrementalTrieWriter<Value>
             node.branchSize = sz;
         }
 
-        // The sizing below will use the branch size, so make sure it's set.
-        if (node.hasOutOfPageChildren)
+        // The sizing below will use the branch size calculated above. Since that can change on out-of-page in branch,
+        // we need to recalculate the size if either flag is set.
+        if (node.hasOutOfPageChildren || node.hasOutOfPageInBranch)
             node.nodeSize = serializer.sizeofNode(node, nodePosition + node.branchSize);
 
         return node.branchSize + node.nodeSize;
@@ -311,27 +311,44 @@ implements IncrementalTrieWriter<Value>
 
     private long writePartialRecursive(Node<Value> node, DataOutputPlus dest, long baseOffset) throws IOException
     {
+        long startPosition = dest.position() + baseOffset;
+
         List<Node<Value>> childrenToClear = new ArrayList<>();
         for (Node<Value> child : node.children)
+        {
             if (child.filePos == -1)
             {
                 childrenToClear.add(child);
                 child.filePos = writePartialRecursive(child, dest, baseOffset);
             }
+        }
 
         long nodePosition = dest.position() + baseOffset;
+
+        if (node.hasOutOfPageInBranch)
+        {
+            // Update the branch size with the size of what we have just written. This may be used by the node's
+            // maxPositionDelta and it's a better approximation for later fitting calculations.
+            node.branchSize = (int) (nodePosition - startPosition);
+        }
+
         serializer.write(dest, node, nodePosition);
+
+        if (node.hasOutOfPageChildren || node.hasOutOfPageInBranch)
+        {
+            // Update the node size with what we have just seen. It's a better approximation for later fitting
+            // calculations.
+            long endPosition = dest.position() + baseOffset;
+            node.nodeSize = (int) (endPosition - nodePosition);
+        }
+
         for (Node<Value> child : childrenToClear)
             child.filePos = -1;
         return nodePosition;
     }
 
-    static final AtomicLong uniqueCounter = new AtomicLong();
-
     static class Node<Value> extends IncrementalTrieWriterBase.BaseNode<Value, Node<Value>>
     {
-        final long uniqueId = uniqueCounter.incrementAndGet();
-
         /**
          * Currently calculated size of the branch below this node, not including the node itself.
          * If hasOutOfPageInBranch is true, this may be underestimated as the size
@@ -356,7 +373,7 @@ implements IncrementalTrieWriter<Value>
          */
         boolean hasOutOfPageChildren = true;
 
-        Node(byte transition)
+        Node(int transition)
         {
             super(transition);
         }
@@ -364,18 +381,13 @@ implements IncrementalTrieWriter<Value>
         @Override
         Node<Value> newNode(byte transition)
         {
-            return new Node<Value>(transition);
+            return new Node<Value>(transition & 0xFF);
         }
 
         public long serializedPositionDelta(int i, long nodePosition)
         {
-            if (children.get(i).filePos != -1)
-                return children.get(i).filePos - nodePosition;
-
-            int dist = children.get(i).nodeSize;
-            for (int j = i + 1; j < children.size(); ++j)
-                dist += children.get(j).branchSize + children.get(j).nodeSize;
-            return -dist;
+            assert (children.get(i).filePos != -1);
+            return children.get(i).filePos - nodePosition;
         }
 
         /**
@@ -420,7 +432,7 @@ implements IncrementalTrieWriter<Value>
         @Override
         public String toString()
         {
-            return String.format("%02x branchSize=%04x nodeSize=%04x", transition, branchSize, nodeSize);
+            return String.format("%02x branchSize=%04x nodeSize=%04x %s%s", transition, branchSize, nodeSize, hasOutOfPageInBranch ? "B" : "", hasOutOfPageChildren ? "C" : "");
         }
     }
 }

@@ -18,6 +18,7 @@
 package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.Closeable;
+import java.io.DataOutput;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
@@ -93,7 +94,7 @@ public class PartitionIndex implements Closeable
     }
 
     public static PartitionIndexSerializer trieSerializer = new PartitionIndexSerializer();
-    static class PartitionIndexSerializer implements TrieSerializer<Payload, DataOutputPlus>
+    static class PartitionIndexSerializer implements TrieSerializer<Payload, DataOutput>
     {
         public int sizeofNode(SerializationNode<Payload> node, long nodePosition)
         {
@@ -102,12 +103,12 @@ public class PartitionIndex implements Closeable
         }
 
         @Override
-        public void write(DataOutputPlus dest, SerializationNode<Payload> node, long nodePosition) throws IOException
+        public void write(DataOutput dest, SerializationNode<Payload> node, long nodePosition) throws IOException
         {
             write(dest, TrieNode.typeFor(node, nodePosition), node, nodePosition);
         }
 
-        public void write(DataOutputPlus dest, TrieNode type, SerializationNode<Payload> node, long nodePosition) throws IOException
+        public void write(DataOutput dest, TrieNode type, SerializationNode<Payload> node, long nodePosition) throws IOException
         {
             Payload payload = node.payload();
             if (payload != null)
