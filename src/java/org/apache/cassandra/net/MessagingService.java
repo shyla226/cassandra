@@ -460,7 +460,7 @@ public final class MessagingService implements MessagingServiceMBean
 
             if (future != null)
             {
-                return future.thenAccept(ignored -> backPressure.apply(states, timeoutInNanos, TimeUnit.NANOSECONDS));
+                return future.thenCompose(ignored -> backPressure.apply(states, timeoutInNanos, TimeUnit.NANOSECONDS));
             }
         }
 
