@@ -67,6 +67,14 @@ public class PartitionRangeReadCommand extends ReadCommand
     public static final Versioned<ReadVersion, Serializer<PartitionRangeReadCommand>> serializers = ReadVersion.versioned(v -> new ReadCommandSerializer<>(v, selectionDeserializer));
 
     private final DataRange dataRange;
+    /**
+     * Race condition when ReadCommand is re-used.
+     * 
+     * It's ok to get a smaller oldestUnrepairedTombstone value when ReadCommand is reused, but the concurrent update
+     * to this variable is not safe, we might lost update.
+     * 
+     * SEE APOLLO-1084
+     */
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
 
     private PartitionRangeReadCommand(DigestVersion digestVersion,

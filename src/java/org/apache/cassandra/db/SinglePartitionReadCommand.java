@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
-
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -84,23 +83,15 @@ public class SinglePartitionReadCommand extends ReadCommand
     private final ClusteringIndexFilter clusteringIndexFilter;
 
 
-    // Mutable query state.
-    private ColumnFamilyStore cfs;
-    private SSTableReadMetricsCollector metricsCollector;
-    private int oldestUnrepairedTombstone;
-
-
-    // Mutable query state as used by queryMemtableAndDiskInternal
-    private long mostRecentPartitionTombstone;
-    private long minTimestamp;
-    private int allTableCount;
-    private int includedDueToTombstones;
-    private int nonIntersectingSSTables;
-
-    // Mutable query state used by queryMemtableAndSSTablesInTimestampOrder
-    private ClusteringIndexNamesFilter namesFilter;
-    private boolean onlyUnrepaired;
-    private ImmutableBTreePartition timeOrderedResult;
+    /**
+     * Race condition when ReadCommand is re-used.
+     * 
+     * It's ok to get a smaller oldestUnrepairedTombstone value when ReadCommand is reused, but the concurrent update
+     * to this variable is not safe, we might lost update.
+     * 
+     * SEE APOLLO-1084
+     */
+    private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
 
     private SinglePartitionReadCommand(DigestVersion digestVersion,
                                        TableMetadata metadata,
@@ -116,24 +107,6 @@ public class SinglePartitionReadCommand extends ReadCommand
         assert partitionKey.getPartitioner() == metadata.partitioner;
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
-        resetMutableState();
-    }
-
-    private void resetMutableState()
-    {
-        metricsCollector = null;
-        cfs = null;
-        oldestUnrepairedTombstone = Integer.MAX_VALUE;
-
-        mostRecentPartitionTombstone = Long.MIN_VALUE;
-        minTimestamp = Long.MAX_VALUE;
-        allTableCount = 0;
-        includedDueToTombstones = 0;
-        nonIntersectingSSTables = 0;
-
-        namesFilter = null;
-        onlyUnrepaired = true;
-        timeOrderedResult = null;
     }
 
     public Request.Dispatcher<SinglePartitionReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints)
@@ -457,11 +430,6 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public Flow<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        //Resets our mutable state for short reads
-        //Since this object can be re-used
-        if (this.cfs != null)
-            resetMutableState();
-
         if (cfs.isRowCacheEnabled())
             return getThroughCache(cfs, executionController);
         else
@@ -470,20 +438,15 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public Flow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        //Resets our mutable state for short reads
-        //Since this object can be re-used
-        if (this.cfs != null)
-            resetMutableState();
+        SSTableReadMetricsCollector metricsCollector = new SSTableReadMetricsCollector();
 
-        metricsCollector = new SSTableReadMetricsCollector();
-
-        return Threads.deferOnCore(() -> queryMemtableAndDisk(cfs, executionController)
-                                         .doOnClose(() -> updateMetrics(cfs.metric)),
+        return Threads.deferOnCore(() -> queryMemtableAndDisk(cfs, executionController, metricsCollector)
+                                         .doOnClose(() -> updateMetrics(cfs.metric, metricsCollector)),
                                    TPC.getCoreForKey(cfs.keyspace, partitionKey),
                                    TPCTaskType.READ);
     }
 
-    private void updateMetrics(TableMetrics metrics)
+    private void updateMetrics(TableMetrics metrics, SSTableReadMetricsCollector metricsCollector)
     {
         int mergedSSTablesIterated = metricsCollector.getMergedSSTables();
         metrics.updateSSTableIterated(mergedSSTablesIterated);
@@ -617,12 +580,12 @@ public class SinglePartitionReadCommand extends ReadCommand
      * a parameter to enforce that fact, even though it's not explicitlly used by the method.
      */
     private Flow<FlowableUnfilteredPartition> queryMemtableAndDisk(ColumnFamilyStore cfs,
-                                                                   ReadExecutionController executionController)
+                                                                   ReadExecutionController executionController,
+                                                                   SSTableReadMetricsCollector metricsCollector)
     {
         assert executionController != null && executionController.validForReadOn(cfs);
 
         Tracing.trace("Executing single-partition query on {}", cfs.name);
-        this.cfs = cfs;
 
          /*
          * We have 2 main strategies:
@@ -636,9 +599,11 @@ public class SinglePartitionReadCommand extends ReadCommand
          *      and counters are intrinsically a collection of shards and so have the same problem).
          */
         if (clusteringIndexFilter().kind() == ClusteringIndexFilter.Kind.NAMES && !queriesMulticellType(cfs.metadata()))
-            return queryMemtableAndSSTablesInTimestampOrder((ClusteringIndexNamesFilter) clusteringIndexFilter());
+            return queryMemtableAndSSTablesInTimestampOrder(cfs,
+                                                            (ClusteringIndexNamesFilter) clusteringIndexFilter(),
+                                                            metricsCollector);
         else
-            return queryMemtableAndDiskInternal();
+            return queryMemtableAndDiskInternal(cfs, metricsCollector);
     }
 
     @Override
@@ -647,7 +612,24 @@ public class SinglePartitionReadCommand extends ReadCommand
         return oldestUnrepairedTombstone;
     }
 
-    private Flow<FlowableUnfilteredPartition> queryMemtableAndDiskInternal()
+    // variables mutated in lambda
+    class MutableState
+    {
+        // for queryMemtableAndDiskInternal
+        long mostRecentPartitionTombstone = Long.MIN_VALUE;
+        long minTimestamp = Long.MIN_VALUE;
+        int allTableCount = 0;
+        int includedDueToTombstones = 0;
+        int nonIntersectingSSTables = 0;
+
+        // queryMemtableAndSSTablesInTimestampOrder
+        boolean onlyUnrepaired = true;
+        ImmutableBTreePartition timeOrderedResults = null;
+        ClusteringIndexNamesFilter namesFilter = null;
+    }
+
+    private Flow<FlowableUnfilteredPartition> queryMemtableAndDiskInternal(ColumnFamilyStore cfs,
+                                                                           SSTableReadMetricsCollector metricsCollector)
     {
         // We now build a flow of FlowableUnfilteredPartition sourced from three separate lists:
         // - memtables
@@ -659,10 +641,12 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         List<Flow<FlowableUnfilteredPartition>> iterators = new ArrayList<>(3);
 
+        MutableState state = new MutableState();
+
         iterators.add(Flow.fromIterable(view.memtables)
                           .flatMap(memtable ->
                           {
-                              minTimestamp = Math.min(minTimestamp, memtable.getMinTimestamp());
+                              state.minTimestamp = Math.min(state.minTimestamp, memtable.getMinTimestamp());
                               return memtable.getPartition(partitionKey());
                           })
                           .skippingMap(p ->
@@ -673,7 +657,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                               oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone,
                                                                    p.stats().minLocalDeletionTime);
 
-                              mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
+                              state.mostRecentPartitionTombstone = Math.max(state.mostRecentPartitionTombstone,
                                                                       p.partitionLevelDeletion().markedForDeleteAt());
 
                               return clusteringIndexFilter().getFlowableUnfilteredPartition(columnFilter(), p);
@@ -698,11 +682,11 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         for (SSTableReader sstable : view.sstables)
         {
-            ++allTableCount;
+            ++state.allTableCount;
 
             if (!shouldInclude(sstable))
             {
-                nonIntersectingSSTables++;
+                state.nonIntersectingSSTables++;
                 if (sstable.mayHaveTombstones())
                 { // if sstable has tombstones we need to check after one pass if it can be safely skipped
                     if (skippedSSTablesWithTombstones == null)
@@ -718,20 +702,20 @@ public class SinglePartitionReadCommand extends ReadCommand
         // been processed, which ensures that the relevant fields are properly set.
 
         iterators.add(Flow.fromIterable(filteredSSTables)
-                          .takeWhile(sstable -> sstable.getMaxTimestamp() >= mostRecentPartitionTombstone)
+                          .takeWhile(sstable -> sstable.getMaxTimestamp() >= state.mostRecentPartitionTombstone)
                           .flatMap(sstable ->
                           {
-                              minTimestamp = Math.min(minTimestamp, sstable.getMinTimestamp());
+                              state.minTimestamp = Math.min(state.minTimestamp, sstable.getMinTimestamp());
 
                               if (!sstable.isRepaired())
                                   oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone,
                                                                        sstable.getMinLocalDeletionTime());
 
-                              return makeFlowable(sstable);
+                              return makeFlowable(sstable, metricsCollector);
                           })
                           .map(fup ->
                           {
-                              mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
+                              state.mostRecentPartitionTombstone = Math.max(state.mostRecentPartitionTombstone,
                                                                       fup.header.partitionLevelDeletion.markedForDeleteAt());
                               return fup;
                           }));
@@ -741,27 +725,35 @@ public class SinglePartitionReadCommand extends ReadCommand
         if (skippedSSTablesWithTombstones != null)
         {
             iterators.add(Flow.fromIterable(skippedSSTablesWithTombstones)
-                              .takeWhile(sstable -> sstable.getMaxTimestamp() > minTimestamp)
+                              .takeWhile(sstable -> sstable.getMaxTimestamp() > state.minTimestamp)
                               .flatMap(sstable ->
                               {
                                   // This has no sliced data so we no longer need to update minTimestamp
 
-                                  includedDueToTombstones++;
+                                  state.includedDueToTombstones++;
 
                                   if (!sstable.isRepaired())
                                       oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone,
                                                                            sstable.getMinLocalDeletionTime());
 
-                                  return makeFlowable(sstable);
+                                  return makeFlowable(sstable, metricsCollector);
                               }));
         }
 
         return Flow.concat(iterators)
                    .toList()
-                   .map(this::mergeResult);
+                   .map(sources -> mergeResult(cfs,
+                                               sources,
+                                               state.nonIntersectingSSTables,
+                                               state.allTableCount,
+                                               state.includedDueToTombstones));
     }
 
-    private FlowableUnfilteredPartition mergeResult(List<FlowableUnfilteredPartition> fups)
+    private FlowableUnfilteredPartition mergeResult(ColumnFamilyStore cfs,
+                                                    List<FlowableUnfilteredPartition> fups,
+                                                    int nonIntersectingSSTables,
+                                                    int allTableCount,
+                                                    int includedDueToTombstones)
     {
         if (Tracing.isTracing())
             Tracing.trace("Skipped {}/{} non-slice-intersecting sstables, included {} due to tombstones",
@@ -787,12 +779,15 @@ public class SinglePartitionReadCommand extends ReadCommand
         return clusteringIndexFilter().shouldInclude(sstable);
     }
 
-    private Flow<FlowableUnfilteredPartition> makeFlowable(final SSTableReader sstable, final ClusteringIndexNamesFilter clusterFilter)
+    private Flow<FlowableUnfilteredPartition> makeFlowable(final SSTableReader sstable,
+                                                           final ClusteringIndexNamesFilter clusterFilter,
+                                                           SSTableReadMetricsCollector metricsCollector)
     {
         return sstable.flow(partitionKey(), clusterFilter.getSlices(metadata()), columnFilter(), isReversed(), metricsCollector);
     }
 
-    private Flow<FlowableUnfilteredPartition> makeFlowable(final SSTableReader sstable)
+    private Flow<FlowableUnfilteredPartition> makeFlowable(final SSTableReader sstable,
+                                                           SSTableReadMetricsCollector metricsCollector)
     {
         return sstable.flow(partitionKey(), clusteringIndexFilter().getSlices(metadata()), columnFilter(), isReversed(), metricsCollector);
     }
@@ -819,12 +814,18 @@ public class SinglePartitionReadCommand extends ReadCommand
      * no collection or counters are included).
      * This method assumes the filter is a {@code ClusteringIndexNamesFilter}.
      */
-    private Flow<FlowableUnfilteredPartition> queryMemtableAndSSTablesInTimestampOrder(final ClusteringIndexNamesFilter initFilter)
+    private Flow<FlowableUnfilteredPartition> queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs,
+                                                                                       final ClusteringIndexNamesFilter initFilter,
+                                                                                       SSTableReadMetricsCollector metricsCollector)
     {
         Tracing.trace("Acquiring sstable references");
         ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
 
-        namesFilter = initFilter;
+        // variables mutated in lambda
+
+        MutableState state = new MutableState();
+        state.namesFilter = initFilter;
+
         Flow<FlowableUnfilteredPartition> pipeline =
             Flow.fromIterable(view.memtables)
                 .flatMap(memtable -> memtable.getPartition(partitionKey()))
@@ -835,7 +836,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                                  oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, p.stats().minLocalDeletionTime);
 
-                                 return namesFilter.getFlowableUnfilteredPartition(columnFilter(), p);
+                                 return state.namesFilter.getFlowableUnfilteredPartition(columnFilter(), p);
                              });
 
         if (!view.sstables.isEmpty())
@@ -850,15 +851,17 @@ public class SinglePartitionReadCommand extends ReadCommand
                         // if we've already seen a partition tombstone with a timestamp greater
                         // than the most recent update to this sstable, we're done, since the rest of the sstables
                         // will also be older
-                        if (timeOrderedResult != null &&
-                            sstable.getMaxTimestamp() < timeOrderedResult.partitionLevelDeletion().markedForDeleteAt())
+                        if (state.timeOrderedResults != null &&
+                            sstable.getMaxTimestamp() < state.timeOrderedResults.partitionLevelDeletion()
+                                                                                .markedForDeleteAt())
                             return false;
 
                         long currentMaxTs = sstable.getMaxTimestamp();
-                        namesFilter = reduceFilter(namesFilter,
-                                                   timeOrderedResult, currentMaxTs);
+                        state.namesFilter = reduceFilter(state.namesFilter,
+                                                         state.timeOrderedResults,
+                                                         currentMaxTs);
                         // If the filter is empty, we have constructed our result; stop processing sstables.
-                        return (namesFilter != null);
+                        return (state.namesFilter != null);
                     })
                     .flatMap(sstable ->
                     {
@@ -868,30 +871,34 @@ public class SinglePartitionReadCommand extends ReadCommand
                             // queried data. We can completely skip a table that doesn't have any tombstones, though.
                             if (!sstable.mayHaveTombstones())
                                 return Flow.empty();
-
-                            ++includedDueToTombstones;
                         }
 
                         Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
 
                         if (sstable.isRepaired())
-                            onlyUnrepaired = false;
+                            state.onlyUnrepaired = false;
                         else
                             oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone,
                                                                  sstable.getMinLocalDeletionTime());
 
-                        return makeFlowable(sstable, namesFilter);
+                        return makeFlowable(sstable, state.namesFilter, metricsCollector);
                     });
 
             pipeline = Flow.concat(pipeline, sstablePipeline);
         }
 
-        return pipeline.flatMap(p -> mergeToMemory(timeOrderedResult, p, initFilter))
-                       .process(p -> timeOrderedResult = p)
-                       .map(v -> outputTimeOrderedResult());
+        return pipeline.flatMap(p -> mergeToMemory(state.timeOrderedResults, p, initFilter))
+                       .process(p -> state.timeOrderedResults = p)
+                       .map(v -> outputTimeOrderedResult(cfs,
+                                                         state.timeOrderedResults,
+                                                         metricsCollector,
+                                                         state.onlyUnrepaired));
     }
 
-    private FlowableUnfilteredPartition outputTimeOrderedResult()
+    private FlowableUnfilteredPartition outputTimeOrderedResult(ColumnFamilyStore cfs,
+                                                                ImmutableBTreePartition timeOrderedResult,
+                                                                SSTableReadMetricsCollector metricsCollector,
+                                                                boolean onlyUnrepaired)
     {
         if (timeOrderedResult == null || timeOrderedResult.isEmpty())
             return FlowablePartitions.empty(metadata(), partitionKey(), clusteringIndexFilter().isReversed());
