@@ -25,13 +25,11 @@ import org.apache.cassandra.db.rows.*;
 
 final class Filter extends Transformation
 {
-    private final boolean filterEmpty; // generally true except for direct row filtration
     private final int nowInSec;
     private final boolean enforceStrictLiveness;
 
-    public Filter(boolean filterEmpty, int nowInSec, boolean enforceStrictLiveness)
+    public Filter(int nowInSec, boolean enforceStrictLiveness)
     {
-        this.filterEmpty = filterEmpty;
         this.nowInSec = nowInSec;
         this.enforceStrictLiveness = enforceStrictLiveness;
     }
@@ -39,14 +37,9 @@ final class Filter extends Transformation
     @Override
     protected RowIterator applyToPartition(BaseRowIterator iterator)
     {
-        RowIterator filtered = iterator instanceof UnfilteredRows
-                               ? new FilteredRows(this, (UnfilteredRows) iterator)
-                               : new FilteredRows((UnfilteredRowIterator) iterator, this);
-
-        if (filterEmpty && closeIfEmpty(filtered))
-            return null;
-
-        return filtered;
+        return iterator instanceof UnfilteredRows
+             ? new FilteredRows(this, (UnfilteredRows) iterator)
+             : new FilteredRows((UnfilteredRowIterator) iterator, this);
     }
 
     @Override
@@ -69,15 +62,5 @@ final class Filter extends Transformation
     protected RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
     {
         return null;
-    }
-
-    private static boolean closeIfEmpty(BaseRowIterator<?> iter)
-    {
-        if (iter.isEmpty())
-        {
-            iter.close();
-            return true;
-        }
-        return false;
     }
 }

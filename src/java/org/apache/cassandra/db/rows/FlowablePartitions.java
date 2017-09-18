@@ -424,24 +424,21 @@ public class FlowablePartitions
         }
     }
 
-    private static Row filterStaticRow(Row row, int nowInSec, boolean enforStrictLiveness)
+    private static Row filterStaticRow(Row row, int nowInSec, boolean enforceStrictLiveness)
     {
         if (row == null || row.isEmpty())
             return Rows.EMPTY_STATIC_ROW;
 
-        row = row.purge(DeletionPurger.PURGE_ALL, nowInSec, enforStrictLiveness);
+        row = row.purge(DeletionPurger.PURGE_ALL, nowInSec, enforceStrictLiveness);
         return row == null ? Rows.EMPTY_STATIC_ROW : row;
     }
 
     public static FlowablePartition filter(FlowableUnfilteredPartition data, int nowInSec)
     {
-        boolean enforStrictLiveness = data.metadata().enforceStrictLiveness();
-        Row staticRow = data.staticRow.purge(DeletionPurger.PURGE_ALL, nowInSec, enforStrictLiveness);
-        Flow<Row> content = filteredContent(data, nowInSec);
-
+        boolean enforceStrictLiveness = data.metadata().enforceStrictLiveness();
         return new FlowablePartition(data.header,
-                                     filterStaticRow(staticRow, nowInSec, enforStrictLiveness),
-                                     content);
+                                     filterStaticRow(data.staticRow, nowInSec, enforceStrictLiveness),
+                                     filteredContent(data, nowInSec));
     }
 
     public static Flow<FlowablePartition> filterAndSkipEmpty(FlowableUnfilteredPartition data, int nowInSec)
@@ -459,11 +456,26 @@ public class FlowablePartitions
                                                                    c));
     }
 
+    public static Flow<FlowablePartition> skipEmpty(FlowablePartition data)
+    {
+        return data.staticRow.isEmpty()
+               ? data.content.skipMapEmpty(c -> new FlowablePartition(data.header, Rows.EMPTY_STATIC_ROW, c))
+               : Flow.just(new FlowablePartition(data.header, data.staticRow, data.content));
+    }
+
     private static Flow<Row> filteredContent(FlowableUnfilteredPartition data, int nowInSec)
     {
         return data.content.skippingMap(unfiltered -> unfiltered.isRow()
                 ? ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec, data.metadata().enforceStrictLiveness())
                 : null);
+    }
+
+    /**
+     * Filters the given partition stream, keeping all partitions that become empty after filtering.
+     */
+    public static Flow<FlowablePartition> filter(Flow<FlowableUnfilteredPartition> data, int nowInSec)
+    {
+        return data.map(p -> filter(p, nowInSec));
     }
 
     /**
@@ -478,12 +490,17 @@ public class FlowablePartitions
      * Skips empty partitions. This is not terribly efficient as it has to cache the first row of the partition and
      * reconstruct the FlowableUnfilteredPartition object.
      */
-    public static Flow<FlowableUnfilteredPartition> skipEmptyPartitions(Flow<FlowableUnfilteredPartition> partitions)
+    public static Flow<FlowableUnfilteredPartition> skipEmptyUnfilteredPartitions(Flow<FlowableUnfilteredPartition> partitions)
     {
         return partitions.flatMap(partition ->
                 partition.staticRow().isEmpty() && partition.partitionLevelDeletion().isLive() ?
                 partition.content.skipMapEmpty(content -> new FlowableUnfilteredPartition(partition.header, partition.staticRow, content)) :
                 Flow.just(partition));
+    }
+
+    public static Flow<FlowablePartition> skipEmptyPartitions(Flow<FlowablePartition> partitions)
+    {
+        return partitions.flatMap(FlowablePartitions::skipEmpty);
     }
     
     public static Flow<FlowablePartition> mergeAndFilter(List<Flow<FlowableUnfilteredPartition>> results,

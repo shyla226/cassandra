@@ -37,6 +37,7 @@ import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.net.*;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.flow.Flow;
@@ -70,10 +71,26 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
             sources[i] = msg.from();
         }
 
-        // Even though every responses should honor the limit, we might have more than requested post reconciliation,
-        // so ensure we're respecting the limit.
+        /*
+         * Even though every response, individually, will honor the limit, it is possible that we will, after the merge,
+         * have more rows than the client requested. To make sure that we still conform to the original limit,
+         * we apply a top-level post-reconciliation counter to the merged partition iterator.
+         *
+         * Short read protection logic (ShortReadRowProtection.moreContents()) relies on this counter to be applied
+         * to the current partition to work. For this reason we have to apply the counter transformation before
+         * empty partition discard logic kicks in - for it will eagerly consume the iterator.
+         *
+         * That's why the order here is: 1) merge; 2) filter rows; 3) count; 4) discard empty partitions
+         *
+         * See CASSANDRA-13747 for more details.
+         */
+
         DataLimits.Counter counter = command.limits().newCounter(command.nowInSec(), true, command.selectsFullPartition());
-        return DataLimits.truncateFiltered(mergeWithShortReadProtection(results, sources, counter), counter);
+
+        Flow<FlowableUnfilteredPartition> merged = mergeWithShortReadProtection(results, sources, counter);
+        Flow<FlowablePartition> filtered = FlowablePartitions.filter(merged, command.nowInSec());
+        Flow<FlowablePartition> counted = DataLimits.truncateFiltered(filtered, counter);
+        return FlowablePartitions.skipEmptyPartitions(counted);
     }
 
     /**
@@ -107,13 +124,13 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
                                  .andThen(completeOnReadRepairAnswersReceived());
     }
 
-    private Flow<FlowablePartition> mergeWithShortReadProtection(List<Flow<FlowableUnfilteredPartition>> results,
-                                                                 InetAddress[] sources,
-                                                                 DataLimits.Counter resultCounter)
+    private Flow<FlowableUnfilteredPartition> mergeWithShortReadProtection(List<Flow<FlowableUnfilteredPartition>> results,
+                                                                           InetAddress[] sources,
+                                                                           DataLimits.Counter resultCounter)
     {
         // If we have only one results, there is no read repair to do and we can't get short reads
         if (results.size() == 1)
-            return FlowablePartitions.filterAndSkipEmpty(results.get(0), command.nowInSec());
+            return results.get(0);
 
         FlowablePartitions.MergeListener listener = new RepairMergeListener(sources);
 
@@ -125,7 +142,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
                 results.set(i, withShortReadProtection(sources[i], results.get(i), resultCounter));
         }
 
-        return FlowablePartitions.mergeAndFilter(results, command.nowInSec(), listener);
+        return FlowablePartitions.mergePartitions(results, command.nowInSec(), listener);
     }
 
     private class RepairMergeListener implements FlowablePartitions.MergeListener
@@ -566,7 +583,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
             // at the top level
             int n = countedInCurrentPartition(postReconciliationCounter);
             int x = countedInCurrentPartition(counter);
-            int toQuery = Math.max(((n * n) / x) - n, 1);
+            int toQuery = Math.max(((n * n) / x) - Math.max(x, 1), 1);
 
             DataLimits retryLimits = command.limits().forShortReadRetry(toQuery);
             ClusteringIndexFilter filter = command.clusteringIndexFilter(lastPartitionKey);
@@ -578,6 +595,9 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
                                                                                retryLimits,
                                                                                lastPartitionKey,
                                                                                retryFilter);
+
+            Tracing.trace("Requesting {} extra rows from {} for short read protection", toQuery, source);
+            Schema.instance.getColumnFamilyStoreInstance(cmd.metadata().id).metric.shortReadProtectionRequests.mark();
 
             return doShortReadRetry(cmd)
                    .flatMap(fup -> fup.content);

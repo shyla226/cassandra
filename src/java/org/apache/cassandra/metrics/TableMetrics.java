@@ -278,6 +278,8 @@ public class TableMetrics
         }
     });
 
+    public final Meter shortReadProtectionRequests;
+
     public final Map<Sampler, TopKSampler<ByteBuffer>> samplers;
     /**
      * stores metrics that will be rolled into a single global metric
@@ -850,6 +852,8 @@ public class TableMetrics
         });
 
         nodeSyncMetrics = new NodeSyncMetrics(factory, "NodeSync");
+
+        shortReadProtectionRequests = Metrics.meter(factory.createMetricName("ShortReadProtectionRequests"));
     }
 
     public void updateSSTableIterated(int count)

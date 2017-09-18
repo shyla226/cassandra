@@ -256,7 +256,7 @@ public interface ReadQuery extends Monitorable
      */
     default public UnfilteredPartitionIterator executeForTests()
     {
-        return FlowablePartitions.toPartitions(FlowablePartitions.skipEmptyPartitions(executeLocally()), metadata());
+        return FlowablePartitions.toPartitions(FlowablePartitions.skipEmptyUnfilteredPartitions(executeLocally()), metadata());
     }
 
     /**

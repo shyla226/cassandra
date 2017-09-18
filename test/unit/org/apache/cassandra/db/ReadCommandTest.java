@@ -277,7 +277,7 @@ public class ReadCommandTest
 
             ReadQuery query = new SinglePartitionReadCommand.Group(commands, DataLimits.NONE);
 
-            Flow<FlowableUnfilteredPartition> partitions = FlowablePartitions.skipEmptyPartitions(query.executeLocally());
+            Flow<FlowableUnfilteredPartition> partitions = FlowablePartitions.skipEmptyUnfilteredPartitions(query.executeLocally());
             UnfilteredPartitionsSerializer.Serializer serializer = UnfilteredPartitionsSerializer.serializerForIntraNode(version);
             buffers.addAll(serializer.serialize(partitions, columnFilter).toList().blockingSingle());
         }
