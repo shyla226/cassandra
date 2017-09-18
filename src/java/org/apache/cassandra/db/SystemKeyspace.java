@@ -796,6 +796,12 @@ public final class SystemKeyspace
         });
     }
 
+    public static CompletableFuture<UntypedResultSet> loadPeerInfo(InetAddress ep, String columnName)
+    {
+        String req = "SELECT %s FROM system.%s WHERE peer = '%s'";
+        return TPCUtils.toFuture(executeInternalAsync(format(req, columnName, PEERS, ep.getHostAddress())));
+    }
+
     public static CompletableFuture<Void> updateHintsDropped(InetAddress ep, UUID timePeriod, int value)
     {
         return TPCUtils.withLock(GLOBAL_LOCK, () -> {
@@ -807,10 +813,39 @@ public final class SystemKeyspace
 
     public static CompletableFuture<Void> updateSchemaVersion(UUID version)
     {
-        return TPCUtils.withLock(GLOBAL_LOCK, () -> {
-            final String req = "INSERT INTO system.%s (key, schema_version) VALUES ('%s', ?)";
-            return TPCUtils.toFutureVoid(executeInternalAsync(format(req, LOCAL, LOCAL), version));
-        });
+        return updateLocalInfo("schema_version", version);
+    }
+
+    public static CompletableFuture<Void> updateLocalInfo(String columnName, Object value)
+    {
+        if (columnName.equals("host_id"))
+        {
+            assert value instanceof UUID;
+            return setLocalHostId((UUID) value).thenAccept(uuid -> {});
+        }
+        else if (columnName.equals("bootstrapped"))
+        {
+            assert value instanceof BootstrapState;
+            return setBootstrapState((BootstrapState) value).thenAccept(state -> {});
+        }
+        else if (columnName.equals("truncated_at"))
+        {
+            throw new IllegalArgumentException("Truncation records should be updated one by one via saveTruncationRecord");
+        }
+        else
+        {
+            return TPCUtils.withLock(GLOBAL_LOCK, () ->
+            {
+                final String req = "INSERT INTO system.%s (key, %s) VALUES ('%s', ?)";
+                return TPCUtils.toFutureVoid(executeInternalAsync(format(req, LOCAL, columnName, LOCAL), value));
+            });
+        }
+    }
+
+    public static CompletableFuture<UntypedResultSet> loadLocalInfo(String columnName)
+    {
+        String req = "SELECT %s FROM system.%s WHERE key = '%s'";
+        return TPCUtils.toFuture(executeInternalAsync(format(req, columnName, LOCAL, LOCAL)));
     }
 
     private static Set<String> tokensAsSet(Collection<Token> tokens)
@@ -900,7 +935,7 @@ public final class SystemKeyspace
      */
     public static Map<InetAddress, UUID> getHostIds()
     {
-        assert peers != null : "Peers not yet available, loadPeerInfoBlocking() called?";
+        assert peers != null : "Peers not yet available, finishStartupBlocking() called?";
         Map<InetAddress, UUID> hostIdMap = new HashMap<>();
 
         for (Map.Entry<InetAddress, PeerInfo> entry : peers.entrySet())
@@ -917,7 +952,7 @@ public final class SystemKeyspace
      */
     public static InetAddress getPreferredIP(InetAddress ep)
     {
-        assert peers != null : "Peers not yet available, loadPeerInfoBlocking() called?";
+        assert peers != null : "Peers not yet available, finishStartupBlocking() called?";
         PeerInfo info = peers.get(ep);
         return info == null || info.preferredIp == null ? ep : info.preferredIp;
     }
@@ -927,7 +962,7 @@ public final class SystemKeyspace
      */
     public static Map<InetAddress, Map<String,String>> loadDcRackInfo()
     {
-        assert peers != null : "Peers not yet available, loadPeerInfoBlocking() called?";
+        assert peers != null : "Peers not yet available, finishStartupBlocking() called?";
         Map<InetAddress, Map<String, String>> result = new HashMap<>();
 
         for (Map.Entry<InetAddress, PeerInfo> entry : peers.entrySet())
@@ -953,7 +988,7 @@ public final class SystemKeyspace
      */
     public static CassandraVersion getReleaseVersion(InetAddress ep)
     {
-        assert peers != null : "Peers not yet available, loadPeerInfoBlocking() called?";
+        assert peers != null : "Peers not yet available, finishStartupBlocking() called?";
 
         if (FBUtilities.getBroadcastAddress().equals(ep))
             return new CassandraVersion(FBUtilities.getReleaseVersionString());
@@ -1166,7 +1201,7 @@ public final class SystemKeyspace
      */
     public static UUID getLocalHostId()
     {
-        assert localHostId != null : "local host id not yet set, setLocalHostIdBlocking() called?";
+        assert localHostId != null : "local host id not yet set, setLocalHostId() called?";
         return localHostId;
     }
 

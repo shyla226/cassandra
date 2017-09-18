@@ -21,6 +21,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.junit.BeforeClass;
@@ -28,6 +29,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -39,7 +41,10 @@ import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.Pair;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class SystemKeyspaceTest
 {
@@ -106,7 +111,11 @@ public class SystemKeyspaceTest
     {
         UUID firstId = TPCUtils.blockingGet(SystemKeyspace.setLocalHostId());
         UUID secondId = SystemKeyspace.getLocalHostId();
-        assert firstId.equals(secondId) : String.format("%s != %s%n", firstId.toString(), secondId.toString());
+        assertEquals(firstId, secondId);
+
+        UUID anotherId = UUID.randomUUID();
+        SystemKeyspace.updateLocalInfo("host_id", anotherId);
+        assertEquals(anotherId, SystemKeyspace.getLocalHostId());
     }
 
     private static List<String> getBuiltIndexes(String keyspace)
@@ -154,7 +163,7 @@ public class SystemKeyspaceTest
     }
 
     @Test
-    public void testUpdatePeerInfo() throws UnknownHostException
+    public void testUpdateDcAndRacks() throws UnknownHostException
     {
         final InetAddress peer = InetAddress.getByName("127.0.0.2");
 
@@ -178,6 +187,140 @@ public class SystemKeyspaceTest
 
         TPCUtils.blockingAwait(SystemKeyspace.removeEndpoint(peer));
         assertEquals(0, SystemKeyspace.loadDcRackInfo().size());
+    }
+
+    @Test
+    public void testUpdateSchemaVersion()
+    {
+        final String columnName = "schema_version";
+        final UUID version = UUID.randomUUID();
+
+        TPCUtils.blockingAwait(SystemKeyspace.updateSchemaVersion(version));
+
+        UntypedResultSet ret = TPCUtils.blockingGet(SystemKeyspace.loadLocalInfo(columnName));
+        assertNotNull(ret);
+        assertEquals(1, ret.size());
+
+        UntypedResultSet.Row row = ret.one();
+        assertTrue(row.has(columnName));
+        assertEquals(version, row.getUUID(columnName));
+    }
+
+    @Test
+    public void testLocalServerId()
+    {
+        testUpdateLocalInfo("server_id", "123456");
+    }
+
+    @Test
+    public void testLocalWorkload()
+    {
+        testUpdateLocalInfo("workload", "analytics");
+    }
+
+    @Test
+    public void testLocalWorkloads()
+    {
+        testUpdateLocalInfo("workloads", Collections.singleton("analytics"));
+    }
+
+    @Test
+    public void testLocalBootstrapState()
+    {
+        testUpdateLocalInfo("bootstrapped", SystemKeyspace.BootstrapState.IN_PROGRESS);
+    }
+
+    @Test(expected=IllegalArgumentException.class)
+    public void testLocalTruncationRecords()
+    {
+        testUpdateLocalInfo("truncated_at", Collections.singletonMap(UUID.randomUUID(), ByteBuffer.allocate(0)));
+    }
+
+    private <T> void testUpdateLocalInfo(String columnName, T value)
+    {
+        UntypedResultSet ret = TPCUtils.blockingGet(SystemKeyspace.loadLocalInfo(columnName));
+        assertNotNull(ret);
+        assertEquals(1, ret.size());
+        assertFalse(ret.one().has(columnName));
+
+        TPCUtils.blockingAwait(SystemKeyspace.updateLocalInfo(columnName, value));
+
+        ret = TPCUtils.blockingGet(SystemKeyspace.loadLocalInfo(columnName));
+        assertNotNull(ret);
+        assertEquals(1, ret.size());
+
+        UntypedResultSet.Row row = ret.one();
+        assertTrue(row.has(columnName));
+
+        if (value instanceof String)
+            assertEquals(value, row.getString(columnName));
+        else if (value instanceof UUID)
+            assertEquals(value, row.getUUID(columnName));
+        else if (value instanceof Set)
+            assertEquals(value, row.getSet(columnName, UTF8Type.instance));
+        else if (value instanceof SystemKeyspace.BootstrapState)
+            assertEquals(value, SystemKeyspace.BootstrapState.valueOf(row.getString(columnName)));
+        else
+            fail("Unsupported value type");
+    }
+
+    @Test
+    public void testRemoteSchemaVersion() throws UnknownHostException
+    {
+        final InetAddress peer = InetAddress.getByName("127.0.0.2");
+        testUpdatePeerInfo(peer, "schema_version", UUID.randomUUID());
+    }
+
+    @Test
+    public void testRemoteServerId() throws UnknownHostException
+    {
+        final InetAddress peer = InetAddress.getByName("127.0.0.2");
+        testUpdatePeerInfo(peer, "server_id", "123456");
+    }
+
+    @Test
+    public void testRemoteWorkload() throws UnknownHostException
+    {
+        final InetAddress peer = InetAddress.getByName("127.0.0.2");
+        testUpdatePeerInfo(peer, "workload", "analytics");
+    }
+
+    @Test
+    public void testRemoteWorkloads() throws UnknownHostException
+    {
+        final InetAddress peer = InetAddress.getByName("127.0.0.2");
+        testUpdatePeerInfo(peer, "workloads", Collections.singleton("analytics"));
+    }
+
+    private <T> void testUpdatePeerInfo(InetAddress peer, String columnName, T value)
+    {
+        UntypedResultSet ret = TPCUtils.blockingGet(SystemKeyspace.loadPeerInfo(peer, columnName));
+        assertNotNull(ret);
+        assertEquals(0, ret.size());
+
+        TPCUtils.blockingAwait(SystemKeyspace.updatePeerInfo(peer, columnName, value));
+
+        ret = TPCUtils.blockingGet(SystemKeyspace.loadPeerInfo(peer, columnName));
+        assertNotNull(ret);
+        assertEquals(1, ret.size());
+
+        UntypedResultSet.Row row = ret.one();
+        assertTrue(row.has(columnName));
+
+        if (value instanceof String)
+            assertEquals(value, row.getString(columnName));
+        else if (value instanceof UUID)
+            assertEquals(value, row.getUUID(columnName));
+        else if (value instanceof Set)
+            assertEquals(value, row.getSet(columnName, UTF8Type.instance));
+        else
+            fail("Unsupported value type");
+
+        TPCUtils.blockingAwait(SystemKeyspace.removeEndpoint(peer));
+
+        ret = TPCUtils.blockingGet(SystemKeyspace.loadPeerInfo(peer, columnName));
+        assertNotNull(ret);
+        assertEquals(0, ret.size());
     }
 
     private void assertDeletedOrDeferred(int expectedCount)
