@@ -96,22 +96,4 @@ public class RepairMessageSerializerTest
         RepairMessage actual = serdes(expected);
         Assert.assertEquals(expected, actual);
     }
-
-    @Test
-    public void finalizePromise() throws Exception
-    {
-        RepairMessage expected = new FinalizePromise(UUIDGen.getTimeUUID(),
-                                                     InetAddress.getByName("10.0.0.2"),
-                                                     true);
-        RepairMessage actual = serdes(expected);
-        Assert.assertEquals(expected, actual);
-    }
-
-    @Test
-    public void finalizePropose() throws Exception
-    {
-        RepairMessage expected = new FinalizePropose(UUIDGen.getTimeUUID());
-        RepairMessage actual = serdes(expected);
-        Assert.assertEquals(expected, actual);
-    }
 }

@@ -19,6 +19,7 @@
 package org.apache.cassandra.repair.messages;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -29,7 +30,7 @@ import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.versioning.Versioned;
 
-public class StatusRequest extends RepairMessage<StatusRequest>
+public class StatusRequest extends ConsistentRepairMessage<StatusRequest>
 {
     public static Versioned<RepairVersion, MessageSerializer<StatusRequest>> serializers = RepairVersion.versioned(v -> new MessageSerializer<StatusRequest>(v)
     {
@@ -49,12 +50,9 @@ public class StatusRequest extends RepairMessage<StatusRequest>
         }
     });
 
-    public final UUID sessionID;
-
     public StatusRequest(UUID sessionID)
     {
-        super(null);
-        this.sessionID = sessionID;
+        super(sessionID);
     }
 
     public boolean equals(Object o)
@@ -84,8 +82,8 @@ public class StatusRequest extends RepairMessage<StatusRequest>
         return serializers.get(version);
     }
 
-    public Verb<StatusRequest, ?> verb()
+    public Optional<Verb<StatusRequest, ?>> verb()
     {
-        return Verbs.REPAIR.STATUS_REQUEST;
+        return Optional.of(Verbs.REPAIR.STATUS_REQUEST);
     }
 }

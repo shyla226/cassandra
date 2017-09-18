@@ -324,7 +324,13 @@ public class CassandraDaemon
         // Re-populate token metadata after commit log recover (new peers might be loaded onto system keyspace #10293)
         StorageService.instance.populateTokenMetadata();
 
-        // enable auto compaction
+        // Finish startup
+        SystemKeyspace.finishStartupBlocking();
+
+        // Enable active repair service: this *must* happen prior to enabling compactions (see APOLLO-821)
+        ActiveRepairService.instance.start();
+        
+        // Enable auto compaction
         for (Keyspace keyspace : Keyspace.all())
         {
             for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
@@ -336,9 +342,6 @@ public class CassandraDaemon
                 }
             }
         }
-
-        SystemKeyspace.finishStartupBlocking();
-        ActiveRepairService.instance.start();
 
         // Prepared statements
         QueryProcessor.preloadPreparedStatementBlocking();

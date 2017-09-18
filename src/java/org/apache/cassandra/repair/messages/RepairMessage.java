@@ -17,11 +17,14 @@
  */
 package org.apache.cassandra.repair.messages;
 
+import java.util.Optional;
+
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 
@@ -47,8 +50,20 @@ public abstract class RepairMessage<T extends RepairMessage>
         this.desc = desc;
     }
 
+    /**
+     * Validate the message: if true, and no exception is thrown, the message will be handled.
+     * @return
+     */
+    public boolean validate()
+    {
+        if (desc != null && desc.parentSessionId != null && !ActiveRepairService.instance.hasParentRepairSession(desc.parentSessionId))
+            throw new IllegalStateException("No parent repair session: " + desc.parentSessionId);
+
+        return true;
+    }
+
     @VisibleForTesting
     public abstract MessageSerializer<T> serializer(RepairVersion version);
     @VisibleForTesting
-    public abstract Verb<T, ?> verb();
+    public abstract Optional<Verb<T, ?>> verb();
 }

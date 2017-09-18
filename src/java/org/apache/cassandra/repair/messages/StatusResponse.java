@@ -19,19 +19,19 @@
 package org.apache.cassandra.repair.messages;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.consistent.ConsistentSession;
 import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.versioning.Versioned;
 
-public class StatusResponse extends RepairMessage<StatusResponse>
+public class StatusResponse extends ConsistentRepairMessage<StatusResponse>
 {
     public static final Versioned<RepairVersion, MessageSerializer<StatusResponse>> serializers = RepairVersion.versioned(v -> new MessageSerializer<StatusResponse>(v)
     {
@@ -39,31 +39,38 @@ public class StatusResponse extends RepairMessage<StatusResponse>
         {
             UUIDSerializer.serializer.serialize(msg.sessionID, out);
             out.writeInt(msg.state.ordinal());
+            out.writeBoolean(msg.running);
         }
 
         public StatusResponse deserialize(DataInputPlus in) throws IOException
         {
             return new StatusResponse(UUIDSerializer.serializer.deserialize(in),
-                                      ConsistentSession.State.valueOf(in.readInt()));
+                                      ConsistentSession.State.valueOf(in.readInt()),
+                                      in.readBoolean());
         }
 
         public long serializedSize(StatusResponse msg)
         {
             return UUIDSerializer.serializer.serializedSize(msg.sessionID)
-                   + TypeSizes.sizeof(msg.state.ordinal());
+                   + TypeSizes.sizeof(msg.state.ordinal())
+                   + TypeSizes.sizeof(msg.running);
         }
     });
 
-    public final UUID sessionID;
     public final ConsistentSession.State state;
+    public final boolean running;
 
     public StatusResponse(UUID sessionID, ConsistentSession.State state)
     {
-        super(null);
-        assert sessionID != null;
+        this(sessionID, state, false);
+    }
+
+    public StatusResponse(UUID sessionID, ConsistentSession.State state, boolean running)
+    {
+        super(sessionID);
         assert state != null;
-        this.sessionID = sessionID;
         this.state = state;
+        this.running = running;
     }
 
     public boolean equals(Object o)
@@ -73,14 +80,14 @@ public class StatusResponse extends RepairMessage<StatusResponse>
 
         StatusResponse that = (StatusResponse) o;
 
-        return sessionID.equals(that.sessionID) && state == that.state;
+        return sessionID.equals(that.sessionID) && state == that.state && running == that.running;
     }
 
     public int hashCode()
     {
         int result = sessionID.hashCode();
         result = 31 * result + state.hashCode();
-        return result;
+        return running ? result * 31 : result;
     }
 
     public String toString()
@@ -88,6 +95,7 @@ public class StatusResponse extends RepairMessage<StatusResponse>
         return "StatusResponse{" +
                "sessionID=" + sessionID +
                ", state=" + state +
+               ", running=" + running +
                '}';
     }
 
@@ -96,8 +104,8 @@ public class StatusResponse extends RepairMessage<StatusResponse>
         return serializers.get(version);
     }
 
-    public Verb<StatusResponse, ?> verb()
+    public Optional<Verb<StatusResponse, ?>> verb()
     {
-        return Verbs.REPAIR.STATUS_RESPONSE;
+        return Optional.empty();
     }
 }

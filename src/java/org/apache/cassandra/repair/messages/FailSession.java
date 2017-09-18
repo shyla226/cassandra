@@ -19,6 +19,7 @@
 package org.apache.cassandra.repair.messages;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -26,10 +27,11 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.versioning.Versioned;
 
-public class FailSession extends RepairMessage<FailSession>
+public class FailSession extends ConsistentRepairMessage<FailSession>
 {
     public static final Versioned<RepairVersion, MessageSerializer<FailSession>> serializers = RepairVersion.versioned(v -> new MessageSerializer<FailSession>(v)
     {
@@ -49,13 +51,9 @@ public class FailSession extends RepairMessage<FailSession>
         }
     });
 
-    public final UUID sessionID;
-
     public FailSession(UUID sessionID)
     {
-        super(null);
-        assert sessionID != null;
-        this.sessionID = sessionID;
+        super(sessionID);
     }
 
     public boolean equals(Object o)
@@ -78,8 +76,13 @@ public class FailSession extends RepairMessage<FailSession>
         return serializers.get(version);
     }
 
-    public Verb<FailSession, ?> verb()
+    public Optional<Verb<FailSession, ?>> verb()
     {
-        return Verbs.REPAIR.FAILED_SESSION;
+        return Optional.of(Verbs.REPAIR.FAILED_SESSION);
+    }
+
+    public boolean validate()
+    {
+        return true;
     }
 }

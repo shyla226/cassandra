@@ -317,7 +317,7 @@ public class LongLeveledCompactionStrategyTest
                 }
                 return null;
             }
-        }, true, true);
+        }, true);
 
 
     }

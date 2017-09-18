@@ -22,11 +22,16 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
@@ -289,5 +294,119 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertFalse(sstable.isPendingRepair());
         Assert.assertFalse(sstable.isRepaired());
         Assert.assertEquals(ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getSSTableMetadata().repairedAt);
+    }
+
+    @Test
+    public void sessionCompleted()
+    {
+        UUID repairID = registerSession(cfs, true, true);
+        LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
+
+        // add as unrepaired
+        SSTableReader sstable = makeSSTable(false);
+        Assert.assertTrue(unrepairedContains(sstable));
+        Assert.assertFalse(repairedContains(sstable));
+        csm.getForPendingRepair(repairID).forEach(Assert::assertNull);
+
+        // change to pending repaired
+        mutateRepaired(sstable, repairID);
+        csm.handleNotification(new SSTableRepairStatusChanged(Collections.singleton(sstable)), cfs.getTracker());
+        Assert.assertFalse(unrepairedContains(sstable));
+        Assert.assertFalse(repairedContains(sstable));
+        Assert.assertTrue(pendingContains(repairID, sstable));
+
+        // finalize
+        LocalSessionAccessor.finalizeUnsafe(repairID);
+
+        // complete session
+        ARS.consistent.local.sessionCompleted(ARS.consistent.local.getSession(repairID));
+
+        // sstable is repaired
+        Assert.assertFalse(unrepairedContains(sstable));
+        Assert.assertTrue(repairedContains(sstable));
+        Assert.assertFalse(pendingContains(repairID, sstable));
+    }
+
+    @Test
+    public void sessionCompletedWithCompactingPendingSSTable() throws Exception
+    {
+        UUID repairID = registerSession(cfs, true, true);
+        LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
+
+        // add sstables
+        SSTableReader sstable1 = makeSSTable(false);
+        SSTableReader sstable2 = makeSSTable(false);
+        Assert.assertTrue(unrepairedContains(sstable1));
+        Assert.assertTrue(unrepairedContains(sstable2));
+
+        // change both to pending repaired:
+        mutateRepaired(sstable1, repairID);
+        mutateRepaired(sstable2, repairID);
+        csm.handleNotification(new SSTableRepairStatusChanged(ImmutableList.of(sstable1, sstable2)), cfs.getTracker());
+        Assert.assertTrue(pendingContains(repairID, sstable1));
+        Assert.assertTrue(pendingContains(repairID, sstable2));
+
+        // finalize
+        LocalSessionAccessor.finalizeUnsafe(repairID);
+
+        // simulate compaction on sstable2
+        LifecycleTransaction compaction = cfs.getTracker().tryModify(sstable2, OperationType.COMPACTION);
+
+        // complete session: it will block due to sstable2 compacting, so we need another thread
+        FutureTask<Void> completion = new FutureTask<>(() -> ARS.consistent.local.sessionCompleted(ARS.consistent.local.getSession(repairID)), null);
+        new Thread(completion).start();
+
+        // abort compaction
+        compaction.abort();
+
+        // wait for completion and verify both sstables are repaired
+        completion.get(1, TimeUnit.MINUTES);
+        Assert.assertTrue(repairedContains(sstable1));
+        Assert.assertTrue(repairedContains(sstable2));
+    }
+
+    @Test
+    public void sessionCompletedWithDifferentSSTables()
+    {
+        UUID repairID1 = registerSession(cfs, true, true);
+        UUID repairID2 = registerSession(cfs, true, true);
+        LocalSessionAccessor.prepareUnsafe(repairID1, COORDINATOR, PARTICIPANTS);
+        LocalSessionAccessor.prepareUnsafe(repairID2, COORDINATOR, PARTICIPANTS);
+
+        // add sstables
+        SSTableReader sstable1 = makeSSTable(false);
+        SSTableReader sstable2 = makeSSTable(false);
+        SSTableReader sstable3 = makeSSTable(false);
+
+        // change sstable1 to pending repaired for session 1
+        mutateRepaired(sstable1, repairID1);
+        // change sstable2 to pending repaired for session 2
+        mutateRepaired(sstable2, repairID2);
+        // change sstable3 to repaired
+        mutateRepaired(sstable3, System.currentTimeMillis());
+        csm.handleNotification(new SSTableRepairStatusChanged(ImmutableList.of(sstable1, sstable2, sstable3)), cfs.getTracker());
+        Assert.assertTrue(pendingContains(repairID1, sstable1));
+        Assert.assertTrue(pendingContains(repairID2, sstable2));
+        Assert.assertTrue(repairedContains(sstable3));
+
+        // finalize session 1
+        LocalSessionAccessor.finalizeUnsafe(repairID1);
+
+        // simulate index build on pending sstable for session 1
+        cfs.getTracker().tryModify(sstable1, OperationType.INDEX_BUILD);
+
+        // simulate compaction on repaired sstable3
+        cfs.getTracker().tryModify(sstable3, OperationType.COMPACTION);
+
+        // completing session 1 will not require to disable compactions because:
+        // * sstable1 is building index, which is a "non conflicting" compaction type
+        // * sstable2 belongs to a different session
+        // * sstable3 is repaired
+        ARS.consistent.local.sessionCompleted(ARS.consistent.local.getSession(repairID1));
+
+        // now they're both repaired
+        Assert.assertTrue(repairedContains(sstable1));
+        Assert.assertTrue(pendingContains(repairID2, sstable2));
+        Assert.assertTrue(repairedContains(sstable3));
     }
 }

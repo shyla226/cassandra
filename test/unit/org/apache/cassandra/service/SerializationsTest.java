@@ -25,9 +25,11 @@ import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.google.common.collect.Lists;
+
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -43,6 +45,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.repair.NodePair;
 import org.apache.cassandra.repair.RepairJobDesc;
@@ -103,7 +106,7 @@ public class SerializationsTest extends AbstractSerializationsTester
     }
 
     @SuppressWarnings("unchecked")
-    private void testRepairMessageWrite(String fileName, RepairMessage... messages) throws IOException
+    private void testRepairMessageWrite(String fileName, RepairMessage... messages) throws Throwable
     {
         try (DataOutputStreamPlus out = getOutput(fileName))
         {
@@ -115,18 +118,18 @@ public class SerializationsTest extends AbstractSerializationsTester
             }
             // also serialize MessageOut
             for (RepairMessage message : messages)
-                serializer.serialize(message.verb().newRequest(inet, message), out);
+                serializer.serialize(((Optional<Verb<RepairMessage, ?>>) message.verb()).orElseThrow(IllegalStateException::new).newRequest(inet, message), out);
         }
     }
 
-    private void testValidationRequestWrite() throws IOException
+    private void testValidationRequestWrite() throws Throwable
     {
         ValidationRequest message = new ValidationRequest(DESC, 1234);
         testRepairMessageWrite("service.ValidationRequest.bin", message);
     }
 
     @Test
-    public void testValidationRequestRead() throws IOException
+    public void testValidationRequestRead() throws Throwable
     {
         if (EXECUTE_WRITES)
             testValidationRequestWrite();
@@ -140,7 +143,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         }
     }
 
-    private void testValidationCompleteWrite() throws IOException
+    private void testValidationCompleteWrite() throws Throwable
     {
         IPartitioner p = RandomPartitioner.instance;
 
@@ -166,7 +169,7 @@ public class SerializationsTest extends AbstractSerializationsTester
     }
 
     @Test
-    public void testValidationCompleteRead() throws IOException
+    public void testValidationCompleteRead() throws Throwable
     {
         if (EXECUTE_WRITES)
             testValidationCompleteWrite();
@@ -200,7 +203,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         }
     }
 
-    private void testSyncRequestWrite() throws IOException
+    private void testSyncRequestWrite() throws Throwable
     {
         InetAddress local = InetAddress.getByAddress(new byte[]{127, 0, 0, 1});
         InetAddress src = InetAddress.getByAddress(new byte[]{127, 0, 0, 2});
@@ -211,7 +214,7 @@ public class SerializationsTest extends AbstractSerializationsTester
     }
 
     @Test
-    public void testSyncRequestRead() throws IOException
+    public void testSyncRequestRead() throws Throwable
     {
         if (EXECUTE_WRITES)
             testSyncRequestWrite();
@@ -233,7 +236,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         }
     }
 
-    private void testSyncCompleteWrite() throws IOException
+    private void testSyncCompleteWrite() throws Throwable
     {
         InetAddress src = InetAddress.getByAddress(new byte[]{127, 0, 0, 2});
         InetAddress dest = InetAddress.getByAddress(new byte[]{127, 0, 0, 3});
@@ -251,7 +254,7 @@ public class SerializationsTest extends AbstractSerializationsTester
     }
 
     @Test
-    public void testSyncCompleteRead() throws IOException
+    public void testSyncCompleteRead() throws Throwable
     {
         if (EXECUTE_WRITES)
             testSyncCompleteWrite();

@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.apache.cassandra.db.TypeSizes;
@@ -142,9 +143,9 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
         return serializers.get(version);
     }
 
-    public Verb<PrepareMessage, ?> verb()
+    public Optional<Verb<PrepareMessage, ?>> verb()
     {
-        return Verbs.REPAIR.PREPARE;
+        return Optional.of(Verbs.REPAIR.PREPARE);
     }
 
     @Override

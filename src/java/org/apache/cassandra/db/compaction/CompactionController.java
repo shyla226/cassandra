@@ -30,6 +30,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.apache.cassandra.db.partitions.Partition;
@@ -365,5 +366,10 @@ public class CompactionController implements AutoCloseable
     protected boolean ignoreOverlaps()
     {
         return ignoreOverlaps;
+    }
+
+    public Set<SSTableReader> getCompacting()
+    {
+        return compacting != null ? Sets.newHashSet(compacting) : Collections.emptySet();
     }
 }

@@ -17,10 +17,13 @@
  */
 package org.apache.cassandra.repair.messages;
 
+import java.net.InetAddress;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import com.google.common.base.Throwables;
+import com.google.common.primitives.Ints;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,16 +34,25 @@ import org.apache.cassandra.net.DroppedMessages;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.Verb.AckedRequest;
 import org.apache.cassandra.net.Verb.OneWay;
+import org.apache.cassandra.net.Verb.RequestResponse;
 import org.apache.cassandra.net.VerbGroup;
 import org.apache.cassandra.net.VerbHandlers;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.messages.StreamMessage;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.versioning.Version;
 import org.apache.cassandra.utils.versioning.Versioned;
 
 public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
 {
+    /**
+     * Amount of time the coordinator will wait for all participants to ack a finalize commit message
+     */
+    static final int FINALIZE_COMMIT_TIMEOUT = Integer.getInteger(
+        "cassandra.finalize_commit_timeout_seconds",
+        Ints.checkedCast(TimeUnit.MINUTES.toSeconds(10)));
+
     private static final Logger logger = LoggerFactory.getLogger(RepairVerbs.class);
 
     public enum RepairVersion implements Version<RepairVersion>
@@ -74,13 +86,10 @@ public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
     public final OneWay<PrepareConsistentRequest> CONSISTENT_REQUEST;
     public final OneWay<PrepareConsistentResponse> CONSISTENT_RESPONSE;
 
-    public final OneWay<FinalizePropose> FINALIZE_PROPOSE;
-    public final OneWay<FinalizePromise> FINALIZE_PROMISE;
-    public final OneWay<FinalizeCommit> FINALIZE_COMMIT;
+    public final AckedRequest<FinalizeCommit> FINALIZE_COMMIT;
     public final OneWay<FailSession> FAILED_SESSION;
 
-    public final OneWay<StatusRequest> STATUS_REQUEST;
-    public final OneWay<StatusResponse> STATUS_RESPONSE;
+    public final RequestResponse<StatusRequest, StatusResponse> STATUS_REQUEST;
 
     public RepairVerbs(Verbs.Group id)
     {
@@ -90,51 +99,51 @@ public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
                                             .droppedGroup(DroppedMessages.Group.REPAIR);
 
         VALIDATION_REQUEST = helper.oneWay("VALIDATION_REQUEST", ValidationRequest.class)
-                                   .handler(withCleanup(ActiveRepairService.instance::handleValidationRequest));
+                                   .handler(decoratedOneWay(ActiveRepairService.instance::handleValidationRequest));
         VALIDATION_COMPLETE = helper.oneWay("VALIDATION_COMPLETE", ValidationComplete.class)
-                                   .handler(withCleanup(ActiveRepairService.instance::handleValidationComplete));
+                                   .handler(decoratedOneWay(ActiveRepairService.instance::handleValidationComplete));
         SYNC_REQUEST = helper.oneWay("SYNC_REQUEST", SyncRequest.class)
-                             .handler(withCleanup(ActiveRepairService.instance::handleSyncRequest));
+                             .handler(decoratedOneWay(ActiveRepairService.instance::handleSyncRequest));
         SYNC_COMPLETE = helper.oneWay("SYNC_COMPLETE", SyncComplete.class)
-                              .handler(withCleanup(ActiveRepairService.instance::handleSyncComplete));
+                              .handler(decoratedOneWay(ActiveRepairService.instance::handleSyncComplete));
         PREPARE = helper.ackedRequest("PREPARE", PrepareMessage.class)
                         .timeout(DatabaseDescriptor::getRpcTimeout)
-                        .syncHandler(withCleanupSync(ActiveRepairService.instance::handlePrepare));
+                        .syncHandler(decoratedAck(ActiveRepairService.instance::handlePrepare));
         SNAPSHOT = helper.ackedRequest("SNAPSHOT", SnapshotMessage.class)
                          .timeout(1, TimeUnit.HOURS)
-                         .syncHandler(withCleanupSync(ActiveRepairService.instance::handleSnapshot));
+                         .syncHandler(decoratedAck(ActiveRepairService.instance::handleSnapshot));
         CLEANUP = helper.ackedRequest("CLEANUP", CleanupMessage.class)
                         .timeout(1, TimeUnit.HOURS)
                         .syncHandler((from, msg) -> ActiveRepairService.instance.removeParentRepairSession(msg.parentRepairSession));
 
         CONSISTENT_REQUEST = helper.oneWay("CONSISTENT_REQUEST", PrepareConsistentRequest.class)
-                                   .handler(ActiveRepairService.instance.consistent.local::handlePrepareMessage);
+                                   .handler(decoratedOneWay(ActiveRepairService.instance.consistent.local::handlePrepareMessage));
         CONSISTENT_RESPONSE = helper.oneWay("CONSISTENT_RESPONSE", PrepareConsistentResponse.class)
                                     .handler(ActiveRepairService.instance.consistent.coordinated::handlePrepareResponse);
-        FINALIZE_PROPOSE = helper.oneWay("FINALIZE_PROPOSE", FinalizePropose.class)
-                                 .handler(ActiveRepairService.instance.consistent.local::handleFinalizeProposeMessage);
-        FINALIZE_PROMISE = helper.oneWay("FINALIZE_PROMISE", FinalizePromise.class)
-                                 .handler(ActiveRepairService.instance.consistent.coordinated::handleFinalizePromiseMessage);
-        FINALIZE_COMMIT = helper.oneWay("FINALIZE_COMMIT", FinalizeCommit.class)
-                                .handler(ActiveRepairService.instance.consistent.local::handleFinalizeCommitMessage);
+        FINALIZE_COMMIT = helper.ackedRequest("FINALIZE_COMMIT", FinalizeCommit.class)
+                                .timeout(FINALIZE_COMMIT_TIMEOUT, TimeUnit.SECONDS)
+                                .syncHandler(decoratedAck((from, msg) -> {
+                                    ActiveRepairService.instance.consistent.local.handleFinalizeCommitMessage(from, msg);
+                                    maybeRemoveSession(from, msg);
+                                }));
         FAILED_SESSION = helper.oneWay("FAILED_SESSION", FailSession.class)
-                               .handler((from, failure) -> {
-                                   ActiveRepairService.instance.consistent.coordinated.handleFailSessionMessage(failure);
-                                   ActiveRepairService.instance.consistent.local.handleFailSessionMessage(from, failure);
-                               });
-        STATUS_REQUEST = helper.oneWay("STATUS_REQUEST", StatusRequest.class)
-                               .handler(ActiveRepairService.instance.consistent.local::handleStatusRequest);
-        STATUS_RESPONSE = helper.oneWay("STATUS_RESPONSE", StatusResponse.class)
-                                .handler(ActiveRepairService.instance.consistent.local::handleStatusResponse);
+                               .handler(decoratedOneWay((from, msg) -> {
+                                   ActiveRepairService.instance.consistent.local.handleFailSessionMessage(from, msg);
+                                   maybeRemoveSession(from, msg);
+                               }));
+        STATUS_REQUEST = helper.requestResponse("STATUS_REQUEST", StatusRequest.class, StatusResponse.class)
+                               .timeout(DatabaseDescriptor::getRpcTimeout)
+                               .syncHandler(ActiveRepairService.instance.consistent.local::handleStatusRequest);
     }
 
-    private static <P extends RepairMessage> VerbHandlers.OneWay<P> withCleanup(VerbHandlers.OneWay<P> handler)
+    private static <P extends RepairMessage> VerbHandlers.OneWay<P> decoratedOneWay(VerbHandlers.OneWay<P> handler)
     {
         return (from, message) ->
         {
             try
             {
-                handler.handle(from, message);
+                if (message.validate())
+                    handler.handle(from, message);
             }
             catch (Exception e)
             {
@@ -143,24 +152,30 @@ public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
         };
     }
 
-    private static <P extends RepairMessage> VerbHandlers.SyncAckedRequest<P> withCleanupSync(VerbHandlers.SyncAckedRequest<P> handler)
+    private static <P extends RepairMessage> VerbHandlers.SyncAckedRequest<P> decoratedAck(VerbHandlers.SyncAckedRequest<P> handler)
     {
         return (from, message) ->
         {
             try
             {
-                handler.handle2(from, message);
+                if (message.validate())
+                    handler.handle2(from, message);
             }
             catch (Exception e)
             {
                 removeSessionAndRethrow(message, e);
             }
         };
+    }
+
+    private static void maybeRemoveSession(InetAddress from, ConsistentRepairMessage msg)
+    {
+        if (!from.equals(FBUtilities.getBroadcastAddress()))
+            ActiveRepairService.instance.removeParentRepairSession(msg.sessionID);
     }
 
     private static void removeSessionAndRethrow(RepairMessage msg, Exception e)
     {
-        logger.error("Got error, removing parent repair session");
         RepairJobDesc desc = msg.desc;
         if (desc != null && desc.parentSessionId != null)
             ActiveRepairService.instance.removeParentRepairSession(desc.parentSessionId);

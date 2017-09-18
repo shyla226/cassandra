@@ -117,6 +117,53 @@ public class CompactionStrategyManager implements INotificationConsumer
             maybeReload(cfs.metadata());
 
             // first try to promote/demote sstables from completed repairs
+            AbstractCompactionTask task = getNextPendingRepairBackgroundTask();
+            if (task != null)
+            {
+                return task;
+            }
+
+            // sort compaction task suppliers by remaining tasks descending
+            ArrayList<Pair<Integer, Supplier<AbstractCompactionTask>>> sortedSuppliers = new ArrayList<>(repaired.size() + unrepaired.size() + 1);
+
+            for (AbstractCompactionStrategy strategy : repaired)
+                sortedSuppliers.add(Pair.create(strategy.getEstimatedRemainingTasks(), () -> strategy.getNextBackgroundTask(gcBefore)));
+
+            for (AbstractCompactionStrategy strategy : unrepaired)
+                sortedSuppliers.add(Pair.create(strategy.getEstimatedRemainingTasks(), () -> strategy.getNextBackgroundTask(gcBefore)));
+
+            for (PendingRepairManager pending : pendingRepairs)
+                sortedSuppliers.add(Pair.create(pending.getMaxEstimatedRemainingTasks(), () -> pending.getNextBackgroundTask(gcBefore)));
+
+            sortedSuppliers.sort((x, y) -> y.left - x.left);
+
+            // return the first non-null task
+            Iterator<Supplier<AbstractCompactionTask>> suppliers = Iterables.transform(sortedSuppliers, p -> p.right).iterator();
+            assert suppliers.hasNext();
+
+            do
+            {
+                task = suppliers.next().get();
+            }
+            while (suppliers.hasNext() && task == null);
+
+            return task;
+        }
+        finally
+        {
+            readLock.unlock();
+        }
+    }
+
+    /**
+     * Return the next background task for pending repairs only. It doesn't require compaction to be enabled as it is not
+     * a proper compaction.
+     */
+    public AbstractCompactionTask getNextPendingRepairBackgroundTask()
+    {
+        readLock.lock();
+        try
+        {
             ArrayList<Pair<Integer, PendingRepairManager>> pendingRepairManagers = new ArrayList<>(pendingRepairs.size());
             for (PendingRepairManager pendingRepair : pendingRepairs)
             {
@@ -138,33 +185,31 @@ public class CompactionStrategyManager implements INotificationConsumer
                     }
                 }
             }
+        }
+        finally
+        {
+            readLock.unlock();
+        }
+        return null;
+    }
 
-            // sort compaction task suppliers by remaining tasks descending
-            ArrayList<Pair<Integer, Supplier<AbstractCompactionTask>>> sortedSuppliers = new ArrayList<>(repaired.size() + unrepaired.size() + 1);
-
-            for (AbstractCompactionStrategy strategy : repaired)
-                sortedSuppliers.add(Pair.create(strategy.getEstimatedRemainingTasks(), () -> strategy.getNextBackgroundTask(gcBefore)));
-
-            for (AbstractCompactionStrategy strategy : unrepaired)
-                sortedSuppliers.add(Pair.create(strategy.getEstimatedRemainingTasks(), () -> strategy.getNextBackgroundTask(gcBefore)));
-
-            for (PendingRepairManager pending : pendingRepairs)
-                sortedSuppliers.add(Pair.create(pending.getMaxEstimatedRemainingTasks(), () -> pending.getNextBackgroundTask(gcBefore)));
-
-            sortedSuppliers.sort((x, y) -> y.left - x.left);
-
-            // return the first non-null task
-            AbstractCompactionTask task;
-            Iterator<Supplier<AbstractCompactionTask>> suppliers = Iterables.transform(sortedSuppliers, p -> p.right).iterator();
-            assert suppliers.hasNext();
-
-            do
+    /**
+     * Return all pending repair tasks for the given session: only call this method and execute the given tasks when
+     * running with compactions disabled (see {@link ColumnFamilyStore#runWithCompactionsDisabled(Callable, boolean, boolean)}).
+     */
+    public List<Runnable> getPendingRepairTasks(UUID sessionID)
+    {
+        readLock.lock();
+        try
+        {
+            List<Runnable> tasks = new ArrayList<>(pendingRepairs.size());
+            for (PendingRepairManager pendingRepair : pendingRepairs)
             {
-                task = suppliers.next().get();
+                Runnable task = pendingRepair.getRepairFinishedTask(sessionID);
+                if (task != null)
+                    tasks.add(task);
             }
-            while (suppliers.hasNext() && task == null);
-
-            return task;
+            return tasks;
         }
         finally
         {
