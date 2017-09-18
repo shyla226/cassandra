@@ -24,6 +24,7 @@ import java.util.concurrent.locks.Lock;
 
 import com.google.common.util.concurrent.Striped;
 
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -33,7 +34,7 @@ import org.apache.cassandra.utils.UUIDGen;
 
 public class PaxosState
 {
-    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentWriters() * 1024);
+    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(TPC.getNumCores() * 1024);
 
     private final Commit promised;
     private final Commit accepted;

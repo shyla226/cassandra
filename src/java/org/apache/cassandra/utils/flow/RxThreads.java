@@ -55,6 +55,11 @@ public class RxThreads
         return subscribeOn(source, TPC.ioScheduler(), taskType);
     }
 
+    public static <T> Single<T> subscribeOnBackgroundIo(Single<T> source, TPCTaskType taskType)
+    {
+        return subscribeOn(source, TPC.backgroundIOScheduler(), taskType);
+    }
+
     public static <T> Single<T> subscribeOnCore(Single<T> source, int coreId, TPCTaskType taskType)
     {
         class SubscribeOn extends Single<T>
@@ -92,6 +97,11 @@ public class RxThreads
     public static Completable subscribeOnIo(Completable source, TPCTaskType taskType)
     {
         return subscribeOn(source, TPC.ioScheduler(), taskType);
+    }
+
+    public static Completable subscribeOnBackgroundIo(Completable source, TPCTaskType taskType)
+    {
+        return subscribeOn(source, TPC.backgroundIOScheduler(), taskType);
     }
 
     public static <T> SingleOperator<T, T> observeOnSingle(Scheduler scheduler, TPCTaskType taskType)

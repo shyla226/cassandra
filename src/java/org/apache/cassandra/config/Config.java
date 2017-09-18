@@ -105,12 +105,6 @@ public class Config
 
     public volatile long truncate_request_timeout_in_ms = 60000L;
 
-    /**
-     * @deprecated use {@link #streaming_keep_alive_period_in_secs} instead
-     */
-    @Deprecated
-    public int streaming_socket_timeout_in_ms = 86400000; //24 hours
-
     public Integer streaming_connections_per_host = 1;
     public Integer streaming_keep_alive_period_in_secs = 300; //5 minutes
 
@@ -119,14 +113,6 @@ public class Config
     public volatile long slow_query_log_timeout_in_ms = 500L;
 
     public volatile double phi_convict_threshold = 8.0;
-
-    public int concurrent_reads = 32;
-    public int concurrent_writes = 32;
-    public int concurrent_counter_writes = 32;
-    public int concurrent_materialized_view_writes = 32;
-
-    @Deprecated
-    public Integer concurrent_replicates = null;
 
     public int memtable_flush_writers = 0;
     public Integer memtable_heap_space_in_mb;
@@ -182,12 +168,6 @@ public class Config
 
     public volatile int tpc_concurrent_requests_limit = 128;
     public volatile int tpc_pending_requests_limit = 65536;
-
-    /**
-     * @deprecated retry support removed on CASSANDRA-10992
-     */
-    @Deprecated
-    public int max_streaming_retries = 3;
 
     public volatile int stream_throughput_outbound_megabits_per_sec = 200;
     public volatile int inter_dc_stream_throughput_outbound_megabits_per_sec = 200;

@@ -91,7 +91,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
 /*
  * Abstract parent class of individual modifications, i.e. INSERT, UPDATE and DELETE.
  */
-public abstract class   ModificationStatement implements CQLStatement
+public abstract class ModificationStatement implements CQLStatement
 {
     protected static final Logger logger = LoggerFactory.getLogger(ModificationStatement.class);
 

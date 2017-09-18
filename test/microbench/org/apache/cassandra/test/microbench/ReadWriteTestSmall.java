@@ -28,15 +28,14 @@ import io.reactivex.Scheduler;
 import io.reactivex.functions.Consumer;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.IOScheduler;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCMetrics;
 import org.apache.cassandra.concurrent.TPCTaskType;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.tools.nodetool.SetBatchlogReplayThrottle;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.openjdk.jmh.annotations.*;
 
@@ -65,7 +64,7 @@ public class ReadWriteTestSmall extends CQLTester
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
-        Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters()));
+        Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(IOScheduler.MAX_POOL_SIZE));
         RxJavaPlugins.setComputationSchedulerHandler((s) -> TPC.bestTPCScheduler());
         RxJavaPlugins.initIoScheduler(() -> ioScheduler);
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));

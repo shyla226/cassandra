@@ -35,10 +35,12 @@ import com.google.common.util.concurrent.Futures;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.cache.*;
 import org.apache.cassandra.cache.AutoSavingCache.CacheSerializer;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.context.CounterContext;
@@ -58,6 +60,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 public class CacheService implements CacheServiceMBean
 {
@@ -376,16 +379,13 @@ public class CacheService implements CacheServiceMBean
             if (!cfs.metadata().isCounter() || !cfs.isCounterCacheEnabled())
                 return null;
 
-            return StageManager.getStage(Stage.READ).submit(new Callable<Pair<CounterCacheKey, ClockAndCount>>()
-            {
-                public Pair<CounterCacheKey, ClockAndCount> call() throws Exception
-                {
-                    ByteBuffer value = cacheKey.readCounterValue(cfs);
-                    return value == null
-                         ? null
-                         : Pair.create(cacheKey, CounterContext.instance().getLocalClockAndCount(value));
-                }
-            });
+            return TPCUtils.toFuture(RxThreads.subscribeOnBackgroundIo(Single.fromCallable(() ->
+                                                         {
+                                                             ByteBuffer value = cacheKey.readCounterValue(cfs);
+                                                             return value == null
+                                                                  ? null
+                                                                  : Pair.create(cacheKey, CounterContext.instance().getLocalClockAndCount(value));
+                                                         }), TPCTaskType.COUNTER_CACHE_LOAD));
         }
     }
 
@@ -410,26 +410,24 @@ public class CacheService implements CacheServiceMBean
             final int rowsToCache = cfs.metadata().params.caching.rowsPerPartitionToCache();
             assert(!cfs.isIndex());//Shouldn't have row cache entries for indexes
 
-            return StageManager.getStage(Stage.READ).submit(new Callable<Pair<RowCacheKey, IRowCacheEntry>>()
-            {
-                public Pair<RowCacheKey, IRowCacheEntry> call() throws Exception
-                {
-                    DecoratedKey key = cfs.decorateKey(buffer);
-                    int nowInSec = FBUtilities.nowInSeconds();
 
-                    SinglePartitionReadCommand cmd = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), nowInSec, key);
-                    try (ReadExecutionController controller = cmd.executionController())
+            return TPCUtils.toFuture(RxThreads.subscribeOnBackgroundIo(Single.fromCallable((Callable<Pair<RowCacheKey, IRowCacheEntry>>) () ->
+            {
+                DecoratedKey key = cfs.decorateKey(buffer);
+                int nowInSec = FBUtilities.nowInSeconds();
+
+                SinglePartitionReadCommand cmd = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), nowInSec, key);
+                try (ReadExecutionController controller = cmd.executionController())
+                {
+                    Flow<FlowableUnfilteredPartition> flow = cmd.deferredQuery(cfs, controller);
+                    try (UnfilteredRowIterator iter = FlowablePartitions.toIterator(DataLimits.cqlLimits(rowsToCache)
+                                                                                              .truncateUnfiltered(flow.blockingSingle(), nowInSec, true)))
                     {
-                        Flow<FlowableUnfilteredPartition> flow = cmd.deferredQuery(cfs, controller);
-                        try (UnfilteredRowIterator iter = FlowablePartitions.toIterator(DataLimits.cqlLimits(rowsToCache)
-                                                                                                  .truncateUnfiltered(flow.blockingSingle(), nowInSec, true)))
-                        {
-                            CachedPartition toCache = CachedBTreePartition.create(iter, nowInSec);
-                            return Pair.create(new RowCacheKey(cfs.metadata(), key), toCache);
-                        }
+                        CachedPartition toCache = CachedBTreePartition.create(iter, nowInSec);
+                        return Pair.create(new RowCacheKey(cfs.metadata(), key), toCache);
                     }
                 }
-            });
+            }), TPCTaskType.ROW_CACHE_LOAD));
         }
     }
 

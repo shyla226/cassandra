@@ -19,17 +19,15 @@ package org.apache.cassandra.concurrent;
 
 public enum Stage
 {
-    READ,
-    MUTATION,
-    COUNTER_MUTATION,
-    VIEW_MUTATION,
     GOSSIP,
     REQUEST_RESPONSE,
     ANTI_ENTROPY,
     MIGRATION,
     MISC,
     INTERNAL_RESPONSE,
-    READ_REPAIR;
+    READ_REPAIR,
+    BACKGROUND_IO,
+    HINTS;
 
     public String getJmxType()
     {
@@ -40,13 +38,11 @@ public enum Stage
             case MIGRATION:
             case MISC:
             case INTERNAL_RESPONSE:
+            case BACKGROUND_IO:
                 return "internal";
-            case MUTATION:
-            case COUNTER_MUTATION:
-            case VIEW_MUTATION:
-            case READ:
             case REQUEST_RESPONSE:
             case READ_REPAIR:
+            case HINTS:
                 return "request";
             default:
                 throw new AssertionError("Unknown stage " + this);

@@ -39,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocalThread;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
@@ -67,11 +68,11 @@ public class ConnectionHandler
     private OutgoingMessageHandler outgoing;
     private final boolean isPreview;
 
-    ConnectionHandler(StreamSession session, int incomingSocketTimeout, boolean isPreview)
+    ConnectionHandler(StreamSession session, boolean isPreview)
     {
         this.session = session;
         this.isPreview = isPreview;
-        this.incoming = new IncomingMessageHandler(session, incomingSocketTimeout);
+        this.incoming = new IncomingMessageHandler(session);
         this.outgoing = new OutgoingMessageHandler(session);
     }
 
@@ -279,17 +280,16 @@ public class ConnectionHandler
      */
     static class IncomingMessageHandler extends MessageHandler
     {
-        private final int socketTimeout;
-
-        IncomingMessageHandler(StreamSession session, int socketTimeout)
+        IncomingMessageHandler(StreamSession session)
         {
             super(session, false);
-            this.socketTimeout = socketTimeout;
         }
 
         @Override
         public void start(Socket socket, StreamVersion version, boolean initiator) throws IOException
         {
+            // We set twice the keep alive period so there is room for delays
+            int socketTimeout = (int) TimeUnit.SECONDS.toMillis(2 * DatabaseDescriptor.getStreamingKeepAlivePeriod());
             try
             {
                 socket.setSoTimeout(socketTimeout);

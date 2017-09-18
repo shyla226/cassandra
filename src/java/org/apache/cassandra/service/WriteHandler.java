@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Completable;
+import io.reactivex.CompletableObserver;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
@@ -204,16 +205,14 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
 
                 if (host.equals(local))
                 {
-                    StorageProxy.submitHint(new StorageProxy.HintRunnable(Collections.singleton(local))
+                    StorageProxy.submitHint(Collections.singleton(local), Completable.defer(() ->
                     {
-                        protected void runMayThrow() throws Exception
-                        {
-                            // Locally, there is no point to write a hint (it's not really less costly than writing the
-                            // mutation itself) so we just write the mutation, but still use HintRunnable which provides
-                            // proper back-pressure for hints.
-                            mutation.apply();
-                        }
-                    });
+                        // Locally, there is no point to write a hint (it's not really less costly than writing the
+                        // mutation itself) so we just write the mutation, but still use HintRunnable which provides
+                        // proper back-pressure for hints.
+                        mutation.apply();
+                        return Completable.complete();
+                    }));
                 }
                 else
                 {

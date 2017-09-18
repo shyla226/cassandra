@@ -70,13 +70,14 @@ public class IOScheduler extends StagedScheduler
     static final int MIN_POOL_SIZE = Integer.valueOf(System.getProperty("cassandra.io.sched.min_pool_size", "8"));
 
     @VisibleForTesting
-    static final int MAX_POOL_SIZE = Integer.valueOf(System.getProperty("cassandra.io.sched.max_pool_size", "256"));
+    public static final int MAX_POOL_SIZE = Integer.valueOf(System.getProperty("cassandra.io.sched.max_pool_size", "256"));
 
     @VisibleForTesting
     static final int KEEP_ALIVE_TIME_SECS = Integer.valueOf(System.getProperty("cassandra.io.sched.keep_alive_secs", "5"));
 
     private final Function<ThreadFactory, ExecutorBasedWorker> workerSupplier;
     private final AtomicReference<WorkersPool> pool;
+    private final AtomicBoolean shutdown = new AtomicBoolean(false);
 
     IOScheduler()
     {
@@ -140,6 +141,9 @@ public class IOScheduler extends StagedScheduler
     @Override
     public void shutdown()
     {
+        if (!shutdown.compareAndSet(false, true))
+            return;
+
         WorkersPool current = pool.get();
         while (current != null)
         {
@@ -151,6 +155,11 @@ public class IOScheduler extends StagedScheduler
 
             current = pool.get();
         }
+    }
+
+    public boolean isShutdown()
+    {
+        return shutdown.get();
     }
 
     @VisibleForTesting

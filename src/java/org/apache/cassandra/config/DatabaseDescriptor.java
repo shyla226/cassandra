@@ -27,6 +27,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -393,23 +394,6 @@ public class DatabaseDescriptor
         {
             throw new ConfigurationException("phi_convict_threshold must be between 5 and 16, but was " + conf.phi_convict_threshold, false);
         }
-
-        /* Thread per pool */
-        if (conf.concurrent_reads < 2)
-        {
-            throw new ConfigurationException("concurrent_reads must be at least 2, but was " + conf.concurrent_reads, false);
-        }
-
-        if (conf.concurrent_writes < 2 && System.getProperty("cassandra.test.fail_mv_locks_count", "").isEmpty())
-        {
-            throw new ConfigurationException("concurrent_writes must be at least 2, but was " + conf.concurrent_writes, false);
-        }
-
-        if (conf.concurrent_counter_writes < 2)
-            throw new ConfigurationException("concurrent_counter_writes must be at least 2, but was " + conf.concurrent_counter_writes, false);
-
-        if (conf.concurrent_replicates != null)
-            logger.warn("concurrent_replicates has been deprecated and should be removed from cassandra.yaml");
 
         if (conf.file_cache_size_in_mb == null)
         {
@@ -1569,26 +1553,6 @@ public class DatabaseDescriptor
         conf.phi_convict_threshold = phiConvictThreshold;
     }
 
-    public static int getConcurrentReaders()
-    {
-        return conf.concurrent_reads;
-    }
-
-    public static int getConcurrentWriters()
-    {
-        return conf.concurrent_writes;
-    }
-
-    public static int getConcurrentCounterWriters()
-    {
-        return conf.concurrent_counter_writes;
-    }
-
-    public static int getConcurrentViewWriters()
-    {
-        return conf.concurrent_materialized_view_writes;
-    }
-
     public static int getFlushWriters()
     {
             return conf.memtable_flush_writers;
@@ -2265,21 +2229,6 @@ public class DatabaseDescriptor
         conf.counter_cache_keys_to_save = counterCacheKeysToSave;
     }
 
-    public static void setStreamingSocketTimeout(int value)
-    {
-        conf.streaming_socket_timeout_in_ms = value;
-    }
-
-    /**
-     * @deprecated use {@link #getStreamingKeepAlivePeriod()} instead
-     * @return streaming_socket_timeout_in_ms property
-     */
-    @Deprecated
-    public static int getStreamingSocketTimeout()
-    {
-        return conf.streaming_socket_timeout_in_ms;
-    }
-
     public static int getStreamingKeepAlivePeriod()
     {
         return conf.streaming_keep_alive_period_in_secs;
@@ -2611,5 +2560,15 @@ public class DatabaseDescriptor
     public static boolean isJMXLocalOnly()
     {
         return jmxLocalOnly;
+    }
+
+    public static int getMaxBackgroundIOThreads()
+    {
+        return Integer.getInteger("cassandra.io.background.max_pool_size", 256);
+    }
+
+    public static int getMaxHintsReceiveThreads()
+    {
+        return Integer.getInteger("cassandra.hints.max_receive_threads", DatabaseDescriptor.getMaxHintsDeliveryThreads());
     }
 }
