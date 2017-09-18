@@ -209,8 +209,8 @@ public class IOSchedulerTest
     private synchronized void check(Runnable runnable)
     {
         errors = Throwables.perform(errors, runnable::run);
-        latch.countDown();
         numChecks++;
+        latch.countDown();
     }
 
     private final static class TestWorker extends ExecutorBasedWorker
