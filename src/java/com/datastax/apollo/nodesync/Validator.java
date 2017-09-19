@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -23,6 +24,7 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.cql3.PageSize;
@@ -236,8 +238,8 @@ class Validator
         Flow<FlowablePartition> flow = moreContents(executor, pager, context);
         // Can be null on an exception
         if (flow != null)
-            flowFuture = flow.flatProcess(p -> p.content.process())
-                             .lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
+            flowFuture = flow.lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
+                             .flatProcess(p -> p.content)
                              .processToFuture()
                              .handleAsync((v, t) -> {
                                  if (t == null)
@@ -257,11 +259,15 @@ class Validator
 
         try
         {
+            // Maybe schedule a refresh of the lock. This can be made concurrently from the rest of the work, but we
+            // must make sure to  wait on it before we completely
+            Completable lockCompletable = maybeRefreshLock(executor.asExecutor());
             observer.onNewPage();
-            maybeRefreshLock();
-            return pager.fetchPage(new PageSize((int) pageSize, PageSize.PageUnit.BYTES), context)
-                        .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), executor))
-                        .concatWith(() -> moreContents(executor, pager, context));
+            Flow<FlowablePartition> flow = pager.fetchPage(new PageSize((int) pageSize, PageSize.PageUnit.BYTES), context)
+                                                .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), executor))
+                                                .concatWith(() -> moreContents(executor, pager, context));
+            return lockCompletable == null ? flow : Flow.concat(flow, lockCompletable);
+
         }
         catch (Throwable t)
         {
@@ -378,11 +384,15 @@ class Validator
         nextLockRefreshTimeMs = currentTimeMs + (3 * LOCK_TIMEOUT_MS / 4);
     }
 
-    private void maybeRefreshLock()
+    // Note that despite returning a Completable, this doesn't wait on subscription to do work. This is a private method
+    // though so probably fine, and it should eventually get cleaned up by APOLLO-1038.
+    private Completable maybeRefreshLock(ExecutorService executor)
     {
         long currentTimeMs = System.currentTimeMillis();
-        if (currentTimeMs > nextLockRefreshTimeMs)
-            refreshLock(currentTimeMs);
+        if (currentTimeMs <= nextLockRefreshTimeMs)
+            return null;
+
+        return Completable.fromFuture(executor.submit(() -> refreshLock(currentTimeMs)));
     }
 
     static interface PageProcessingStatsListener
