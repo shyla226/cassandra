@@ -18,6 +18,7 @@
 package org.apache.cassandra.net;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
@@ -135,5 +136,10 @@ public class DroppedMessages
         for (Group group : Group.values())
             map.put(group.toString(), (int) metrics.get(group).dropped.getCount());
         return map;
+    }
+
+    Map<Group, DroppedMessageMetrics> getAllMetrics()
+    {
+        return Collections.unmodifiableMap(metrics);
     }
 }
