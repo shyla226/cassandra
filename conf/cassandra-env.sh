@@ -134,12 +134,12 @@ readJvmOps()
 #GC log path has to be defined here because it needs to access CASSANDRA_HOME
 if [ "$JVM_VERSION" \> "1.8.9" ] ; then
     # Java 9+
-    # See description of https://bugs.openjdk.java.net/browse/JDK-8046148 for details about the syntax
+    # See 'java -Xlog:help' and description of https://bugs.openjdk.java.net/browse/JDK-8046148 for details about the syntax
     # The following is the equivalent to -XX:+PrintGCDetails -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=10 -XX:GCLogFileSize=10M
     if ! grep -q "^-[X]log:gc" $CASSANDRA_CONF/jvm9.options ; then # [X] to prevent ccm from replacing this line
         # only add -Xlog:gc if it's not mentioned in jvm9.options file
         mkdir -p ${CASSANDRA_HOME}/logs
-        JVM_OPTS="$JVM_OPTS -Xlog:gc=info,heap=trace,age=debug,safepoint=info,promotion=trace:file=${CASSANDRA_HOME}/logs/gc.log:time,uptime,pid,tid,level:filecount=10,filesize=10240"
+        JVM_OPTS="$JVM_OPTS -Xlog:gc=info,heap=trace,age=debug,safepoint=info,promotion=trace:file=${CASSANDRA_HOME}/logs/gc.log:time,uptime,pid,tid,level:filecount=10,filesize=10M"
     fi
     readJvmOps "jvm9.options"
     JVM9_OPTS="$JVM9_OPTS -Djdk.attach.allowAttachSelf=true"

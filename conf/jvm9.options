@@ -1,6 +1,6 @@
 ###########################################################################
 #                             jvm.options                                 #
-#                           Java 8 specific                               #
+#                           Java 9 specific                               #
 #                                                                         #
 # - all flags defined here will be used by cassandra to startup the JVM   #
 # - one flag should be specified per line                                 #
@@ -9,12 +9,14 @@
 # - dynamic flags will be appended to these on cassandra-env              #
 ###########################################################################
 
-### GC logging options -- uncomment to enable
+#################
+#  GC SETTINGS  #
+#################
 
 # Java 9 GC logging options:
 # See description of https://bugs.openjdk.java.net/browse/JDK-8046148 for details about the syntax
 # The following is the equivalent to -XX:+PrintGCDetails -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=10 -XX:GCLogFileSize=10M
-#-Xlog:gc=info,heap=trace,age=debug,safepoint=info,promotion=trace:file=/var/log/cassandra/gc.log:time,uptime,pid,tid,level:filecount=10,filesize=10240
+#-Xlog:gc=info,heap=trace,age=debug,safepoint=info,promotion=trace:file=/var/log/cassandra/gc.log:time,uptime,pid,tid,level:filecount=10,filesize=10M
 
 # Notes for Java 8 migration:
 #

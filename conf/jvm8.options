@@ -9,13 +9,21 @@
 # - dynamic flags will be appended to these on cassandra-env              #
 ###########################################################################
 
+########################
+# GENERAL JVM SETTINGS #
+########################
+
+# allows lowering thread priority without being root on linux - probably
+# not necessary on Windows but doesn't harm anything.
+# see http://tech.stolsvik.com/2010/01/linux-java-thread-priorities-workaround.html
+-XX:ThreadPriorityPolicy=42
+
+#################
+#  GC SETTINGS  #
+#################
+
 ### GC logging options -- uncomment to enable
 
-# Java 8 GC logging options:
-#-Xloggc:/var/log/cassandra/gc.log
--XX:+UseGCLogFileRotation
--XX:NumberOfGCLogFiles=10
--XX:GCLogFileSize=10M
 -XX:+PrintGCDetails
 -XX:+PrintGCDateStamps
 -XX:+PrintHeapAtGC
@@ -23,3 +31,7 @@
 -XX:+PrintGCApplicationStoppedTime
 -XX:+PrintPromotionFailure
 #-XX:PrintFLSStatistics=1
+#-Xloggc:/var/log/cassandra/gc.log
+-XX:+UseGCLogFileRotation
+-XX:NumberOfGCLogFiles=10
+-XX:GCLogFileSize=10M
