@@ -19,10 +19,15 @@
 
 package org.apache.cassandra.db.commitlog;
 
+import java.util.concurrent.CompletableFuture;
+
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -58,7 +63,11 @@ public class CommitLogFailurePolicyTest
         {
             DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.stop);
             CommitLog.handleCommitError("Test stop error", new Throwable());
-            Assert.assertFalse(Gossiper.instance.isEnabled());
+            // Gossip is stopped asynchronously on the GOSSIP stage by StorageService.instance.stopTransportsAsync(),
+            // because the GOSSIP stage is single threaded, by checking on the same thread we get the correct result
+            CompletableFuture<Boolean> fut = CompletableFuture.supplyAsync(() -> Gossiper.instance.isEnabled(),
+                                                                           StageManager.getStage(Stage.GOSSIP));
+            Assert.assertFalse(TPCUtils.blockingGet(fut));
         }
         finally
         {

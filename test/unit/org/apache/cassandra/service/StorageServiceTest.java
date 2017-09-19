@@ -19,11 +19,14 @@
 package org.apache.cassandra.service;
 
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
@@ -35,10 +38,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.Assert.*;
 
 public class StorageServiceTest extends CQLTester
 {
@@ -215,5 +215,75 @@ public class StorageServiceTest extends CQLTester
         assertEquals(isView, tableInfo.isView);
         assertEquals(hasIncrementallyRepaired, tableInfo.wasIncrementallyRepaired);
         assertEquals(isCdcEnabled, tableInfo.isCdcEnabled);
+    }
+
+    @Test
+    public void testStopTransportFromTPCThread()
+    {
+        boolean isNativeTransportRunning = StorageService.instance.isNativeTransportRunning();
+        boolean isGossipRunning = StorageService.instance.isGossipRunning();
+
+        try
+        {
+            // here we make sure that both the native transport and gossip are running
+            if (!isNativeTransportRunning)
+                startNativeTransport();
+
+            if (!isGossipRunning)
+                StorageService.instance.startGossiping();
+
+            stopTransports(); // both gossip and the native transport are running
+
+            stopTransports(); // neither gossip nor the native transport running
+
+            StorageService.instance.startGossiping();
+            stopTransports(); // only gossip running
+
+            startNativeTransport();
+            stopTransports(); // only the native transport running
+        }
+        finally
+        {
+            // here we restore state as it was before the test
+            if (isNativeTransportRunning)
+                startNativeTransport();
+
+            if (isGossipRunning)
+                StorageService.instance.startGossiping();
+        }
+    }
+
+    private void startNativeTransport()
+    {
+        // register a daemon so we can test starting and stopping the native transport service
+        CassandraDaemon daemon = new CassandraDaemon();
+        daemon.nativeTransportService = new NativeTransportService();
+        StorageService.instance.registerDaemon(daemon);
+
+        StorageService.instance.startNativeTransport();
+    }
+
+    private void stopTransports()
+    {
+        CompletableFuture fut = new CompletableFuture();
+        TPC.bestTPCScheduler().scheduleDirect(() -> {
+            try
+            {
+              StorageService.instance.stopTransportsAsync()
+                                     .whenComplete((res, err) ->
+                                                   {
+                                                       if (err != null)
+                                                           fut.completeExceptionally((Throwable) err);
+                                                       else
+                                                           fut.complete(null);
+                                                   });
+            }
+            catch (Throwable err)
+            { // stopTransportsAsync() used to stop gossip directly, which would result in an exception captured here
+              fut.completeExceptionally(err);
+            }
+        });
+
+        TPCUtils.blockingAwait(fut);
     }
 }

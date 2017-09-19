@@ -164,7 +164,8 @@ public class CassandraDaemon
 
     static final CassandraDaemon instance = new CassandraDaemon();
 
-    private NativeTransportService nativeTransportService;
+    @VisibleForTesting
+    NativeTransportService nativeTransportService;
     private JMXConnectorServer jmxServer;
 
     private final boolean runManaged;
@@ -329,7 +330,7 @@ public class CassandraDaemon
 
         // Enable active repair service: this *must* happen prior to enabling compactions (see APOLLO-821)
         ActiveRepairService.instance.start();
-        
+
         // Enable auto compaction
         for (Keyspace keyspace : Keyspace.all())
         {
