@@ -57,6 +57,7 @@ import org.apache.cassandra.exceptions.InternalRequestExecutionException;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.ILatencySubscriber;
 import org.apache.cassandra.metrics.ConnectionMetrics;
+import org.apache.cassandra.metrics.DroppedMessageMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.net.interceptors.Interceptor;
 import org.apache.cassandra.net.interceptors.Interceptors;
@@ -1024,6 +1025,15 @@ public final class MessagingService implements MessagingServiceMBean
     public Map<String, Integer> getDroppedMessages()
     {
         return droppedMessages.getSnapshot();
+    }
+
+    /**
+     * @return Dropped message metrics by group with full access to all underlying metrics.
+     * Used by DSE's DroppedMessagesWriter
+     */
+    public Map<DroppedMessages.Group, DroppedMessageMetrics> getDroppedMessagesWithAllMetrics()
+    {
+        return droppedMessages.getAllMetrics();
     }
 
     public long getTotalTimeouts()

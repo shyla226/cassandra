@@ -28,6 +28,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.metrics.DroppedMessageMetrics;
 
 import static org.junit.Assert.*;
 
@@ -76,31 +77,50 @@ public class DroppedMessagesTest
             dms.onDroppedMessage(fakeMessage(i, i % 2 == 0));
 
         List<String> logs = dms.getDroppedMessagesLogs();
+        DroppedMessageMetrics metrics = dms.getAllMetrics().get(Verbs.READS.SINGLE_READ.droppedGroup());
+
         assertEquals(1, logs.size());
         Pattern regexp = Pattern.compile("READ messages were dropped in last 5000 ms: (\\d+) internal and (\\d+) cross node. Mean internal dropped latency: (\\d+) ms and Mean cross-node dropped latency: (\\d+) ms");
         Matcher matcher = regexp.matcher(logs.get(0));
         assertTrue(matcher.find());
         assertEquals(2500, Integer.parseInt(matcher.group(1)));
+        assertEquals(2500, metrics.internalDroppedLatency.getCount());
         assertEquals(2500, Integer.parseInt(matcher.group(2)));
+        assertEquals(2500, metrics.crossNodeDroppedLatency.getCount());
         assertTrue(Integer.parseInt(matcher.group(3)) > 0);
         assertTrue(Integer.parseInt(matcher.group(4)) > 0);
+        assertTrue(metrics.internalDroppedLatency.getSnapshot().getMean() > 0.0);
+        assertTrue(metrics.crossNodeDroppedLatency.getSnapshot().getMean() > 0.0);
         assertEquals(5000, (int) dms.getSnapshot().get(Verbs.READS.SINGLE_READ.droppedGroup().toString()));
+        assertEquals(5000, (int) metrics.dropped.getCount());
 
         logs = dms.getDroppedMessagesLogs();
+        metrics = dms.getAllMetrics().get(Verbs.READS.SINGLE_READ.droppedGroup());
+        // there shouldn't be any new changes
         assertEquals(0, logs.size());
+        assertEquals(5000, (int) metrics.dropped.getCount());
+        assertEquals(2500, metrics.internalDroppedLatency.getCount());
+        assertEquals(2500, metrics.crossNodeDroppedLatency.getCount());
 
         for (int i = 0; i < 2500; i++)
             dms.onDroppedMessage(fakeMessage(i, i % 2 == 0));
 
         logs = dms.getDroppedMessagesLogs();
+        metrics = dms.getAllMetrics().get(Verbs.READS.SINGLE_READ.droppedGroup());
+
         assertEquals(1, logs.size());
         matcher = regexp.matcher(logs.get(0));
         assertTrue(matcher.find());
         assertEquals(1250, Integer.parseInt(matcher.group(1)));
+        assertEquals(2500 + 1250, metrics.internalDroppedLatency.getCount());
         assertEquals(1250, Integer.parseInt(matcher.group(2)));
+        assertEquals(2500 + 1250, metrics.crossNodeDroppedLatency.getCount());
         assertTrue(Integer.parseInt(matcher.group(3)) > 0);
         assertTrue(Integer.parseInt(matcher.group(4)) > 0);
+        assertTrue(metrics.internalDroppedLatency.getSnapshot().getMean() > 0.0);
+        assertTrue(metrics.crossNodeDroppedLatency.getSnapshot().getMean() > 0.0);
         assertEquals(7500, (int) dms.getSnapshot().get(Verbs.READS.SINGLE_READ.droppedGroup().toString()));
+        assertEquals(7500, (int) metrics.dropped.getCount());
     }
 
     private Message<?> fakeMessage(long lifeTime, boolean isCrossNode)
