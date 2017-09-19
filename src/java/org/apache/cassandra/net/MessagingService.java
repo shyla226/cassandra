@@ -43,6 +43,7 @@ import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ExecutorLocal;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -235,10 +236,8 @@ public final class MessagingService implements MessagingServiceMBean
     private <P, Q> void deliverLocally(Request<P, Q> request, MessageCallback<Q> callback)
     {
         Consumer<Response<Q>> handleResponse = response ->
-        {
-            addLatency(request.verb(), request.to(), request.lifetimeMillis());
-            response.deliverTo(callback);
-        };
+                                               request.responseExecutor().execute(() -> deliverLocalResponse(request, response, callback),
+                                                                                  ExecutorLocals.create());
 
         Consumer<Response<Q>> onResponse = messageInterceptors.isEmpty()
                                            ? handleResponse
@@ -260,6 +259,12 @@ public final class MessagingService implements MessagingServiceMBean
             rq.execute(onResponse, onAborted);
         };
         deliverLocallyInternal(request, consumer, callback);
+    }
+
+    private <P, Q> void deliverLocalResponse(Request<P, Q> request, Response<Q> response, MessageCallback<Q> callback)
+    {
+        addLatency(request.verb(), request.to(), request.lifetimeMillis());
+        response.deliverTo(callback);
     }
 
     private <P, Q> void registerCallback(Request<P, Q> request, MessageCallback<Q> callback)
