@@ -43,7 +43,6 @@
     <property name="build.test.dir" value="${build.dir}/test"/>
     <property name="build.classes" value="${build.dir}/classes"/>
     <property name="build.classes.main" value="${build.classes}/main" />
-    <property name="build.j9-classes" value="${build.dir}/j9classes" />
     <property name="javadoc.dir" value="${build.dir}/javadoc"/>
     <property name="javadoc.jars.dir" value="${build.dir}/javadocs"/>
     <property name="interface.dir" value="${basedir}/interface"/>
@@ -946,10 +945,7 @@
             <src path="${build.src.java}"/>
             <src path="${build.src.gen-java}"/>
         	<compilerarg value="-XDignore.symbol.file"/>
-            <classpath>
-                <path refid="cassandra.classpath"/>
-                <path path="${build.j9-classes}/classes"/>
-            </classpath>
+            <classpath refid="cassandra.classpath"/>
         </javac>
         <antcall target="createVersionPropFile"/>
         <copy todir="${build.classes.main}">
@@ -1291,14 +1287,8 @@
      encoding="utf-8">
      <classpath>
         <path refid="cassandra.classpath"/>
-        <path path="${build.j9-classes}/classes"/>
      </classpath>
 	 <compilerarg value="-XDignore.symbol.file"/>
-     <!--
-         When compiling with Java 9 (which does not work yet), remove source&target attributes
-         and use the release argument.
-         <compilerarg value="- -release"/><compilerarg value="${release.version}"/>
-     -->
      <src path="${test.unit.src}"/>
      <src path="${test.long.src}"/>
      <src path="${test.burn.src}"/>
@@ -1929,84 +1919,12 @@
   <!-- setup additional java runtime arguments -->
   <target name="setup-java9">
 
-    <!--
-    OLD list
-    <property name="java9-jvmargs" value="
-    - -add-exports java.base/jdk.internal.ref=ALL-UNNAMED
-    - -add-opens java.base/sun.nio.ch=ALL-UNNAMED
-    - -add-opens java.base/java.nio=ALL-UNNAMED
-    - -add-opens java.base/java.io=ALL-UNNAMED
-    - -add-opens java.base/java.lang=ALL-UNNAMED
-    - -add-opens java.base/java.util=ALL-UNNAMED
-    - -add-opens java.base/java.util.concurrent=ALL-UNNAMED
-    - -add-exports java.management/com.sun.jmx.remote.internal=ALL-UNNAMED
-    - -add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED
-    - -add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED
-    - -add-exports java.rmi/sun.rmi.server=ALL-UNNAMED
-    - -add-exports jdk.scripting.nashorn/jdk.nashorn.internal.objects=ALL-UNNAMED
-    - -add-exports jdk.scripting.nashorn/jdk.nashorn.internal.runtime=ALL-UNNAMED
-    - -add-exports jdk.scripting.nashorn/jdk.nashorn.internal.runtime.options=ALL-UNNAMED"/>
-    -->
     <condition property="java9-jvmargs" else="" value="-Djdk.attach.allowAttachSelf=true --add-exports java.sql/java.sql=ALL-UNNAMED --add-exports java.base/jdk.internal.ref=ALL-UNNAMED --add-exports java.base/sun.nio.ch=ALL-UNNAMED --add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED">
       <not>
         <equals arg1="${ant.java.version}" arg2="1.8" />
       </not>
     </condition>
     <echo message="supp args: ${java9-jvmargs}"/>
-
-    <!--
-    At the moment, compiling with Java 9 does not work.
-    Jigsaw's javac prevents a lot...
-
-
-
-    Some old comments for compilation w/ Java9
-
-    Unfortunately, we need the 'release 8' option of javac to compile the code base. Reason is that
-    Java 9 introduced new methods to java.nio.*Buffer.java that overrides methods in java.nio.Buffer
-    using covariants (e.g. override java.nio.Buffer.reset()Ljava.nio.Buffer with java.nio.ByteBuffer.reset()Ljava.nio.ByteBuffer),
-    which makes class files compiled with "pure" Java 9 incompatible on older Java versions.
-
-    Unfortunately, that 'release' javac option cannot be used in combination with other options to "import"
-    modules, which would be required to get access to these modules' classes.
-
-    So, as a workaround we unzip the Jigsaw modules into a folder in the build/ directory and
-    use that as a javac classpath reference. Not nice, but it seems to work.
-    -->
-    <!--
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/jdk.unsupported.jmod" overwrite="false"/>
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.base.jmod" overwrite="false">
-      <patternset>
-        <include name="**/sun/nio/ch/*.class"/>
-      </patternset>
-    </unzip>
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.management.jmod" overwrite="false">
-      <patternset>
-        <include name="**/sun/management/**/*.class"/>
-        <include name="**/com/sun/jmx/remote/**/*.class"/>
-      </patternset>
-    </unzip>
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.rmi.jmod" overwrite="false">
-      <patternset>
-        <include name="**/sun/rmi/**/*.class"/>
-      </patternset>
-    </unzip>
-    -->
-
-
-    <!--
-    TODO all these are required for eclipse-warnings target. But it then still fails to resolve java.lang.SecurityManager
-
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/jdk.unsupported.jmod" overwrite="false"/>
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.scripting.jmod" overwrite="false"/>
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/jdk.scripting.nashorn.jmod" overwrite="false"/>
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.base.jmod" overwrite="false"/>
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.management.jmod" overwrite="false"/>
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.management.rmi.jmod" overwrite="false"/>
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/jdk.management.jmod" overwrite="false"/>
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.desktop.jmod" overwrite="false"/>
-    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.rmi.jmod" overwrite="false"/>
-    -->
   </target>
 
     <!-- run microbenchmarks suite -->
@@ -2170,7 +2088,7 @@
             <arg value="-properties" />
             <arg value="${ecj.properties}" />
             <arg value="-cp" />
-            <arg value="${build.j9-classes}/classes:${toString:cassandra.classpath}" />
+            <arg value="${toString:cassandra.classpath}" />
             <arg value="${build.src.java}" />
         </java>
   </target>
