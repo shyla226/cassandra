@@ -315,9 +315,9 @@ public class FlowTest
         for (Object tag : tags)
         {
             Assert.assertTrue(msg.contains(tag.toString()));
-            Pair<String, Integer> line = Flow.LINE_NUMBERS.getLine(tag.getClass());
+            LineNumberInference.Descriptor line = Flow.LINE_NUMBERS.getLine(tag.getClass());
             Assert.assertNotSame("Expected to have a defined source", line, LineNumberInference.UNKNOWN_SOURCE);
-            Assert.assertTrue(msg.contains(line.left + ":" + line.right));
+            Assert.assertTrue(msg.contains(line.source() + ":" + line.line()));
         }
     }
 

@@ -2266,11 +2266,12 @@ public abstract class Flow<T>
                                                 .collect(Collectors.joining("\n\tat "))
                + "\n";
     }
+
     public static String withLineNumber(Object obj)
     {
         LINE_NUMBERS.maybeProcessClass(obj.getClass());
-        Pair<String, Integer> lineNumber = LINE_NUMBERS.getLine(obj.getClass());
-        return obj + "(" + lineNumber.left + ":" + lineNumber.right + ")";
+        LineNumberInference.Descriptor lineNumber = LINE_NUMBERS.getLine(obj.getClass());
+        return obj + "(" + lineNumber.source() + ":" + lineNumber.line() + ")";
     }
 
     public static String formatTrace(String prefix)

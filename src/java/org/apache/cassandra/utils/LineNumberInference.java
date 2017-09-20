@@ -23,26 +23,18 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileSystems;
+import java.nio.file.Path;
 import java.nio.file.PathMatcher;
-import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.BiMap;
-import com.google.common.collect.HashBiMap;
-import com.google.common.collect.Maps;
 import com.google.common.io.Files;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,7 +57,18 @@ import org.objectweb.asm.Opcodes;
  */
 public final class LineNumberInference
 {
-    public static final Pair<String, Integer> UNKNOWN_SOURCE = Pair.create("unknown", -1);
+    public static final Descriptor UNKNOWN_SOURCE = new Descriptor()
+    {
+        public int line()
+        {
+            return -1;
+        }
+
+        public String source()
+        {
+            return "unknown";
+        }
+    };
 
     private static final Logger logger = LoggerFactory.getLogger(LineNumberInference.class);
     private static final Pattern DOT = Pattern.compile(".", Pattern.LITERAL);
@@ -87,66 +90,58 @@ public final class LineNumberInference
         // no-op
     }
 
-    private final BiMap<String, Pair<String, String>> mappings;
-    private final BiMap<Pair<String, String>, String> inverseMappings;
-    private final Map<String, Pair<String, Integer>> lines;
-    private final Set<String> processedFiles;
-    private final Set<String> processedProxyClasses;
-    private final Predicate<Class> matcher;
+    // Maps the internal lambda class name to the descriptor
+    final Map<String, Descriptor> mappings;
     private final LambdaClassVisitor lambdaClassVisitor = new LambdaClassVisitor();
     private final SimpleClassVisitor simpleClassVisitor = new SimpleClassVisitor();
     private final ReadWriteLock lock;
     private final Lock readLock;
     private final Lock writeLock;
-
-    public LineNumberInference()
-    {
-        this((x) -> true);
-    }
+    private final Path tmpFilePath;
+    private final String lookupRegex;
 
     /**
      * Constructor allowing filtering of the classes for which the preloading has to be done. Used to reduce
      * the runtime memory footprint of stack trace inference.
      */
-    @VisibleForTesting
-    public LineNumberInference(Predicate<Class> matcher)
+    public LineNumberInference()
     {
-        this.matcher = matcher;
-        mappings = HashBiMap.create();
-        inverseMappings = mappings.inverse();
-        lines = Maps.newHashMap();
-        processedFiles = new HashSet<>();
-        processedProxyClasses = new HashSet<>();
+        mappings = new HashMap<>();
         lock = new ReentrantReadWriteLock();
         readLock = lock.readLock();
         writeLock = lock.writeLock();
+        tmpFilePath = new File(tmpDir).toPath();
+        lookupRegex = tmpFilePath + "\\/(.*)\\.class";
     }
 
     /**
      * Preloads the bytecode of the proxy classes for lambdas, dumped by JVM into the specified location.
+     *
+     * This is required to establish the mapping from the lambda class name to the actual method that
+     * it's calling.
      */
     public void preloadLambdas()
     {
-        File dirFile = new File(tmpDir);
-
         writeLock.lock();
         try
         {
             final PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:**.class");
 
-            Collection<File> files = java.nio.file.Files.find(dirFile.toPath(), 999, (path, attributes) -> matcher.matches(path))
-                                                        .map(path -> path.toFile())
+            Collection<File> files = java.nio.file.Files.find(tmpFilePath, 999, (path, attributes) -> matcher.matches(path))
+                                                        .map(Path::toFile)
                                                         .collect(Collectors.toList());
 
             for (File file : files)
             {
-                if (processedProxyClasses.contains(file.getAbsolutePath()))
+                 String className = slashToDot(file.getAbsolutePath().replaceFirst(lookupRegex, "$1"));
+
+                 // Already processed
+                if (mappings.containsKey(className))
                     continue;
 
                 try (InputStream in = new FileInputStream(file))
                 {
                     new ClassReader(in).accept(new FileMappingVisitor(), ClassReader.EXPAND_FRAMES);
-                    processedProxyClasses.add(file.getAbsolutePath());
                 }
                 catch (IOException e)
                 {
@@ -167,19 +162,20 @@ public final class LineNumberInference
     /**
      * Returns the Pair of Filename and Line Number where the given class was originally declared.
      */
-    public Pair<String, Integer> getLine(Class klass)
+    public Descriptor getLine(Class klass)
     {
         readLock.lock();
         try
         {
-            Pair<String, Integer> line = lines.get(klass.getName().split("/")[0]);
-            if (line == null)
+            String klassName = klass.getName().split("/")[0];
+            Descriptor descriptor = mappings.get(klassName);
+            if (descriptor == null)
             {
                 logger.info("Could not find line information for " + klass);
                 return UNKNOWN_SOURCE;
             }
 
-            return line;
+            return descriptor;
         }
         finally
         {
@@ -191,16 +187,17 @@ public final class LineNumberInference
      * Loads and extracts the line numbers from the bytecode of the class. In case of lambda instance
      * will load all the lambdas in the file at once.
      */
-    public void maybeProcessClass(Class klass)
+    public boolean maybeProcessClass(Class klass)
     {
         writeLock.lock();
         try
         {
-            maybeProcessClassInternal(klass);
+            return maybeProcessClassInternal(klass);
         }
         catch (Throwable e)
         {
             logger.warn("Could not process class information for lambda " + klass.getName());
+            return false;
         }
         finally
         {
@@ -208,33 +205,29 @@ public final class LineNumberInference
         }
     }
 
-    private void maybeProcessClassInternal(Class klass) throws IOException
+    private boolean maybeProcessClassInternal(Class klass) throws IOException
     {
         String className = klass.getName();
         // no need to filter by interface here since we're calling it from the framework level
         if (LAMBDA_PATTERN.matcher(className).matches())
         {
             String parentClass = className.split("/")[0];
-            if (processedFiles.contains(parentClass))
-                return;
 
-            Pair<String, String> methodDescriptor = mappings.get(parentClass);
+            LambdaDescriptor lambdaDescriptor = (LambdaDescriptor) mappings.get(parentClass);
+            if (lambdaDescriptor.line != -1)
+                return false;
 
-            // Skipped lambda, for which no mapping is found
-            if (methodDescriptor == null)
-                return;
-
-            try (InputStream in = klass.getResourceAsStream("/" + methodDescriptor.left + ".class"))
+            try (InputStream in = klass.getResourceAsStream("/" + lambdaDescriptor.classFilePath + ".class"))
             {
+                lambdaClassVisitor.lambdaDescriptor = lambdaDescriptor;
                 new ClassReader(in).accept(lambdaClassVisitor, ClassReader.SKIP_FRAMES);
+                lambdaClassVisitor.lambdaDescriptor = null;
             }
-
-            processedFiles.add(parentClass);
         }
         else
         {
-            if (processedFiles.contains(className))
-                return;
+            if (mappings.containsKey(className))
+                return false;
 
             // Nested classes, unlike lambdas are stored in the separate files and their line information is not
             // accessible through their enclosing class bytecode
@@ -242,9 +235,9 @@ public final class LineNumberInference
             {
                 new ClassReader(in).accept(simpleClassVisitor, ClassReader.SKIP_FRAMES);
             }
-
-            processedFiles.add(klass.getName());
         }
+
+        return true;
      }
 
     /**
@@ -254,6 +247,7 @@ public final class LineNumberInference
     {
         private String className;
         private String fileName;
+
         SimpleClassVisitor()
         {
             super(Opcodes.ASM5);
@@ -279,7 +273,7 @@ public final class LineNumberInference
                 {
                     public void visitLineNumber(int line, Label label)
                     {
-                        lines.put(className, Pair.create(fileName, line));
+                        mappings.put(className, new ClassDescriptor(className, fileName, line));
                     }
                 };
             }
@@ -299,8 +293,9 @@ public final class LineNumberInference
      */
     private class LambdaClassVisitor extends ClassVisitor
     {
-        private String className;
-        private String fileName;
+        // Assigned from outside
+        LambdaDescriptor lambdaDescriptor;
+        String fileName;
 
         LambdaClassVisitor()
         {
@@ -315,23 +310,35 @@ public final class LineNumberInference
                           String superName,
                           String[] interfaces)
         {
-            this.className = name;
         }
 
         @Override
         public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions)
         {
-            String pendingMethod = inverseMappings.get(Pair.create(this.className, name));
+            // For the abstract classes, the "real" will not be visited, since it's implemented in the other class.
+            // In this situation the best thing we can do is to direct to record the base class constructor line number.
+            if (name.equals(INIT))
+            {
+                return new MethodVisitor(Opcodes.ASM5)
+                {
+                    public void visitLineNumber(int line, Label label)
+                    {
+                        if (lambdaDescriptor.line == -1)
+                            lambdaDescriptor.line = line;
+                    }
+                };
+            }
 
-            // Skip unmapped lambdas: they either weren't loaded or did't match the interface
-            if (pendingMethod == null)
+            // Filter out currently queried method
+            if (!name.equals(lambdaDescriptor.targetMethodRef))
                 return null;
 
             return new MethodVisitor(Opcodes.ASM5)
             {
                 public void visitLineNumber(int line, Label label)
                 {
-                    lines.put(pendingMethod, Pair.create(fileName, line));
+                    lambdaDescriptor.line = line;
+                    lambdaDescriptor.sourceFilePath = fileName;
                 }
             };
         }
@@ -344,7 +351,7 @@ public final class LineNumberInference
     }
 
     /**
-     * Visitor for proxy classfiles generated by Java for lambdas, used to build a bi-directional mapping from the
+     * Visitor for proxy classfiles generated by Java for lambdas, used to build a mapping from the
      * lambda proxy class to the private static method generated, since the runtime only has access to the proxy
      * class and bytecode visitor fetching line numbers only has access to the generated "fake" method.
      */
@@ -357,7 +364,6 @@ public final class LineNumberInference
 
         // Name of currently visited lambda
         private String currentLambda;
-        private boolean process;
 
         @Override
         public void visit(int version,
@@ -368,29 +374,11 @@ public final class LineNumberInference
                           String[] interfaces)
         {
             this.currentLambda = slashToDot(name);
-
-            if (matcher == null)
-                process = false;
-            else if (interfaces.length == 0)
-                process = true;
-            else
-            {
-                process = Arrays.stream(interfaces)
-                                .map(LineNumberInference.this::slashToDot)
-                                .map(this::safeClassForName)
-                                .filter(Objects::nonNull)
-                                .reduce(false, (acc, klass) -> acc || matcher.test(klass), (l, r) -> l || r);
-            }
         }
 
         @Override
         public MethodVisitor visitMethod(int access, String methodName, String desc, String signature, String[] exceptions)
         {
-            if (!process)
-            {
-                return null;
-            }
-
             if (methodName.equals(INIT))
                 return null;
 
@@ -398,27 +386,9 @@ public final class LineNumberInference
             {
                 public void visitMethodInsn(int opcode, String path, String methodRef, String s2, boolean b)
                 {
-                    // lambda proxies are calling the generated private static method
-                    if (Opcodes.INVOKESTATIC == opcode || (Opcodes.INVOKESPECIAL == opcode && !methodRef.equals(INIT)))
-                    {
-                        Pair<String, String> pair = Pair.create(path, methodRef);
-                        if (!inverseMappings.containsKey(pair))
-                            mappings.put(currentLambda, pair);
-                    }
+                    mappings.put(currentLambda, new LambdaDescriptor(currentLambda, path, methodRef));
                 }
             };
-        }
-
-        private Class<?> safeClassForName(String iface)
-        {
-            try
-            {
-                return Class.forName(iface);
-            }
-            catch (ClassNotFoundException e)
-            {
-                return null;
-            }
         }
     }
 
@@ -430,5 +400,78 @@ public final class LineNumberInference
     private String slashToDot(String input)
     {
         return SLASH.matcher(input).replaceAll(".");
+    }
+
+    public interface Descriptor
+    {
+        public int line();
+        public String source();
+    }
+
+    private static class LambdaDescriptor implements Descriptor
+    {
+        final String className;
+        final String classFilePath;
+        final String targetMethodRef;
+
+        String sourceFilePath = "unknown";
+        int line = -1;
+
+        LambdaDescriptor(String className, String classFilePath, String targetMethodRef)
+        {
+            this.className = className;
+            this.classFilePath = classFilePath;
+            this.targetMethodRef = targetMethodRef;
+        }
+
+        public String toString()
+        {
+            return "LambdaDescriptor{" +
+                   ", source='" + sourceFilePath + '\'' +
+                   ", line=" + line +
+                   '}';
+        }
+
+        public int line()
+        {
+            return line;
+        }
+
+        public String source()
+        {
+            return sourceFilePath;
+        }
+    }
+
+    public static class ClassDescriptor implements Descriptor
+    {
+        final String className;
+        final String sourceFilePath;
+        final int line;
+
+        public ClassDescriptor(String className, String sourceFilePath, int line)
+        {
+            this.className = className;
+            this.sourceFilePath = sourceFilePath;
+            this.line = line;
+        }
+
+        public int line()
+        {
+            return line;
+        }
+
+        public String source()
+        {
+            return sourceFilePath;
+        }
+
+        public String toString()
+        {
+            return "ClassDescriptor{" +
+                   ", source='" + sourceFilePath + '\'' +
+                   ", line=" + line +
+                   '}';
+        }
     }
 }

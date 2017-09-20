@@ -18,6 +18,9 @@
 
 package org.apache.cassandra.utils;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.function.Function;
 
 import org.junit.Test;
@@ -30,31 +33,42 @@ public class LineNumberInferenceTest
     @Test
     public void lineNumbersTest() throws Throwable
     {
-        LineNumberInference lineNumbers = new LineNumberInference(Tag.class::isAssignableFrom);
+        LineNumberInference lineNumbers = new LineNumberInference();
 
-        TaggedFunction<Short, String> lambda = (a) -> Short.toString(a); // Line #35
-        TaggedFunction<Short, String> lambda2 = (a) -> Short.toString(a);
-        Function<Short, String> lambda3 = (a) -> Short.toString(a);
-        Function<Long, String> methodRef = toFn(this::methodAsReference);
+        TaggedFunction<Short, String> lambda = (a) -> Short.toString(a); // Line #38
+        TaggedFunction<Short, String> lambda2 = (a) -> Short.toString(a); // Line #39
+        Function<Short, String> lambda3 = (a) -> Short.toString(a); // Line #40
+        Function<Long, String> thisMethodRef = toFn(this::methodAsReference);
+        Function<Long, String> methodRef = toFn(new ConcreteStaticClass()::methodOfStaticClass);
+        Function<Long, String> abstractMethodRef = toFn(((StaticClass)new ConcreteStaticClass())::abstractMethodOfStaticClass);
+        Function<Long, String> abstractMethodConcreteClassRef = toFn((new ConcreteStaticClass())::abstractMethodOfStaticClass);
+        Function<Long, ConstructorAsReferenceClass> constructorAsReferenceClassFunction = toFn(ConstructorAsReferenceClass::new);
 
         lineNumbers.preloadLambdas();
 
-        lineNumbers.maybeProcessClass(lambda.getClass());
-        lineNumbers.maybeProcessClass(lambda3.getClass());
-        lineNumbers.maybeProcessClass(FunInst.class);
-        lineNumbers.maybeProcessClass(FunInstStatic.class);
-        lineNumbers.maybeProcessClass(AbstractFunInst.class);
-        lineNumbers.maybeProcessClass(methodRef.getClass());
-        lineNumbers.maybeProcessClass(LineNumbersFn.class);
+        List<Class> classes = Arrays.asList(lambda.getClass(), lambda2.getClass(), lambda3.getClass(),
+                                            FunInst.class, FunInstStatic.class, AbstractFunInst.class, LineNumbersFn.class,
+                                            thisMethodRef.getClass(), methodRef.getClass(), abstractMethodRef.getClass(),
+                                            abstractMethodConcreteClassRef.getClass(), constructorAsReferenceClassFunction.getClass());
+        Collections.shuffle(classes);
 
-        Assert.assertEquals(lineNumbers.getLine(lambda.getClass()).right.intValue(), 35);
-        Assert.assertEquals(lineNumbers.getLine(lambda2.getClass()).right.intValue(), 36);
-        Assert.assertEquals(lineNumbers.getLine(lambda3.getClass()).right.intValue(), -1); // Does not inherit from Tag interface
-        Assert.assertEquals(lineNumbers.getLine(LineNumberInference.class).right.intValue(), -1); // Does not inherit from Tag interface
-        Assert.assertEquals(lineNumbers.getLine(methodRef.getClass()).right.intValue(), 68);
-        Assert.assertEquals(lineNumbers.getLine(FunInst.class).right.intValue(), 79);
-        Assert.assertEquals(lineNumbers.getLine(FunInstStatic.class).right.intValue(), 87);
-        Assert.assertEquals(lineNumbers.getLine(AbstractFunInst.class).right.intValue(), 95);
+        for (Class klass : classes)
+        {
+            Assert.assertTrue(lineNumbers.maybeProcessClass(klass));
+            Assert.assertFalse(lineNumbers.maybeProcessClass(klass)); // Make sure that subsequent calls are skipped
+        }
+
+        Assert.assertEquals(lineNumbers.getLine(lambda.getClass()).line(), 38);
+        Assert.assertEquals(lineNumbers.getLine(lambda2.getClass()).line(), 39);
+        Assert.assertEquals(lineNumbers.getLine(lambda3.getClass()).line(), 40);
+        Assert.assertEquals(lineNumbers.getLine(thisMethodRef.getClass()).line(), 82);
+        Assert.assertEquals(lineNumbers.getLine(methodRef.getClass()).line(), 118);
+        Assert.assertEquals(lineNumbers.getLine(abstractMethodRef.getClass()).line(), 114);
+        Assert.assertEquals(lineNumbers.getLine(abstractMethodConcreteClassRef.getClass()).line(), 128);
+        Assert.assertEquals(lineNumbers.getLine(constructorAsReferenceClassFunction.getClass()).line(), 135);
+        Assert.assertEquals(lineNumbers.getLine(FunInst.class).line(), 94);
+        Assert.assertEquals(lineNumbers.getLine(FunInstStatic.class).line(), 102);
+        Assert.assertEquals(lineNumbers.getLine(AbstractFunInst.class).line(), 110);
     }
 
     private TaggedFunction<Long, String> toFn(TaggedFunction<Long, String> fn)
@@ -63,20 +77,21 @@ public class LineNumberInferenceTest
     }
 
     // Method to be cast to method reference
-    private String methodAsReference(Long l) // Line # 68
+    private String methodAsReference(Long l)
     {
-        return Long.toString(l);
+        return Long.toString(l); // Line #82
     }
 
-    public interface Tag
+    private Function<Long, ConstructorAsReferenceClass> toFn(Function<Long, ConstructorAsReferenceClass> fn)
+    {
+        return fn;
+    }
+
+    public interface TaggedFunction<A, B> extends Function<A, B>
     {
     }
 
-    public interface TaggedFunction<A, B> extends Function<A, B>, Tag
-    {
-    }
-
-    public class FunInst implements Function<Integer, String>, Tag // Line #79
+    public class FunInst implements Function<Integer, String> // Line #94
     {
         public String apply(Integer integer)
         {
@@ -84,7 +99,7 @@ public class LineNumberInferenceTest
         }
     }
 
-    public static class FunInstStatic implements Function<Integer, String>, Tag // Line #87
+    public static class FunInstStatic implements Function<Integer, String> // Line #102
     {
         public String apply(Integer integer)
         {
@@ -92,7 +107,32 @@ public class LineNumberInferenceTest
         }
     }
 
-    public abstract class AbstractFunInst implements Function<Integer, String>, Tag // Line #95
+    public abstract class AbstractFunInst implements Function<Integer, String> // Line #110
     {
+    }
+
+    static abstract class StaticClass
+    {
+        public String methodOfStaticClass(Long i)
+        {
+            return Long.toString(i); // Line #118
+        }
+
+        public abstract String abstractMethodOfStaticClass(Long i);
+    }
+
+    static class ConcreteStaticClass extends StaticClass
+    {
+        public String abstractMethodOfStaticClass(Long i)
+        {
+            return Long.toString(i); // Line #128
+        }
+    }
+
+    public static class ConstructorAsReferenceClass
+    {
+        public ConstructorAsReferenceClass(Long l)
+        { // Line #135
+        }
     }
 }

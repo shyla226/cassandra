@@ -20,7 +20,7 @@ package org.apache.cassandra.utils;
 
 import java.util.function.Function;
 
-public class LineNumbersFn implements Function<Integer, String>, LineNumberInferenceTest.Tag
+public class LineNumbersFn implements Function<Integer, String>
 {
     public String apply(Integer integer)
     {
