@@ -45,6 +45,7 @@ import com.codahale.metrics.jvm.FileDescriptorRatioGauge;
 import com.codahale.metrics.jvm.GarbageCollectorMetricSet;
 import com.codahale.metrics.jvm.MemoryUsageGaugeSet;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
@@ -53,6 +54,7 @@ import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.TPCUtils;
@@ -436,6 +438,14 @@ public class CassandraDaemon
 
         // Native transport
         nativeTransportService = new NativeTransportService();
+
+        // During initialization memtables do not know the correct token boundaries to use.
+        // Flush all to make sure they get updated and don't get stuck on core 0 (APOLLO-939).
+        // There should be no data in the tables at this time, so this should complete very quickly.
+        // Wait for it before signalling we are ready.
+        Single.merge(Iterables.concat(Iterables.transform(Keyspace.all(),
+                                                          Keyspace::flush)))
+              .blockingLast();
 
         completeSetup();
     }

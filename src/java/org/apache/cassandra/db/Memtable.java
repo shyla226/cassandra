@@ -263,6 +263,11 @@ public class Memtable implements Comparable<Memtable>
             if (!memtableSubrange.isEmpty())
                 return false;
         }
+
+        // Force memtable switch if boundaries have changed (APOLLO-939)
+        if (boundaries != cfs.keyspace.getTPCBoundaries())
+            return false;
+
         return true;
     }
 
