@@ -3519,12 +3519,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                                                     t -> t.params.nodeSync.isEnabled(t));
             if (!Iterables.isEmpty(withNodeSync))
             {
-                logger.warn(String.format("Running anti-entropy repair on tables with NodeSync enabled (and NodeSync is enabled on %s); "
-                                          + "This won't break anything but is inefficient as both will do duplicate work.", withNodeSync));
-                // TODO(Sylvain): decide if we truly want to reject this. It is possibly a good idea to do so, but that
-                // currently break some dtests as nodesync is enabled on distributed system tables and some tests ends up forcing a repair on those.
-                //throw new IllegalStateException(String.format("Cannot run anti-entropy repair on tables with NodeSync enabled (and NodeSync is enabled on %s)",
-                //                                              withNodeSync));
+                throw new IllegalStateException(String.format("Cannot run anti-entropy repair on tables with NodeSync enabled (and NodeSync is enabled on %s)",
+                                                              withNodeSync));
             }
         }
         catch (IOException e)
