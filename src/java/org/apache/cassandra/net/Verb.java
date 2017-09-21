@@ -62,6 +62,7 @@ public abstract class Verb<P, Q>
         private final int groupIdx;
         private final String name;
         private final ExecutorSupplier<P> requestExecutor;
+        private final ExecutorSupplier<P> responseExecutor;
         private final boolean supportsBackPressure;
         private final DroppedMessages.Group droppedGroup;
 
@@ -69,6 +70,7 @@ public abstract class Verb<P, Q>
              int groupIdx,
              String name,
              ExecutorSupplier<P> requestExecutor,
+             ExecutorSupplier<P> responseExecutor,
              boolean supportsBackPressure,
              DroppedMessages.Group droppedGroup)
         {
@@ -77,6 +79,7 @@ public abstract class Verb<P, Q>
             this.groupIdx = groupIdx;
             this.name = name;
             this.requestExecutor = requestExecutor;
+            this.responseExecutor = responseExecutor;
             this.supportsBackPressure = supportsBackPressure;
             this.droppedGroup = droppedGroup;
         }
@@ -156,6 +159,14 @@ public abstract class Verb<P, Q>
     ExecutorSupplier<P> requestExecutor()
     {
         return info.requestExecutor;
+    }
+
+    /**
+     * The factory method to return the executor that will execute responses.
+     */
+    ExecutorSupplier<P> responseExecutor()
+    {
+        return info.responseExecutor;
     }
 
     /**

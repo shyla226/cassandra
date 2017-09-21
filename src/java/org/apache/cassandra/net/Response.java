@@ -125,9 +125,4 @@ public class Response<Q> extends Message<Q>
                ? messageData.payloadSize
                : version.serializer(verb()).responseSerializer.serializedSize(payload());
     }
-
-    TracingAwareExecutor executor()
-    {
-        return StageManager.getStage(group().isInternal() ? Stage.INTERNAL_RESPONSE : Stage.REQUEST_RESPONSE);
-    }
 }

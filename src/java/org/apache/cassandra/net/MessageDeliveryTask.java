@@ -17,27 +17,28 @@
  */
 package org.apache.cassandra.net;
 
-import java.util.concurrent.TimeUnit;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.ExpiringMap;
 
-class MessageDeliveryTask implements Runnable
+abstract class MessageDeliveryTask<T, M extends Message<T>> implements Runnable
 {
-    private static final Logger logger = LoggerFactory.getLogger(MessageDeliveryTask.class);
-
-    private final Message message;
+    protected final M message;
     private final long enqueueTime;
 
-    MessageDeliveryTask(Message message)
+    MessageDeliveryTask(M message)
     {
-        assert message != null;
         this.message = message;
         this.enqueueTime = ApproximateTime.currentTimeMillis();
+    }
+
+    static <P, Q> RequestDeliveryTask<P, Q> forRequest(Request<P, Q> request)
+    {
+        return new RequestDeliveryTask<>(request);
+    }
+
+    static <Q> ResponseDeliveryTask<Q> forResponse(Response<Q> response)
+    {
+        return new ResponseDeliveryTask<>(response);
     }
 
     public void run()
@@ -53,53 +54,59 @@ class MessageDeliveryTask implements Runnable
             return;
         }
 
-        if (message.isRequest())
+        deliverMessage(currentTimeMillis);
+    }
+
+    protected abstract void deliverMessage(long currentTimeMillis);
+
+    private static class RequestDeliveryTask<P, Q> extends MessageDeliveryTask<P, Request<P, Q>>
+    {
+        private RequestDeliveryTask(Request<P, Q> request)
         {
-            Request<?, ?> request = (Request)message;
+            super(request);
+        }
+
+        protected void deliverMessage(long currentTimeMillis)
+        {
             // First, deal with forwards if we have any
-            for (ForwardRequest<?, ?> forward : request.forwardRequests())
+            for (ForwardRequest<?, ?> forward : message.forwardRequests())
                 MessagingService.instance().forward(forward);
 
-            if (request.verb().isOneWay())
-                ((OneWayRequest<?>)request).execute();
+            if (message.verb().isOneWay())
+                ((OneWayRequest<?>)message).execute();
             else
-                request.execute(MessagingService.instance()::reply, onAborted(request));
+                message.execute(MessagingService.instance()::reply, this::onAborted);
         }
-        else
+
+        private void onAborted()
         {
-            handleResponse((Response<?>) message);
+            Tracing.trace("Discarding partial response to {} (timed out)", message.from());
+            MessagingService.instance().incrementDroppedMessages(message);
         }
     }
 
-    private Runnable onAborted(Request<?, ?> request)
+    private static class ResponseDeliveryTask<Q> extends MessageDeliveryTask<Q, Response<Q>>
     {
-        return () ->
+        private ResponseDeliveryTask(Response<Q> response)
         {
-            Tracing.trace("Discarding partial response to {} (timed out)", request.from());
-            MessagingService.instance().incrementDroppedMessages(request);
-        };
-    }
-
-    private static <Q> void handleResponse(Response<Q> response)
-    {
-        Tracing.trace("Processing response from {}", response.from());
-
-        ExpiringMap.CacheableObject<CallbackInfo<?>> cObj = MessagingService.instance().removeRegisteredCallback(response);
-        if (cObj == null)
-        {
-            String msg = "Callback already removed for message {} from {}, ignoring response";
-            logger.trace(msg, response.id(), response.from());
-            Tracing.trace(msg, response.id(), response.from());
-            return;
+            super(response);
         }
 
-        @SuppressWarnings("unchecked")
-        MessageCallback<Q> callback = (MessageCallback<Q>)cObj.get().callback;
-        // TODO: should we maybe add the latency on failure too?
-        if (!response.isFailure())
-            MessagingService.instance().addLatency(response.verb(), response.from(), cObj.lifetime(TimeUnit.MILLISECONDS));
+        protected void deliverMessage(long currentTimeMillis)
+        {
+            CallbackInfo<Q> info = MessagingService.instance().getRegisteredCallback(message, true);
+            // If the info have expired, ignore the response (we already logged in getRegisteredCallback)
+            if (info == null)
+                return;
 
-        response.deliverTo(callback);
-        MessagingService.instance().updateBackPressureOnReceive(response.from(), response.verb(), false);
+            Tracing.trace("Processing response from {}", message.from());
+            MessageCallback<Q> callback = info.callback;
+            // TODO: should we maybe add the latency on failure too?
+            if (!message.isFailure())
+                MessagingService.instance().addLatency(message.verb(), message.from(), Math.max(currentTimeMillis - info.requestStartMillis, 0));
+
+            message.deliverTo(callback);
+            MessagingService.instance().updateBackPressureOnReceive(message.from(), message.verb(), false);
+        }
     }
 }

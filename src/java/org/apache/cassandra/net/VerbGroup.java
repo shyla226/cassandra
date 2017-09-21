@@ -147,13 +147,27 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
         return id.toString();
     }
 
-    @SuppressWarnings("unchecked")
     private static <T> ExecutorSupplier<T> maybeGetRequestExecutor(Class<T> requestClass, Stage defaultStage)
     {
         if (Scheduleable.class.isAssignableFrom(requestClass))
             return (p) -> ((Scheduleable)p).getOperationExecutor();
 
         return defaultStage == null ? null : (p) -> StageManager.getStage(defaultStage);
+    }
+
+    // Note that the response executor depends on the _request_ payload, not the _response_ one. This is because
+    // the request is what contains the most information on the actual request-response exchange in practice (so, is
+    // more likely to be useful at deciding the executor of its response. In fact, in case like reads, we need to
+    // know the executor before we truly deserialize the payload, so making the executor choice based on the response
+    // payload wouldn't work (of course, we could make imagine making the decision be based on both the request
+    // and response payload, but that would require a new 'ExecutorSupplier' class taking 2 arguments and we simply
+    // don't need that for now).
+    private static <T> ExecutorSupplier<T> maybeGetResponseExecutor(Class<T> requestClass, boolean isInternal)
+    {
+        if (Scheduleable.class.isAssignableFrom(requestClass))
+            return (p) -> ((Scheduleable)p).getOperationExecutor();
+
+        return (p) -> StageManager.getStage(isInternal ? Stage.INTERNAL_RESPONSE : Stage.REQUEST_RESPONSE);
     }
 
     @SuppressWarnings("unchecked")
@@ -251,6 +265,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
 
             private TimeoutSupplier<P> timeoutSupplier;
             private ExecutorSupplier<P> requestExecutor;
+            private ExecutorSupplier<P> responseExecutor;
 
             private Serializer<P> requestSerializer;
             private Serializer<Q> responseSerializer;
@@ -271,6 +286,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
                 this.groupIdx = groupIdx;
                 this.isOneWay = isOneWay;
                 this.requestExecutor = maybeGetRequestExecutor(requestClass, defaultStage);
+                this.responseExecutor = maybeGetResponseExecutor(requestClass, isInternal);
                 this.requestSerializer = maybeGetSerializer(requestClass);
                 this.responseSerializer = maybeGetSerializer(responseClass);
                 this.requestSerializerFct = maybeGetVersionedSerializers(requestClass);
@@ -371,13 +387,13 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
             protected Verb.Info<P> info()
             {
                 if (requestExecutor == null)
-                    throw new IllegalStateException("Unless the request payload implements the Scheduleable interface, a request stage is required (either at the RegistrationHelper lever or at the VerbBuilder one)");
+                    throw new IllegalStateException("Unless the request payload implements the Scheduleable interface, a request stage is required (either at the RegistrationHelper level or at the VerbBuilder one)");
                 if (isOneWay && supportsBackPressure)
                     throw new IllegalStateException("Back pressure doesn't make sense for one-way message (no response is sent so we can't keep track of in-flight requests to an host)");
                 if (!isOneWay && droppedGroup == null)
                     throw new IllegalStateException("Missing 'dropped group', should be indicated either at the RegistrationHelper lever or at the VerbBuilder one");
 
-                return new Verb.Info<>(VerbGroup.this, groupIdx, name, requestExecutor, supportsBackPressure, isOneWay ? null : droppedGroup);
+                return new Verb.Info<>(VerbGroup.this, groupIdx, name, requestExecutor, responseExecutor, supportsBackPressure, isOneWay ? null : droppedGroup);
             }
 
             TimeoutSupplier<P> timeoutSupplier()

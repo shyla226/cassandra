@@ -285,9 +285,6 @@ public abstract class ReadResponse
 
         public Flow<FlowableUnfilteredPartition> data(ReadCommand command)
         {
-            // Note that the command parameter shadows the 'command' field and this is intended because
-            // the later can be null (for RemoteDataResponse as those are created in the serializers and
-            // those don't have easy access to the command). This is also why we need the command as parameter here.
             return UnfilteredPartitionsSerializer.serializerForIntraNode(version)
                                                  .deserialize(data, command.metadata(), command.columnFilter(), flag);
 
