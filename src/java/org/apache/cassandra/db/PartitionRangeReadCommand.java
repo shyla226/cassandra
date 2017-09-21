@@ -26,6 +26,7 @@ import java.util.List;
 import com.google.common.collect.Iterables;
 
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.IOScheduler;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
@@ -77,6 +78,12 @@ public class PartitionRangeReadCommand extends ReadCommand
      */
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
 
+    // We access the scheduler/operationExecutor multiple times for each command (at least twice for every replica
+    // involved in the request and response executor in Messaging) and re-doing their computation is unnecessary so
+    // caching their value here. Note that we don't serialize those in any way, they are just recomputed in the ctor.
+    private final transient IOScheduler scheduler;
+    private final transient TracingAwareExecutor operationExecutor;
+
     private PartitionRangeReadCommand(DigestVersion digestVersion,
                                       TableMetadata metadata,
                                       int nowInSec,
@@ -88,6 +95,9 @@ public class PartitionRangeReadCommand extends ReadCommand
     {
         super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         this.dataRange = dataRange;
+
+        this.scheduler = TPC.ioScheduler();
+        this.operationExecutor = scheduler.forTaskType(TPCTaskType.READ_RANGE);
     }
 
     private PartitionRangeReadCommand(TableMetadata metadata,
@@ -430,12 +440,12 @@ public class PartitionRangeReadCommand extends ReadCommand
 
     public StagedScheduler getScheduler()
     {
-        return TPC.ioScheduler();
+        return scheduler;
     }
 
     public TracingAwareExecutor getOperationExecutor()
     {
-        return getScheduler().forTaskType(TPCTaskType.READ_RANGE);
+        return operationExecutor;
     }
 
     private static class Deserializer extends SelectionDeserializer<PartitionRangeReadCommand>

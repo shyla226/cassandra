@@ -24,6 +24,7 @@ import java.util.concurrent.CompletableFuture;
 
 import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.Scheduleable;
@@ -86,6 +87,13 @@ public class Mutation implements IMutation, Scheduleable
     private static final int CACHED_SERIALIZATIONS = EncodingVersion.values().length;
     private final ByteBuffer[] cachedSerializations = new ByteBuffer[CACHED_SERIALIZATIONS];
 
+    // We access the scheduler/operationExecutor multiple times for each mutation (at least twice for every replica
+    // involved in the request and response executor in Messaging, and potentially for commit log tasks) and re-doing
+    // their computation is unnecessary so caching their value here. Note that we don't serialize those in any way, they
+    // are just recomputed in the ctor.
+    private final transient TPCScheduler scheduler;
+    private final transient TracingAwareExecutor operationExecutor;
+
     public Mutation(String keyspaceName, DecoratedKey key)
     {
         this(keyspaceName, key, new HashMap<>());
@@ -103,6 +111,9 @@ public class Mutation implements IMutation, Scheduleable
         this.modifications = modifications;
         for (PartitionUpdate pu : modifications.values())
             cdcEnabled |= pu.metadata().params.cdc;
+
+        this.scheduler = TPC.getForKey(Keyspace.open(keyspaceName), key);
+        this.operationExecutor = scheduler.forTaskType(TPCTaskType.WRITE);
     }
 
     public Mutation copy()
@@ -242,12 +253,12 @@ public class Mutation implements IMutation, Scheduleable
 
     public StagedScheduler getScheduler()
     {
-        return TPC.getForKey(Keyspace.open(getKeyspaceName()), key());
+        return scheduler;
     }
 
     public TracingAwareExecutor getOperationExecutor()
     {
-        return getScheduler().forTaskType(TPCTaskType.WRITE);
+        return operationExecutor;
     }
 
     public Completable applyAsync(boolean durableWrites, boolean isDroppable)

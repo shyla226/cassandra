@@ -34,6 +34,7 @@ import org.apache.cassandra.cache.RowCacheSentinel;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCRunnable;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
@@ -82,6 +83,12 @@ public class SinglePartitionReadCommand extends ReadCommand
     private final DecoratedKey partitionKey;
     private final ClusteringIndexFilter clusteringIndexFilter;
 
+    // We access the scheduler/operationExecutor multiple times for each command (at least twice for every replica
+    // involved in the request and response executor in Messaging, plus potentially in AbstractReadExecutor when
+    // speculating) and re-doing their computation is unnecessary so caching their value here. Note that we don't
+    // serialize those in any way, they are just recomputed in the ctor.
+    private final transient TPCScheduler scheduler;
+    private final transient TracingAwareExecutor operationExecutor;
 
     /**
      * Race condition when ReadCommand is re-used.
@@ -107,6 +114,9 @@ public class SinglePartitionReadCommand extends ReadCommand
         assert partitionKey.getPartitioner() == metadata.partitioner;
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
+
+        this.scheduler = TPC.getForKey(Keyspace.open(metadata().keyspace), partitionKey);
+        this.operationExecutor = scheduler.forTaskType(TPCTaskType.READ);
     }
 
     public Request.Dispatcher<SinglePartitionReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints)
@@ -1084,12 +1094,12 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public StagedScheduler getScheduler()
     {
-        return TPC.getForKey(Keyspace.open(metadata().keyspace), partitionKey());
+        return scheduler;
     }
 
     public TracingAwareExecutor getOperationExecutor()
     {
-        return getScheduler().forTaskType(TPCTaskType.READ);
+        return operationExecutor;
     }
 
     /**
