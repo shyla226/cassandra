@@ -24,8 +24,6 @@ import java.util.NoSuchElementException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Observable;
-import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
@@ -35,7 +33,6 @@ import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.reactivestreams.Subscription;
 
 public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 {
@@ -375,14 +372,6 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
             lastOpenMarker = null;
             // Note that we always read index blocks in forward order so this method is always called in forward order
             openMarker = marker.isOpen(false) ? marker.openDeletionTime(false) : null;
-        }
-
-        protected DeletionTime getAndClearOpenMarker()
-        {
-            DeletionTime toReturn = openMarker;
-            lastOpenMarker = openMarker;
-            openMarker = null;
-            return toReturn;
         }
 
         public boolean hasNext()

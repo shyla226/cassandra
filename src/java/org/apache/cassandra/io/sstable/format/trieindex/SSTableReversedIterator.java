@@ -25,7 +25,6 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
@@ -236,7 +235,7 @@ class SSTableReversedIterator extends AbstractSSTableIterator
             if (openMarker != null && filterEnd)
             {
                 // If we have no end and still an openMarker, this means we're indexed and the marker is closed in a following block.
-                blockCloseMarker = new RangeTombstoneBoundMarker(slice.end(), getAndClearOpenMarker());
+                blockCloseMarker = new RangeTombstoneBoundMarker(slice.end(), openMarker);
             }
         }
     }
