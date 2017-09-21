@@ -520,9 +520,9 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
         private final DataLimits.Counter counter;
         private final DataLimits.Counter postReconciliationCounter;
 
-        private DecoratedKey lastPartitionKey;
-        private Clustering lastClustering;
-        private int lastCount = 0;
+        private volatile DecoratedKey lastPartitionKey;
+        private volatile Clustering lastClustering;
+        private volatile int lastCount = 0;
 
         private ShortReadProtection(InetAddress source, DataLimits.Counter postReconciliationCounter)
         {
@@ -533,7 +533,9 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
 
         private Flow<FlowableUnfilteredPartition> apply(Flow<FlowableUnfilteredPartition> data)
         {
-            return DataLimits.countUnfiltered(data, counter).map(this::applyPartition);
+            return DataLimits.countUnfilteredPartitions(data, counter)
+                .map(this::applyPartition)
+                .doOnClose(counter::endOfIteration);
         }
 
         private FlowableUnfilteredPartition applyPartition(FlowablePartitionBase<? extends Unfiltered> p)
@@ -543,14 +545,18 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
             lastClustering = null;
             lastCount = 0;
 
-            return partition.withContent(partition.content.concatWith(this::moreContents)
-                                                          .map(this::applyUnfiltered));
+            return partition.withContent(
+                partition.content
+                    .concatWith(this::moreContents)
+                    .map(this::applyUnfiltered)
+                    .doOnClose(counter::endOfPartition));
         }
 
         private Unfiltered applyUnfiltered(Unfiltered unfiltered)
         {
             if (unfiltered instanceof Row)
                 lastClustering = ((Row)unfiltered).clustering();
+
             return unfiltered;
         }
 
@@ -566,7 +572,9 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
             // Also note that we only get here once all the results for this node have been returned, and so
             // if the node had returned the requested number but we still get there, it imply some results were
             // skipped during reconciliation.
-            if (lastCount == counted(counter) || !counter.isDoneForPartition())
+            // Finally, if the latest clustering is just empty, it means we have no more in-partition rows to extend to,
+            // so just return.
+            if (lastCount == counted(counter) || !counter.isDoneForPartition() || lastClustering == Clustering.EMPTY)
                 return null;
 
             lastCount = counted(counter);
@@ -599,8 +607,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
             Tracing.trace("Requesting {} extra rows from {} for short read protection", toQuery, source);
             Schema.instance.getColumnFamilyStoreInstance(cmd.metadata().id).metric.shortReadProtectionRequests.mark();
 
-            return doShortReadRetry(cmd)
-                   .flatMap(fup -> fup.content);
+            return DataLimits.countUnfilteredRows(doShortReadRetry(cmd).flatMap(fup -> fup.content), counter);
         }
 
         /**

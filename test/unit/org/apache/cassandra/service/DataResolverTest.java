@@ -1094,6 +1094,11 @@ public class DataResolverTest
         messageRecorder.addShortReadResponse(peer1, readResponseMessage(peer2, iter(UpdateBuilder.create(cfm, dk).withTimestamp(2L)
                                                                                                  .newRow("4").add("c1", "v4").build())));
 
+        messageRecorder.addShortReadResponse(peer1, Response.testResponse(peer2,
+                                                                          FBUtilities.getBroadcastAddress(),
+                                                                          Verbs.READS.SINGLE_READ,
+                                                                          ReadResponse.createRemoteDataResponse(Flow.empty(), command)));
+
         try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
             while (data.hasNext())

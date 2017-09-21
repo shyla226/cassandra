@@ -213,7 +213,7 @@ public abstract class DataLimits
         abstract Row newRow(Row row);           // Can return null, in which case row should not be returned.
         abstract Row newStaticRow(Row row);     // Can return EMPTY_STATIC_ROW, in which case row should not be returned.
 
-        abstract void endOfPartition();
+        public abstract void endOfPartition();
         public abstract void endOfIteration();
 
         /**
@@ -259,32 +259,52 @@ public abstract class DataLimits
     }
 
     /**
-     * Count the number of rows in the partitions. Note that unlike the truncate methods, the flow is not interrupted
-     * when the counter is done.
+     * Count the number of rows in the partitions. Note that:
+     * <ul>
+     * <li>Unlike the truncate methods, the flow is not interrupted when the counter is done.</li>
+     * <li>This method doesn't call {@link Counter#endOfIteration()}, as that's caller's responsibility.</li>
+     * </ul>
      *
-     * @param partitions - the partitions to count
-     * @param counter - the counter that will receive the notifications
+     * @param partitions the partitions to count
+     * @param counter the counter that will receive the notifications
      *
      * @return the same flow but with the counter operations applied
      */
-    public static Flow<FlowableUnfilteredPartition> countUnfiltered(Flow<FlowableUnfilteredPartition> partitions, Counter counter)
+    public static Flow<FlowableUnfilteredPartition> countUnfilteredPartitions(Flow<FlowableUnfilteredPartition> partitions, Counter counter)
     {
-        return partitions.doOnClose(counter::endOfIteration)
-                         .map(partition -> countUnfiltered(counter, partition));
+        return partitions
+            .map(partition -> countUnfilteredPartition(partition, counter));
     }
 
-    public static FlowableUnfilteredPartition countUnfiltered(Counter counter, FlowableUnfilteredPartition partition)
+    /**
+     * Count the number of rows in the given flow. Note that:
+     * <ul>
+     * <li>Unlike the truncate methods, the flow is not interrupted when the counter is done.</li>
+     * <li>This method doesn't call {@link Counter#endOfPartition()}, as that's caller's responsibility.</li>
+     * </ul>
+     *
+     * @param rows the rows to count
+     * @param counter the counter that will receive the notifications
+     *
+     * @return the same flow but with the counter operations applied
+     */
+    public static Flow<Unfiltered> countUnfilteredRows(Flow<Unfiltered> rows, Counter counter)
+    {
+        return rows
+            .map(unfiltered ->
+            {
+                if (unfiltered instanceof Row)
+                    counter.newRow((Row) unfiltered);
+                
+                return unfiltered;
+            });
+    }
+
+    private static FlowableUnfilteredPartition countUnfilteredPartition(FlowableUnfilteredPartition partition, Counter counter)
     {
         counter.newPartition(partition.partitionKey(), partition.staticRow);
 
-        Flow<Unfiltered> content = partition.content
-                                              .doOnClose(counter::endOfPartition)
-                                              .map(unfiltered ->
-                                                   {
-                                                       if (unfiltered instanceof Row)
-                                                           counter.newRow((Row) unfiltered);
-                                                       return unfiltered;
-                                                   });
+        Flow<Unfiltered> content = countUnfilteredRows(partition.content, counter);
 
         counter.newStaticRow(partition.staticRow);
         return new FlowableUnfilteredPartition(partition.header,
@@ -530,18 +550,18 @@ public abstract class DataLimits
             /**
              * Bytes and rows counted by this counter.
              */
-            protected int bytesCounted;
-            protected int rowCounted;
+            protected volatile int bytesCounted;
+            protected volatile int rowCounted;
             
             /**
              * Rows counted in the current partition by this counter, plus any previously counted rows for the same partition.
              */
-            protected int rowCountedInCurrentPartition;
-            protected int previouslyCountedInCurrentPartition;
+            protected volatile int rowCountedInCurrentPartition;
+            protected volatile int previouslyCountedInCurrentPartition;
             
             protected final boolean countPartitionsWithOnlyStaticData;
 
-            protected int staticRowBytes;
+            protected volatile int staticRowBytes;
 
             public CQLCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData)
             {
