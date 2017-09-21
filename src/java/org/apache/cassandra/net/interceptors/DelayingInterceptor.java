@@ -31,7 +31,7 @@ import org.apache.cassandra.net.Message;
  * An internode message interceptor that delays messages delivery.
  * <p>
  * This interceptor provides a simple way to simulate lag for a given node. A specific delay <b>must</b> be configured
- * through the {@code -Ddatastax.net.interceptors.message_delay_ms} and intercepted messages will be delivered with
+ * through the {@code -Ddse.net.interceptors.message_delay_ms} and intercepted messages will be delivered with
  * that configured delay.
  *
  * @see AbstractInterceptor for details on the options supported by this interceptor (including how to pick which

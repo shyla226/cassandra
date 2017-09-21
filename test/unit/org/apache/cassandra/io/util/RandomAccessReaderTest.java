@@ -60,7 +60,7 @@ public class RandomAccessReaderTest
     @BeforeClass
     public static void setupDD()
     {
-        System.setProperty("cassandra.native.aio.enabled", "false");
+        System.setProperty("dse.io.aio.enabled", "false");
         DatabaseDescriptor.daemonInitialization();
     }
 

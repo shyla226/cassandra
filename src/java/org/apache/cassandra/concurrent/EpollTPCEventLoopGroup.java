@@ -52,7 +52,7 @@ import sun.misc.Contended;
  */
 public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements TPCEventLoopGroup
 {
-    private static final String DEBUG_RUNNING_TIME_NAME = "cassandra.debug_tpc_task_running_time_seconds";
+    private static final String DEBUG_RUNNING_TIME_NAME = "dse.tpc.debug_task_running_time_seconds";
     private static final long DEBUG_RUNNING_TIME_NANOS = TimeUnit.NANOSECONDS.convert(Integer.parseInt(System.getProperty(DEBUG_RUNNING_TIME_NAME, "0")),
                                                                                       TimeUnit.SECONDS);
 

@@ -42,7 +42,7 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public class Interceptors
 {
-    private static final String PROPERTY = "datastax.net.interceptors";
+    private static final String PROPERTY = "dse.net.interceptors";
     static final String PROPERTY_PREFIX = PROPERTY + '.';
 
     private static final Logger logger = LoggerFactory.getLogger(Interceptors.class);

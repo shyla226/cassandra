@@ -63,7 +63,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
      * bigger problem than large NodeSync segments).
      */
     // TODO(Sylvain): Not sure how good of a default it is, could be worth some experimentation (but doesn't seem too bad either)
-    static final long SEGMENT_SIZE_TARGET = Long.getLong("datastax.nodesync.segment_size_target_bytes", SizeUnit.MEGABYTES.toBytes(200));
+    static final long SEGMENT_SIZE_TARGET = Long.getLong("dse.nodesync.segment_size_target_bytes", SizeUnit.MEGABYTES.toBytes(200));
 
     /**
      * The minimum delay we enforce between doing 2 validation on the same segment.
@@ -78,13 +78,13 @@ public class NodeSyncService implements NodeSyncServiceMBean
      * hand.
      */
     // publicly Visible because we warn if user are setting a deadline lowe than this in NodeSyncParams and that's outside the nodesync package
-    public static final String MIN_VALIDATION_INTERVAL_PROP_NAME = "datastax.nodesync.min_validation_interval_ms";
+    public static final String MIN_VALIDATION_INTERVAL_PROP_NAME = "dse.nodesync.min_validation_interval_ms";
     public static final long MIN_VALIDATION_INTERVAL_MS = Long.getLong(MIN_VALIDATION_INTERVAL_PROP_NAME, TimeUnit.MINUTES.toMillis(5));
 
-    private static final long LOG_REPORTING_DELAY_SEC = Long.getLong("datastax.nodesync.log_reporter_interval_sec", TimeUnit.MINUTES.toSeconds(10));
-    private static final long RATE_CHECKING_DELAY_SEC = Long.getLong("datastax.nodesync.rate_checker_interval_sec", TimeUnit.MINUTES.toSeconds(30));
+    private static final long LOG_REPORTING_DELAY_SEC = Long.getLong("dse.nodesync.log_reporter_interval_sec", TimeUnit.MINUTES.toSeconds(10));
+    private static final long RATE_CHECKING_DELAY_SEC = Long.getLong("dse.nodesync.rate_checker_interval_sec", TimeUnit.MINUTES.toSeconds(30));
 
-    static final long MIN_WARN_INTERVAL_MS = TimeUnit.SECONDS.toMillis(Long.getLong("datastax.nodesync.min_warn_interval_sec",
+    static final long MIN_WARN_INTERVAL_MS = TimeUnit.SECONDS.toMillis(Long.getLong("dse.nodesync.min_warn_interval_sec",
                                                                                     TimeUnit.HOURS.toSeconds(10)));
 
 

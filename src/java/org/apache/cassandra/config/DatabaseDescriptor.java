@@ -2633,11 +2633,7 @@ public class DatabaseDescriptor
             return ((long) conf.max_memory_to_lock_mb) * 1024 * 1024;
         }
 
-        long system_memory_in_mb = Long.getLong("dse.system_memory_in_mb", -1); // backward compatibility for when this feature was in DSE
-        if (system_memory_in_mb == -1)
-        {
-            system_memory_in_mb = Long.getLong("system_memory_in_mb", 2048); // calculated and set in cassandra-env.sh
-        }
+        long system_memory_in_mb = Long.getLong("dse.system_memory_in_mb", 2048); // calculated and set in cassandra-env.sh
         return (long) (conf.max_memory_to_lock_fraction * (system_memory_in_mb * 1024 * 1024));
     }
 
