@@ -461,25 +461,25 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
-            Single.merge(ks.flush()).blockingLast();
+            FBUtilities.waitOnFutures(ks.flush());
 
         //update c's timestamp TS=2
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
-            Single.merge(ks.flush()).blockingLast();
+            FBUtilities.waitOnFutures(ks.flush());
 
         // change c's value and TS=3, tombstones c=1 and adds c=0 record
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? and b = ? ", 0, 0, 0);
         if (flush)
-            Single.merge(ks.flush()).blockingLast();
+            FBUtilities.waitOnFutures(ks.flush());
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0));
 
         if(flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            Single.merge(ks.flush()).blockingLast();
+            FBUtilities.waitOnFutures(ks.flush());
         }
 
 
@@ -488,7 +488,7 @@ public class ViewTest extends CQLTester
         if (flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            Single.merge(ks.flush()).blockingLast();
+            FBUtilities.waitOnFutures(ks.flush());
         }
 
         assertRows(execute("SELECT d,e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, null));
@@ -499,7 +499,7 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d,e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, 1));
 
         if (flush)
-            Single.merge(ks.flush()).blockingLast();
+            FBUtilities.waitOnFutures(ks.flush());
 
 
         //Change d value @ TS=2
@@ -507,7 +507,7 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(2));
 
         if (flush)
-            Single.merge(ks.flush()).blockingLast();
+            FBUtilities.waitOnFutures(ks.flush());
 
 
         //Change d value @ TS=3

@@ -906,9 +906,10 @@ public final class SystemKeyspace
     private static CompletableFuture<Void> forceFlush(String cfname)
     {
         if (!DatabaseDescriptor.isUnsafeSystem())
-            return TPCUtils.toFutureVoid(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)
-                                                 .getColumnFamilyStore(cfname)
-                                                 .forceFlush());
+            return Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)
+                           .getColumnFamilyStore(cfname)
+                           .forceFlush()
+                           .thenApply(pos -> null);
 
         return CompletableFuture.completedFuture(null);
     }

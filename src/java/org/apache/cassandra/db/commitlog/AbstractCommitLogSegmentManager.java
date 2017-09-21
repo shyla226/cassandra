@@ -290,10 +290,10 @@ public abstract class AbstractCommitLogSegmentManager
         Keyspace.writeOrder.awaitNewBarrier();
 
         // flush and wait for all CFs that are dirty in segments up-to and including 'last'
-        Observable<CommitLogPosition> observable = flushDataFrom(segmentsToRecycle, true);
+        Iterable<CompletableFuture<CommitLogPosition>> flushes = flushDataFrom(segmentsToRecycle, true);
         try
         {
-            observable.blockingLast(CommitLogPosition.NONE);
+            FBUtilities.waitOnFutures(flushes);
 
             for (CommitLogSegment segment : activeSegments)
                 for (TableId tableId : droppedTables)
@@ -364,15 +364,15 @@ public abstract class AbstractCommitLogSegmentManager
      *
      * @return a Future that will finish when all the flushes are complete.
      */
-    private Observable<CommitLogPosition> flushDataFrom(List<CommitLogSegment> segments, boolean force)
+    private Iterable<CompletableFuture<CommitLogPosition>> flushDataFrom(List<CommitLogSegment> segments, boolean force)
     {
         if (segments.isEmpty())
-            return Observable.just(CommitLogPosition.NONE);
+            return Collections.emptyList();
 
         final CommitLogPosition maxCommitLogPosition = segments.get(segments.size() - 1).getCurrentCommitLogPosition();
 
         // a map of CfId -> forceFlush() to ensure we only queue one flush per cf
-        final Map<TableId, Observable<CommitLogPosition>> flushes = new LinkedHashMap<>();
+        final Map<TableId, CompletableFuture<CommitLogPosition>> flushes = new LinkedHashMap<>();
 
         for (CommitLogSegment segment : segments)
         {
@@ -391,12 +391,12 @@ public abstract class AbstractCommitLogSegmentManager
                     final ColumnFamilyStore cfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(dirtyTableId);
                     // can safely call forceFlush here as we will only ever block (briefly) for other attempts to flush,
                     // no deadlock possibility since switchLock removal
-                    flushes.put(dirtyTableId, force ? cfs.forceFlush().toObservable() : cfs.forceFlush(maxCommitLogPosition).toObservable());
+                    flushes.put(dirtyTableId, force ? cfs.forceFlush() : cfs.forceFlush(maxCommitLogPosition));
                 }
             }
         }
 
-        return Observable.concat(flushes.values());
+        return flushes.values();
     }
 
     /**

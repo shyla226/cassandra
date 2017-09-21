@@ -757,9 +757,9 @@ public class Keyspace
         return replicationStrategy;
     }
 
-    public List<Single<CommitLogPosition>> flush()
+    public List<CompletableFuture<CommitLogPosition>> flush()
     {
-        List<Single<CommitLogPosition>> futures = new ArrayList<>(columnFamilyStores.size());
+        List<CompletableFuture<CommitLogPosition>> futures = new ArrayList<>(columnFamilyStores.size());
         for (ColumnFamilyStore cfs : columnFamilyStores.values())
             futures.add(cfs.forceFlush());
         return futures;

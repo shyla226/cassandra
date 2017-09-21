@@ -42,6 +42,7 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 
+import com.datastax.apollo.utils.concurrent.CompletableFutures;
 import io.reactivex.Completable;
 import io.reactivex.Single;
 
@@ -4598,20 +4599,20 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 totalCFs += keyspace.getColumnFamilyStores().size();
             remainingCFs = totalCFs;
 
-            // flush non-system keyspaces first
-            List<Single<CommitLogPosition>> nonSystemFlushes =
-                StreamSupport.stream(Keyspace.nonSystem().spliterator(), false)
-                            .flatMap(keyspace -> keyspace.getColumnFamilyStores().stream())
-                            .map(cfs ->cfs.forceFlush().doOnSuccess((cl) -> remainingCFs--))
-                            .collect(toList());
-
-            // wait for the non-system flushes for up to 1 minute
-            Single.concat(nonSystemFlushes)
-                  .timeout(1, TimeUnit.MINUTES)
-                  .doOnError(t -> {
-                      JVMStabilityInspector.inspectThrowable(t);
-                      logger.error("Caught exception while waiting for memtable flushes during shutdown hook", t);
-            }).blockingLast(CommitLogPosition.NONE);
+            // flush non-system keyspaces first, and wait for them up to 1 minute
+            try
+            {
+                CompletableFutures.allOf(Streams.of(Keyspace.nonSystem())
+                                                .flatMap(keyspace -> keyspace.getColumnFamilyStores().stream())
+                                                .map(cfs -> cfs.forceFlush()
+                                                               .whenComplete((cl, exc) -> remainingCFs--)))
+                                  .get(1, TimeUnit.MINUTES);
+            }
+            catch (Throwable t)
+            {
+                JVMStabilityInspector.inspectThrowable(t);
+                logger.error("Caught exception while waiting for memtable flushes during shutdown hook", t);
+            }
 
             // Interrupt ongoing compactions and shutdown CM to prevent further compactions.
             CompactionManager.instance.forceShutdown();
@@ -4631,20 +4632,19 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // system tables (for example compactions can obsolete sstables and the tidiers in SSTableReader update
             // system tables, see SSTableReader.GlobalTidy)
 
-            // flush system keyspaces
-            List<Single<CommitLogPosition>> systemFlushes =
-                StreamSupport.stream(Keyspace.system().spliterator(), false)
-                             .flatMap(keyspace -> keyspace.getColumnFamilyStores().stream())
-                             .map(cfs ->cfs.forceFlush())
-                             .collect(toList());
-
-            // wait for the system flushes for up to 1 minute
-            Single.concat(systemFlushes)
-                  .timeout(1, TimeUnit.MINUTES)
-                  .doOnError(t -> {
-                      JVMStabilityInspector.inspectThrowable(t);
-                      logger.error("Caught exception while waiting for memtable flushes during shutdown hook", t);
-            }).blockingLast(CommitLogPosition.NONE);
+            // flush system keyspaces and wait for up to 1 minute
+            try
+            {
+                CompletableFutures.allOf(Streams.of(Keyspace.system())
+                                                .flatMap(keyspace -> keyspace.getColumnFamilyStores().stream())
+                                                .map(ColumnFamilyStore::forceFlush))
+                                  .get(1, TimeUnit.MINUTES);
+            }
+            catch (Throwable t)
+            {
+                JVMStabilityInspector.inspectThrowable(t);
+                logger.error("Caught exception while waiting for memtable flushes during shutdown hook", t);
+            }
 
             // Now that client requests, messaging service and compactions are shutdown, there shouldn't be any more
             // mutations so let's wait for any pending mutations and then clear the stages. Note that the compaction

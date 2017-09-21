@@ -764,7 +764,10 @@ public final class SystemDistributedKeyspace
     private static CompletableFuture<Void> forceFlush(String table)
     {
         if (!DatabaseDescriptor.isUnsafeSystem())
-            return TPCUtils.toFutureVoid(Keyspace.open(DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(table).forceFlush());
+            return Keyspace.open(DISTRIBUTED_KEYSPACE_NAME)
+                           .getColumnFamilyStore(table)
+                           .forceFlush()
+                           .thenApply(pos -> null);
 
         return TPCUtils.completedFuture();
     }

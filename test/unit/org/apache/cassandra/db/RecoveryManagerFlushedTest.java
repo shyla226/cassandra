@@ -111,8 +111,8 @@ public class RecoveryManagerFlushedTest
         LifecycleTransaction.waitForDeletions();
 
         // Flush everything that may be in the commit log now to start fresh
-        Single.concat(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).flush()).blockingLast();
-        Single.concat(Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).flush()).blockingLast();
+        FBUtilities.waitOnFutures(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).flush());
+        FBUtilities.waitOnFutures(Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).flush());
 
         // add a row to another CF so we test skipping mutations within a not-entirely-flushed CF
         insertRow("Standard2", "key");

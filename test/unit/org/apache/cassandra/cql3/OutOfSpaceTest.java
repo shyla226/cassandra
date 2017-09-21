@@ -170,7 +170,7 @@ public class OutOfSpaceTest extends CQLTester
     {
         try
         {
-            Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).forceFlush().blockingGet();
+            Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).forceFlush().join();
             fail(errorClass.getSimpleName() + " expected.");
         }
         catch (Throwable e)

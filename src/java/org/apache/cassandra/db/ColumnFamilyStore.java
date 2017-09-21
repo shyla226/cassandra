@@ -327,7 +327,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                             else
                             {
                                 // we'll be rescheduled by the constructor of the Memtable.
-                                forceFlush().subscribe();
+                                forceFlush();
                             }
                         }
                     }
@@ -897,7 +897,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      *
      * @param memtable
      */
-    public Single<CommitLogPosition> switchMemtableIfCurrent(Memtable memtable)
+    public CompletableFuture<CommitLogPosition> switchMemtableIfCurrent(Memtable memtable)
     {
         synchronized (data)
         {
@@ -914,30 +914,28 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * not complete until the Memtable (and all prior Memtables) have been successfully flushed, and the CL
      * marked clean up to the position owned by the Memtable.
      */
-    public Single<CommitLogPosition> switchMemtable()
+    public CompletableFuture<CommitLogPosition> switchMemtable()
     {
         synchronized (data)
         {
             logFlush();
             Flush flush = new Flush(false);
             flushExecutor.execute(flush);
-            BehaviorSubject<CommitLogPosition> publisher = BehaviorSubject.create();
+            CompletableFuture<CommitLogPosition> future = new CompletableFuture<>();
             postFlushExecutor.execute(() -> {
                 flush.postFlushTask.run();
                 try
                 {
-                    publisher.onNext(flush.postFlushTask.get());
-                    // Note: If we issue onComplete or the subscribers will not get the onNext notification.
+                    future.complete(flush.postFlushTask.get());
                 }
                 catch (InterruptedException|ExecutionException exc)
                 {
                     logger.error("Unexpected exception running post flush task", exc);
                     JVMStabilityInspector.inspectThrowable(exc);
-                    publisher.onError(exc);
+                    future.completeExceptionally(exc);
                 }
             });
-            return RxThreads.observeOnIo(publisher.first(CommitLogPosition.NONE),
-                                         TPCTaskType.AWAIT_FLUSH);
+            return future;
         }
     }
 
@@ -978,7 +976,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    public Single<CommitLogPosition> forceFlush()
+    public CompletableFuture<CommitLogPosition> forceFlush()
     {
         synchronized (data)
         {
@@ -997,7 +995,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    public Single<CommitLogPosition> forceFlush(CommitLogPosition flushIfDirtyBefore)
+    public CompletableFuture<CommitLogPosition> forceFlush(CommitLogPosition flushIfDirtyBefore)
     {
         // we don't loop through the remaining memtables since here we only care about commit log dirtiness
         // and this does not vary between a table and its table-backed indexes
@@ -1011,22 +1009,20 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    private Single<CommitLogPosition> waitForFlushes()
+    private CompletableFuture<CommitLogPosition> waitForFlushes()
     {
         // we grab the current memtable; once any preceding memtables have flushed, we know its
         // commitLogLowerBound has been set (as this it is set with the upper bound of the preceding memtable)
         final Memtable current = data.getView().getCurrentMemtable();
-        BehaviorSubject<CommitLogPosition> publisher = BehaviorSubject.create();
+        CompletableFuture<CommitLogPosition> future = new CompletableFuture<>();
         postFlushExecutor.execute(() ->
                                   {
                                       logger.debug("forceFlush requested but everything is clean in {}", name);
                                       CommitLogPosition pos = current.getCommitLogLowerBound();
-                                      publisher.onNext(pos == null ? CommitLogPosition.NONE : pos);
-                                      // Note: If we issue onComplete or the subscribers will not get the onNext notification.
+                                      future.complete(pos == null ? CommitLogPosition.NONE : pos);
                                   });
 
-        return RxThreads.observeOnIo(publisher.first(CommitLogPosition.NONE),
-                                     TPCTaskType.AWAIT_FLUSH);
+        return future;
     }
 
     public CommitLogPosition forceBlockingFlush()

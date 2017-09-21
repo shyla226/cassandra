@@ -22,11 +22,15 @@ import java.nio.charset.CharacterCodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.*;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+
+import com.datastax.apollo.utils.concurrent.CompletableFutures;
 import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -302,18 +306,12 @@ public final class SchemaKeyspace
         ALL.reverse().forEach(table -> getSchemaCFS(table).truncateBlocking());
     }
 
-    static Completable flush()
+    static CompletableFuture<Void> flush()
     {
-        if (!DatabaseDescriptor.isUnsafeSystem())
-        {
-            List<Completable> flushes = new ArrayList<>(ALL.size());
-            for (String table : ALL)
-                flushes.add(getSchemaCFS(table).forceFlush().flatMapCompletable(position -> Completable.complete()));
+        if (DatabaseDescriptor.isUnsafeSystem())
+            return CompletableFuture.completedFuture(null);
 
-            return Completable.concat(flushes);
-        }
-
-        return Completable.complete();
+        return CompletableFutures.allOf(Lists.transform(ALL, t -> getSchemaCFS(t).forceFlush()));
     }
 
     /**
@@ -1357,7 +1355,7 @@ public final class SchemaKeyspace
         Completable.concat(mutations.stream().map(Mutation::applyAsync).collect(toList())).blockingAwait();
 
         if (SchemaKeyspace.FLUSH_SCHEMA_TABLES)
-            SchemaKeyspace.flush().blockingAwait();
+            SchemaKeyspace.flush().join();
     }
 
     static Keyspaces fetchKeyspaces(Set<String> toFetch)

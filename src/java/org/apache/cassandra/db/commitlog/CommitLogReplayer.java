@@ -21,6 +21,7 @@ package org.apache.cassandra.db.commitlog;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -163,20 +164,20 @@ public class CommitLogReplayer implements CommitLogReadHandler
         futures.clear();
         boolean flushingSystem = false;
 
-        List<Single<CommitLogPosition>> observables = new ArrayList<>();
+        List<CompletableFuture<CommitLogPosition>> futures = new ArrayList<>();
         for (Keyspace keyspace : keyspacesReplayed)
         {
             if (keyspace.getName().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
                 flushingSystem = true;
 
-            observables.addAll(keyspace.flush());
+            futures.addAll(keyspace.flush());
         }
 
         // also flush batchlog incase of any MV updates
         if (!flushingSystem)
-            observables.add(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceFlush());
+            futures.add(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceFlush());
 
-        Single.concat(observables).blockingLast();
+        FBUtilities.waitOnFutures(futures);
 
         return replayedCount.get();
     }

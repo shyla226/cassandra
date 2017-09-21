@@ -816,11 +816,10 @@ public class StreamSession implements IEndpointStateChangeSubscriber
      */
     private void flushSSTables(Iterable<ColumnFamilyStore> stores)
     {
-        List<Single<CommitLogPosition>> flushes = new ArrayList<>();
+        List<Future<CommitLogPosition>> flushes = new ArrayList<>();
         for (ColumnFamilyStore cfs : stores)
             flushes.add(cfs.forceFlush());
-        if (!flushes.isEmpty())
-            Single.concat(flushes).blockingLast();
+        FBUtilities.waitOnFutures(flushes);
     }
 
     private synchronized void prepareReceiving(StreamSummary summary)
