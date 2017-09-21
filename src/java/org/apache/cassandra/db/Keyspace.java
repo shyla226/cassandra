@@ -101,6 +101,7 @@ public class Keyspace
     public final ViewManager viewManager;
 
     private volatile TPCBoundaries tpcBoundaries;
+    private long boundariesForRingVersion = -1;
 
     private static volatile boolean initialized = false;
 
@@ -385,7 +386,7 @@ public class Keyspace
     public TPCBoundaries getTPCBoundaries()
     {
         TPCBoundaries boundaries = tpcBoundaries;
-        if (boundaries == null)
+        if (boundaries == null || boundariesForRingVersion < StorageService.instance.getTokenMetadata().getRingVersion())
         {
             if (!StorageService.instance.isInitialized())
                 return TPCBoundaries.NONE;
@@ -393,8 +394,9 @@ public class Keyspace
             synchronized (this)
             {
                 boundaries = tpcBoundaries;
-                if (boundaries == null)
+                if (boundaries == null || boundariesForRingVersion < StorageService.instance.getTokenMetadata().getRingVersion())
                 {
+                    boundariesForRingVersion = StorageService.instance.getTokenMetadata().getRingVersion();
                     tpcBoundaries = boundaries = computeTPCBoundaries();
                     logger.debug("Computed TPC core assignments for {}: {}", getName(), boundaries);
                 }
