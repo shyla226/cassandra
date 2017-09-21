@@ -67,10 +67,6 @@ public class IncomingStreamingConnection extends Thread implements Closeable
             DataInputPlus input = new DataInputStreamPlus(socket.getInputStream());
             StreamInitMessage init = StreamInitMessage.serializers.get(streamVersion).deserialize(input);
 
-            //Set SO_TIMEOUT on follower side
-            if (!init.isForOutgoing)
-                socket.setSoTimeout(DatabaseDescriptor.getStreamingSocketTimeout());
-
             // The initiator makes two connections, one for incoming and one for outgoing.
             // The receiving side distinguish two connections by looking at StreamInitMessage#isForOutgoing.
             // Note: we cannot use the same socket for incoming and outgoing streams because we want to

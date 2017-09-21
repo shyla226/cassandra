@@ -32,7 +32,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 @Command(name = "gettimeout", description = "Print the timeout of the given type in ms")
 public class GetTimeout extends NodeToolCmd
 {
-    public static final String TIMEOUT_TYPES = "read, range, write, counterwrite, cascontention, truncate, streamingsocket, misc (general rpc_timeout_in_ms)";
+    public static final String TIMEOUT_TYPES = "read, range, write, counterwrite, cascontention, truncate, misc (general rpc_timeout_in_ms)";
 
     @Arguments(usage = "<timeout_type>", description = "The timeout type, one or more of (" + TIMEOUT_TYPES + ")")
     private List<String> args = new ArrayList<>();
@@ -41,7 +41,7 @@ public class GetTimeout extends NodeToolCmd
     public void execute(NodeProbe probe)
     {
         if (args.isEmpty())
-            args.addAll(Arrays.asList("read", "range", "write", "counterwrite", "cascontention", "truncate", "streamingsocket", "misc"));
+            args.addAll(Arrays.asList("read", "range", "write", "counterwrite", "cascontention", "truncate", "misc"));
 
         try
         {

@@ -1440,17 +1440,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return DatabaseDescriptor.getTruncateRpcTimeout();
     }
 
-    public void setStreamingSocketTimeout(int value)
-    {
-        DatabaseDescriptor.setStreamingSocketTimeout(value);
-        logger.info("set streaming socket timeout to {} ms", value);
-    }
-
-    public int getStreamingSocketTimeout()
-    {
-        return DatabaseDescriptor.getStreamingSocketTimeout();
-    }
-
     public void setStreamThroughputMbPerSec(int value)
     {
         DatabaseDescriptor.setStreamThroughputOutboundMegabitsPerSec(value);
@@ -4535,13 +4524,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     protected synchronized void drain(boolean isFinalShutdown) throws IOException, InterruptedException, ExecutionException
     {
-        ExecutorService counterMutationStage = StageManager.getStage(Stage.COUNTER_MUTATION);
-        ExecutorService viewMutationStage = StageManager.getStage(Stage.VIEW_MUTATION);
-        ExecutorService mutationStage = StageManager.getStage(Stage.MUTATION);
+        ExecutorService hintsStage = StageManager.getStage(Stage.HINTS);
 
-        if (mutationStage.isTerminated()
-            && counterMutationStage.isTerminated()
-            && viewMutationStage.isTerminated())
+        if (hintsStage.isTerminated())
         {
             if (!isFinalShutdown)
                 logger.warn("Cannot drain node (did it already happen?)");
@@ -4665,14 +4650,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             barriers.forEach(OpOrder.Barrier::await); // we could parallelize this...
 
             if (!isFinalShutdown)
-                setMode(Mode.DRAINING, "clearing mutation stages", false);
+                setMode(Mode.DRAINING, "clearing background IO stage", false);
 
-            viewMutationStage.shutdown();
-            counterMutationStage.shutdown();
-            mutationStage.shutdown();
-            viewMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
-            counterMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
-            mutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+            hintsStage.shutdown();
+            hintsStage.awaitTermination(3600, TimeUnit.SECONDS);
 
             StorageProxy.instance.verifyNoHintsInProgress();
 
@@ -4689,7 +4670,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             ScheduledExecutors.nonPeriodicTasks.shutdown();
             if (!ScheduledExecutors.nonPeriodicTasks.awaitTermination(1, TimeUnit.MINUTES))
                 logger.warn("Failed to wait for non periodic tasks to shutdown");
-
 
             ColumnFamilyStore.shutdownPostFlushExecutor();
             setMode(Mode.DRAINED, !isFinalShutdown);

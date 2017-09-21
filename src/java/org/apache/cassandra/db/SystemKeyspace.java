@@ -80,6 +80,7 @@ public final class SystemKeyspace
 
     private static final Logger logger = LoggerFactory.getLogger(SystemKeyspace.class);
 
+    public static final LocalPartitioner BATCH_PARTITIONER = new LocalPartitioner(TimeUUIDType.instance);
     public static final String BATCHES = "batches";
     public static final String PAXOS = "paxos";
     public static final String BUILT_INDEXES = "IndexInfo";
@@ -105,7 +106,7 @@ public final class SystemKeyspace
               + "mutations list<blob>,"
               + "version int,"
               + "PRIMARY KEY ((id)))")
-              .partitioner(new LocalPartitioner(TimeUUIDType.instance))
+              .partitioner(BATCH_PARTITIONER)
               .compaction(CompactionParams.scts(singletonMap("min_threshold", "2")))
               .compression(CompressionParams.forSystemTables())
               .build();
@@ -1664,5 +1665,10 @@ public final class SystemKeyspace
                                   row.getString("query_string")));
             return r;
         });
+    }
+
+    public static DecoratedKey decorateBatchKey(UUID id)
+    {
+        return BATCH_PARTITIONER.decorateKey(TimeUUIDType.instance.getSerializer().serialize(id));
     }
 }

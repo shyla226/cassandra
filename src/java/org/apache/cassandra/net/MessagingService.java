@@ -47,6 +47,7 @@ import org.apache.cassandra.concurrent.ExecutorLocal;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
@@ -699,8 +700,8 @@ public final class MessagingService implements MessagingServiceMBean
     public void shutdown()
     {
         logger.info("Waiting for messaging service to quiesce");
-        // We may need to schedule hints on the mutation stage, so it's erroneous to shut down the mutation stage first
-        assert !StageManager.getStage(Stage.MUTATION).isShutdown();
+        // We may need to schedule hints, so it's erroneous to shut down the HINTS first
+        assert !StageManager.getStage(Stage.HINTS).isShutdown();
 
         // the important part
         if (!callbacks.shutdownBlocking())

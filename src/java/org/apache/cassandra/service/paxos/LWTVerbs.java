@@ -20,6 +20,8 @@ package org.apache.cassandra.service.paxos;
 import java.util.function.Function;
 
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.EncodingVersion;
 import org.apache.cassandra.net.*;
@@ -56,18 +58,21 @@ public class LWTVerbs extends VerbGroup<LWTVerbs.LWTVersion>
     {
         super(id, false, LWTVersion.class);
 
-        RegistrationHelper helper = helper().stage(Stage.MUTATION)
+        RegistrationHelper helper = helper().executeOnIOScheduler()
                                             .droppedGroup(DroppedMessages.Group.LWT);
 
         PREPARE = helper.requestResponse("PREPARE", Commit.class, PrepareResponse.class)
                         .timeout(DatabaseDescriptor::getWriteRpcTimeout)
+                        .requestExecutor(TPC.ioScheduler().forTaskType(TPCTaskType.LWT_PREPARE))
                         .syncHandler((from, commit) -> PaxosState.prepare(commit));
         PROPOSE = helper.requestResponse("PROPOSE", Commit.class, Boolean.class)
                         .timeout(DatabaseDescriptor::getWriteRpcTimeout)
+                        .requestExecutor(TPC.ioScheduler().forTaskType(TPCTaskType.LWT_PROPOSE))
                         .withResponseSerializer(BooleanSerializer.serializer)
                         .syncHandler((from, commit) -> PaxosState.propose(commit));
         COMMIT = helper.ackedRequest("COMMIT", Commit.class)
                        .timeout(DatabaseDescriptor::getWriteRpcTimeout)
+                       .requestExecutor(TPC.ioScheduler().forTaskType(TPCTaskType.LWT_COMMIT))
                        .syncHandler((from, commit) -> PaxosState.commit(commit));
     }
 }

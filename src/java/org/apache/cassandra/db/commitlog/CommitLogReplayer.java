@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -49,7 +50,7 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.WrappedRunnable;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 public class CommitLogReplayer implements CommitLogReadHandler
 {
@@ -193,51 +194,50 @@ public class CommitLogReplayer implements CommitLogReadHandler
                                                    final int entryLocation,
                                                    final CommitLogReplayer commitLogReplayer)
         {
-            Runnable runnable = new WrappedRunnable()
+            Completable completable = Completable.defer(() ->
             {
-                public void runMayThrow()
+                if (Schema.instance.getKeyspaceMetadata(mutation.getKeyspaceName()) == null)
+                    return Completable.complete();
+                if (commitLogReplayer.pointInTimeExceeded(mutation))
+                    return Completable.complete();
+
+                final Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
+
+                // Rebuild the mutation, omitting column families that
+                //    a) the user has requested that we ignore,
+                //    b) have already been flushed,
+                // or c) are part of a cf that was dropped.
+                // Keep in mind that the cf.name() is suspect. do every thing based on the cfid instead.
+                Mutation newMutation = null;
+                for (PartitionUpdate update : commitLogReplayer.replayFilter.filter(mutation))
                 {
-                    if (Schema.instance.getKeyspaceMetadata(mutation.getKeyspaceName()) == null)
-                        return;
-                    if (commitLogReplayer.pointInTimeExceeded(mutation))
-                        return;
+                    if (Schema.instance.getTableMetadata(update.metadata().id) == null)
+                        continue; // dropped
 
-                    final Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
-
-                    // Rebuild the mutation, omitting column families that
-                    //    a) the user has requested that we ignore,
-                    //    b) have already been flushed,
-                    // or c) are part of a cf that was dropped.
-                    // Keep in mind that the cf.name() is suspect. do every thing based on the cfid instead.
-                    Mutation newMutation = null;
-                    for (PartitionUpdate update : commitLogReplayer.replayFilter.filter(mutation))
+                    // replay if current segment is newer than last flushed one or,
+                    // if it is the last known segment, if we are after the commit log segment position
+                    if (commitLogReplayer.shouldReplay(update.metadata().id, new CommitLogPosition(segmentId, entryLocation)))
                     {
-                        if (Schema.instance.getTableMetadata(update.metadata().id) == null)
-                            continue; // dropped
+                        if (newMutation == null)
+                            newMutation = new Mutation(mutation.getKeyspaceName(), mutation.key());
+                        newMutation.add(update);
 
-                        // replay if current segment is newer than last flushed one or,
-                        // if it is the last known segment, if we are after the commit log segment position
-                        if (commitLogReplayer.shouldReplay(update.metadata().id, new CommitLogPosition(segmentId, entryLocation)))
-                        {
-                            if (newMutation == null)
-                                newMutation = new Mutation(mutation.getKeyspaceName(), mutation.key());
-                            newMutation.add(update);
-
-                            if (logger.isTraceEnabled())
-                                logger.trace("Replaying {}", update);
-                            commitLogReplayer.replayedCount.incrementAndGet();
-                        }
-                    }
-                    if (newMutation != null)
-                    {
-                        assert !newMutation.isEmpty();
-                        Keyspace.open(newMutation.getKeyspaceName()).apply(newMutation, false, true, false).blockingAwait();
-
-                        commitLogReplayer.keyspacesReplayed.add(keyspace);
+                        if (logger.isTraceEnabled())
+                            logger.trace("Replaying {}", update);
+                        commitLogReplayer.replayedCount.incrementAndGet();
                     }
                 }
-            };
-            return StageManager.getStage(Stage.MUTATION).submit(runnable, serializedSize);
+                if (newMutation != null)
+                {
+                    assert !newMutation.isEmpty();
+                    Keyspace.open(newMutation.getKeyspaceName()).apply(newMutation, false, true, false).blockingAwait();
+
+                    commitLogReplayer.keyspacesReplayed.add(keyspace);
+                }
+                return Completable.complete();
+            });
+            RxThreads.subscribeOnBackgroundIo(completable, TPCTaskType.COMMIT_LOG_REPLAY);
+            return TPCUtils.toFuture(completable.toSingle(() -> serializedSize));
         }
     }
 

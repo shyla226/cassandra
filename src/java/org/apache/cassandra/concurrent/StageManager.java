@@ -22,10 +22,9 @@ import java.util.concurrent.*;
 
 import io.reactivex.Scheduler;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
-
-import static org.apache.cassandra.config.DatabaseDescriptor.*;
 
 
 /**
@@ -44,18 +43,16 @@ public class StageManager
 
     static
     {
-        stages.put(Stage.MUTATION, multiThreadedStage(Stage.MUTATION, getConcurrentWriters()));
-        stages.put(Stage.COUNTER_MUTATION, multiThreadedStage(Stage.COUNTER_MUTATION, getConcurrentCounterWriters()));
-        stages.put(Stage.VIEW_MUTATION, multiThreadedStage(Stage.VIEW_MUTATION, getConcurrentViewWriters()));
-        stages.put(Stage.READ, multiThreadedStage(Stage.READ, getConcurrentReaders()));
         stages.put(Stage.REQUEST_RESPONSE, multiThreadedStage(Stage.REQUEST_RESPONSE, FBUtilities.getAvailableProcessors()));
         stages.put(Stage.INTERNAL_RESPONSE, multiThreadedStage(Stage.INTERNAL_RESPONSE, FBUtilities.getAvailableProcessors()));
+        stages.put(Stage.READ_REPAIR, multiThreadedStage(Stage.READ_REPAIR, FBUtilities.getAvailableProcessors()));
+        stages.put(Stage.BACKGROUND_IO, multiThreadedStage(Stage.BACKGROUND_IO, DatabaseDescriptor.getMaxBackgroundIOThreads()));
+        stages.put(Stage.HINTS, multiThreadedStage(Stage.HINTS, DatabaseDescriptor.getMaxHintsReceiveThreads()));
         // the rest are all single-threaded
         stages.put(Stage.GOSSIP, new JMXEnabledThreadPoolExecutor(Stage.GOSSIP));
         stages.put(Stage.ANTI_ENTROPY, new JMXEnabledThreadPoolExecutor(Stage.ANTI_ENTROPY));
         stages.put(Stage.MIGRATION, new JMXEnabledThreadPoolExecutor(Stage.MIGRATION));
         stages.put(Stage.MISC, new JMXEnabledThreadPoolExecutor(Stage.MISC));
-        stages.put(Stage.READ_REPAIR, multiThreadedStage(Stage.READ_REPAIR, FBUtilities.getAvailableProcessors()));
 
         // add the corresponding scheduler to each stage
         stages.forEach((stage, executor) -> schedulers.put(stage, Schedulers.from(executor)));

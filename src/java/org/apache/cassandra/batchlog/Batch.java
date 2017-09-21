@@ -21,11 +21,22 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.concurrent.Scheduleable;
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.EncodingVersion;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
+import org.apache.cassandra.db.marshal.TimeUUIDType;
+import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.UUIDSerializer;
@@ -35,7 +46,7 @@ import org.apache.cassandra.utils.versioning.Versioned;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
 
-public final class Batch
+public final class Batch implements Scheduleable
 {
     public static final Versioned<WriteVersion, Serializer<Batch>> serializers = WriteVersion.versioned(BatchSerializer::new);
 
@@ -79,6 +90,16 @@ public final class Batch
     public int size()
     {
         return decodedMutations.size() + encodedMutations.size();
+    }
+
+    public StagedScheduler getScheduler()
+    {
+        return TPC.getForKey(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME), SystemKeyspace.decorateBatchKey(id));
+    }
+
+    public TracingAwareExecutor getOperationExecutor()
+    {
+        return getScheduler().forTaskType(TPCTaskType.BATCH_WRITE);
     }
 
     static final class BatchSerializer extends VersionDependent<WriteVersion> implements Serializer<Batch>

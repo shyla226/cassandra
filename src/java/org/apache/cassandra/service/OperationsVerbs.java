@@ -68,7 +68,7 @@ public class OperationsVerbs extends VerbGroup<OperationsVerbs.OperationsVersion
         RegistrationHelper helper = helper();
 
         TRUNCATE = helper.requestResponse("TRUNCATE", Truncation.class, TruncateResponse.class)
-                         .stage(Stage.MUTATION)
+                         .stage(Stage.MISC)
                          .droppedGroup(DroppedMessages.Group.TRUNCATE)
                          .timeout(DatabaseDescriptor::getTruncateRpcTimeout)
                          .syncHandler((from, t) ->

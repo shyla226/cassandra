@@ -21,6 +21,8 @@ package org.apache.cassandra.db.commitlog;
 import java.io.File;
 
 import io.reactivex.Single;
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.FileUtils;
@@ -79,8 +81,8 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
                 return nalloc;
             });
 
-            // Do blocking on IO Sched, continue on TPC thread
-            allocationSingle = RxThreads.subscribeOnIo(allocationSingle, TPCTaskType.COMMIT_LOG_ALLOCATE);
+            // Do blocking on background IO scheduler, continue on TPC thread
+            allocationSingle = RxThreads.subscribeOnBackgroundIo(allocationSingle, TPCTaskType.COMMIT_LOG_ALLOCATE);
             allocationSingle = RxThreads.observeOn(allocationSingle, mutation.getScheduler(), TPCTaskType.WRITE_POST_COMMIT_LOG);
             return allocationSingle;
         });

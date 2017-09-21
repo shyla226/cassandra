@@ -196,9 +196,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         this.connecting = connecting;
         this.index = index;
         this.factory = factory;
-        this.handler = new ConnectionHandler(this, isKeepAliveSupported()?
-                                                   (int)TimeUnit.SECONDS.toMillis(2 * DatabaseDescriptor.getStreamingKeepAlivePeriod()) :
-                                                   DatabaseDescriptor.getStreamingSocketTimeout(), previewKind.isPreview());
+        this.handler = new ConnectionHandler(this, previewKind.isPreview());
         this.metrics = StreamingMetrics.get(connecting);
         this.keepSSTableLevel = keepSSTableLevel;
         this.pendingRepair = pendingRepair;
@@ -246,12 +244,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         return receivers.get(tableId).getTransaction();
     }
 
-    private boolean isKeepAliveSupported()
-    {
-        CassandraVersion peerVersion = Gossiper.instance.getReleaseVersion(peer);
-        return peerVersion != null && peerVersion.compareTo(STREAM_KEEP_ALIVE_VERSION) >= 0;
-    }
-
     /**
      * Bind this session to report to specific {@link StreamResultFuture} and
      * perform pre-streaming initialization.
@@ -264,11 +256,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         this.streamResult = streamResult;
         this.canFlush = canFlush;
         StreamHook.instance.reportStreamFuture(this, streamResult);
-
-        if (isKeepAliveSupported())
-            scheduleKeepAliveTask();
-        else
-            logger.debug("Peer {} does not support keep-alive.", peer);
+        scheduleKeepAliveTask();
     }
 
     public void start()
@@ -599,18 +587,12 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     {
         if (e instanceof SocketTimeoutException)
         {
-            if (isKeepAliveSupported())
-                logger.error("[Stream #{}] Did not receive response from peer {}{} for {} secs. Is peer down? " +
-                             "If not, maybe try increasing streaming_keep_alive_period_in_secs.", planId(),
-                             peer.getHostAddress(),
-                             peer.equals(connecting) ? "" : " through " + connecting.getHostAddress(),
-                             2 * DatabaseDescriptor.getStreamingKeepAlivePeriod(),
-                             e);
-            else
-                logger.error("[Stream #{}] Streaming socket timed out. This means the session peer stopped responding or " +
-                             "is still processing received data. If there is no sign of failure in the other end or a very " +
-                             "dense table is being transferred you may want to increase streaming_socket_timeout_in_ms " +
-                             "property. Current value is {}ms.", planId(), DatabaseDescriptor.getStreamingSocketTimeout(), e);
+            logger.error("[Stream #{}] Did not receive response from peer {}{} for {} secs. Is peer down? " +
+                         "If not, maybe try increasing streaming_keep_alive_period_in_secs.", planId(),
+                         peer.getHostAddress(),
+                         peer.equals(connecting) ? "" : " through " + connecting.getHostAddress(),
+                         2 * DatabaseDescriptor.getStreamingKeepAlivePeriod(),
+                         e);
         }
         else
         {

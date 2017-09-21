@@ -231,6 +231,15 @@ public class TPC
     }
 
     /**
+     * The background IO scheduler should be used for background tasks (commitlog, hints, , etc),
+     * since it's bounded, to prevent overloading the system with background tasks on the unbounded IO Scheduler.
+     */
+    public static Scheduler backgroundIOScheduler()
+    {
+        return StageManager.getScheduler(Stage.BACKGROUND_IO);
+    }
+
+    /**
      * Creates a new {@link OpOrder} suitable for synchronizing operations that mostly execute on TPC threads.
      * <p>
      * More precisely, the returned {@link OpOrder} reduces contentions between operations calling

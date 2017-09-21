@@ -26,8 +26,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.batchlog.Batch;
+import org.apache.cassandra.batchlog.BatchRemove;
 import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.InternalRequestExecutionException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -67,7 +69,7 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
     public final AckedRequest<CounterMutation> COUNTER_FORWARDING;
     public final AckedRequest<Mutation> READ_REPAIR;
     public final AckedRequest<Batch> BATCH_STORE;
-    public final OneWay<UUID> BATCH_REMOVE;
+    public final OneWay<BatchRemove> BATCH_REMOVE;
 
     private static final VerbHandlers.AckedRequest<Mutation> WRITE_HANDLER = (from, mutation) -> mutation.applyFuture();
 
@@ -106,6 +108,10 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
 
     };
 
+    private static final VerbHandlers.AckedRequest<Batch> BATCH_WRITE_HANDLER = (from, batch) -> TPCUtils.toFuture(BatchlogManager.store(batch));
+
+    private static final VerbHandlers.OneWay<BatchRemove> BATCH_REMOVE_HANDLER = (from, batchRemove) -> TPCUtils.toFuture(BatchlogManager.remove(batchRemove.id));
+
     public WriteVerbs(Verbs.Group id)
     {
         super(id, false, WriteVersion.class);
@@ -132,14 +138,11 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
                             .droppedGroup(DroppedMessages.Group.READ_REPAIR)
                             .handler(WRITE_HANDLER);
         BATCH_STORE = helper.ackedRequest("BATCH_STORE", Batch.class)
-                            .stage(Stage.MUTATION)
                             .timeout(DatabaseDescriptor::getWriteRpcTimeout)
                             .droppedGroup(DroppedMessages.Group.MUTATION)
                             .withBackPressure()
-                            .syncHandler((from, batch) -> BatchlogManager.store(batch).blockingAwait());
-        BATCH_REMOVE = helper.oneWay("BATCH_REMOVE", UUID.class)
-                             .stage(Stage.MUTATION)
-                             .withRequestSerializer(UUIDSerializer.serializer)
-                             .handler((from, batchId) -> BatchlogManager.remove(batchId).blockingAwait());
+                            .handler(BATCH_WRITE_HANDLER);
+        BATCH_REMOVE = helper.oneWay("BATCH_REMOVE", BatchRemove.class)
+                             .handler(BATCH_REMOVE_HANDLER);
     }
 }

@@ -44,13 +44,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.batchlog.Batch;
+import org.apache.cassandra.batchlog.BatchRemove;
 import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.RowIterator;
@@ -78,6 +80,7 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.concurrent.AsyncLatch;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 public class StorageProxy implements StorageProxyMBean
 {
@@ -917,7 +920,7 @@ public class StorageProxy implements StorageProxyMBean
 
     private static void asyncRemoveFromBatchlog(List<InetAddress> endpoints, UUID uuid)
     {
-        MessagingService.instance().send(Verbs.WRITES.BATCH_REMOVE.newDispatcher(endpoints, uuid));
+        MessagingService.instance().send(Verbs.WRITES.BATCH_REMOVE.newDispatcher(endpoints, new BatchRemove(uuid)));
     }
 
     private static void writeBatchedMutations(List<MutationAndEndpoints> mutationsAndEndpoints,
@@ -2192,40 +2195,6 @@ public class StorageProxy implements StorageProxyMBean
         return !Gossiper.instance.getUnreachableTokenOwners().isEmpty();
     }
 
-    /**
-     * HintRunnable will decrease totalHintsInProgress and targetHints when finished.
-     * It is the caller's responsibility to increment them initially.
-     */
-    abstract static class HintRunnable implements Runnable
-    {
-        public final Collection<InetAddress> targets;
-
-        protected HintRunnable(Collection<InetAddress> targets)
-        {
-            this.targets = targets;
-        }
-
-        public void run()
-        {
-            try
-            {
-                runMayThrow();
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-            finally
-            {
-                StorageMetrics.totalHintsInProgress.dec(targets.size());
-                for (InetAddress target : targets)
-                    getHintsInProgressFor(target).decrementAndGet();
-            }
-        }
-
-        abstract protected void runMayThrow() throws Exception;
-    }
-
     public long getTotalHints()
     {
         return StorageMetrics.totalHints.getCount();
@@ -2273,41 +2242,44 @@ public class StorageProxy implements StorageProxyMBean
                                           Collection<InetAddress> targets,
                                           WriteHandler handler)
     {
-        HintRunnable runnable = new HintRunnable(targets)
+        return submitHint(targets, Completable.defer(() ->
         {
-            public void runMayThrow()
+            Set<InetAddress> validTargets = new HashSet<>(targets.size());
+            Set<UUID> hostIds = new HashSet<>(targets.size());
+            for (InetAddress target : targets)
             {
-                Set<InetAddress> validTargets = new HashSet<>(targets.size());
-                Set<UUID> hostIds = new HashSet<>(targets.size());
-                for (InetAddress target : targets)
+                UUID hostId = StorageService.instance.getHostIdForEndpoint(target);
+                if (hostId != null)
                 {
-                    UUID hostId = StorageService.instance.getHostIdForEndpoint(target);
-                    if (hostId != null)
-                    {
-                        hostIds.add(hostId);
-                        validTargets.add(target);
-                    }
-                    else
-                        logger.debug("Discarding hint for endpoint not part of ring: {}", target);
+                    hostIds.add(hostId);
+                    validTargets.add(target);
                 }
-                logger.trace("Adding hints for {}", validTargets);
-                HintsService.instance.write(hostIds, Hint.create(mutation, System.currentTimeMillis()));
-                validTargets.forEach(HintsService.instance.metrics::incrCreatedHints);
-                // Notify the handler only for CL == ANY
-                if (handler != null && handler.consistencyLevel() == ConsistencyLevel.ANY)
-                    handler.onLocalResponse();
+                else
+                    logger.debug("Discarding hint for endpoint not part of ring: {}", target);
             }
-        };
-
-        return submitHint(runnable);
+            logger.trace("Adding hints for {}", validTargets);
+            HintsService.instance.write(hostIds, Hint.create(mutation, System.currentTimeMillis()));
+            validTargets.forEach(HintsService.instance.metrics::incrCreatedHints);
+            // Notify the handler only for CL == ANY
+            if (handler != null && handler.consistencyLevel() == ConsistencyLevel.ANY)
+                handler.onLocalResponse();
+            return Completable.complete();
+        }));
     }
 
-    static Future<Void> submitHint(HintRunnable runnable)
+    static Future<Void> submitHint(Collection<InetAddress> targets, Completable hintsCompletable)
     {
-        StorageMetrics.totalHintsInProgress.inc(runnable.targets.size());
-        for (InetAddress target : runnable.targets)
+        StorageMetrics.totalHintsInProgress.inc(targets.size());
+        for (InetAddress target : targets)
             getHintsInProgressFor(target).incrementAndGet();
-        return (Future<Void>) StageManager.getStage(Stage.MUTATION).submit(runnable);
+        hintsCompletable.doOnTerminate(() ->
+                                       {
+                                           StorageMetrics.totalHintsInProgress.dec(targets.size());
+                                           for (InetAddress target : targets)
+                                               getHintsInProgressFor(target).decrementAndGet();
+                                       });
+        RxThreads.subscribeOn(hintsCompletable, StageManager.getScheduler(Stage.HINTS), TPCTaskType.HINT_SUBMIT);
+        return TPCUtils.toFuture(hintsCompletable);
     }
 
     public Long getRpcTimeout() { return DatabaseDescriptor.getRpcTimeout(); }

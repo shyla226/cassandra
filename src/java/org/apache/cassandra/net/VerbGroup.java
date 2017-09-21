@@ -31,6 +31,7 @@ import org.apache.cassandra.concurrent.ExecutorSupplier;
 import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.db.WriteVerbs;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.monitoring.Monitorable;
@@ -224,6 +225,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
         private final int[] versionCodes = new int[versionClass.getEnumConstants().length];
         private Stage defaultStage;
         private DroppedMessages.Group defaultDroppedGroup;
+        private boolean executeOnIOScheduler;
 
         public RegistrationHelper stage(Stage defaultStage)
         {
@@ -249,12 +251,18 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
 
         public <P, Q> RequestResponseBuilder<P, Q> requestResponse(String verbName, Class<P> requestClass, Class<Q> responseClass)
         {
-            return new RequestResponseBuilder<>(verbName, idx++, requestClass, responseClass);
+            return new RequestResponseBuilder<>(verbName, idx++, requestClass, responseClass, executeOnIOScheduler);
         }
 
         public <P extends Monitorable, Q> MonitoredRequestResponseBuilder<P, Q> monitoredRequestResponse(String verbName, Class<P> requestClass, Class<Q> responseClass)
         {
             return new MonitoredRequestResponseBuilder<>(verbName, idx++, requestClass, responseClass);
+        }
+
+        public RegistrationHelper executeOnIOScheduler()
+        {
+            this.executeOnIOScheduler = true;
+            return this;
         }
 
         public class VerbBuilder<P, Q, T>
@@ -321,6 +329,12 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
             public T stage(Stage stage)
             {
                 this.requestExecutor = (p) -> StageManager.getStage(stage);
+                return us();
+            }
+
+            public T requestExecutor(TracingAwareExecutor tae)
+            {
+                this.requestExecutor = (p) -> tae;
                 return us();
             }
 
@@ -477,7 +491,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
 
         public class RequestResponseBuilder<P, Q> extends VerbBuilder<P, Q, RequestResponseBuilder<P, Q>>
         {
-            private RequestResponseBuilder(String name, int groupIdx, Class<P> requestClass, Class<Q> responseClass)
+            private RequestResponseBuilder(String name, int groupIdx, Class<P> requestClass, Class<Q> responseClass, boolean executeOnIOScheduler)
             {
                 super(name, groupIdx, false, requestClass, responseClass);
             }
