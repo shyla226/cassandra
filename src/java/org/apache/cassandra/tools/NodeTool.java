@@ -208,7 +208,8 @@ public class NodeTool
                .withCommand(SetRate.class)
                .withCommand(GetRate.class)
                .withCommand(Enable.class)
-               .withCommand(Disable.class);
+               .withCommand(Disable.class)
+               .withCommand(org.apache.cassandra.tools.nodetool.nodesync.Status.class);
 
         return builder.build();
     }

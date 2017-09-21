@@ -48,6 +48,10 @@ public interface NodeSyncServiceMBean
      */
     public boolean disable(boolean force, long timeout, TimeUnit timeoutUnit) throws TimeoutException;
 
+    /**
+     * Returns whether the service is currently running.
+     */
+    public boolean isRunning();
 
     /**
      * Sets the validation rate for NodeSync.
