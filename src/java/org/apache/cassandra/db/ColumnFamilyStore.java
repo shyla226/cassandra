@@ -2705,4 +2705,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                    return mutated;
                                    }, true, true);
     }
+
+    public static TableMetrics metricsFor(UUID tableId)
+    {
+        return getIfExists(tableId).metric;
+    }
 }
