@@ -925,6 +925,15 @@
       </java>
     </target>
 
+    <target name="test-trigger-jar" depends="build-test"
+            description="">
+      <jar jarfile="test-trigger.jar">
+          <fileset dir="build/test/classes" >
+            <include name="org/apache/cassandra/triggers/TestTrigger.class" />
+          </fileset>
+      </jar>
+    </target>
+
     <!--
         The build target builds all the .class files
     -->

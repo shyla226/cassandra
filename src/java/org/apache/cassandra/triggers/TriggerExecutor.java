@@ -252,6 +252,8 @@ public class TriggerExecutor
         // double check.
         if (cachedTriggers.get(triggerName) != null)
             return cachedTriggers.get(triggerName);
+        if (customClassLoader == null)
+            throw new RuntimeException("Trigger directory doesn't exist.");
         return (ITrigger) customClassLoader.loadClass(triggerName).getConstructor().newInstance();
     }
 }
