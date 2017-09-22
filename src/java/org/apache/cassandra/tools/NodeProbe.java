@@ -1639,6 +1639,11 @@ public class NodeProbe implements AutoCloseable
         return nodeSyncProxy.disable(force, timeout, timeoutUnit);
     }
 
+    public boolean nodeSyncStatus()
+    {
+        return nodeSyncProxy.isRunning();
+    }
+
     public void setNodeSyncRate(Integer repairRate)
     {
         nodeSyncProxy.setRate(repairRate);

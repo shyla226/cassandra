@@ -28,16 +28,16 @@ public class Disable extends NodeTool.NodeToolCmd
         try
         {
             if (!probe.disableNodeSync(force, timeoutSec, TimeUnit.SECONDS))
-                System.out.println("NodeSync is not running");
+                System.out.println("The NodeSync service is not running");
         }
         catch (TimeoutException e)
         {
-            System.err.println("Error: timed-out waiting for nodeSync to stop (timeout was " + timeoutSec + " seconds).");
+            System.err.println("Error: timed-out waiting for the NodeSync service to stop (timeout was " + timeoutSec + " seconds).");
             System.exit(1);
         }
         catch (Exception e)
         {
-            throw new RuntimeException("Got error disabling NodeSync", e);
+            throw new RuntimeException("Unexpected error disabling the NodeSync service", e);
         }
     }
 }
