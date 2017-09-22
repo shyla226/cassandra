@@ -44,7 +44,7 @@ public class Status extends NodeTool.NodeToolCmd
         }
         catch (Exception e)
         {
-            throw new RuntimeException("Unexpected error while checking NodeSync status", e);
+            throw new RuntimeException("Unexpected error while checking the NodeSync service status", e);
         }
     }
 }

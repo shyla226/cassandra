@@ -18,11 +18,11 @@ public class Enable extends NodeTool.NodeToolCmd
         try
         {
             if (!probe.enableNodeSync())
-                System.out.println("NodeSync is already running");
+                System.out.println("The NodeSync service is already running");
         }
         catch (Exception e)
         {
-            throw new RuntimeException("Got error enabling NodeSync", e);
+            throw new RuntimeException("Unexpected error enabling the NodeSync service", e);
         }
     }
 }
