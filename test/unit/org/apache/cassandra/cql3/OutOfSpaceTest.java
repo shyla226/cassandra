@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import static junit.framework.Assert.fail;
 
 import java.io.Closeable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 import org.junit.Assert;
@@ -27,6 +28,9 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.Config.DiskFailurePolicy;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -121,7 +125,11 @@ public class OutOfSpaceTest extends CQLTester
         {
             DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.stop);
             flushAndExpectError(FSWriteError.class);
-            Assert.assertFalse(Gossiper.instance.isEnabled());
+            // Gossip is stopped asynchronously on the GOSSIP stage by StorageService.instance.stopTransportsAsync(),
+            // because the GOSSIP stage is single threaded, by checking on the same thread we get the correct result
+            CompletableFuture<Boolean> fut = CompletableFuture.supplyAsync(() -> Gossiper.instance.isEnabled(),
+                                                                           StageManager.getStage(Stage.GOSSIP));
+            Assert.assertFalse(TPCUtils.blockingGet(fut));
         }
         finally
         {

@@ -392,18 +392,31 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public CompletableFuture stopTransportsAsync()
     {
-        if (isGossipActive())
-        {
-            logger.error("Stopping gossiper");
-            stopGossiping();
-        }
-        if (isNativeTransportRunning())
-        {
-            logger.error("Stopping native transport");
-            return daemon.stopNativeTransportAsync();
-        }
+        return CompletableFuture.allOf(stopGossipingAsync(), stopNativeTransportAsync());
+    }
 
-        return CompletableFuture.completedFuture(null);
+    private CompletableFuture stopGossipingAsync()
+    {
+        if (!isGossipActive())
+            return TPCUtils.completedFuture();
+
+        return CompletableFuture.supplyAsync(() -> {
+            if (isGossipActive())
+            {
+                logger.error("Stopping gossiper");
+                stopGossiping();
+            }
+            return null;
+        }, StageManager.getStage(Stage.GOSSIP));
+    }
+
+    private CompletableFuture stopNativeTransportAsync()
+    {
+        if (!isNativeTransportRunning())
+            return TPCUtils.completedFuture();
+
+        logger.error("Stopping native transport");
+        return daemon.stopNativeTransportAsync();
     }
 
     /**
