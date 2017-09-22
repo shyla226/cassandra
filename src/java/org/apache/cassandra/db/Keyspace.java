@@ -117,8 +117,10 @@ public class Keyspace
 
     public static Keyspace open(String keyspaceName)
     {
-        assert initialized || SchemaConstants.isSystemKeyspace(keyspaceName);
-        return open(keyspaceName, Schema.instance, true);
+        if (initialized || SchemaConstants.isSystemKeyspace(keyspaceName))
+            return open(keyspaceName, Schema.instance, true);
+
+        throw new IllegalStateException(String.format("Cannot open non-system keyspace %s as server is not yet initialized.", keyspaceName));
     }
 
     // to only be used by org.apache.cassandra.tools.Standalone* classes
