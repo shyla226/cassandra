@@ -259,14 +259,12 @@ class Validator
 
         try
         {
-            // Maybe schedule a refresh of the lock. This can be made concurrently from the rest of the work, but we
-            // must make sure to  wait on it before we completely
-            Completable lockCompletable = maybeRefreshLock(executor.asExecutor());
+            // Maybe schedule a refresh of the lock.
+            maybeRefreshLock();
             observer.onNewPage();
-            Flow<FlowablePartition> flow = pager.fetchPage(new PageSize((int) pageSize, PageSize.PageUnit.BYTES), context)
-                                                .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), executor))
-                                                .concatWith(() -> moreContents(executor, pager, context));
-            return lockCompletable == null ? flow : Flow.concat(flow, lockCompletable);
+            return pager.fetchPage(new PageSize((int) pageSize, PageSize.PageUnit.BYTES), context)
+                        .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), executor))
+                        .concatWith(() -> moreContents(executor, pager, context));
 
         }
         catch (Throwable t)
@@ -384,15 +382,11 @@ class Validator
         nextLockRefreshTimeMs = currentTimeMs + (3 * LOCK_TIMEOUT_MS / 4);
     }
 
-    // Note that despite returning a Completable, this doesn't wait on subscription to do work. This is a private method
-    // though so probably fine, and it should eventually get cleaned up by APOLLO-1038.
-    private Completable maybeRefreshLock(ExecutorService executor)
+    private void maybeRefreshLock()
     {
         long currentTimeMs = System.currentTimeMillis();
-        if (currentTimeMs <= nextLockRefreshTimeMs)
-            return null;
-
-        return Completable.fromFuture(executor.submit(() -> refreshLock(currentTimeMs)));
+        if (currentTimeMs > nextLockRefreshTimeMs)
+            refreshLock(currentTimeMs);
     }
 
     static interface PageProcessingStatsListener
