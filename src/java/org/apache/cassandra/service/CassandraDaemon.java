@@ -49,6 +49,7 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -71,7 +72,10 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.metrics.StorageMetrics;
+import org.apache.cassandra.schema.TriggerMetadata;
+import org.apache.cassandra.schema.Triggers;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.*;
 
 /**
@@ -254,7 +258,7 @@ public class CassandraDaemon
         // load schema from disk
         Schema.instance.loadFromDisk();
 
-        // clean up debris in the rest of the keyspaces
+        // clean up debris in the rest of the keyspaces and pre-load triggers to catch any load errors
         for (String keyspaceName : Schema.instance.getKeyspaces())
         {
             // Skip system as we've already cleaned it
@@ -263,6 +267,23 @@ public class CassandraDaemon
 
             for (TableMetadata cfm : Schema.instance.getTablesAndViews(keyspaceName))
             {
+                // Pre-load triggers to make sure they can be loaded correctly
+                for (TriggerMetadata trigger : cfm.triggers)
+                {
+                    try
+                    {
+                        TriggerExecutor.instance.loadTriggerInstance(trigger.classOption);
+                    }
+                    catch(Throwable t)
+                    {
+                        exitOrFail(StartupException.ERR_WRONG_CONFIG,
+                                   String.format("Could not load class '%s' from trigger '%s' from %s.%s. " +
+                                                 "Cannot continue startup. Trigger load error stack " +
+                                                 "trace: %s", trigger.classOption, trigger.name,
+                                                 cfm.keyspace, cfm.name, ExceptionUtils.getStackTrace(t)),
+                                   t.getCause());
+                    }
+                }
                 try
                 {
                     ColumnFamilyStore.scrubDataDirectories(cfm);
