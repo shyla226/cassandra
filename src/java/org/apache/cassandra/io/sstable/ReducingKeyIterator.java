@@ -23,6 +23,8 @@ import java.util.Collection;
 import java.util.List;
 
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -32,21 +34,29 @@ import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Reducer;
 
 /**
+ * Iterates through all keys on a given set of sstables via merge reduce.
+ * <p>
  * Caller must acquire and release references to the sstables used here.
  */
-public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
+public class ReducingKeyIterator implements KeyIterator
 {
-    private IMergeIterator<DecoratedKey,DecoratedKey> mi;
+    private IMergeIterator<DecoratedKey, DecoratedKey> mi;
     long bytesRead;
     long bytesTotal;
 
     public ReducingKeyIterator(Collection<SSTableReader> sstables)
     {
+        this(sstables, null);
+    }
+
+    // Package protected to allow implementing per range iteration, not meant to be used by external callers
+    ReducingKeyIterator(Collection<SSTableReader> sstables, AbstractBounds<Token> range)
+    {
         List<Iter> iters = new ArrayList<>(sstables.size());
         for (SSTableReader sstable : sstables)
-            iters.add(new Iter(sstable));
+            iters.add(new Iter(sstable, range));
 
-        mi = MergeIterator.get(iters, DecoratedKey.comparator, new Reducer<DecoratedKey,DecoratedKey>()
+        mi = MergeIterator.get(iters, DecoratedKey.comparator, new Reducer<DecoratedKey, DecoratedKey>()
         {
             DecoratedKey reduced = null;
 
@@ -61,22 +71,26 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
                 reduced = current;
             }
 
-                public DecoratedKey getReduced()
-                {
-                    return reduced;
-                }
-            });
-        }
-class Iter implements CloseableIterator<DecoratedKey>
+            public DecoratedKey getReduced()
+            {
+                return reduced;
+            }
+        });
+    }
+
+    class Iter implements CloseableIterator<DecoratedKey>
     {
         PartitionIndexIterator source;
         SSTableReader sstable;
+        AbstractBounds<Token> range;
         final long total;
 
-        public Iter(SSTableReader sstable)
+        public Iter(SSTableReader sstable, AbstractBounds<Token> range)
         {
             this.sstable = sstable;
-            bytesTotal += total = sstable.getDataChannel().size();    }
+            this.range = range;
+            bytesTotal += total = sstable.getDataChannel().size();
+        }
 
         @Override
         public void close()
@@ -89,14 +103,20 @@ class Iter implements CloseableIterator<DecoratedKey>
         public boolean hasNext()
         {
             if (source == null)
+            {
                 try
                 {
-                    source = sstable.allKeysIterator();
+                    if (range == null)
+                        source = sstable.allKeysIterator();
+                    else
+                        source = sstable.coveredKeysIterator(range.left.minKeyBound(), range.inclusiveLeft(),
+                                                             range.inclusiveRight() ? range.right.maxKeyBound() : range.right.minKeyBound(), range.inclusiveRight());
                 }
                 catch (IOException e)
                 {
                     throw new FSReadError(e, sstable.getFilename());
                 }
+            }
 
             return source.key() != null;
         }
@@ -105,7 +125,9 @@ class Iter implements CloseableIterator<DecoratedKey>
         public DecoratedKey next()
         {
             if (!hasNext())
+            {
                 throw new AssertionError();
+            }
 
             try
             {
@@ -115,8 +137,8 @@ class Iter implements CloseableIterator<DecoratedKey>
                 source.advance();
 
                 long pos = source.key() != null
-                        ? source.dataPosition()
-                        : total;
+                           ? source.dataPosition()
+                           : total;
 
                 bytesRead += pos - prevPos;
 
@@ -152,10 +174,5 @@ class Iter implements CloseableIterator<DecoratedKey>
     public DecoratedKey next()
     {
         return mi.next();
-    }
-
-    public void remove()
-    {
-        throw new UnsupportedOperationException();
     }
 }
