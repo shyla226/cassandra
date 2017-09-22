@@ -26,6 +26,7 @@ import com.google.common.base.Throwables;
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.Single;
+import io.reactivex.SingleObserver;
 import io.reactivex.internal.disposables.EmptyDisposable;
 import org.apache.cassandra.utils.concurrent.ExecutableLock;
 
@@ -150,6 +151,23 @@ public class TPCUtils
                 future.whenComplete((res, err) ->{
                     if (err == null)
                         observer.onComplete();
+                    else
+                        observer.onError(err);
+                });
+            }
+        };
+    }
+
+    public static <T> Single<T> toSingle(CompletableFuture<T> future)
+    {
+        return new Single<T>()
+        {
+            protected void subscribeActual(SingleObserver<? super T> observer)
+            {
+                observer.onSubscribe(EmptyDisposable.INSTANCE);
+                future.whenComplete((res, err) -> {
+                    if (err == null)
+                        observer.onSuccess(res);
                     else
                         observer.onError(err);
                 });

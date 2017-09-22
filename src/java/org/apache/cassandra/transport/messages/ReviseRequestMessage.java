@@ -135,25 +135,21 @@ public class ReviseRequestMessage extends Message.Request
 
     public Single<Response> execute(QueryState queryState, long queryStartNanoTime)
     {
-        try
-        {
+        Single<Boolean> ret;
+        if (revisionType == RevisionType.CONTINUOUS_PAGING_CANCEL)
+            ret = ContinuousPagingService.cancel(queryState, id);
+        else if (revisionType == RevisionType.CONTINUOUS_PAGING_BACKPRESSURE)
+            ret = Single.just(ContinuousPagingService.updateBackpressure(queryState, id, nextPages));
+        else
+            ret = Single.error(new InvalidRequestException(String.format("Unknown update type: %s", revisionType)));
 
-            boolean res;
-            if (revisionType == RevisionType.CONTINUOUS_PAGING_CANCEL)
-                res = ContinuousPagingService.cancel(queryState, id);
-            else if (revisionType == RevisionType.CONTINUOUS_PAGING_BACKPRESSURE)
-                res = ContinuousPagingService.updateBackpressure(queryState, id, nextPages);
-            else
-                throw new InvalidRequestException(String.format("Unknown update type: %s", revisionType));
-
+        return ret.map(res -> {
             List<List<ByteBuffer>> rows = Collections.singletonList(Collections.singletonList(BooleanType.instance.decompose(res)));
-            return Single.just(new ResultMessage.Rows(new ResultSet(RESULT_METADATA, rows)));
-        }
-        catch (Throwable t)
-        {
-            JVMStabilityInspector.inspectThrowable(t);
-            return Single.just(ErrorMessage.fromException(t));
-        }
+            return (Response)(new ResultMessage.Rows(new ResultSet(RESULT_METADATA, rows)));
+        }).onErrorReturn(err -> {
+            JVMStabilityInspector.inspectThrowable(err);
+            return ErrorMessage.fromException(err);
+        });
     }
 
     @Override

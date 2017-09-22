@@ -53,6 +53,7 @@ public class TokenRangeQuery extends Operation
     private final TokenRangeIterator tokenRangeIterator;
     private final String columns;
     private final int pageSize;
+    private final int queueSize;
     private final boolean isWarmup;
     private final PrintWriter resultsWriter;
     private final int timeoutSeconds;
@@ -69,6 +70,7 @@ public class TokenRangeQuery extends Operation
         this.tokenRangeIterator = tokenRangeIterator;
         this.columns = sanitizeColumns(def.columns, tableMetadata);
         this.pageSize = isWarmup ? Math.min(100, def.page_size) : def.page_size;
+        this.queueSize = def.queue_size;
         this.isWarmup = isWarmup;
         this.resultsWriter = maybeCreateResultsWriter(settings.tokenRange);
         this.timeoutSeconds = def.timeout_sec;
@@ -170,6 +172,7 @@ public class TokenRangeQuery extends Operation
                 statement.setRoutingToken(state.tokenRange.getEnd());
                 statement.setConsistencyLevel(JavaDriverClient.from(settings.command.consistencyLevel));
                 state.result = client.execute(statement, ContinuousPagingOptions.builder()
+                                                                            .withMaxEnqueuedPages(queueSize)
                                                                             .withPageSize(pageSize, ContinuousPagingOptions.PageUnit.ROWS)
                                                                             .build()).get(timeoutSeconds, TimeUnit.SECONDS);
             }
