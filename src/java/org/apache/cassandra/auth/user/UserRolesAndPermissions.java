@@ -84,13 +84,13 @@ public abstract class UserRolesAndPermissions
         @Override
         protected boolean hasPermissionOnResourceChain(IResource resource, Permission perm)
         {
-            return !CorePermission.AUTHORIZE.equals(perm);
+            return CorePermission.AUTHORIZE != perm;
         }
 
         @Override
         protected void checkPermissionOnResourceChain(IResource resource, Permission perm)
         {
-            if (CorePermission.AUTHORIZE.equals(perm))
+            if (CorePermission.AUTHORIZE == perm)
                 throw new UnauthorizedException("Anonymous users are not authorized to perform this request");
         }
     };
@@ -242,7 +242,7 @@ public abstract class UserRolesAndPermissions
     public final boolean hasFunctionPermission(FunctionResource resource, Permission perm)
     {
         // Access to built in functions is unrestricted
-        if(resource.hasParent() && isNativeFunction(resource))
+        if (resource.hasParent() && isNativeFunction(resource))
             return true;
 
         return hasPermissionOnResourceChain(resource, perm);
@@ -407,7 +407,7 @@ public abstract class UserRolesAndPermissions
      * @param perm the permission
      * @throws UnauthorizedException if the user does not have the permission on the function.
      */
-    public final void checkFunctionPermission(Function function, Permission permission)
+    public final void checkFunctionPermission(Function function, Permission perm)
     {
         // built in functions are always available to all
         if (function.isNative())
@@ -415,13 +415,13 @@ public abstract class UserRolesAndPermissions
 
         checkPermissionOnResourceChain(FunctionResource.function(function.name().keyspace,
                                                                  function.name().name,
-                                                                 function.argTypes()), permission);
+                                                                 function.argTypes()), perm);
     }
 
     /**
      * Validates that the user has the permission on the function.
-     * @param perm the permission
-     * @param function the function resource
+     * @param resource the resource
+     * @param perm the function resource
      * @throws UnauthorizedException if the user does not have the permission on the function.
      */
     public final void checkFunctionPermission(FunctionResource resource, Permission perm)
