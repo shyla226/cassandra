@@ -91,7 +91,9 @@ public class RolesCache extends AuthCache<RoleResource, Role> implements RolesCa
 
             for (Entry<RoleResource, Role> entry : roles.entrySet())
             {
-                map.put(entry.getKey(), entry.getValue());
+                Role role = entry.getValue();
+                map.put(entry.getKey(), role);
+                collectRoles(role.memberOf, map);
             }
         }
         return map;
