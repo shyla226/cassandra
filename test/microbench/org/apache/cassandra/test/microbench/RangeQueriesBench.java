@@ -68,6 +68,8 @@ public class RangeQueriesBench extends CQLTester
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
 
         CQLTester.setUpClass();
+        Keyspace.setInitialized();
+
         System.err.println("setupClass done.");
 
         keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");

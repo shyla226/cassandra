@@ -24,7 +24,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import org.junit.Test;
 
-import junit.framework.Assert;
+import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
 
@@ -150,7 +150,38 @@ public class BTreeTest
         final List<Integer> result = new ArrayList<>();
         BTree.<Integer>apply(btree, i -> result.add(i), true);
 
-        org.junit.Assert.assertArrayEquals(Lists.reverse(input).toArray(),result.toArray());
+        assertArrayEquals(Lists.reverse(input).toArray(),result.toArray());
+    }
+
+    @Test
+    public void testReduce()
+    {
+        List<Integer> input = seq(71);
+        Object[] btree = BTree.build(input, noOp);
+
+        List<Integer> result = BTree.<List<Integer>, Integer>reduce(btree, new ArrayList(), (r, i) -> { r.add(i); return r; });
+        assertArrayEquals(input.toArray(), result.toArray());
+
+        // test interrupting after i items
+        for (int i = 1; i < input.size(); i++)
+        {
+            final int max = i;
+            result = BTree.reduce(btree, new ArrayList(), new BTree.ReduceFunction<List<Integer>, Integer>()
+            {
+                public boolean stop(List<Integer> res)
+                {
+                    return res.size() == max;
+                }
+
+                public List<Integer> apply(List<Integer> ret, Integer val)
+                {
+                    ret.add(val);
+                    return ret;
+                }
+            });
+
+            assertArrayEquals(seq(max).toArray(), result.toArray());
+        }
     }
 
     /**
@@ -303,7 +334,7 @@ public class BTreeTest
             for (Accumulator i : sorted)
                 builder.add(i);
             // for sorted input, check non-resolve path works before checking resolution path
-            Assert.assertTrue(Iterables.elementsEqual(sorted, BTree.iterable(builder.build())));
+            assertTrue(Iterables.elementsEqual(sorted, BTree.iterable(builder.build())));
 
             builder = BTree.builder(Comparator.naturalOrder());
             builder.auto(false);
@@ -377,10 +408,10 @@ public class BTreeTest
         int i = 1;
         for (Accumulator current : BTree.<Accumulator>iterable(btree, dir))
         {
-            Assert.assertEquals(i * i, current.sum);
+            assertEquals(i * i, current.sum);
             i++;
         }
-        Assert.assertEquals(i, count + 1);
+        assertEquals(i, count + 1);
     }
 
     private static void checkResult(int count, Object[] btree)

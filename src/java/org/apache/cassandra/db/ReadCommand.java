@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
@@ -30,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.functions.Function;
 import org.apache.cassandra.net.Request;
+import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.flow.Flow;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.Scheduleable;
@@ -446,20 +448,19 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
             public void countRow(Row row)
             {
-                boolean hasLiveCells = false;
-                for (Cell cell : row.cells())
-                {
-                    if (!cell.isLive(ReadCommand.this.nowInSec()))
+                Boolean hasLiveCells = row.reduceCells(Boolean.FALSE, (ret, cell) -> {
+                    if (!cell.isLive(nowInSec))
+                    {
                         countTombstone(row.clustering());
-                    else if (!hasLiveCells)
-                        hasLiveCells = true;
-                }
+                        return ret;
+                    }
+
+                    return Boolean.TRUE; // cell is live
+                });
 
                 /**
                  * This duplicates the logic of {@link AbstractRow#hasLiveData(int, boolean)} to avoid
-                 * iterating twice on the cells since this is GC-intensive. Please change this whenever
-                 * changing that.
-                 * TODO: unify the logic in a performant way
+                 * iterating twice on the cells since it is inefficient.
                  */
                 if ((hasLiveCells && !enforceStrictLiveness) || row.primaryKeyLivenessInfo().isLive(nowInSec))
                     ++liveRows;

@@ -49,4 +49,9 @@ public class WrappedInt
     {
         --value;
     }
+
+    public void add(int value)
+    {
+        this.value += value;
+    }
 }
