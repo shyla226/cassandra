@@ -34,7 +34,7 @@ public class TestTrigger implements ITrigger
 {
     private static final Logger logger = LoggerFactory.getLogger(TestTrigger.class);
 
-    public Collection<Mutation> augment(Partition update)
+    public Collection<Mutation> augmentNonBlocking(Partition update)
     {
         logger.info("Writing key {}", update);
         return Collections.emptyList();

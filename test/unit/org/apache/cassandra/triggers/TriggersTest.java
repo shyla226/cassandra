@@ -214,7 +214,7 @@ public class TriggersTest
 
     public static class TestTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(Partition partition)
+        public Collection<Mutation> augmentNonBlocking(Partition partition)
         {
             RowUpdateBuilder update = new RowUpdateBuilder(partition.metadata(), FBUtilities.timestampMicros(), partition.partitionKey().getKey());
             update.add("v2", 999);
@@ -225,7 +225,7 @@ public class TriggersTest
 
     public static class CrossPartitionTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(Partition partition)
+        public Collection<Mutation> augmentNonBlocking(Partition partition)
         {
             RowUpdateBuilder update = new RowUpdateBuilder(partition.metadata(), FBUtilities.timestampMicros(), toInt(partition.partitionKey().getKey()) + 1000);
             update.add("v2", 999);
@@ -236,7 +236,7 @@ public class TriggersTest
 
     public static class CrossTableTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(Partition partition)
+        public Collection<Mutation> augmentNonBlocking(Partition partition)
         {
 
             RowUpdateBuilder update = new RowUpdateBuilder(Schema.instance.getTableMetadata(ksName, otherCf), FBUtilities.timestampMicros(), partition.partitionKey().getKey());
@@ -249,7 +249,7 @@ public class TriggersTest
     public static class ErrorTrigger implements ITrigger
     {
         public static final String MESSAGE = "Thrown by ErrorTrigger";
-        public Collection<Mutation> augment(Partition partition)
+        public Collection<Mutation> augmentNonBlocking(Partition partition)
         {
             throw new org.apache.cassandra.exceptions.InvalidRequestException(MESSAGE);
         }

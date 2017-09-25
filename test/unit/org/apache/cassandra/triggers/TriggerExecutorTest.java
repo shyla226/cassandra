@@ -299,7 +299,7 @@ public class TriggerExecutorTest
 
     public static class NoOpTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(Partition partition)
+        public Collection<Mutation> augmentNonBlocking(Partition partition)
         {
             return null;
         }
@@ -307,7 +307,7 @@ public class TriggerExecutorTest
 
     public static class SameKeySameCfTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(Partition partition)
+        public Collection<Mutation> augmentNonBlocking(Partition partition)
         {
             RowUpdateBuilder builder = new RowUpdateBuilder(partition.metadata(), FBUtilities.timestampMicros(), partition.partitionKey().getKey());
             builder.add("c2", bytes("trigger"));
@@ -317,7 +317,7 @@ public class TriggerExecutorTest
 
     public static class SameKeySameCfPartialTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(Partition partition)
+        public Collection<Mutation> augmentNonBlocking(Partition partition)
         {
             if (!partition.partitionKey().getKey().equals(bytes("k2")))
                 return null;
@@ -330,7 +330,7 @@ public class TriggerExecutorTest
 
     public static class SameKeyDifferentCfTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(Partition partition)
+        public Collection<Mutation> augmentNonBlocking(Partition partition)
         {
             RowUpdateBuilder builder = new RowUpdateBuilder(makeTableMetadata(partition.metadata().keyspace, "otherCf", null), FBUtilities.timestampMicros(), partition.partitionKey().getKey());
             builder.add("c2", bytes("trigger"));
@@ -340,7 +340,7 @@ public class TriggerExecutorTest
 
     public static class SameKeyDifferentKsTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(Partition partition)
+        public Collection<Mutation> augmentNonBlocking(Partition partition)
         {
             RowUpdateBuilder builder = new RowUpdateBuilder(makeTableMetadata("otherKs", "otherCf", null), FBUtilities.timestampMicros(), partition.partitionKey().getKey());
             builder.add("c2", bytes("trigger"));
@@ -350,7 +350,7 @@ public class TriggerExecutorTest
 
     public static class DifferentKeyTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(Partition partition)
+        public Collection<Mutation> augmentNonBlocking(Partition partition)
         {
             RowUpdateBuilder builder = new RowUpdateBuilder(makeTableMetadata("otherKs", "otherCf", null), FBUtilities.timestampMicros(), "otherKey");
             builder.add("c2", bytes("trigger"));

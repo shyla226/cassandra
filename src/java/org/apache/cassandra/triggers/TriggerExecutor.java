@@ -232,7 +232,7 @@ public class TriggerExecutor
                     trigger = loadTriggerInstance(td.classOption);
                     cachedTriggers.put(td.classOption, trigger);
                 }
-                Collection<Mutation> temp = trigger.augment(update);
+                Collection<Mutation> temp = trigger.augmentNonBlocking(update);
                 if (temp != null)
                     tmutations.addAll(temp);
             }

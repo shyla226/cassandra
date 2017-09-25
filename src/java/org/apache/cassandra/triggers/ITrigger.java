@@ -27,7 +27,7 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.Partition;
 
 /**
- * Trigger interface, For every partition update received by the coordinator {@link #augment(Partition)}
+ * Trigger interface, For every partition update received by the coordinator {@link #augmentNonBlocking(Partition)}
  * is called.<p>
  *
  * <b> Contract:</b><br>
@@ -35,7 +35,7 @@ import org.apache.cassandra.db.partitions.Partition;
  * 2) ITrigger implementation can be instantiated multiple times during the server life time.
  *      (Depends on the number of times trigger folder is updated.)<br>
  * 3) ITrigger implementation should be state-less (avoid dependency on instance variables).<br>
- *
+ * 4) ITrigger implementation should be non-blocking (the thread calling the trigger should not be block on I/O, etc)
  * <br><b>The API is still beta and can change.</b>
  */
 public interface ITrigger
@@ -46,5 +46,5 @@ public interface ITrigger
      * @param update - update received for the CF
      * @return additional modifications to be applied along with the supplied update
      */
-    public Collection<Mutation> augment(Partition update);
+    public Collection<Mutation> augmentNonBlocking(Partition update);
 }

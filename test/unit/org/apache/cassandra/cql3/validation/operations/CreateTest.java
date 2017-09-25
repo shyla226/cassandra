@@ -894,7 +894,7 @@ public class CreateTest extends CQLTester
     public static class TestTrigger implements ITrigger
     {
         public TestTrigger() { }
-        public Collection<Mutation> augment(Partition update)
+        public Collection<Mutation> augmentNonBlocking(Partition update)
         {
             return Collections.emptyList();
         }
