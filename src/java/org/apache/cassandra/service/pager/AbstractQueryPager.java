@@ -33,6 +33,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     protected final T command;
     protected final DataLimits limits;
     protected final ProtocolVersion protocolVersion;
+    private final boolean enforceStrictLiveness;
 
     /** The internal pager is created when the fetch command is issued since its properties will depend on
         the page limits and whether we need to retrieve a single page or multiple pages, however we need
@@ -63,6 +64,8 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         this.command = command;
         this.protocolVersion = protocolVersion;
         this.limits = command.limits();
+        this.enforceStrictLiveness = command.metadata().enforceStrictLiveness();
+
         this.remaining = limits.count();
         this.remainingInPartition = limits.perPartitionCount();
     }
@@ -153,7 +156,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         private Pager(DataLimits pageLimits, ReadCommand pageCommand, int nowInSec)
         {
-            this.counter = pageLimits.newCounter(nowInSec, true, command.selectsFullPartition());
+            this.counter = pageLimits.newCounter(nowInSec, true, command.selectsFullPartition(), enforceStrictLiveness);
             this.pageLimits = pageLimits;
             this.pageCommand = pageCommand;
         }

@@ -430,7 +430,7 @@ public class PartitionRangeReadCommand extends ReadCommand
 
     public PartitionIterator withLimitsAndPostReconciliation(PartitionIterator iterator)
     {
-        return limits().filter(postReconciliationProcessing(iterator), nowInSec(), selectsFullPartition());
+        return limits().filter(postReconciliationProcessing(iterator), nowInSec(), selectsFullPartition(), metadata().enforceStrictLiveness());
     }
 
     /**
