@@ -37,6 +37,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.SerializationHelper;
+import org.apache.cassandra.exceptions.UnknownKeyspaceException;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -112,8 +113,25 @@ public class Mutation implements IMutation, Scheduleable
         for (PartitionUpdate pu : modifications.values())
             cdcEnabled |= pu.metadata().params.cdc;
 
-        this.scheduler = TPC.getForKey(Keyspace.open(keyspaceName), key);
-        this.operationExecutor = scheduler.forTaskType(TPCTaskType.WRITE);
+        this.scheduler = createScheduler(keyspaceName, key);
+        // See createScheduler() for why scheduler can be null and why we're happy basically ignoring that case.
+        this.operationExecutor = scheduler == null ? null : scheduler.forTaskType(TPCTaskType.WRITE);
+    }
+
+    private static TPCScheduler createScheduler(String keyspaceName, DecoratedKey key)
+    {
+        try
+        {
+            return TPC.getForKey(Keyspace.open(keyspaceName), key);
+        }
+        catch (IllegalStateException | UnknownKeyspaceException e)
+        {
+            // Some tests (including ones outside of Apollo) create mutations for keyspaces that don't exist and/or on
+            // servers that are not initialized, and we will get here when that happens. To not break those tests, we
+            // return null here and simply don't set the scheduler/operationExecutor: it's safe to assume those tests
+            // are not applying the mutation and that those executors will simply never get used.
+            return null;
+        }
     }
 
     public Mutation copy()
