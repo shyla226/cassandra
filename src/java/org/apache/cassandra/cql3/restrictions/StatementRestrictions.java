@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.base.Joiner;
+import com.google.common.collect.Iterators;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.config.CFMetaData;
@@ -241,7 +242,12 @@ public final class StatementRestrictions
             }
             else
             {
-                Restriction restriction = relation.toRestriction(cfm, boundNames);
+                Restriction restriction;
+
+                if (cfm.isSuper() && cfm.isDense() && !relation.onToken())
+                    restriction = relation.toSuperColumnAdapter().toRestriction(cfm, boundNames);
+                else 
+                    restriction = relation.toRestriction(cfm, boundNames);
 
                 if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(secondaryIndexManager)))
                 {
@@ -346,9 +352,16 @@ public final class StatementRestrictions
                                      Joiner.on(", ").join(nonPrimaryKeyColumns));
             }
             if (hasQueriableIndex)
+            {
                 usesSecondaryIndexing = true;
-            else if (!allowFiltering)
+            }
+            else if (!allowFiltering && !cfm.isSuper())
+            {
                 throw invalidRequest(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+            }
+
+            checkFalse(clusteringColumnsRestrictions.isEmpty() && cfm.isSuper(),
+                       "Filtering is not supported on SuperColumn tables");
 
             filterRestrictionsBuilder.add(nonPrimaryKeyRestrictions);
         }
@@ -919,5 +932,16 @@ public final class StatementRestrictions
     public boolean hasRegularColumnsRestrictions()
     {
         return hasRegularColumnsRestrictions;
+    }
+
+    private SuperColumnCompatibility.SuperColumnRestrictions cached;
+    public SuperColumnCompatibility.SuperColumnRestrictions getSuperColumnRestrictions()
+    {
+        assert cfm.isSuper() && cfm.isDense();
+
+        if (cached == null)
+            cached = new SuperColumnCompatibility.SuperColumnRestrictions(Iterators.concat(clusteringColumnsRestrictions.iterator(),
+                                                                                           nonPrimaryKeyRestrictions.iterator()));
+        return cached;
     }
 }
