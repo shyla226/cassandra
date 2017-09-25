@@ -92,10 +92,10 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     /**
      * Race condition when ReadCommand is re-used.
-     * 
+     *
      * It's ok to get a smaller oldestUnrepairedTombstone value when ReadCommand is reused, but the concurrent update
      * to this variable is not safe, we might lost update.
-     * 
+     *
      * SEE APOLLO-1084
      */
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
@@ -494,7 +494,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             }
 
             CachedPartition cachedPartition = (CachedPartition)cached;
-            if (cfs.isFilterFullyCoveredBy(clusteringIndexFilter(), limits(), cachedPartition, nowInSec()))
+            if (cfs.isFilterFullyCoveredBy(clusteringIndexFilter(), limits(), cachedPartition, nowInSec(), metadata().enforceStrictLiveness()))
             {
                 cfs.metric.rowCacheHit.inc();
                 Tracing.trace("Row cache hit");
@@ -532,6 +532,8 @@ public class SinglePartitionReadCommand extends ReadCommand
             if (sentinelSuccess)
             {
                 int rowsToCache = metadata().params.caching.rowsPerPartitionToCache();
+                final boolean enforceStrictLiveness = metadata().enforceStrictLiveness();
+
                 Flow<FlowableUnfilteredPartition> iter = SinglePartitionReadCommand.fullPartitionRead(metadata(),
                                                                                                       nowInSec(),
                                                                                                       partitionKey())
@@ -544,7 +546,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                     FlowableUnfilteredPartition toCache = partition.withContent(tee.child(0));
                     FlowableUnfilteredPartition toReturn = partition.withContent(tee.child(1));
 
-                    toCache = DataLimits.cqlLimits(rowsToCache).truncateUnfiltered(toCache, nowInSec(), false);
+                    toCache = DataLimits.cqlLimits(rowsToCache).truncateUnfiltered(toCache, nowInSec(), false, enforceStrictLiveness);
                     Flow<CachedBTreePartition> cachedPartition = CachedBTreePartition.create(toCache, nowInSec());
 
                     // reduceToFuture initiates processing on this branch. It will immediately return until we have a request
@@ -1111,6 +1113,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         private final DataLimits limits;
         private final int nowInSec;
         private final boolean selectsFullPartitions;
+        private final boolean enforceStrictLiveness;
 
         public Group(List<SinglePartitionReadCommand> commands, DataLimits limits)
         {
@@ -1120,6 +1123,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             SinglePartitionReadCommand firstCommand = commands.get(0);
             this.nowInSec = firstCommand.nowInSec();
             this.selectsFullPartitions = firstCommand.selectsFullPartition();
+            this.enforceStrictLiveness = firstCommand.metadata().enforceStrictLiveness();
             for (int i = 1; i < commands.size(); i++)
                 assert commands.get(i).nowInSec() == nowInSec;
         }
@@ -1153,13 +1157,13 @@ public class SinglePartitionReadCommand extends ReadCommand
         {
             return false;
         }
-        
+
         @Override
         public ReadContext.Builder applyDefaults(ReadContext.Builder ctx)
         {
             return commands.get(0).applyDefaults(ctx);
         }
-        
+
         @Override
         public boolean selectsFullPartition()
         {
@@ -1178,7 +1182,8 @@ public class SinglePartitionReadCommand extends ReadCommand
             return limits.truncateFiltered(FlowablePartitions.filterAndSkipEmpty(executeLocally(monitor, false),
                                                                                  nowInSec()),
                                                          nowInSec(),
-                                                         selectsFullPartitions);
+                                                         selectsFullPartitions,
+                                                         enforceStrictLiveness);
         }
 
         public Flow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)

@@ -1359,6 +1359,9 @@ public class StorageProxy implements StorageProxyMBean
     {
         Flow<FlowablePartition> result = fetchRows(group.commands, ctx);
 
+        // Note that the only difference between the command in a group must be the partition key on which
+        // they applied.
+        boolean enforceStrictLiveness = group.commands.get(0).metadata().enforceStrictLiveness();
         // For continuous paging, we know we enforce global limits when we have more than one command
         // later (by always wrapping in a pager) and we also don't need to update the metrics or latency
         // because it has its own dedicated metrics, so just return the result here.
@@ -1368,7 +1371,7 @@ public class StorageProxy implements StorageProxyMBean
         // If we have more than one command, then despite each read command honoring the limit, the total result
         // might not honor it and so we should enforce it;
         if (group.commands.size() > 1)
-            result = result.map(r -> group.limits().truncateFiltered(r, group.nowInSec(), group.selectsFullPartition()));
+            result = result.map(r -> group.limits().truncateFiltered(r, group.nowInSec(), group.selectsFullPartition(), enforceStrictLiveness));
 
         return result.doOnError(e ->
                                 {
@@ -1846,7 +1849,7 @@ public class StorageProxy implements StorageProxyMBean
             Tracing.trace("Submitted {} concurrent range requests", concurrentQueries.size());
             // We want to count the results for the sake of updating the concurrency factor (see updateConcurrencyFactor) but we don't want to
             // enforce any particular limit at this point (this could break code than rely on postReconciliationProcessing), hence the DataLimits.NONE.
-            counter = DataLimits.NONE.newCounter(command.nowInSec(), true, command.selectsFullPartition());
+            counter = DataLimits.NONE.newCounter(command.nowInSec(), true, command.selectsFullPartition(), command.metadata().enforceStrictLiveness());
             return DataLimits.truncateFiltered(Flow.concat(concurrentQueries), counter);
         }
 

@@ -389,6 +389,7 @@ public class ViewTest extends CQLTester
         BatchlogManager.instance.forceBatchlogReplay();
 
         assertRows(execute("SELECT c, k, val FROM mv_rctstest"), row(2, 0, 2));
+        assertRows(execute("SELECT c, k, val FROM mv_rctstest limit 1"), row(2, 0, 2));
     }
 
     @Test

@@ -378,7 +378,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                 // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
                 // processing we do on it).
                 r = updatedFilter.filter(r, cfs.metadata(), nowInSec());
-                return limits().truncateUnfiltered(r, nowInSec(), selectsFullPartition());
+                return limits().truncateUnfiltered(r, nowInSec(), selectsFullPartition(), metadata().enforceStrictLiveness());
             });
 
         return flow;
@@ -417,6 +417,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             private final int warningThreshold = DatabaseDescriptor.getTombstoneWarnThreshold();
 
             private final boolean respectTombstoneThresholds = !SchemaConstants.isSystemKeyspace(ReadCommand.this.metadata().keyspace);
+            private final boolean enforceStrictLiveness = metadata.enforceStrictLiveness();
 
             private int liveRows = 0;
             private int tombstones = 0;
@@ -454,8 +455,14 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                         hasLiveCells = true;
                 }
 
-                if (hasLiveCells || row.primaryKeyLivenessInfo().isLive(nowInSec))
-                    ++ liveRows;
+                /**
+                 * This duplicates the logic of {@link AbstractRow#hasLiveData(int, boolean)} to avoid
+                 * iterating twice on the cells since this is GC-intensive. Please change this whenever
+                 * changing that.
+                 * TODO: unify the logic in a performant way
+                 */
+                if ((hasLiveCells && !enforceStrictLiveness) || row.primaryKeyLivenessInfo().isLive(nowInSec))
+                    ++liveRows;
             }
 
             private void countTombstone(ClusteringPrefix clustering)

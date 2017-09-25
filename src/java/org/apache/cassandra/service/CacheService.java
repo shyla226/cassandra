@@ -421,7 +421,10 @@ public class CacheService implements CacheServiceMBean
                 {
                     Flow<FlowableUnfilteredPartition> flow = cmd.deferredQuery(cfs, controller);
                     try (UnfilteredRowIterator iter = FlowablePartitions.toIterator(DataLimits.cqlLimits(rowsToCache)
-                                                                                              .truncateUnfiltered(flow.blockingSingle(), nowInSec, true)))
+                                                                                              .truncateUnfiltered(flow.blockingSingle(),
+                                                                                                                  nowInSec,
+                                                                                                                  true,
+                                                                                                                  cmd.metadata().enforceStrictLiveness())))
                     {
                         CachedPartition toCache = CachedBTreePartition.create(iter, nowInSec);
                         return Pair.create(new RowCacheKey(cfs.metadata(), key), toCache);

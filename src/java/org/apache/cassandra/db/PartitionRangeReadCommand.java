@@ -70,10 +70,10 @@ public class PartitionRangeReadCommand extends ReadCommand
     private final DataRange dataRange;
     /**
      * Race condition when ReadCommand is re-used.
-     * 
+     *
      * It's ok to get a smaller oldestUnrepairedTombstone value when ReadCommand is reused, but the concurrent update
      * to this variable is not safe, we might lost update.
-     * 
+     *
      * SEE APOLLO-1084
      */
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
@@ -330,7 +330,7 @@ public class PartitionRangeReadCommand extends ReadCommand
                                               CachedPartition cached = cfs.getRawCachedPartition(dk);
                                               ClusteringIndexFilter filter = dataRange().clusteringIndexFilter(dk);
 
-                                              if (cached != null && cfs.isFilterFullyCoveredBy(filter, limits(), cached, nowInSec()))
+                                              if (cached != null && cfs.isFilterFullyCoveredBy(filter, limits(), cached, nowInSec(), metadata().enforceStrictLiveness()))
                                               {
                                                   // The partition will not be used, so abort it.
                                                   partition.unused();
@@ -389,7 +389,7 @@ public class PartitionRangeReadCommand extends ReadCommand
 
     public Flow<FlowablePartition> withLimitsAndPostReconciliation(Flow<FlowablePartition> partitions)
     {
-        return limits().truncateFiltered(postReconciliationProcessing(partitions), nowInSec(), selectsFullPartition());
+        return limits().truncateFiltered(postReconciliationProcessing(partitions), nowInSec(), selectsFullPartition(), metadata().enforceStrictLiveness());
     }
 
     /**

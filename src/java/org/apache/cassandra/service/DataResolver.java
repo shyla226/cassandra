@@ -85,7 +85,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
          * See CASSANDRA-13747 for more details.
          */
 
-        DataLimits.Counter counter = command.limits().newCounter(command.nowInSec(), true, command.selectsFullPartition());
+        DataLimits.Counter counter = command.limits().newCounter(command.nowInSec(), true, command.selectsFullPartition(), command.metadata().enforceStrictLiveness());
 
         Flow<FlowableUnfilteredPartition> merged = mergeWithShortReadProtection(results, sources, counter);
         Flow<FlowablePartition> filtered = FlowablePartitions.filter(merged, command.nowInSec());
@@ -527,7 +527,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
         private ShortReadProtection(InetAddress source, DataLimits.Counter postReconciliationCounter)
         {
             this.source = source;
-            this.counter = command.limits().newCounter(command.nowInSec(), false, command.selectsFullPartition());
+            this.counter = command.limits().newCounter(command.nowInSec(), false, command.selectsFullPartition(), command.metadata().enforceStrictLiveness());
             this.postReconciliationCounter = postReconciliationCounter;
         }
 

@@ -46,7 +46,7 @@ import org.apache.cassandra.utils.versioning.Versioned;
  * limits, but also due to {@code GROUP BY} and paging.
  * </p>
  * <p>
- * Tracking happens by row count ({@see count()}) and bytes ({@see bytes()}), with the first exhausted limit 
+ * Tracking happens by row count ({@see count()}) and bytes ({@see bytes()}), with the first exhausted limit
  * taking precedence.
  * </p>
  * <p>
@@ -66,7 +66,7 @@ public abstract class DataLimits
     public static final DataLimits NONE = new CQLLimits(NO_ROWS_LIMIT)
     {
         @Override
-        public boolean hasEnoughLiveData(CachedPartition cached, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+        public boolean hasEnoughLiveData(CachedPartition cached, int nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
         {
             return false;
         }
@@ -141,7 +141,10 @@ public abstract class DataLimits
         throw new UnsupportedOperationException();
     }
 
-    public abstract boolean hasEnoughLiveData(CachedPartition cached, int nowInSec, boolean countPartitionsWithOnlyStaticData);
+    public abstract boolean hasEnoughLiveData(CachedPartition cached,
+                                              int nowInSec,
+                                              boolean countPartitionsWithOnlyStaticData,
+                                              boolean enforceStrictLiveness);
 
     /**
      * Returns a new {@code Counter} for this limits.
@@ -152,19 +155,24 @@ public abstract class DataLimits
      * {@code RowIterator} (since it only returns live rows), false otherwise.
      * @param countPartitionsWithOnlyStaticData if {@code true} the partitions with only static data should be counted
      * as 1 valid row.
+     * @param enforceStrictLiveness whether the row should be purged if there is no PK liveness info,
+     *                              normally retrieved from {@link TableMetadata#enforceStrictLiveness()}
      * @return a new {@code Counter} for this limits.
      */
-    public abstract Counter newCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData);
+    public abstract Counter newCounter(int nowInSec,
+                                       boolean assumeLiveData,
+                                       boolean countPartitionsWithOnlyStaticData,
+                                       boolean enforceStrictLiveness);
 
     /**
      * The max number of bytes this limits enforces.
      * <p>
      * Note that if this value is set, less rows might be returned if the size of the current rows exceeds the bytes limit.
-     * 
+     *
      * @return the maximum number of bytes this limits enforces.
      */
     public abstract int bytes();
-    
+
     /**
      * The max number of results this limits enforces.
      * <p>
@@ -182,12 +190,12 @@ public abstract class DataLimits
      * discarded.
      */
     public abstract DataLimits withoutState();
-    
+
     /**
      * Returns equivalent limits but with updated count value.
      */
     public abstract DataLimits withCount(int count);
-    
+
     /**
      * Duplicate the current limits with exact same state.
      */
@@ -202,11 +210,13 @@ public abstract class DataLimits
     {
         protected final int nowInSec;
         protected final boolean assumeLiveData;
+        private final boolean enforceStrictLiveness;
 
-        protected Counter(int nowInSec, boolean assumeLiveData)
+        protected Counter(int nowInSec, boolean assumeLiveData, boolean enforceStrictLiveness)
         {
             this.nowInSec = nowInSec;
             this.assumeLiveData = assumeLiveData;
+            this.enforceStrictLiveness = enforceStrictLiveness;
         }
 
         abstract void newPartition(DecoratedKey partitionKey, Row staticRow);
@@ -226,7 +236,7 @@ public abstract class DataLimits
         public abstract int counted();
 
         public abstract int countedInCurrentPartition();
-        
+
         /**
          * The number of bytes for the counted rows.
          *
@@ -254,7 +264,7 @@ public abstract class DataLimits
 
         protected boolean isLive(Row row)
         {
-            return assumeLiveData || row.hasLiveData(nowInSec);
+            return assumeLiveData || row.hasLiveData(nowInSec, enforceStrictLiveness);
         }
     }
 
@@ -295,7 +305,7 @@ public abstract class DataLimits
             {
                 if (unfiltered instanceof Row)
                     counter.newRow((Row) unfiltered);
-                
+
                 return unfiltered;
             });
     }
@@ -322,9 +332,9 @@ public abstract class DataLimits
      *
      * @return the truncated flow
      */
-    public Flow<FlowableUnfilteredPartition> truncateUnfiltered(Flow<FlowableUnfilteredPartition> partitions, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+    public Flow<FlowableUnfilteredPartition> truncateUnfiltered(Flow<FlowableUnfilteredPartition> partitions, int nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
     {
-        Counter counter = this.newCounter(nowInSec, false, countPartitionsWithOnlyStaticData);
+        Counter counter = this.newCounter(nowInSec, false, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
         return truncateUnfiltered(partitions, counter);
     }
 
@@ -335,9 +345,9 @@ public abstract class DataLimits
                          .map(partition -> truncateUnfiltered(counter, partition));
     }
 
-    public FlowableUnfilteredPartition truncateUnfiltered(FlowableUnfilteredPartition partition, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+    public FlowableUnfilteredPartition truncateUnfiltered(FlowableUnfilteredPartition partition, int nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
     {
-        Counter counter = this.newCounter(nowInSec, false, countPartitionsWithOnlyStaticData);
+        Counter counter = this.newCounter(nowInSec, false, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
         return truncateUnfiltered(counter, partition);
     }
 
@@ -367,9 +377,9 @@ public abstract class DataLimits
      *
      * @return the truncated flow
      */
-    public Flow<FlowablePartition> truncateFiltered(Flow<FlowablePartition> partitions, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+    public Flow<FlowablePartition> truncateFiltered(Flow<FlowablePartition> partitions, int nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
     {
-        Counter counter = this.newCounter(nowInSec, true, countPartitionsWithOnlyStaticData);
+        Counter counter = this.newCounter(nowInSec, true, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
         return truncateFiltered(partitions, counter);
     }
 
@@ -380,9 +390,9 @@ public abstract class DataLimits
                          .map(partition -> truncateFiltered(counter, partition));
     }
 
-    public FlowablePartition truncateFiltered(FlowablePartition partition, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+    public FlowablePartition truncateFiltered(FlowablePartition partition, int nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
     {
-        Counter counter = this.newCounter(nowInSec, true, countPartitionsWithOnlyStaticData);
+        Counter counter = this.newCounter(nowInSec, true, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
         return truncateFiltered(counter, partition);
     }
 
@@ -423,7 +433,7 @@ public abstract class DataLimits
         {
             this(NO_BYTES_LIMIT, rowLimit, perPartitionLimit, false);
         }
-        
+
         private CQLLimits(int rowLimit, int perPartitionLimit, boolean isDistinct)
         {
             this(NO_BYTES_LIMIT, rowLimit, perPartitionLimit, isDistinct);
@@ -479,8 +489,7 @@ public abstract class DataLimits
             return new CQLLimits(bytesLimit, toFetch, NO_ROWS_LIMIT, isDistinct);
         }
 
-        @SuppressWarnings("resource") // cacheIter closed by the partition content blocking operation
-        public boolean hasEnoughLiveData(CachedPartition cached, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+        public boolean hasEnoughLiveData(CachedPartition cached, int nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
         {
             // We want the number of row that are currently live. Getting that precise number forces
             // us to iterate the cached partition in general, but we can avoid that if:
@@ -495,7 +504,7 @@ public abstract class DataLimits
 
             // Otherwise, we need to re-count,
             FlowableUnfilteredPartition cachePart = cached.unfilteredPartition(ColumnFilter.selection(cached.columns()), Slices.ALL, false);
-            DataLimits.Counter counter = newCounter(nowInSec, false, countPartitionsWithOnlyStaticData);
+            DataLimits.Counter counter = newCounter(nowInSec, false, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
             FlowableUnfilteredPartition partition = DataLimits.truncateUnfiltered(counter, cachePart);
 
             // Consume the iterator until we've counted enough
@@ -503,11 +512,14 @@ public abstract class DataLimits
             return counter.isDone();
         }
 
-        public Counter newCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData)
+        public Counter newCounter(int nowInSec,
+                                  boolean assumeLiveData,
+                                  boolean countPartitionsWithOnlyStaticData,
+                                  boolean enforceStrictLiveness)
         {
-            return new CQLCounter(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData);
+            return new CQLCounter(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
         }
-        
+
         public int bytes()
         {
             return bytesLimit;
@@ -532,12 +544,12 @@ public abstract class DataLimits
         {
             return new CQLLimits(bytesLimit, count, perPartitionLimit, isDistinct);
         }
-        
+
         public DataLimits duplicate()
         {
             return new CQLLimits(bytesLimit, rowLimit, perPartitionLimit, isDistinct);
         }
-        
+
         public float estimateTotalResults(ColumnFamilyStore cfs)
         {
             // TODO: we should start storing stats on the number of rows (instead of the number of cells)
@@ -552,20 +564,23 @@ public abstract class DataLimits
              */
             protected volatile int bytesCounted;
             protected volatile int rowCounted;
-            
+
             /**
              * Rows counted in the current partition by this counter, plus any previously counted rows for the same partition.
              */
             protected volatile int rowCountedInCurrentPartition;
             protected volatile int previouslyCountedInCurrentPartition;
-            
+
             protected final boolean countPartitionsWithOnlyStaticData;
 
             protected volatile int staticRowBytes;
 
-            public CQLCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData)
+            public CQLCounter(int nowInSec,
+                              boolean assumeLiveData,
+                              boolean countPartitionsWithOnlyStaticData,
+                              boolean enforceStrictLiveness)
             {
-                super(nowInSec, assumeLiveData);
+                super(nowInSec, assumeLiveData, enforceStrictLiveness);
                 this.countPartitionsWithOnlyStaticData = countPartitionsWithOnlyStaticData;
             }
 
@@ -626,7 +641,7 @@ public abstract class DataLimits
             {
                 return rowCountedInCurrentPartition;
             }
-            
+
             public int bytesCounted()
             {
                 return bytesCounted;
@@ -647,7 +662,7 @@ public abstract class DataLimits
             {
                 return bytesCounted == 0 && rowCounted == 0;
             }
-            
+
             public boolean isDone()
             {
                 return bytesCounted >= bytesLimit || rowCounted >= rowLimit;
@@ -661,7 +676,7 @@ public abstract class DataLimits
             @Override
             public String toString()
             {
-                return String.format("[counted(bytes,rows,perPartition): (%d,%d,%d), count(bytes,rows,perPartition): (%d,%d,%d)", 
+                return String.format("[counted(bytes,rows,perPartition): (%d,%d,%d), count(bytes,rows,perPartition): (%d,%d,%d)",
                                      bytesCounted(), rowCounted(), rowCountedInCurrentPartition(), bytes(), count(), perPartitionCount());
             }
         }
@@ -670,7 +685,7 @@ public abstract class DataLimits
         public String toString()
         {
             StringBuilder sb = new StringBuilder();
-            
+
             if (bytesLimit != NO_BYTES_LIMIT)
             {
                 sb.append("BYTES ").append(bytesLimit);
@@ -727,7 +742,7 @@ public abstract class DataLimits
         {
             return new CQLLimits(bytesLimit, rowLimit, perPartitionLimit, isDistinct);
         }
-        
+
         @Override
         public DataLimits withCount(int count)
         {
@@ -741,16 +756,19 @@ public abstract class DataLimits
         }
 
         @Override
-        public Counter newCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData)
+        public Counter newCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
         {
-            return new PagingAwareCounter(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData);
+            return new PagingAwareCounter(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
         }
 
         private class PagingAwareCounter extends CQLCounter
         {
-            private PagingAwareCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData)
+            private PagingAwareCounter(int nowInSec,
+                                       boolean assumeLiveData,
+                                       boolean countPartitionsWithOnlyStaticData,
+                                       boolean enforceStrictLiveness)
             {
-                super(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData);
+                super(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
             }
 
             @Override
@@ -849,7 +867,7 @@ public abstract class DataLimits
         @Override
         public float estimateTotalResults(ColumnFamilyStore cfs)
         {
-            // For the moment, we return the estimated number of rows as we have no good way of estimating 
+            // For the moment, we return the estimated number of rows as we have no good way of estimating
             // the number of groups that will be returned. Hopefully, we should be able to fix
             // that problem at some point.
             return super.estimateTotalResults(cfs);
@@ -860,7 +878,7 @@ public abstract class DataLimits
         {
             if (logger.isTraceEnabled())
                 logger.trace("{} forPaging({})", hashCode(), pageSize);
-            
+
             return pageSize.isInBytes()
                    ? new CQLGroupByLimits(groupLimit,
                                           groupPerPartitionLimit,
@@ -887,7 +905,7 @@ public abstract class DataLimits
                              lastReturnedKeyRemaining,
                              state.partitionKey() == null ? "null" : ByteBufferUtil.bytesToHex(state.partitionKey()),
                              state.clustering() == null ? "null" : state.clustering().toBinaryString());
-            
+
             return pageSize.isInBytes()
                    ? new CQLGroupByPagingLimits(groupLimit,
                                                 groupPerPartitionLimit,
@@ -919,9 +937,12 @@ public abstract class DataLimits
         }
 
         @Override
-        public Counter newCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData)
+        public Counter newCounter(int nowInSec,
+                                  boolean assumeLiveData,
+                                  boolean countPartitionsWithOnlyStaticData,
+                                  boolean enforceStrictLiveness)
         {
-            return new GroupByAwareCounter(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData);
+            return new GroupByAwareCounter(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
         }
 
         @Override
@@ -941,33 +962,33 @@ public abstract class DataLimits
         {
             return state == GroupingState.EMPTY_STATE
                  ? this
-                 : new CQLGroupByLimits(groupLimit, 
-                     groupPerPartitionLimit, 
-                     bytesLimit, 
-                     rowLimit, 
-                     groupBySpec, 
+                 : new CQLGroupByLimits(groupLimit,
+                     groupPerPartitionLimit,
+                     bytesLimit,
+                     rowLimit,
+                     groupBySpec,
                      GroupingState.EMPTY_STATE);
         }
-        
+
         @Override
         public DataLimits withCount(int count)
         {
-            return new CQLGroupByLimits(count, 
-                     groupPerPartitionLimit, 
-                     bytesLimit, 
-                     rowLimit, 
-                     groupBySpec, 
+            return new CQLGroupByLimits(count,
+                     groupPerPartitionLimit,
+                     bytesLimit,
+                     rowLimit,
+                     groupBySpec,
                      state);
         }
 
         @Override
         public DataLimits duplicate()
         {
-            return new CQLGroupByLimits(groupLimit, 
-                     groupPerPartitionLimit, 
-                     bytesLimit, 
-                     rowLimit, 
-                     groupBySpec, 
+            return new CQLGroupByLimits(groupLimit,
+                     groupPerPartitionLimit,
+                     bytesLimit,
+                     rowLimit,
+                     groupBySpec,
                      state);
         }
 
@@ -989,7 +1010,7 @@ public abstract class DataLimits
                 if (bytesLimit != NO_BYTES_LIMIT)
                     sb.append(' ');
             }
-            
+
             if (bytesLimit != NO_BYTES_LIMIT)
             {
                 sb.append("BYTES LIMIT ").append(bytesLimit);
@@ -1023,7 +1044,7 @@ public abstract class DataLimits
              * The key of the partition being processed.
              */
             protected DecoratedKey currentPartitionKey;
-            
+
             /**
              * The number of bytes counted so far.
              */
@@ -1049,28 +1070,31 @@ public abstract class DataLimits
              * The number of groups in the current partition, counted by this counter.
              */
             protected int groupCountedInCurrentPartition;
-            
+
              /**
              * The number of groups in the current partition, as previously counted by a different counter.
              */
             protected int previouslyCountedInCurrentPartition;
-            
+
             protected int staticRowBytes;
 
             protected boolean hasGroupStarted;
 
             protected boolean hasReturnedRowsFromCurrentPartition;
 
-            private GroupByAwareCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData)
+            private GroupByAwareCounter(int nowInSec,
+                                        boolean assumeLiveData,
+                                        boolean countPartitionsWithOnlyStaticData,
+                                        boolean enforceStrictLiveness)
             {
-                super(nowInSec, assumeLiveData);
+                super(nowInSec, assumeLiveData, enforceStrictLiveness);
                 this.groupMaker = groupBySpec.newGroupMaker(state);
                 this.countPartitionsWithOnlyStaticData = countPartitionsWithOnlyStaticData;
 
                 // If the end of the partition was reached at the same time than the row limit, the last group might
                 // not have been counted yet. Due to that we need to guess, based on the state, if the previous group
                 // is still open.
-                hasGroupStarted = state.hasClustering();                
+                hasGroupStarted = state.hasClustering();
             }
 
             @Override
@@ -1079,7 +1103,7 @@ public abstract class DataLimits
                 if (logger.isTraceEnabled())
                     logger.trace("{} - GroupByAwareCounter.newPartition {} with state {}", hashCode(),
                                  ByteBufferUtil.bytesToHex(partitionKey.getKey()), state.partitionKey() != null ? ByteBufferUtil.bytesToHex(state.partitionKey()) : "null");
-                
+
                 if (partitionKey.getKey().equals(state.partitionKey()))
                 {
                     // The only case were we could have state.partitionKey() equals to the partition key
@@ -1195,7 +1219,7 @@ public abstract class DataLimits
             {
                 return groupCountedInCurrentPartition;
             }
-            
+
             @Override
             public int bytesCounted()
             {
@@ -1236,7 +1260,7 @@ public abstract class DataLimits
             {
                 return isDone() || (previouslyCountedInCurrentPartition + groupCountedInCurrentPartition) >= groupPerPartitionLimit;
             }
-            
+
             @Override
             public boolean isEmpty()
             {
@@ -1279,11 +1303,11 @@ public abstract class DataLimits
                     incrementGroupInCurrentPartitionCount();
                 }
             }
-            
+
             @Override
             public String toString()
             {
-                return String.format("[counted(bytes,groups,perPartition): (%d,%d,%d), count(bytes,groups,perPartition): (%d,%d,%d)", 
+                return String.format("[counted(bytes,groups,perPartition): (%d,%d,%d), count(bytes,groups,perPartition): (%d,%d,%d)",
                                      bytesCounted(), groupCounted, groupCountedInCurrentPartition, bytes(), count(), perPartitionCount());
             }
         }
@@ -1340,10 +1364,10 @@ public abstract class DataLimits
         }
 
         @Override
-        public Counter newCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData)
+        public Counter newCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
         {
             assert state == GroupingState.EMPTY_STATE || lastReturnedKey.equals(state.partitionKey());
-            return new PagingGroupByAwareCounter(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData);
+            return new PagingGroupByAwareCounter(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
         }
 
         @Override
@@ -1351,7 +1375,7 @@ public abstract class DataLimits
         {
             return new CQLGroupByLimits(groupLimit, groupPerPartitionLimit, rowLimit, groupBySpec);
         }
-        
+
         @Override
         public DataLimits withCount(int count)
         {
@@ -1366,9 +1390,9 @@ public abstract class DataLimits
 
         private class PagingGroupByAwareCounter extends GroupByAwareCounter
         {
-            private PagingGroupByAwareCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData)
+            private PagingGroupByAwareCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
             {
-                super(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData);
+                super(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
             }
 
             @Override
