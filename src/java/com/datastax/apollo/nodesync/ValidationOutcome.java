@@ -5,6 +5,9 @@
  */
 package com.datastax.apollo.nodesync;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
 
 /**
@@ -149,6 +152,31 @@ public enum ValidationOutcome
         // As mention in the enum declaration above, outcomes are declared in such a way that the max of two is the
         // "worst" outcome and so the one we have to keep when composing them.
         return this.compareTo(other) > 0 ? this : other;
+    }
+
+    /**
+     * Given a array containing a specific value for every possible outcome (indexed by {@link #ordinal()}), return an
+     * equivalent map of outcome names to value.
+     * <p>
+     * This is used because we internally generally use a simple array internally when tracking per-outcome counts, but
+     * when storing them in system tables, we want to use a {@code map<text, bigint>}. Note that the resulting map
+     * doesn't include entries for outcomes whose associated value is 0: this avoid wasting storage in system tables for
+     * no reason, but also make things a tad more human readable when said system tables are inspected manually.
+     *
+     * @param outcomes the array to convert.
+     * @return a map that associate to each outcome {@code o} the value of {@code outcomes[o.ordinal()]} if it's not 0.
+     */
+    public static Map<String, Long> toMap(long[] outcomes)
+    {
+        Map<String, Long> m = new HashMap<>();
+        for (ValidationOutcome outcome : ValidationOutcome.values())
+        {
+            long v = outcomes[outcome.ordinal()];
+            // Don't store zeros; it wastes storage and make things a tad less human readable in general
+            if (v != 0)
+                m.put(outcome.toString(), v);
+        }
+        return m;
     }
 
     @Override

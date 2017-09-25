@@ -41,6 +41,9 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.apollo.nodesync.UserValidationProposer;
+import com.datastax.apollo.nodesync.ValidationMetrics;
+import com.datastax.apollo.nodesync.ValidationOutcome;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -74,6 +77,7 @@ import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.lang.String.format;
 
+import static java.util.stream.Collectors.toSet;
 import static org.apache.cassandra.schema.SchemaConstants.DISTRIBUTED_KEYSPACE_NAME;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
@@ -97,6 +101,8 @@ public final class SystemDistributedKeyspace
 
     public static final String NODESYNC_VALIDATION = "nodesync_validation";
     public static final String NODESYNC_STATUS = "nodesync_status";
+    public static final String NODESYNC_METRICS = "nodesync_metrics";
+    public static final String NODESYNC_USER_VALIDATIONS = "nodesync_user_validations";
 
     private static final TableMetadata RepairHistory =
         parse(REPAIR_HISTORY,
@@ -188,6 +194,37 @@ public final class SystemDistributedKeyspace
         .defaultTimeToLive((int)TimeUnit.DAYS.toSeconds(28))
         .build();
 
+    public static final UserType NodeSyncMetrics =
+        parseType(NODESYNC_METRICS,
+                  "CREATE TYPE %s ("
+                  + "data_validated bigint,"
+                  + "data_repaired bigint,"
+                  + "objects_validated bigint,"
+                  + "objects_repaired bigint,"
+                  + "repair_data_sent bigint,"
+                  + "repair_objects_sent bigint,"
+                  + "pages_outcomes frozen<map<text, bigint>>)");
+
+    private static final TableMetadata NodeSyncUserValidations =
+        parse(NODESYNC_USER_VALIDATIONS,
+              "NodeSync user-triggered validations status",
+              "CREATE TABLE %s ("
+              + "id text,"
+              + "keyspace_name text static,"
+              + "table_name text static,"
+              + "node inet,"
+              + "status text,"
+              + "validated_ranges frozen<set<text>>,"
+              + "started_at timestamp,"
+              + "ended_at timestamp,"
+              + "segments_to_validate bigint,"
+              + "segments_validated bigint,"
+              + "outcomes frozen<map<text, bigint>>,"
+              + "metrics frozen<" + NODESYNC_METRICS + ">,"
+              + "PRIMARY KEY (id, node))",
+              Collections.singleton(NodeSyncMetrics))
+        .defaultTimeToLive((int)TimeUnit.DAYS.toSeconds(1))
+        .build();
 
     private static TableMetadata.Builder parse(String table, String description, String cql)
     {
@@ -211,7 +248,7 @@ public final class SystemDistributedKeyspace
     {
         return KeyspaceMetadata.create(DISTRIBUTED_KEYSPACE_NAME,
                                        KeyspaceParams.simple(3),
-                                       Tables.of(RepairHistory, ParentRepairHistory, ViewBuildStatus, NodeSyncStatus),
+                                       Tables.of(RepairHistory, ParentRepairHistory, ViewBuildStatus, NodeSyncStatus, NodeSyncUserValidations),
                                        Views.none(),
                                        types(),
                                        Functions.none());
@@ -219,7 +256,7 @@ public final class SystemDistributedKeyspace
 
     private static Types types()
     {
-        return Types.of(NodeSyncValidation);
+        return Types.of(NodeSyncValidation, NodeSyncMetrics);
     }
 
     public static void startParentRepair(UUID parent_id, String keyspaceName, String[] cfnames, RepairOption options)
@@ -660,6 +697,68 @@ public final class SystemDistributedKeyspace
                                       null,
                                       "recording NodeSync validation"
         );
+    }
+
+    public static void recordNodeSyncUserValidation(UserValidationProposer proposer)
+    {
+        UserValidationProposer.Statistics statistics = proposer.statistics();
+
+        List<Range<Token>> ranges = proposer.validatedRanges();
+        Set<String> stringRanges = ranges == null ? null : ranges.stream().map(Range::toString).collect(toSet());
+
+        ByteBuffer startTime = statistics.startTime() < 0
+                               ? null
+                               : ByteBufferUtil.bytes(statistics.startTime());
+
+        UserValidationProposer.Status status = proposer.status();
+        ByteBuffer endTime;
+        switch (status)
+        {
+            case RUNNING:
+                endTime = null;
+                break;
+            case SUCCESSFUL:
+                endTime = ByteBufferUtil.bytes(statistics.endTime());
+                break;
+            default:
+                endTime = ByteBufferUtil.bytes(System.currentTimeMillis());
+        }
+
+        ValidationMetrics metrics = statistics.metrics();
+
+        String q = "INSERT INTO %s.%s ("
+                   + "id,"
+                   + "keyspace_name,"
+                   + "table_name,"
+                   + "node,"
+                   + "status,"
+                   + "validated_ranges,"
+                   + "started_at,"
+                   + "ended_at,"
+                   + "segments_to_validate,"
+                   + "segments_validated,"
+                   + "outcomes, "
+                   + "metrics"
+                   + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+        String query = String.format(q, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_USER_VALIDATIONS);
+        withNodeSyncExceptionHandling(() ->
+                                      QueryProcessor.execute(query,
+                                                             ConsistencyLevel.ONE,
+                                                             proposer.id(),
+                                                             proposer.table().keyspace,
+                                                             proposer.table().name,
+                                                             DatabaseDescriptor.getListenAddress(),
+                                                             status.toString(),
+                                                             stringRanges,
+                                                             startTime,
+                                                             endTime,
+                                                             statistics.segmentsToValidate(),
+                                                             statistics.segmentValidated(),
+                                                             ValidationOutcome.toMap(statistics.getOutcomes()),
+                                                             metrics == null ? null : metrics.toBytes()),
+                                      null,
+                                      "recording NodeSync user validation");
     }
 
     private static CompletableFuture<Void> forceFlush(String table)

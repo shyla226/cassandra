@@ -67,16 +67,16 @@ public class ValidationInfo
      * {@link ValidationInfo} object.
      *
      * @param bytes the value to deserialize.
-     * @return the deserialized {@link ValidationInfo}, or {@code null} if an error forbade proper deserialization.
+     * @return the deserialized {@link ValidationInfo}.
      *
-     * @throw IllegalArgumentException is an error forbid a proper deserialization of the provided {@code bytes}.
+     * @throws IllegalArgumentException if an error forbid a proper deserialization of the provided {@code bytes}.
      */
     public static ValidationInfo fromBytes(ByteBuffer bytes)
     {
         UserType type = SystemDistributedKeyspace.NodeSyncValidation;
         ByteBuffer[] values = type.split(bytes);
-        if (values.length != 3)
-            throw new IllegalArgumentException(String.format("Invalid number of components for nodesync_validation, expected %d but got %d", 3, values.length));
+        if (values.length < type.size())
+            throw new IllegalArgumentException(String.format("Invalid number of components for nodesync_validation, expected %d but got %d", type.size(), values.length));
 
         try
         {

@@ -78,7 +78,7 @@ abstract class AbstractValidationProposer implements ValidationProposer
     /**
      * The table for which this generates validation proposals.
      */
-    TableMetadata table()
+    public TableMetadata table()
     {
         return table;
     }

@@ -107,13 +107,7 @@ public class NodeSyncMetrics
         this.failedPages = Metrics.counter(name("FailedPages"));
     }
 
-    public void incrementRows(long validated, long repaired)
-    {
-        objectsValidated.mark(validated);
-        objectsRepaired.mark(repaired);
-    }
-
-    public void incrementRangeTombstoneMarkers(long validated, long repaired)
+    public void incrementObjects(long validated, long repaired)
     {
         objectsValidated.mark(validated);
         objectsRepaired.mark(repaired);

@@ -6,12 +6,18 @@
 package com.datastax.apollo.nodesync;
 
 import java.io.Serializable;
+import java.nio.ByteBuffer;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.LongStream;
 
+import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.metrics.NodeSyncMetrics;
+import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.units.SizeUnit;
 import org.apache.cassandra.utils.units.Units;
 
@@ -25,7 +31,7 @@ import org.apache.cassandra.utils.units.Units;
  * <p>
  * This is NOT thread-safe.
  */
-class ValidationMetrics implements Serializable
+public class ValidationMetrics implements Serializable
 {
     private static final long serialVersionUID = 42L;
 
@@ -34,14 +40,9 @@ class ValidationMetrics implements Serializable
     // The number of pages having a particular outcome. Indexed by ValidationOutcome.ordinal().
     private final long[] pagesByOutcome = new long[ValidationOutcome.values().length];
 
-    // Number of rows we read/validated, and the number for which at least one replica was out of sync.
-    private long rowsValidated;
-    private long rowsRepaired;
-
-    // Number of range tombstones markers (and partition deletion) we read/validated, and the number for which at least
-    // one replica was out of sync.
-    private long rangeTombstoneMarkersValidated;
-    private long rangeTombstoneMarkersRepaired;
+    // Number of "objects" (rows+range tombstones) we read/validated, and the number for which at least one replica was out of sync.
+    private long objectsValidated;
+    private long objectsRepaired;
 
     // How much data (in bytes) was validated (resp. repaired), so  basically the size in bytes of what is counted by
     // rowsValidated + rangeTombstoneMarkersValidated (resp. rowsRepaired + rangeTombstoneMarkersRepaired).
@@ -77,16 +78,16 @@ class ValidationMetrics implements Serializable
 
     void incrementRowsRead(boolean isConsistent)
     {
-        ++rowsValidated;
+        ++objectsValidated;
         if (!isConsistent)
-            ++rowsRepaired;
+            ++objectsRepaired;
     }
 
     void incrementRangeTombstoneMarkersRead(boolean isConsistent)
     {
-        ++rangeTombstoneMarkersValidated;
+        ++objectsValidated;
         if (!isConsistent)
-            ++rangeTombstoneMarkersRepaired;
+            ++objectsRepaired;
     }
 
     void addTo(NodeSyncMetrics metrics)
@@ -94,8 +95,7 @@ class ValidationMetrics implements Serializable
         for (ValidationOutcome outcome : ValidationOutcome.values())
             metrics.addPageOutcomes(outcome, pagesByOutcome[outcome.ordinal()]);
 
-        metrics.incrementRows(rowsValidated, rowsRepaired);
-        metrics.incrementRangeTombstoneMarkers(rangeTombstoneMarkersValidated, rangeTombstoneMarkersRepaired);
+        metrics.incrementObjects(objectsValidated, objectsRepaired);
 
         metrics.incrementDataSizes(dataValidated, dataRepaired);
         metrics.incrementRepairSent(repairDataSent, repairObjectsSent);
@@ -109,11 +109,8 @@ class ValidationMetrics implements Serializable
         for (int i = 0; i < s; i++)
             result.pagesByOutcome[i] += m2.pagesByOutcome[i];
 
-        result.rowsValidated = m1.rowsValidated + m2.rowsValidated;
-        result.rowsRepaired = m1.rowsRepaired + m2.rowsRepaired;
-
-        result.rangeTombstoneMarkersValidated = m1.rangeTombstoneMarkersValidated + m2.rangeTombstoneMarkersValidated;
-        result.rangeTombstoneMarkersRepaired = m1.rangeTombstoneMarkersRepaired + m2.rangeTombstoneMarkersRepaired;
+        result.objectsValidated = m1.objectsValidated + m2.objectsValidated;
+        result.objectsRepaired = m1.objectsRepaired + m2.objectsRepaired;
 
         result.dataValidated = m1.dataValidated + m2.dataValidated;
         result.dataRepaired = m1.dataRepaired + m2.dataRepaired;
@@ -122,6 +119,61 @@ class ValidationMetrics implements Serializable
         result.repairObjectsSent = m1.repairObjectsSent + m2.repairObjectsSent;
 
         return result;
+    }
+
+    /**
+     * Deserialize a binary {@link SystemDistributedKeyspace#NODESYNC_METRICS} value into a corresponding
+     * {@link ValidationMetrics} object.
+     *
+     * @param bytes the value to deserialize.
+     * @return the deserialized {@link ValidationMetrics}.
+     *
+     * @throws IllegalArgumentException if an error forbid a proper deserialization of the provided {@code bytes}.
+     */
+    public static ValidationMetrics fromBytes(ByteBuffer bytes)
+    {
+        UserType type = SystemDistributedKeyspace.NodeSyncMetrics;
+        ByteBuffer[] values = type.split(bytes);
+        if (values.length < type.size())
+            throw new IllegalArgumentException(String.format("Invalid number of components for nodesync_metrics, expected %d but got %d", type.size(), values.length));
+
+        try
+        {
+            ValidationMetrics m = new ValidationMetrics();
+            m.dataValidated = type.composeField(0, values[0]);
+            m.dataRepaired = type.composeField(1, values[1]);
+            m.objectsValidated = type.composeField(2, values[2]);
+            m.objectsRepaired = type.composeField(3, values[3]);
+            m.repairDataSent = type.composeField(4, values[4]);
+            m.repairObjectsSent = type.composeField(5, values[5]);
+            Map<String, Long> outcomesMap = type.composeField(6, values[6]);
+            for (ValidationOutcome outcome : ValidationOutcome.values())
+                m.pagesByOutcome[outcome.ordinal()] = outcomesMap.getOrDefault(outcome.toString(), 0L);
+            return m;
+        }
+        catch (MarshalException e)
+        {
+            throw new IllegalArgumentException("Error deserializing nodesync_metrics from " + ByteBufferUtil.toDebugHexString(bytes), e);
+        }
+    }
+
+    /**
+     * Serializes the validation info into a {@link SystemDistributedKeyspace#NODESYNC_VALIDATION} value.
+     *
+     * @return the serialized value.
+     */
+    public ByteBuffer toBytes()
+    {
+        UserType type = SystemDistributedKeyspace.NodeSyncMetrics;
+        ByteBuffer[] values = new ByteBuffer[type.size()];
+        values[0] = type.decomposeField(0, dataValidated);
+        values[1] = type.decomposeField(1, dataRepaired);
+        values[2] = type.decomposeField(2, objectsValidated);
+        values[3] = type.decomposeField(3, objectsRepaired);
+        values[4] = type.decomposeField(4, repairDataSent);
+        values[5] = type.decomposeField(5, repairObjectsSent);
+        values[6] = type.decomposeField(6, ValidationOutcome.toMap(pagesByOutcome));
+        return UserType.buildValue(values);
     }
 
     /**
@@ -151,11 +203,8 @@ class ValidationMetrics implements Serializable
         }
         sb.append(" }, ");
 
-        sb.append("rows={ validated: ").append(rowsValidated)
-          .append(", repaired: ").append(rowsRepaired).append("}, ");
-
-        sb.append("range tombstones={ validated: ").append(rangeTombstoneMarkersValidated)
-          .append(", repaired: ").append(rangeTombstoneMarkersRepaired).append("}, ");
+        sb.append("objects={ validated: ").append(objectsValidated)
+          .append(", repaired: ").append(objectsRepaired).append("}, ");
 
         sb.append("data={ validated: ").append(Units.toLogString(dataValidated, SizeUnit.BYTES))
           .append(", repaired: ").append(dataRepaired).append("}, ");
@@ -191,8 +240,8 @@ class ValidationMetrics implements Serializable
         String repairString = repairDataSent == 0
                               ? "everything was in sync"
                               : String.format("%d repaired (%d%%); %s of repair data sent",
-                                              rowsRepaired,
-                                              percent(rowsRepaired, rowsValidated),
+                                              objectsRepaired,
+                                              percent(objectsRepaired, objectsValidated),
                                               Units.toString(repairDataSent, SizeUnit.BYTES));
 
         return String.format("validated %s - %s%s%s%s",

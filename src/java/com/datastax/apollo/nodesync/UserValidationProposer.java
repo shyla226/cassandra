@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
@@ -23,11 +22,12 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
 import com.google.common.primitives.Longs;
 
@@ -42,7 +42,6 @@ import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.units.TimeValue;
 
 /**
@@ -73,7 +72,7 @@ import org.apache.cassandra.utils.units.TimeValue;
  *    basically "pause" normal NodeSync execution while it runs. If multiple {@link UserValidationProposer} are
  *    created concurrently, whichever one was created first will have priority over the other until full completion.
  */
-class UserValidationProposer extends AbstractValidationProposer
+public class UserValidationProposer extends AbstractValidationProposer
 {
     private static final Logger logger = LoggerFactory.getLogger(UserValidationProposer.class);
 
@@ -81,10 +80,10 @@ class UserValidationProposer extends AbstractValidationProposer
     private final String id;
     private final long createdTime = System.currentTimeMillis();
 
-    // The list of ranges requested by the user. This contains only local, "normalized" ranges (in the sense of Range#normalize).
+    // The list of ranges validated by this proposer. This contains only local, "normalized" ranges (in the sense of Range#normalize).
     // This can null to signify that all local ranges are requested.
     @Nullable
-    private final List<Range<Token>> requestedRanges;
+    private final ImmutableList<Range<Token>> validatedRanges;
     // The segments to validate
     private volatile List<Segment> toValidate;
     private final AtomicInteger nextIdx = new AtomicInteger(); // Atomic is tad overkill since supplyNextProposal is not
@@ -102,14 +101,14 @@ class UserValidationProposer extends AbstractValidationProposer
                                    String id,
                                    TableMetadata table,
                                    int depth,
-                                   List<Range<Token>> requestedRanges,
+                                   ImmutableList<Range<Token>> validatedRanges,
                                    Function<String, Collection<Range<Token>>> localRangesProvider,
                                    ToLongFunction<ColumnFamilyStore> tableSizeProvider)
     {
         super(service, table, depth, localRangesProvider, tableSizeProvider);
-        assert requestedRanges == null || !requestedRanges.isEmpty();
+        assert validatedRanges == null || !validatedRanges.isEmpty();
         this.id = id;
-        this.requestedRanges = requestedRanges;
+        this.validatedRanges = validatedRanges;
     }
 
     @VisibleForTesting
@@ -118,9 +117,20 @@ class UserValidationProposer extends AbstractValidationProposer
         return toValidate;
     }
 
+    /**
+     * The (externally provided) identifier for this validation proposer.
+     */
     public String id()
     {
         return id;
+    }
+
+    /**
+     * The (local) ranges that are validated by this proposer, or {@code null} if all local ranges are validated.
+     */
+    public @Nullable List<Range<Token>> validatedRanges()
+    {
+        return validatedRanges;
     }
 
     public void init()
@@ -132,9 +142,11 @@ class UserValidationProposer extends AbstractValidationProposer
         generateSegments(localRanges);
         // We've validated all requested ranges are local and we have at least 1 (or we request all local ranges), so we
         // should have something to validate.
-        assert !toValidate.isEmpty() : String.format("requested=%s, local=%s", requestedRanges, localRanges);
+        assert !toValidate.isEmpty() : String.format("requested=%s, local=%s", validatedRanges, localRanges);
         nextIdx.set(0);
         remaining.set(toValidate.size());
+
+        SystemDistributedKeyspace.recordNodeSyncUserValidation(this);
     }
 
     private void generateSegments(Collection<Range<Token>> localRanges)
@@ -145,11 +157,11 @@ class UserValidationProposer extends AbstractValidationProposer
         Iterators.addAll(allSegments, Segments.generateSegments(table, localRanges, depth));
         assert !allSegments.isEmpty();
 
-        if (requestedRanges == null)
+        if (validatedRanges == null)
             toValidate = allSegments;
         else
             toValidate = allSegments.stream()
-                                    .filter(s -> requestedRanges.stream().anyMatch(s.range::intersects))
+                                    .filter(s -> validatedRanges.stream().anyMatch(s.range::intersects))
                                     .collect(Collectors.toList());
     }
 
@@ -164,6 +176,7 @@ class UserValidationProposer extends AbstractValidationProposer
                                          Function<String, Collection<Range<Token>>> localRangesProvider,
                                          ToLongFunction<ColumnFamilyStore> tableSizeProvider,
                                          long maxSegmentSize)
+
     {
         TableMetadata table = options.table;
         ColumnFamilyStore store = ColumnFamilyStore.getIfExists(table.id);
@@ -178,24 +191,25 @@ class UserValidationProposer extends AbstractValidationProposer
                                                              table, table.keyspace, rf));
 
         List<Range<Token>> local = Range.normalize(localRangesProvider.apply(table.keyspace));
-        List<Range<Token>> requested = options.requestedRanges;
+        List<Range<Token>> requested = options.validatedRanges;
 
-        if (requested != null)
+        ImmutableList<Range<Token>> validated = requested == null ? null : ImmutableList.copyOf(requested);
+        if (validated != null)
         {
             // We only validate local ranges so make sure to reject any non fully local requested range to avoid
             // later confusion (note that we deal with normalized ranges which makes this easier).
-            checkAllLocalRanges(requested, local);
+            checkAllLocalRanges(validated, local);
         }
 
         int depth = computeDepth(store, local.size(), tableSizeProvider, maxSegmentSize);
-        return new UserValidationProposer(service, options.id, table, depth, requested, localRangesProvider, tableSizeProvider);
+        return new UserValidationProposer(service, options.id, table, depth, validated, localRangesProvider, tableSizeProvider);
     }
 
-    private static void checkAllLocalRanges(List<Range<Token>> requestedRanges, List<Range<Token>> localRanges)
+    private static void checkAllLocalRanges(List<Range<Token>> validatedRanges, List<Range<Token>> localRanges)
     {
         // Because ranges are normalized, either every requested is strictly contained in one local range, or it
         // has some part that is not local.
-        Set<Range<Token>> nonLocal = requestedRanges.stream()
+        Set<Range<Token>> nonLocal = validatedRanges.stream()
                                                     .filter(r -> localRanges.stream().noneMatch(l -> l.contains(r)))
                                                     .collect(Collectors.toSet());
         if (!nonLocal.isEmpty())
@@ -231,12 +245,29 @@ class UserValidationProposer extends AbstractValidationProposer
 
     public boolean cancel()
     {
-         return completionFuture.cancel(false);
+        boolean cancelled = completionFuture.cancel(false);
+        SystemDistributedKeyspace.recordNodeSyncUserValidation(this);
+        return cancelled;
     }
 
     public boolean isCancelled()
     {
         return completionFuture.isCancelled();
+    }
+
+    private boolean isCompletedExceptionally()
+    {
+        return !isCancelled() && completionFuture.isCompletedExceptionally();
+    }
+
+    public Status status()
+    {
+        return Status.of(this);
+    }
+
+    public Statistics statistics()
+    {
+        return completionFuture.getCurrent();
     }
 
     public ValidationProposer onTableUpdate(TableMetadata table)
@@ -253,7 +284,7 @@ class UserValidationProposer extends AbstractValidationProposer
         if (remaining.decrementAndGet() == 0)
         {
             completionFuture.complete(new Statistics(startTime,
-                                                     System.nanoTime(),
+                                                     System.currentTimeMillis(),
                                                      this.metrics.get(),
                                                      extractOutcomes(),
                                                      toValidate.size()));
@@ -262,6 +293,8 @@ class UserValidationProposer extends AbstractValidationProposer
         {
             completionFuture.signalListeners();
         }
+
+        SystemDistributedKeyspace.recordNodeSyncUserValidation(this);
     }
 
     private void onValidationError(Throwable error)
@@ -270,11 +303,12 @@ class UserValidationProposer extends AbstractValidationProposer
         // completeExceptionally on its completion future (it logs and mark the segment failed instead). But even
         // if this changes, the right thing to do is to pass the error back to this proposer future.
         completionFuture.completeExceptionally(error);
+        SystemDistributedKeyspace.recordNodeSyncUserValidation(this);
     }
 
-    private int[] extractOutcomes()
+    private long[] extractOutcomes()
     {
-        int[] a = new int[outcomes.length()];
+        long[] a = new long[outcomes.length()];
         for (int i = 0; i < outcomes.length(); i++)
             a[i] = outcomes.get(i);
         return a;
@@ -302,7 +336,7 @@ class UserValidationProposer extends AbstractValidationProposer
             // thing took) to be set as close to the true beginning of the work as possible, so set it here. Note that
             // this is racy but we don't care.
             if (proposer().startTime < 0)
-                proposer().startTime = System.nanoTime();
+                proposer().startTime = System.currentTimeMillis();
 
             logger.trace("Submitting user validation of {} for execution", segment);
             Validator validator = Validator.createAndLock(proposer().service(), segment);
@@ -368,7 +402,7 @@ class UserValidationProposer extends AbstractValidationProposer
                 if (isDone() && !isCompletedExceptionally())
                     return get();
 
-                return new Statistics(startTime, System.nanoTime(), metrics.get(), extractOutcomes(), toValidate.size());
+                return new Statistics(startTime, -1, metrics.get(), extractOutcomes(), toValidate.size());
             }
             catch (InterruptedException | ExecutionException e)
             {
@@ -442,21 +476,35 @@ class UserValidationProposer extends AbstractValidationProposer
     {
         private final long startTime;
         private final long endTime;
+        private final long currentTime;
         private final ValidationMetrics metrics;
-        private final int[] outcomes;
-        private final int segmentsToValidate;
+        private final long[] outcomes;
+        private final long segmentsToValidate;
 
         private Statistics(long startTime,
                            long endTime,
                            ValidationMetrics metrics,
-                           int[] outcomes,
+                           long[] outcomes,
                            int segmentsToValidate)
         {
             this.startTime = startTime;
             this.endTime = endTime;
+            this.currentTime = endTime < 0 ? System.currentTimeMillis() : endTime;
             this.metrics = metrics;
             this.outcomes = outcomes;
             this.segmentsToValidate = segmentsToValidate;
+        }
+
+        /** The time (in milliseconds) in which the proposer started to run its validation, {@code -1} if not started */
+        public long startTime()
+        {
+            return startTime;
+        }
+
+        /** The time (in milliseconds) in which the proposer ended to run its validation, {@code -1} if not ended */
+        public long endTime()
+        {
+            return endTime;
         }
 
         /**
@@ -465,8 +513,11 @@ class UserValidationProposer extends AbstractValidationProposer
          */
         public TimeValue duration()
         {
-            long durationNanos = Math.max(endTime - startTime, 0);
-            return TimeValue.of(durationNanos, TimeUnit.NANOSECONDS);
+            if (startTime < 0)
+                return TimeValue.ZERO;
+
+            long durationNanos = Math.max(currentTime - startTime, 0);
+            return TimeValue.of(durationNanos, TimeUnit.MILLISECONDS);
         }
 
         /**
@@ -487,18 +538,23 @@ class UserValidationProposer extends AbstractValidationProposer
          * The number of segments that have been validated at the time those statistics have been created. If this is the
          * statistics of a (successfully) completed proposer, then {@code segmentsValidated() == segmentsToValidate()}.
          */
-        public int segmentValidated()
+        public long segmentValidated()
         {
-            return IntStream.of(outcomes).sum();
+            return LongStream.of(outcomes).sum();
         }
 
         /**
          * The total number of segments that the proposer this is the statistics of has to validate (which may be more
          * that the number of segments this object reports about if the proposer is not complete).
          */
-        public int segmentsToValidate()
+        public long segmentsToValidate()
         {
             return segmentsToValidate;
+        }
+
+        public long[] getOutcomes()
+        {
+            return outcomes;
         }
 
         /**
@@ -508,7 +564,7 @@ class UserValidationProposer extends AbstractValidationProposer
          * @return the number of segments validated by the proposer this is the statistics of that had the outcome
          * represented by {@code outcome}.
          */
-        public int numberOfSegmentsWithOutcome(ValidationOutcome outcome)
+        public long numberOfSegmentsWithOutcome(ValidationOutcome outcome)
         {
             return outcomes[outcome.ordinal()];
         }
@@ -528,9 +584,60 @@ class UserValidationProposer extends AbstractValidationProposer
         /**
          * Metrics on the validations this is a statistics of.
          */
+        @Nullable
         public ValidationMetrics metrics()
         {
             return metrics;
         }
     }
+
+    /**
+     * Represents the completion status of the validation.
+     */
+    public enum Status
+    {
+        RUNNING,
+        SUCCESSFUL,
+        CANCELLED,
+        FAILED;
+
+        private static Status of(UserValidationProposer proposer)
+        {
+            if (proposer.isCancelled())
+                return CANCELLED;
+
+            if (proposer.isCompletedExceptionally())
+                return FAILED;
+
+            if (proposer.isDone())
+                return SUCCESSFUL;
+
+            return RUNNING;
+        }
+
+        public Status combineWith(Status other)
+        {
+            if (this == RUNNING || other == RUNNING)
+                return RUNNING;
+
+            if (this == FAILED || other == FAILED)
+                return FAILED;
+
+            if (this == CANCELLED || other == CANCELLED)
+                return CANCELLED;
+
+            return other;
+        }
+
+        public static Status from(String s)
+        {
+            return valueOf(s.toUpperCase());
+        }
+
+        public String toString()
+        {
+            return super.toString().toLowerCase();
+        }
+    }
+
 }

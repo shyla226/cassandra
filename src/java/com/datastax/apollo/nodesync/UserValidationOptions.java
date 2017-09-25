@@ -47,14 +47,14 @@ class UserValidationOptions
     /** The normalized list of ranges on which validation should operate. This can be {@code null} in which case the
      * user validation is on all local ranges (this cannot be empty however). */
     @Nullable
-    final List<Range<Token>> requestedRanges;
+    final List<Range<Token>> validatedRanges;
 
-    UserValidationOptions(String id, TableMetadata table, Collection<Range<Token>> requestedRanges)
+    UserValidationOptions(String id, TableMetadata table, Collection<Range<Token>> validatedRanges)
     {
-        assert requestedRanges == null || !requestedRanges.isEmpty();
+        assert validatedRanges == null || !validatedRanges.isEmpty();
         this.id = id;
         this.table = table;
-        this.requestedRanges = requestedRanges == null ? null : Range.normalize(requestedRanges);
+        this.validatedRanges = validatedRanges == null ? null : Range.normalize(validatedRanges);
     }
 
     /**
@@ -87,7 +87,7 @@ class UserValidationOptions
     {
         String id = optionMap.get(ID);
         if (id == null)
-            throw new IllegalArgumentException("Missing mandatory option " + KEYSPACE_NAME);
+            throw new IllegalArgumentException("Missing mandatory option " + ID);
 
         String ksName = optionMap.get(KEYSPACE_NAME);
         if (ksName == null)

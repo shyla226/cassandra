@@ -90,7 +90,6 @@ import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.streaming.management.StreamStateCompositeData;
 
 import com.google.common.base.Function;
-import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
@@ -1657,6 +1656,11 @@ public class NodeProbe implements AutoCloseable
     public void startUserValidation(Map<String, String> optionMap)
     {
         nodeSyncProxy.startUserValidation(optionMap);
+    }
+
+    public void startUserValidation(String id, String keyspace, String table, String ranges)
+    {
+        nodeSyncProxy.startUserValidation(id, keyspace, table, ranges);
     }
 
     public void cancelUserValidation(String idStr)

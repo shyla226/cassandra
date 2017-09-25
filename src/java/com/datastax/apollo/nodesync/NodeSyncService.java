@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledFuture;
@@ -331,7 +330,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
     {
         ValidationScheduler scheduler = this.scheduler;
         if (scheduler == null)
-            throw new IllegalStateException("Cannot start user validation, NodeSync is not currently running.");
+            throw new NodeSyncNotRunningException("Cannot start user validation, NodeSync is not currently running.");
 
         // TODO: we should use JMX notifications for progress reporting. Not really a priority though.
         scheduler.userValidations().createAndStart(UserValidationOptions.fromMap(optionMap));
@@ -352,11 +351,11 @@ public class NodeSyncService implements NodeSyncServiceMBean
     {
         ValidationScheduler scheduler = this.scheduler;
         if (scheduler == null)
-            throw new IllegalStateException("Cannot cancel user validation, NodeSync is not currently running.");
+            throw new NodeSyncNotRunningException("Cannot cancel user validation, NodeSync is not currently running.");
 
         UserValidationProposer proposer = scheduler.userValidations().get(id);
         if (proposer == null)
-            throw new NoSuchElementException("Cannot find user validation #" + id);
+            throw new NotFoundValidationException("Cannot find user validation #" + id);
 
         // We could return the value of cancel() from this method, but as validations are unregistered as soon as they
         // complete, we can only get false here on a race with that removal and the window for that is really small. It
@@ -368,7 +367,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
             // Anti-bug protection: if for some reason a validation don't get properly cleared after completion, we'll
             // get here and forcing the removal here may give use a work-around. Otherwise, it's just a no-op.
             scheduler.userValidations().forceRemove(id);
-            throw new IllegalArgumentException("User validation #" + id + " is already completed");
+            throw new CancelledValidationException("User validation #" + id + " is already completed");
         }
     }
 
@@ -458,4 +457,47 @@ public class NodeSyncService implements NodeSyncServiceMBean
             return value == 0 ? 0 : Math.min((int)((value * 100)/total), 100);
         }
     }
+
+    static class NodeSyncServiceException extends RuntimeException
+    {
+        private NodeSyncServiceException(String message)
+        {
+            super(message);
+        }
+    }
+
+    /**
+     * Thrown by {@link #startUserValidation} and {@link #cancelUserValidation} when the NodeSync service isn't running.
+     */
+    public final static class NodeSyncNotRunningException extends NodeSyncServiceException
+    {
+        private NodeSyncNotRunningException(String message)
+        {
+            super(message);
+        }
+    }
+
+    /**
+     * Thrown by {@link #cancelUserValidation} when the referenced validation is not found.
+     */
+    public final static class NotFoundValidationException extends NodeSyncServiceException
+    {
+        private NotFoundValidationException(String message)
+        {
+            super(message);
+        }
+    }
+
+    /**
+     * Thrown by {@link #cancelUserValidation} when the referenced validation is already cancelled.
+     */
+    public final static class CancelledValidationException extends NodeSyncServiceException
+    {
+        private CancelledValidationException(String message)
+        {
+            super(message);
+        }
+    }
+
+
 }
