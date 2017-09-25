@@ -22,6 +22,7 @@ import java.util.*;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -32,6 +33,7 @@ import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TriggerMetadata;
 import org.apache.cassandra.schema.Triggers;
 import org.apache.cassandra.triggers.TriggerExecutorTest.SameKeySameCfTrigger;
@@ -44,10 +46,18 @@ import static org.junit.Assert.assertTrue;
 
 public class TriggerExecutorTest
 {
+    public static final String KS1 = "ks1";
+    public static final String OTHER_KS = "otherKs";
+    
     @BeforeClass
-    public static void setupDD()
+    public static void setup()
     {
         DatabaseDescriptor.daemonInitialization();
+        SchemaLoader.prepareServer();
+        SchemaLoader.createKeyspace(KS1,
+                                    KeyspaceParams.simple(1));
+        SchemaLoader.createKeyspace(OTHER_KS,
+                                    KeyspaceParams.simple(1));
     }
 
     @Test
