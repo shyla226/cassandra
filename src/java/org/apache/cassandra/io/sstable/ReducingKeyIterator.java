@@ -125,9 +125,7 @@ public class ReducingKeyIterator implements KeyIterator
         public DecoratedKey next()
         {
             if (!hasNext())
-            {
                 throw new AssertionError();
-            }
 
             try
             {

@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.concurrent;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -97,6 +98,20 @@ public class TPCBoundaries
     public int supportedCores()
     {
         return boundaries.length + 1;
+    }
+    
+    public List<Range<Token>> asRanges()
+    {
+        IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
+        List<Range<Token>> ranges = new ArrayList<>(boundaries.length + 1);
+        Token left = partitioner.getMinimumToken();
+        for (Token right : boundaries)
+        {
+            ranges.add(new Range<>(left, right));
+            left = right;
+        }
+        ranges.add(new Range<>(left, partitioner.getMaximumToken()));
+        return ranges;
     }
 
     @Override
