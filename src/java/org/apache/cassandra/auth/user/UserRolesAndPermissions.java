@@ -6,11 +6,21 @@
 package org.apache.cassandra.auth.user;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
-import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.AuthenticatedUser;
+import org.apache.cassandra.auth.DataResource;
+import org.apache.cassandra.auth.FunctionResource;
+import org.apache.cassandra.auth.IAuthorizer;
+import org.apache.cassandra.auth.IResource;
+import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.PermissionSets;
+import org.apache.cassandra.auth.Resources;
+import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.functions.Function;
@@ -59,6 +69,19 @@ public abstract class UserRolesAndPermissions
         {
             return true;
         }
+
+        public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
+        {
+        }
+
+        public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
+                                       Supplier<R> initialState,
+                                       RoleResourcePermissionFilter<R> aggregate)
+        {
+            R state = initialState.get();
+            state = applicablePermissions.apply(state);
+            return state;
+        }
     };
 
     /**
@@ -92,6 +115,19 @@ public abstract class UserRolesAndPermissions
         {
             if (CorePermission.AUTHORIZE == perm)
                 throw new UnauthorizedException("Anonymous users are not authorized to perform this request");
+        }
+
+        public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
+        {
+        }
+
+        public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
+                                       Supplier<R> initialState,
+                                       RoleResourcePermissionFilter<R> aggregate)
+        {
+            R state = initialState.get();
+            state = applicablePermissions.apply(state);
+            return state;
         }
     };
 
@@ -459,6 +495,11 @@ public abstract class UserRolesAndPermissions
     protected abstract boolean hasPermissionOnResourceChain(IResource resource, Permission perm);
 
     /**
+     * Used by Row-Level-Access-Control to inject "arbitrary" permissions.
+     */
+    public abstract void additionalQueryPermission(IResource resource, PermissionSets permissionSets);
+
+    /**
      * Checks that this user has the specified role.
      * @param role the role
      * @return {@code true} if the user has the specified role, {@code false} otherwise.
@@ -466,6 +507,28 @@ public abstract class UserRolesAndPermissions
     public final boolean hasRole(RoleResource role)
     {
         return roles.contains(role);
+    }
+
+    public final Set<RoleResource> getRoles()
+    {
+        return roles;
+    }
+
+    /**
+     * Retrieve the aggregated permissions for the role-resources accepted by the provided filter.
+     *
+     * @param applicablePermissions when there is no authenticated user, the user is a superuser or authorization
+     *                              is not required, a permission set with granted and grantables set to the
+     *                              permissions provided by this supplier will be used
+     */
+    public abstract <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
+                                            Supplier<R> initialState,
+                                            RoleResourcePermissionFilter<R> aggregate);
+
+    @FunctionalInterface
+    public interface RoleResourcePermissionFilter<R>
+    {
+        R apply(R state, RoleResource role, IResource resource, PermissionSets permissionSets);
     }
 
     /**
@@ -500,6 +563,19 @@ public abstract class UserRolesAndPermissions
         {
             return true;
         }
+
+        public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
+        {
+        }
+
+        public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
+                                       Supplier<R> initialState,
+                                       RoleResourcePermissionFilter<R> aggregate)
+        {
+            R state = initialState.get();
+            state = applicablePermissions.apply(state);
+            return state;
+        }
     }
 
     /**
@@ -511,6 +587,7 @@ public abstract class UserRolesAndPermissions
          * The user permissions per role and resources.
          */
         private Map<RoleResource, Map<IResource, PermissionSets>> permissions;
+        private Map<IResource, PermissionSets> additionalPermissions;
 
         public NormalUserWithPermissions(String name,
                                          Set<RoleResource> roles,
@@ -564,7 +641,34 @@ public abstract class UserRolesAndPermissions
                 for (RoleResource roleResource : super.roles)
                     permissions.addChainPermissions(chain, this.permissions.get(roleResource));
             }
+            permissions.addChainPermissions(chain, additionalPermissions);
             return permissions.buildSingleton();
+        }
+
+        public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
+        {
+            if (additionalPermissions == null)
+                additionalPermissions = new HashMap<>();
+            PermissionSets previous = additionalPermissions.putIfAbsent(resource, permissionSets);
+            assert previous == null;
+        }
+
+        public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
+                                       Supplier<R> initialState,
+                                       RoleResourcePermissionFilter<R> aggregate)
+        {
+            R state = initialState.get();
+            for (RoleResource roleResource : getRoles())
+            {
+                Map<IResource, PermissionSets> rolePerms = permissions.get(roleResource);
+                if (rolePerms == null)
+                    continue;
+                for (Map.Entry<IResource, PermissionSets> resourcePerms : rolePerms.entrySet())
+                {
+                    state = aggregate.apply(state, roleResource, resourcePerms.getKey(), resourcePerms.getValue());
+                }
+            }
+            return state;
         }
     }
 
@@ -594,6 +698,20 @@ public abstract class UserRolesAndPermissions
         protected boolean hasPermissionOnResourceChain(IResource resource, Permission perm)
         {
             return true;
+        }
+
+        public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
+                                       Supplier<R> initialState,
+                                       RoleResourcePermissionFilter<R> aggregate)
+        {
+            R state = initialState.get();
+            state = applicablePermissions.apply(state);
+            return state;
         }
     }
 }

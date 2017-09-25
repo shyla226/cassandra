@@ -298,4 +298,9 @@ public class QueryState
     {
         return userRolesAndPermissions.hasRolePermission(role, perm);
     }
+
+    public UserRolesAndPermissions getUserRolesAndPermissions()
+    {
+        return userRolesAndPermissions;
+    }
 }

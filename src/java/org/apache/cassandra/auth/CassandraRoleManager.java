@@ -283,7 +283,7 @@ public class CassandraRoleManager implements IRoleManager
         return getRole(role);
     }
 
-    public Set<RoleResource> filterExistingRoleNames(List<String> roleNames)
+    public ImmutableSet<RoleResource> filterExistingRoleNames(List<String> roleNames)
     {
         List<ByteBuffer> params = Collections.singletonList(ListType.getInstance(UTF8Type.instance, false)
                                                                     .getSerializer()
@@ -292,11 +292,11 @@ public class CassandraRoleManager implements IRoleManager
                                                                                    QueryOptions.forInternalCalls(consistencyForRole("-"), params),
                                                                                    System.nanoTime()));
 
-        Set<RoleResource> roles = new HashSet<>(roleNames.size(), 1.0f);
+        ImmutableSet.Builder<RoleResource> roles = ImmutableSet.builder();
         for (UntypedResultSet.Row row : UntypedResultSet.create(rows.result))
             roles.add(RoleResource.role(row.getString("role")));
 
-        return roles;
+        return roles.build();
     }
 
     public boolean isExistingRole(RoleResource role)

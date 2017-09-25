@@ -233,8 +233,7 @@ public abstract class Message
                 return true;
 
             // If no tracing is explicitly requested in the message, eventually trace the query according to configured trace probability.
-            double traceProbability = StorageService.instance.getTraceProbability();
-            return traceProbability != 0 && ThreadLocalRandom.current().nextDouble() < traceProbability;
+            return StorageService.instance.shouldTraceRequest();
         }
 
         public boolean isTracingRequested()
