@@ -134,7 +134,7 @@ public class HintsVerbs extends VerbGroup<HintsVerbs.HintsVersion>
         RegistrationHelper helper = helper().droppedGroup(DroppedMessages.Group.HINT);
 
         HINT = helper.ackedRequest("HINT", HintMessage.class)
-                     .stage(Stage.HINTS)
+                     .requestStage(Stage.HINTS)
                      .timeout(DatabaseDescriptor::getWriteRpcTimeout)
                      .withBackPressure()
                      .handler(HINT_HANDLER);

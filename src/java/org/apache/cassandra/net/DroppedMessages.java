@@ -65,6 +65,7 @@ public class DroppedMessages
         SNAPSHOT,
         SCHEMA,
         REPAIR,
+        NODESYNC,
         OTHER
     }
 

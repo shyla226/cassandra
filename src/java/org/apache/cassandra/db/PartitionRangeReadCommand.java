@@ -100,13 +100,13 @@ public class PartitionRangeReadCommand extends ReadCommand
         this.operationExecutor = scheduler.forTaskType(TPCTaskType.READ_RANGE);
     }
 
-    private PartitionRangeReadCommand(TableMetadata metadata,
-                                      int nowInSec,
-                                      ColumnFilter columnFilter,
-                                      RowFilter rowFilter,
-                                      DataLimits limits,
-                                      DataRange dataRange,
-                                      IndexMetadata index)
+    protected PartitionRangeReadCommand(TableMetadata metadata,
+                                        int nowInSec,
+                                        ColumnFilter columnFilter,
+                                        RowFilter rowFilter,
+                                        DataLimits limits,
+                                        DataRange dataRange,
+                                        IndexMetadata index)
     {
         this(null, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index);
     }
@@ -157,12 +157,12 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              null);
     }
 
-    public Request.Dispatcher<PartitionRangeReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints)
+    public Request.Dispatcher<? extends PartitionRangeReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints)
     {
         return Verbs.READS.RANGE_READ.newDispatcher(endpoints, this);
     }
 
-    public Request<PartitionRangeReadCommand, ReadResponse> requestTo(InetAddress endpoint)
+    public Request<? extends PartitionRangeReadCommand, ReadResponse> requestTo(InetAddress endpoint)
     {
         return Verbs.READS.RANGE_READ.newRequest(endpoint, this);
     }

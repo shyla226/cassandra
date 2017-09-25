@@ -326,7 +326,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
                 return timeout(request -> timeoutMillis);
             }
 
-            public T stage(Stage stage)
+            public T requestStage(Stage stage)
             {
                 this.requestExecutor = (p) -> StageManager.getStage(stage);
                 return us();
@@ -335,6 +335,12 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
             public T requestExecutor(TracingAwareExecutor tae)
             {
                 this.requestExecutor = (p) -> tae;
+                return us();
+            }
+
+            public T responseExecutor(ExecutorSupplier<P> responseExecutor)
+            {
+                this.responseExecutor = responseExecutor;
                 return us();
             }
 

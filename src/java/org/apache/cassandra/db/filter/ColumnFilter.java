@@ -171,7 +171,7 @@ public class ColumnFilter
     }
 
     /**
-     * Wether all the (regular or static) columns are fetched by this filter.
+     * Whether all the (regular or static) columns are fetched by this filter.
      * <p>
      * Note that this method is meant as an optimization but a negative return
      * shouldn't be relied upon strongly: this can return {@code false} but

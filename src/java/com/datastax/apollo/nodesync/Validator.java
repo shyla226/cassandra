@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -23,14 +24,15 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.NodeSyncReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadContext;
 import org.apache.cassandra.db.ReadReconciliationObserver;
@@ -115,9 +117,7 @@ class Validator
     private final RateLimiter limiter;
     private final long pageSize;
 
-    private final QueryPager pager;
     private final Observer observer;
-    private final ReadContext readContext;
     private final int replicationFactor;
     private final Set<InetAddress> segmentReplicas;
 
@@ -144,30 +144,11 @@ class Validator
         this.startTime = startTime;
         this.limiter = service.config.rateLimiter;
         this.pageSize = service.config.getPageSize(SizeUnit.BYTES);
-        
-        // Integer.MAX_VALUE is the max page size in bytes we support: 
+        // Integer.MAX_VALUE is the max page size in bytes we support:
         assert pageSize <= Integer.MAX_VALUE : "page size cannot be bigger than Integer.MAX_VALUE";
 
-        ReadCommand command = PartitionRangeReadCommand.fullRangeRead(table(),
-                                                                      DataRange.forTokenRange(range()),
-                                                                      FBUtilities.nowInSeconds());
-
-        this.pager = command.getPager(null, ProtocolVersion.CURRENT);
         this.observer = new Observer();
-
-        // We don't want to use CL.ALL, because that would throw Unavailable unless all nodes are up. Instead, we want
-        // read to proceed as soon as at least 2 nodes are up (hence CL.TWO), but we still want to block in the resolver
-        // until all queried (live) replicas have replied (and ack eventual repairs), hence the
-        // 'blockForAllTargets()' option. Of course, we also want to read from all live replicas, so we force GLOBAL
-        // read-repairs. Lastly, we force digests since it's a range query and those don't use digests by default.
-        this.readContext = ReadContext.builder(command, ConsistencyLevel.TWO)
-                                      .useDigests()
-                                      .blockForAllTargets()
-                                      .observer(observer)
-                                      .readRepairDecision(ReadRepairDecision.GLOBAL)
-                                      .build(System.nanoTime());
-
-        AbstractReplicationStrategy replicationStrategy = readContext.keyspace.getReplicationStrategy();
+        AbstractReplicationStrategy replicationStrategy = Keyspace.open(table().keyspace).getReplicationStrategy();
         // Note that we can't entirely use segmentReplicas.size() as a shortcut for replicationFactor because it's
         // actually possible for the replication factor to be greater than the total number of nodes (and thus replica)
         // and we want to make sure we detect this (mark pages as PARTIAL below even though the missingNodes recorded
@@ -238,12 +219,27 @@ class Validator
             throw new IllegalStateException("Cannot call executeOn multiple times");
         }
 
+        ReadCommand command = new NodeSyncReadCommand(segment, FBUtilities.nowInSeconds(), executor.asExecutor());
+        QueryPager pager = command.getPager(null, ProtocolVersion.CURRENT);
+        // We don't want to use CL.ALL, because that would throw Unavailable unless all nodes are up. Instead, we want
+        // read to proceed as soon as at least 2 nodes are up (hence CL.TWO), but we still want to block in the resolver
+        // until all queried (live) replicas have replied (and ack eventual repairs), hence the
+        // 'blockForAllTargets()' option. Of course, we also want to read from all live replicas, so we force GLOBAL
+        // read-repairs. Lastly, we force digests since it's a range query and those don't use digests by default.
+        ReadContext context = ReadContext.builder(command, ConsistencyLevel.TWO)
+                                         .useDigests()
+                                         .blockForAllTargets()
+                                         .observer(observer)
+                                         .readRepairDecision(ReadRepairDecision.GLOBAL)
+                                         .build(System.nanoTime());
+
+
         logger.trace("Starting execution of validation on {}", segment);
-        Flow<FlowablePartition> flow = moreContents(executor);
+        Flow<FlowablePartition> flow = moreContents(executor, pager, context);
         // Can be null on an exception
         if (flow != null)
-            flowFuture = flow.flatProcess(p -> p.content.process())
-                             .lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
+            flowFuture = flow.lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
+                             .flatProcess(p -> p.content)
                              .processToFuture()
                              .handleAsync((v, t) -> {
                                  if (t == null)
@@ -256,18 +252,20 @@ class Validator
         return completionFuture;
     }
 
-    private Flow<FlowablePartition> moreContents(ValidationExecutor executor)
+    private Flow<FlowablePartition> moreContents(ValidationExecutor executor, QueryPager pager, ReadContext context)
     {
         if (pager.isExhausted() || state.get() == State.CANCELLED)
             return null;
 
         try
         {
-            observer.onNewPage();
+            // Maybe schedule a refresh of the lock.
             maybeRefreshLock();
-            return pager.fetchPage(new PageSize((int) pageSize, PageSize.PageUnit.BYTES), readContext)
+            observer.onNewPage();
+            return pager.fetchPage(new PageSize((int) pageSize, PageSize.PageUnit.BYTES), context)
                         .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), executor))
-                        .concatWith(() -> moreContents(executor));
+                        .concatWith(() -> moreContents(executor, pager, context));
+
         }
         catch (Throwable t)
         {
