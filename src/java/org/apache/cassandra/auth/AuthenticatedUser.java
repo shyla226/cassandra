@@ -51,13 +51,13 @@ public class AuthenticatedUser
                                                        true,
                                                        false,
                                                        ImmutableMap.of(),
-                                                       null));
+                                                       ""));
         registerInternalUserRole(ANONYMOUS_USER, new Role(ANONYMOUS_USERNAME,
                                                           ImmutableSet.of(),
                                                           false,
                                                           false,
                                                           ImmutableMap.of(),
-                                                          null));
+                                                          ""));
     }
 
     protected static synchronized void registerInternalUserRole(AuthenticatedUser internalUser, Role internalRole)

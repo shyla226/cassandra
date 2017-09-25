@@ -5,6 +5,7 @@
  */
 package org.apache.cassandra.auth;
 
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
@@ -46,5 +47,17 @@ public final class Role
         this.canLogin = canLogin;
         this.options = ImmutableMap.copyOf(options);
         this.hashedPassword = hashedPassword;
+    }
+
+    @Override
+    public String toString()
+    {
+        return MoreObjects.toStringHelper(this)
+                          .add("name", name)
+                          .add("memberOf", memberOf)
+                          .add("isSuper", isSuper)
+                          .add("canLogin", canLogin)
+                          .add("options", options)
+                          .toString();
     }
 }

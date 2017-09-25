@@ -445,7 +445,7 @@ public class CassandraRoleManager implements IRoleManager
                             row.getBoolean("is_superuser"),
                             row.getBoolean("can_login"),
                             ImmutableMap.of(),
-                            row.has("salted_hash") ? row.getString("salted_hash") : null
+                            row.has("salted_hash") ? row.getString("salted_hash") : ""
             );
         }
         // Failing to deserialize a boolean in is_superuser or can_login will throw an NPE
