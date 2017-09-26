@@ -1,6 +1,9 @@
-DSE 5.0.10
+DSE 5.0.11
  * Backport CASSANDRA-13079: Warn user to run full repair when increasing replication factor (APOLLO-602)
  * Add anticompaction metrics and warn users when incremental repair is inefficient (APOLLO-689)
+
+
+DSE 5.0.10
  * Make scrub validate the partition key, add validation to schema mutation creation (APOLLO-657)
  * Group multiple view updates within the same base partition to speedup view build process(APOLLO-969)
  * Add nodetool mark_unrepaired command (APOLLO-692)
