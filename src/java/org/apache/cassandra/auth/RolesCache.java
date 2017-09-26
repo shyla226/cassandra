@@ -78,9 +78,9 @@ public class RolesCache extends AuthCache<RoleResource, Role> implements RolesCa
         if (primary.memberOf.isEmpty())
             return Collections.singletonMap(primaryRole, primary);
 
-        Map<RoleResource, Role> set = new HashMap<>();
-        set.put(primaryRole, primary);
-        return collectRoles(primary.memberOf, set);
+        Map<RoleResource, Role> map = new HashMap<>();
+        map.put(primaryRole, primary);
+        return collectRoles(primary.memberOf, map);
     }
 
     private Map<RoleResource, Role> collectRoles(Set<RoleResource> roleResources, Map<RoleResource, Role> map)
@@ -92,8 +92,8 @@ public class RolesCache extends AuthCache<RoleResource, Role> implements RolesCa
             for (Entry<RoleResource, Role> entry : roles.entrySet())
             {
                 Role role = entry.getValue();
-                map.put(entry.getKey(), role);
-                collectRoles(role.memberOf, map);
+                if (map.put(entry.getKey(), role) == null)
+                    collectRoles(role.memberOf, map);
             }
         }
         return map;
