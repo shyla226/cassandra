@@ -22,6 +22,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Striped;
 
@@ -194,7 +195,21 @@ public class ViewManager
         return views;
     }
 
-    public static Pair<Long, ExecutableLock> getLockFor(int keyAndCfidHash)
+    /**
+     * Get locks for the given mutation updates in sorted order and into a map to get rid of duplicates
+     * (which could arise due to underlying striping). IMPORTANT: the locks must be acquired in the provided order,
+     * to avoid deadlocks.
+     */
+    public SortedMap<Long, ExecutableLock> getLocksFor(Mutation mutation)
+    {
+        SortedMap<Long, ExecutableLock> locks = mutation.getTableIds().stream()
+            .map(t -> Objects.hash(mutation.key().getKey(), t))
+            .map(k -> getLockFor(k))
+            .collect(Collectors.toMap(p -> p.left, p -> p.right, (v1, v2) -> v1, () -> new TreeMap<>((k1, k2) -> k1.compareTo(k2))));
+        return locks;
+    }
+
+    private Pair<Long, ExecutableLock> getLockFor(int keyAndCfidHash)
     {
         Semaphore semaphore = SEMAPHORES.get(keyAndCfidHash);
         return LOCKS.computeIfAbsent(semaphore, s -> Pair.create(LOCK_ID_GEN.incrementAndGet(), new ExecutableLock(s)));

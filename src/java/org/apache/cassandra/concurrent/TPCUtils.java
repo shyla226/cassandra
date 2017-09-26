@@ -24,7 +24,9 @@ import java.util.function.Supplier;
 import com.google.common.base.Throwables;
 
 import io.reactivex.Completable;
+import io.reactivex.CompletableObserver;
 import io.reactivex.Single;
+import io.reactivex.internal.disposables.EmptyDisposable;
 import org.apache.cassandra.utils.concurrent.ExecutableLock;
 
 public class TPCUtils
@@ -136,6 +138,23 @@ public class TPCUtils
         CompletableFuture<Void> ret = new CompletableFuture<>();
         completable.subscribe(()-> ret.complete(null), ret::completeExceptionally);
         return ret;
+    }
+
+    public static Completable toCompletable(CompletableFuture<Void> future)
+    {
+        return new Completable()
+        {
+            protected void subscribeActual(CompletableObserver observer)
+            {
+                observer.onSubscribe(EmptyDisposable.INSTANCE);
+                future.whenComplete((res, err) ->{
+                    if (err == null)
+                        observer.onComplete();
+                    else
+                        observer.onError(err);
+                });
+            }
+        };
     }
 
     /**

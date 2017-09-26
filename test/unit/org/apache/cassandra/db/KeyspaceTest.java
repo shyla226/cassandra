@@ -569,7 +569,7 @@ public class KeyspaceTest extends CQLTester
 
         ListeningExecutorService executor = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(8));
         List<ListenableFuture<?>> futures = new LinkedList<>();
-        for (int i = 0; i < 1000; i++)
+        for (int i = 0; i < 10000; i++)
         {
             int keyPart = i;
             futures.add(executor.submit(() ->
@@ -597,6 +597,6 @@ public class KeyspaceTest extends CQLTester
 
         ListenableFuture all = Futures.allAsList(futures);
         all.get(1, TimeUnit.MINUTES);
-        assertEquals(1000, result.get());
+        assertEquals(10000, result.get());
     }
 }

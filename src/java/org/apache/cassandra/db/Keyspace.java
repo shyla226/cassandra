@@ -546,7 +546,7 @@ public class Keyspace
     private Completable applyWithViews(Mutation mutation, boolean writeCommitLog, boolean updateIndexes, boolean isDroppable)
     {
         return Completable.using(writeOrder::start,
-                              opGroup -> Completable.fromFuture(runWithLocks(mutation, () -> TPCUtils.toFuture(applyInternal(opGroup, mutation, writeCommitLog, updateIndexes, true)), isDroppable)),
+                              opGroup -> TPCUtils.toCompletable(runWithLocks(mutation, () -> TPCUtils.toFuture(applyInternal(opGroup, mutation, writeCommitLog, updateIndexes, true)), isDroppable)),
                               opGroup -> opGroup.close());
     }
 
@@ -660,20 +660,13 @@ public class Keyspace
     @VisibleForTesting
     CompletableFuture<Void> runWithLocks(Mutation mutation, Supplier<CompletableFuture<Void>> action, boolean isDroppable)
     {
-        // Compute the list of lock keys:
-        Collection<Integer> lockKeys = mutation.getTableIds().stream()
-            .map(t -> Objects.hash(mutation.key().getKey(), t))
-            .collect(Collectors.toList());
-
-        // Get the locks in sorted order and insert in a set to get rid of duplicates (which could arise due to striping):
-        SortedSet<Pair<Long, ExecutableLock>> sortedLocks = new TreeSet<>((p1, p2) -> p1.left.compareTo(p2.left));
-        for (Integer lockKey : lockKeys)
-            sortedLocks.add(viewManager.getLockFor(lockKey));
+        // Get the locks for the mutation:
+        SortedMap<Long, ExecutableLock> locks = viewManager.getLocksFor(mutation);
 
         // The coordinated action to execute:
         CoordinatedAction coordinator = new CoordinatedAction(
             action,
-            sortedLocks.size(),
+            locks.size(),
             mutation.createdAt,
             isDroppable ? DatabaseDescriptor.getWriteRpcTimeout() : Long.MAX_VALUE, TimeUnit.MILLISECONDS);
 
@@ -682,13 +675,13 @@ public class Keyspace
         CompletableFuture<Void> first = new CompletableFuture<>();
         CompletableFuture<Void> prev = first;
         CompletableFuture<Void> result = null;
-        for (Pair<Long, ExecutableLock> lock : sortedLocks)
+        for (ExecutableLock lock : locks.values())
         {
             CompletableFuture<Void> current = new CompletableFuture<>();
             // Chain / compose:
             result = prev.thenCompose(ignored ->
             {
-                return lock.right.execute(() ->
+                return lock.execute(() ->
                 {
                     // Complete the current future, so that the next chained one can run:
                     current.complete(null);
