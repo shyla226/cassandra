@@ -20,6 +20,15 @@ package org.apache.cassandra.db;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.ListeningExecutorService;
+import com.google.common.util.concurrent.MoreExecutors;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -40,6 +49,8 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.schema.TableMetadata;
 
 import static org.junit.Assert.*;
 
@@ -542,5 +553,50 @@ public class KeyspaceTest extends CQLTester
         command = SinglePartitionReadCommand.create(
                 cfs.metadata(), FBUtilities.nowInSeconds(), ColumnFilter.all(cfs.metadata()), RowFilter.NONE, DataLimits.cqlLimits(3), Util.dk("0"), filter);
         assertRowsInResult(cfs, command);
+    }
+
+    @Test
+    public void testRunWithLocks() throws Throwable
+    {
+        TableMetadata[] tables = new TableMetadata[10];
+        for (int i = 0; i < 10; i++)
+        {
+            createTable("CREATE TABLE %s (a text PRIMARY KEY, b int)");
+            tables[i] = tableMetadata(KEYSPACE_PER_TEST, currentTable());
+        }
+
+        AtomicInteger result = new AtomicInteger();
+
+        ListeningExecutorService executor = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(8));
+        List<ListenableFuture<?>> futures = new LinkedList<>();
+        for (int i = 0; i < 1000; i++)
+        {
+            int keyPart = i;
+            futures.add(executor.submit(() ->
+            {
+                try
+                {
+                    String key = "k" + (keyPart % 2 == 0 ? "" : keyPart);
+                    Mutation m = new Mutation(KEYSPACE_PER_TEST, Util.dk(key));
+                    for (int j = 0; j < 10; j++)
+                    {
+                        m.add(new RowUpdateBuilder(tables[j], System.currentTimeMillis(), key).buildUpdate());
+                    }
+
+                    Keyspace.open(KEYSPACE_PER_TEST).runWithLocks(
+                        m,
+                        () -> CompletableFuture.completedFuture(null).thenRun(() -> result.incrementAndGet()), true)
+                        .get();
+                }
+                catch (Exception ex)
+                {
+                    throw new RuntimeException(ex);
+                }
+            }));
+        }
+
+        ListenableFuture all = Futures.allAsList(futures);
+        all.get(1, TimeUnit.MINUTES);
+        assertEquals(1000, result.get());
     }
 }

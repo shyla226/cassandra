@@ -22,18 +22,20 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 
 import io.reactivex.*;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCBoundaries;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -47,7 +49,6 @@ import org.apache.cassandra.exceptions.InternalRequestExecutionException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.UnknownKeyspaceException;
 import org.apache.cassandra.exceptions.UnknownTableException;
-import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
@@ -63,6 +64,8 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.concurrent.CoordinatedAction;
+import org.apache.cassandra.utils.concurrent.ExecutableLock;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /**
@@ -542,26 +545,9 @@ public class Keyspace
 
     private Completable applyWithViews(Mutation mutation, boolean writeCommitLog, boolean updateIndexes, boolean isDroppable)
     {
-        Single<Semaphore[]> lockAcquisition =  acquireLocksForView(mutation, isDroppable);
-        return lockAcquisition.flatMapCompletable(locks ->
-            Completable.using(writeOrder::start,
-                              opGroup -> applyInternal(opGroup, mutation, writeCommitLog, updateIndexes, true),
-                              opGroup -> {
-                                  opGroup.close();
-
-                                  try
-                                  {
-                                      for (Semaphore lock : locks)
-                                          ViewManager.release(lock);
-                                  }
-                                  catch (Throwable t)
-                                  {
-                                      JVMStabilityInspector.inspectThrowable(t);
-                                      logger.error("Fail to release view locks", t);
-                                  }
-                              }
-            )
-        );
+        return Completable.using(writeOrder::start,
+                              opGroup -> Completable.fromFuture(runWithLocks(mutation, () -> TPCUtils.toFuture(applyInternal(opGroup, mutation, writeCommitLog, updateIndexes, true)), isDroppable)),
+                              opGroup -> opGroup.close());
     }
 
     private Completable applyNoViews(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
@@ -660,96 +646,63 @@ public class Keyspace
         logger.error("Attempted to apply mutation {} after final write barrier", mutation);
         return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Keyspace closed to new mutations"));
     }
-
+    
     /**
-     * Acquire the locks necessary to update view, assuming the provide mutation does have views associated.
-     * This will keep on trying to acquire them until we succeed or the timeout expires.
+     * Runs the supplied action by first acquiring locks over the given mutation updates; each lock is acquired in order
+     * based on its id, so to avoid deadlocks.
      *
-     * @param mutation - the mutation to be applied
-     * @param isDroppable - {@code true} if this should throw {@link WriteTimeoutException} if it does not acquire lock within
-     *                    write_request_timeout_in_ms. Otherwise, this will try as long as required.
-     *
-     * @return a Single of an array containing the locks that have been acquired for updating the views associated to
-     * {@code mutation}. Those locks <b>must</b> be released by the caller on all path.
+     * @param mutation The mutation to acquire locks for.
+     * @param action The action to execute.
+     * @param isDroppable True if we should timeout if unable to acquire all locks after write RPC timeout.
+     * @return The future that will be completed when all locks are acquired and the action executed.
+     * Locks are released after such future completes.
      */
-    private Single<Semaphore[]> acquireLocksForView(final Mutation mutation, final boolean isDroppable)
+    @VisibleForTesting
+    CompletableFuture<Void> runWithLocks(Mutation mutation, Supplier<CompletableFuture<Void>> action, boolean isDroppable)
     {
-        Semaphore[] locks = new Semaphore[mutation.getTableIds().size()];
-        return Single.create(source -> acquireLocksForView(source, mutation, locks, isDroppable));
-    }
+        // Compute the list of lock keys:
+        Collection<Integer> lockKeys = mutation.getTableIds().stream()
+            .map(t -> Objects.hash(mutation.key().getKey(), t))
+            .collect(Collectors.toList());
 
-    // Helper method for maybeAcquireLocksForView that recursively reschedules itself if the locks are not available
-    private void acquireLocksForView(final SingleEmitter<Semaphore[]> source, final Mutation mutation, final Semaphore[] locks, final boolean isDroppable)
-    {
-        if (mutation.viewLockAcquireStart == 0)
-            mutation.viewLockAcquireStart = System.currentTimeMillis();
+        // Get the locks in sorted order and insert in a set to get rid of duplicates (which could arise due to striping):
+        SortedSet<Pair<Long, ExecutableLock>> sortedLocks = new TreeSet<>((p1, p2) -> p1.left.compareTo(p2.left));
+        for (Integer lockKey : lockKeys)
+            sortedLocks.add(viewManager.getLockFor(lockKey));
 
-        // the order of lock acquisition doesn't matter (from a deadlock perspective) because we only use tryLock()
-        Collection<TableId> tableIds = mutation.getTableIds();
-        Iterator<TableId> idIterator = tableIds.iterator();
+        // The coordinated action to execute:
+        CoordinatedAction coordinator = new CoordinatedAction(
+            action,
+            sortedLocks.size(),
+            mutation.createdAt,
+            isDroppable ? DatabaseDescriptor.getWriteRpcTimeout() : Long.MAX_VALUE, TimeUnit.MILLISECONDS);
 
-        for (int i = 0; i < tableIds.size(); i++)
+        // Loop over the locks and execute the action by chaining them: chaining is necessary to make sure each lock
+        // is taken only after the previous one (again, to avoid deadlocks):
+        CompletableFuture<Void> first = new CompletableFuture<>();
+        CompletableFuture<Void> prev = first;
+        CompletableFuture<Void> result = null;
+        for (Pair<Long, ExecutableLock> lock : sortedLocks)
         {
-            TableId tableId = idIterator.next();
-            int lockKey = Objects.hash(mutation.key().getKey(), tableId);
-            Semaphore lock = null;
-
-            if (TEST_FAIL_MV_LOCKS_COUNT == 0)
-                lock = ViewManager.acquireLockFor(lockKey);
-            else
-                TEST_FAIL_MV_LOCKS_COUNT--;
-
-            if (lock == null)
-            { // the lock could not be acquired, release previous locks and either fail or try again later
-                for (int j = 0; j < i; j++)
+            CompletableFuture<Void> current = new CompletableFuture<>();
+            // Chain / compose:
+            result = prev.thenCompose(ignored ->
+            {
+                return lock.right.execute(() ->
                 {
-                    ViewManager.release(locks[j]);
-                    locks[j] = null;
-                }
-
-                //throw WTE only if request is droppable
-                if (isDroppable && (System.currentTimeMillis() - mutation.createdAt) > DatabaseDescriptor.getWriteRpcTimeout())
-                { // we've waited for too long, give up
-                    if (logger.isTraceEnabled())
-                        logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
-
-                    Tracing.trace("Could not acquire MV lock");
-                    source.onError(new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1));
-                    return;
-                }
-                else
-                { // reschedule for later
-                    if (logger.isTraceEnabled())
-                        logger.trace("Could not acquire lock for {} and table {}, retrying later", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
-
-                    // This view update can't happen right now, so schedule another attempt later.
-                    // TODO: 1 microsecond is an arbitrary value that was chosen to avoid spinning the CPU too much, we
-                    // should perform some tests to see if there is an impact in changing this value (APOLLO-799)
-                    mutation.getScheduler().scheduleDirect(() -> acquireLocksForView(source, mutation, locks, isDroppable),
-                                                           TPCTaskType.VIEW_ACQUIRE_LOCK,
-                                                           1,
-                                                           TimeUnit.MICROSECONDS);
-                    return;
-                }
-            }
-            else
-            { // the lock was acquired, carry on
-                if (logger.isTraceEnabled())
-                    logger.trace("Acquired lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
-                locks[i] = lock;
-            }
+                    // Complete the current future, so that the next chained one can run:
+                    current.complete(null);
+                    // Return the action future:
+                    return coordinator.get();
+                }, TPC.bestTPCScheduler().getExecutor());
+            });
+            prev = current;
         }
+        // Kickoff the chain:
+        first.complete(null);
 
-        long acquireTime = System.currentTimeMillis() - mutation.viewLockAcquireStart;
-        // Metrics are only collected for droppable write operations
-        // Bulk non-droppable operations (e.g. commitlog replay, hint delivery) are not measured
-        if (isDroppable)
-        {
-            for (TableId tableId : tableIds)
-                columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
-        }
-
-        source.onSuccess(locks);
+        // Return the result of chaining all locks:
+        return result;
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

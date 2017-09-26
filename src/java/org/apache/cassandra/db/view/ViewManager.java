@@ -21,8 +21,10 @@ import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.util.concurrent.Striped;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +36,8 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.concurrent.ExecutableLock;
 
 /**
  * Manages {@link View}'s for a single {@link ColumnFamilyStore}. All of the views for that table are created when this
@@ -55,6 +59,8 @@ public class ViewManager
     private static final Logger logger = LoggerFactory.getLogger(ViewManager.class);
 
     private static final Striped<Semaphore> SEMAPHORES = Striped.lazyWeakSemaphore(TPC.getNumCores() * 1024, 1);
+    private static final ConcurrentMap<Semaphore, Pair<Long, ExecutableLock>> LOCKS = new ConcurrentHashMap<>();
+    private static final AtomicLong LOCK_ID_GEN = new AtomicLong();
 
     private static final boolean enableCoordinatorBatchlog = Boolean.getBoolean("cassandra.mv_enable_coordinator_batchlog");
 
@@ -188,19 +194,9 @@ public class ViewManager
         return views;
     }
 
-    public static Semaphore acquireLockFor(int keyAndCfidHash)
+    public static Pair<Long, ExecutableLock> getLockFor(int keyAndCfidHash)
     {
-        Semaphore ret = SEMAPHORES.get(keyAndCfidHash);
-
-        if (ret.tryAcquire(1))
-            return ret;
-
-        return null;
-    }
-
-    public static void release(Semaphore semaphore)
-    {
-        if (semaphore != null)
-            semaphore.release(1);
+        Semaphore semaphore = SEMAPHORES.get(keyAndCfidHash);
+        return LOCKS.computeIfAbsent(semaphore, s -> Pair.create(LOCK_ID_GEN.incrementAndGet(), new ExecutableLock(s)));
     }
 }
