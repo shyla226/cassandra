@@ -28,6 +28,7 @@ import java.util.stream.StreamSupport;
 import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.TabularData;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.*;
 import com.google.common.io.ByteStreams;
 
@@ -334,8 +335,8 @@ public final class SystemKeyspace
     /** A semaphore for global synchronization on SystemKeyspace static methods */
     private static final ExecutableLock GLOBAL_LOCK = new ExecutableLock();
 
-    /** Set to true when {@link #finishStartupBlocking()} has been called */
-    private static boolean startupCompleted = false;
+    /** Changed by {@link #beginStartupBlocking()} and {@link #finishStartupBlocking()} */
+    private static StartupState startupState = StartupState.NONE;
 
     /**
      * The local host id.
@@ -347,11 +348,15 @@ public final class SystemKeyspace
     /**
      * The bootstrap state.
      *
-     * Set during start-up, see {@link #finishStartupBlocking()}.
+     * Set during start-up, see {@link #beginStartupBlocking()} and {@link #finishStartupBlocking()}.
      */
     private static volatile BootstrapState bootstrapState = BootstrapState.NEEDS_BOOTSTRAP;
 
-    /** Cache for information read from System PEERS, available after {@link #finishStartupBlocking()} is called. */
+    /**
+     * Cache for information read from System PEERS.
+     *
+     * Set during start-up, see {@link #beginStartupBlocking()} and {@link #finishStartupBlocking()}.
+     */
     private static volatile ConcurrentMap<InetAddress, PeerInfo> peers = null;
 
     private static TableMetadata.Builder parse(String table, String description, String cql)
@@ -415,6 +420,11 @@ public final class SystemKeyspace
         return Arrays.asList(SystemKeyspace.LOCAL, SystemKeyspace.PEERS);
     }
 
+    /**
+     * The truncation records map a table to its truncation position and time, if any TRUNCATE was performed.
+     *
+     * Set during start-up, see {@link #beginStartupBlocking()} and {@link #finishStartupBlocking()}.
+     */
     private static ConcurrentMap<TableId, Pair<CommitLogPosition, Long>> truncationRecords = null;
 
     public enum BootstrapState
@@ -425,10 +435,60 @@ public final class SystemKeyspace
         DECOMMISSIONED
     }
 
+    private enum StartupState
+    {
+        NONE,
+        STARTED,
+        COMPLETED
+    };
+
+    /**
+     * Called very early on during startup, before any CL replay, persists the local metadata
+     * and initializes the internal cache.
+     * <p>
+     * We need to persist the local metadata by calling {@link #persistLocalMetadata()} as soon as possible
+     * after startup checks. This should be the first write to SystemKeyspace (CASSANDRA-11742).
+     * <p>
+     * We need to initialize the cache very early, because of early calls to {@link StorageService#populateTokenMetadata()},
+     * and to {@link #loadDcRackInfo()}. Note that DseSimpleSnitch.getDataCenter() calls {@link #loadDcRackInfo()},
+     * and that {@link #persistLocalMetadata()} calls {@link IEndpointSnitch#getDatacenter(InetAddress)}, as well as
+     * {@link IEndpointSnitch#getRack(InetAddress)}. Therefore, the {@link #PEERS} cache must be loaded before calling
+     * {@link #persistLocalMetadata()}, whereas the data cached from {@link #LOCAL} is loaded afterwards, given that
+     * {@link #persistLocalMetadata()} updates {@link #LOCAL}.
+     * <p>
+     * After CL replay, the cache is loaded again, see {@link #finishStartupBlocking()}.
+     * <p>
+     * This method is idem-potent for consistency with {@link #finishStartupBlocking()}.
+     */
+    public static void beginStartupBlocking()
+    {
+        TPCUtils.withLockBlocking(GLOBAL_LOCK, () -> {
+            if (startupState != StartupState.NONE)
+                return null;
+
+            peers = TPCUtils.blockingGet(readPeerInfo());
+
+            TPCUtils.blockingAwait(SystemKeyspace.persistLocalMetadata());
+
+            truncationRecords = TPCUtils.blockingGet(readTruncationRecords());
+            bootstrapState = TPCUtils.blockingGet(loadBootstrapState());
+
+            startupState = StartupState.STARTED;
+            return null;
+        });
+    }
+
+    /**
+     * Called during startup after CL replay, persist other data (e.g. the schema mutations)
+     * and re-load the cache to pick up any CL changes.
+     *
+     * This method is idem-potent as StorageService calls it in initServer purely for the benefit
+     * of tests (CassandraDaemon has already called it during startup).
+     */
     public static void finishStartupBlocking()
     {
         TPCUtils.withLockBlocking(GLOBAL_LOCK, () -> {
-            if (startupCompleted)
+            if (startupState == StartupState.COMPLETED)
                 return null;
 
             SchemaKeyspace.saveSystemKeyspacesSchema();
@@ -436,9 +496,31 @@ public final class SystemKeyspace
             peers = TPCUtils.blockingGet(readPeerInfo());
             truncationRecords = TPCUtils.blockingGet(readTruncationRecords());
             bootstrapState = TPCUtils.blockingGet(loadBootstrapState());
-            startupCompleted = true;
+
+            startupState = StartupState.COMPLETED;
             return null;
         });
+    }
+
+    /**
+     * Reset the startup state and remove the internal caches, this is used exclusively for testing.
+     */
+    @VisibleForTesting
+    public static void resetStartupBlocking()
+    {
+        TPCUtils.withLockBlocking(GLOBAL_LOCK, () -> {
+            peers = null;
+            truncationRecords =null;
+            bootstrapState = null;
+            startupState = StartupState.NONE;
+            return null;
+        });
+    }
+
+    private static void verify(boolean test, String error)
+    {
+        if (!test)
+            throw new IllegalStateException(error);
     }
 
     public static CompletableFuture<Void> persistLocalMetadata()
@@ -704,7 +786,7 @@ public final class SystemKeyspace
 
     private static Map<TableId, Pair<CommitLogPosition, Long>> getTruncationRecords()
     {
-        assert truncationRecords != null : "truncation records not yet available, call SK.finishStartupBlocking() first";
+        verify(truncationRecords != null, "startup methods not yet called");
         return truncationRecords;
     }
 
@@ -821,12 +903,16 @@ public final class SystemKeyspace
     {
         if (columnName.equals("host_id"))
         {
-            assert value instanceof UUID;
+            if (!(value instanceof UUID))
+                throw new IllegalArgumentException("Expected UUID for host_id column");
+
             return setLocalHostId((UUID) value).thenAccept(uuid -> {});
         }
         else if (columnName.equals("bootstrapped"))
         {
-            assert value instanceof BootstrapState;
+            if (!(value instanceof BootstrapState))
+                throw new IllegalArgumentException("Expected BootstrapState for bootstrapped column");
+
             return setBootstrapState((BootstrapState) value).thenAccept(state -> {});
         }
         else if (columnName.equals("truncated_at"))
@@ -890,7 +976,7 @@ public final class SystemKeyspace
     */
     public static CompletableFuture<Void> updateTokens(Collection<Token> tokens)
     {
-        assert !tokens.isEmpty() : "removeEndpoint should be used instead";
+        verify(!tokens.isEmpty(), "removeEndpoint should be used instead");
         return TPCUtils.withLock(GLOBAL_LOCK, () ->
             getSavedTokens().thenCompose(savedTokens -> {
                 if (tokens.containsAll(savedTokens) && tokens.size() == savedTokens.size())
@@ -937,7 +1023,7 @@ public final class SystemKeyspace
      */
     public static Map<InetAddress, UUID> getHostIds()
     {
-        assert peers != null : "Peers not yet available, finishStartupBlocking() called?";
+        verify(peers != null, "startup methods not yet called");
         Map<InetAddress, UUID> hostIdMap = new HashMap<>();
 
         for (Map.Entry<InetAddress, PeerInfo> entry : peers.entrySet())
@@ -954,7 +1040,7 @@ public final class SystemKeyspace
      */
     public static InetAddress getPreferredIP(InetAddress ep)
     {
-        assert peers != null : "Peers not yet available, finishStartupBlocking() called?";
+        verify(peers != null, "startup methods not yet called");
         PeerInfo info = peers.get(ep);
         return info == null || info.preferredIp == null ? ep : info.preferredIp;
     }
@@ -964,7 +1050,7 @@ public final class SystemKeyspace
      */
     public static Map<InetAddress, Map<String,String>> loadDcRackInfo()
     {
-        assert peers != null : "Peers not yet available, finishStartupBlocking() called?";
+        verify(peers != null, "startup methods not yet called");
         Map<InetAddress, Map<String, String>> result = new HashMap<>();
 
         for (Map.Entry<InetAddress, PeerInfo> entry : peers.entrySet())
@@ -990,7 +1076,7 @@ public final class SystemKeyspace
      */
     public static CassandraVersion getReleaseVersion(InetAddress ep)
     {
-        assert peers != null : "Peers not yet available, finishStartupBlocking() called?";
+        verify(peers != null, "startup methods not yet called");
 
         if (FBUtilities.getBroadcastAddress().equals(ep))
             return new CassandraVersion(FBUtilities.getReleaseVersionString());
@@ -1203,7 +1289,7 @@ public final class SystemKeyspace
      */
     public static UUID getLocalHostId()
     {
-        assert localHostId != null : "local host id not yet set, setLocalHostId() called?";
+        verify(localHostId != null, "startup methods not yet called");
         return localHostId;
     }
 

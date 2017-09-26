@@ -32,6 +32,8 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.locator.AbstractEndpointSnitch;
+import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -70,6 +72,80 @@ public class SystemKeyspaceTest
 
             FileUtils.createDirectory(dir);
         }
+    }
+
+    @Test(expected=IllegalStateException.class)
+    public void testMissingStartup()
+    {
+        try
+        {
+            SystemKeyspace.resetStartupBlocking();
+            SystemKeyspace.loadDcRackInfo();
+        }
+        finally
+        {
+            SystemKeyspace.finishStartupBlocking();
+        }
+    }
+
+    @Test
+    public void testDcRackInfoDuringStartup()
+    {
+        try
+        {
+            SystemKeyspace.resetStartupBlocking();
+            SystemKeyspace.beginStartupBlocking();
+            Map<InetAddress, Map<String,String>> ret = SystemKeyspace.loadDcRackInfo();
+            assertNotNull(ret);
+        }
+        finally
+        {
+            SystemKeyspace.finishStartupBlocking();
+        }
+    }
+
+    @Test
+    public void testSnitchLoadingDcRackInfo()
+    {
+        IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
+        try
+        {
+            DatabaseDescriptor.setEndpointSnitch(new AbstractEndpointSnitch()
+            {
+                @Override public String getRack(InetAddress endpoint) { SystemKeyspace.loadDcRackInfo(); return "rack"; }
+                @Override public String getDatacenter(InetAddress endpoint) { SystemKeyspace.loadDcRackInfo(); return "datacenter"; }
+                @Override public int compareEndpoints(InetAddress target, InetAddress a1, InetAddress a2) { return 0; }
+            });
+
+            SystemKeyspace.resetStartupBlocking();
+            SystemKeyspace.beginStartupBlocking(); // calls SK.persistLocalMetadata(), which calls getRack() and getDatacenter() in the snitch
+
+        }
+        finally
+        {
+            SystemKeyspace.finishStartupBlocking();
+            DatabaseDescriptor.setEndpointSnitch(snitch);
+        }
+    }
+
+    @Test
+    public void testMultipleStartupCalls()
+    {
+        SystemKeyspace.resetStartupBlocking();
+        SystemKeyspace.beginStartupBlocking();
+        SystemKeyspace.beginStartupBlocking();
+
+        SystemKeyspace.finishStartupBlocking();
+        SystemKeyspace.beginStartupBlocking();
+        SystemKeyspace.finishStartupBlocking();
+
+    }
+
+    @Test
+    public void testMissingBeginStartup()
+    {
+        SystemKeyspace.resetStartupBlocking();
+        SystemKeyspace.finishStartupBlocking();
     }
 
     @Test

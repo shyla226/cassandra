@@ -242,9 +242,7 @@ public class CassandraDaemon
                                                      }
                                                  }));
 
-        // We need to persist this as soon as possible after startup checks.
-        // This should be the first write to SystemKeyspace (CASSANDRA-11742)
-        TPCUtils.blockingAwait(SystemKeyspace.persistLocalMetadata());
+        SystemKeyspace.beginStartupBlocking();
 
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler()
         {
@@ -345,11 +343,11 @@ public class CassandraDaemon
             throw new RuntimeException(e);
         }
 
-        // Re-populate token metadata after commit log recover (new peers might be loaded onto system keyspace #10293)
-        StorageService.instance.populateTokenMetadata();
-
         // Finish startup
         SystemKeyspace.finishStartupBlocking();
+
+        // Re-populate token metadata after commit log recover (new peers might be loaded onto system keyspace #10293)
+        StorageService.instance.populateTokenMetadata();
 
         // Enable active repair service: this *must* happen prior to enabling compactions (see APOLLO-821)
         ActiveRepairService.instance.start();
