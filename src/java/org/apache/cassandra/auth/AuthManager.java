@@ -85,34 +85,59 @@ public final class AuthManager
         if (user.isAnonymous())
             return Single.just(UserRolesAndPermissions.ANONYMOUS);
 
+        return getUserRolesAndPermissions(user.getName(), user.getPrimaryRole());
+    }
+
+    /**
+     * Returns the roles and permissions associated to the specified user.
+     * <p>If the role and permission data were not cached and the calling thread is a TPC thread,
+     * the returned {@code Single} might be a deferred one which is scheduled to run on an IO thread.</p>
+     * @param name the user name.
+     * @return the role and permissions associated to the specified user.
+     */
+    public Single<UserRolesAndPermissions> getUserRolesAndPermissions(String name)
+    {
+        return getUserRolesAndPermissions(name, RoleResource.role(name));
+    }
+
+    /**
+     * Returns the roles and permissions associated to the specified user.
+     * <p>If the role and permission data were not cached and the calling thread is a TPC thread,
+     * the returned {@code Single} might be a deferred one which is scheduled to run on an IO thread.</p>
+     * @param name the user name.
+     * @param primaryRole thuser primary role
+     * @return the role and permissions associated to the specified user.
+     */
+    public Single<UserRolesAndPermissions> getUserRolesAndPermissions(String name, RoleResource primaryRole)
+    {
         // If we are not on a TPC thread we can query the cache without worrying.
         if (!TPC.isTPCThread())
-            return loadRolesAndPermissionsIfNeeded(user);
+            return loadRolesAndPermissionsIfNeeded(name, primaryRole);
 
         // If we are on the TPC thread we need to ensure that either all the needed data are in the cache or
         // that we switch to an IO thread if the data is not in the cache.
-        Map<RoleResource, Role> rolePerResource = rolesCache.getRolesIfPresent(user.getPrimaryRole());
+        Map<RoleResource, Role> rolePerResource = rolesCache.getRolesIfPresent(primaryRole);
 
         if (rolePerResource != null)
         {
             Set<RoleResource> resources = rolePerResource.keySet();
 
             if (isSuperUser(rolePerResource.values()))
-                return Single.just(UserRolesAndPermissions.createSuperUserRolesAndPermissions(user.getName(), resources));
+                return Single.just(UserRolesAndPermissions.createSuperUserRolesAndPermissions(name, resources));
 
             if (!authorizer.requireAuthorization())
-                return Single.just(UserRolesAndPermissions.newNormalUserRoles(user.getName(), resources));
+                return Single.just(UserRolesAndPermissions.newNormalUserRoles(name, resources));
 
             Map<RoleResource, Map<IResource, PermissionSets>> permissions = permissionsCache.getAllPresent(resources);
 
             if (permissions.size() == resources.size())
-                return Single.just(UserRolesAndPermissions.newNormalUserRolesAndPermissions(user.getName(),
+                return Single.just(UserRolesAndPermissions.newNormalUserRolesAndPermissions(name,
                                                                                             resources,
                                                                                             permissions));
 
             Single<UserRolesAndPermissions> rolesAndPermissions = Single.defer(() ->
             {
-                return loadPermissionsIfNeeded(user, resources);
+                return loadPermissionsIfNeeded(name, resources);
             });
 
             return RxThreads.subscribeOnIo(rolesAndPermissions, TPCTaskType.AUTHORIZATION);
@@ -120,33 +145,34 @@ public final class AuthManager
 
         Single<UserRolesAndPermissions> rolesAndPermissions = Single.defer(() ->
         {
-            return loadRolesAndPermissionsIfNeeded(user);
+            return loadRolesAndPermissionsIfNeeded(name, primaryRole);
         });
 
         return RxThreads.subscribeOnIo(rolesAndPermissions, TPCTaskType.AUTHORIZATION);
     }
-
+    
     /**
      * Retrieves the roles and permissions from the cache allowing it to fetch them from the disk if needed.
      *
-     * @param user the user
+     * @param name the user name
+     * @param primaryRole the user primary role
      * @return roles and permissions for the specified user
      */
-    private Single<UserRolesAndPermissions> loadRolesAndPermissionsIfNeeded(AuthenticatedUser user)
+    private Single<UserRolesAndPermissions> loadRolesAndPermissionsIfNeeded(String name, RoleResource primaryRole)
     {
         Map<RoleResource, Role> rolePerResource;
-        rolePerResource = rolesCache.getRoles(user.getPrimaryRole());
+        rolePerResource = rolesCache.getRoles(primaryRole);
 
         Set<RoleResource> roleResources = rolePerResource.keySet();
 
         if (isSuperUser(rolePerResource.values()))
-            return Single.just(UserRolesAndPermissions.createSuperUserRolesAndPermissions(user.getName(),
+            return Single.just(UserRolesAndPermissions.createSuperUserRolesAndPermissions(name,
                                                                                           roleResources));
 
         if (!authorizer.requireAuthorization())
-            return Single.just(UserRolesAndPermissions.newNormalUserRoles(user.getName(), roleResources));
+            return Single.just(UserRolesAndPermissions.newNormalUserRoles(name, roleResources));
 
-        return Single.just(UserRolesAndPermissions.newNormalUserRolesAndPermissions(user.getName(),
+        return Single.just(UserRolesAndPermissions.newNormalUserRolesAndPermissions(name,
                                                                                     roleResources,
                                                                                     permissionsCache.getAll(roleResources)));
     }
@@ -154,13 +180,13 @@ public final class AuthManager
     /**
      * Retrieves the permissions from the cache allowing it to fetch them from the disk if needed.
      *
-     * @param user the user
+     * @param user the user name
      * @param roleResources the user roles
      * @return roles and permissions for the specified user
      */
-    private Single<UserRolesAndPermissions> loadPermissionsIfNeeded(AuthenticatedUser user, Set<RoleResource> roleResources)
+    private Single<UserRolesAndPermissions> loadPermissionsIfNeeded(String user, Set<RoleResource> roleResources)
     {
-        return Single.just(UserRolesAndPermissions.newNormalUserRolesAndPermissions(user.getName(),
+        return Single.just(UserRolesAndPermissions.newNormalUserRolesAndPermissions(user,
                                                                                     roleResources,
                                                                                     permissionsCache.getAll(roleResources)));
     }

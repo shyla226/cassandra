@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.service.StorageService;
 
@@ -105,30 +106,21 @@ public class AuthorizationProxy implements InvocationHandler
      Used to check whether the Role associated with the authenticated Subject has superuser
      status. By default, just delegates to Roles::hasSuperuserStatus, but can be overridden for testing.
      */
-    protected Function<RoleResource, Boolean> isSuperuser = r -> DatabaseDescriptor.getAuthManager()
-                                                                                   .hasSuperUserStatus(r)
-                                                                                   .blockingGet();
+    protected Function<String, UserRolesAndPermissions> userRolesAndPermissions = (name) ->
+    {
+        if (name == null)
+            return UserRolesAndPermissions.SYSTEM;
 
-    /*
-     Used to retrieve the set of all permissions granted to a given role. By default, this fetches
-     the permissions from the local cache, which in turn loads them from the configured IAuthorizer
-     but can be overridden for testing.
-     */
-    protected Function<RoleResource, Map<IResource, PermissionSets>> getPermissions = r -> DatabaseDescriptor.getAuthManager()
-                                                                                                             .getPermissions(r)
-                                                                                                             .blockingGet();
+        return DatabaseDescriptor.getAuthManager()
+                                 .getUserRolesAndPermissions(name)
+                                 .blockingGet();
+    };
 
     /*
      Used to decide whether authorization is enabled or not, usually this depends on the configured
      IAuthorizer, but can be overridden for testing.
      */
     protected Supplier<Boolean> isAuthzRequired = DatabaseDescriptor.getAuthorizer()::requireAuthorization;
-
-    /*
-     Used to find matching MBeans when the invocation target is a pattern type ObjectName.
-     Defaults to querying the MBeanServer but can be overridden for testing. See checkPattern for usage.
-     */
-    protected Function<ObjectName, Set<ObjectName>> queryNames = (name) -> mbs.queryNames(name, null);
 
     /*
      Used to determine whether auth setup has completed so we know whether the expect the IAuthorizer
@@ -217,17 +209,18 @@ public class AuthorizationProxy implements InvocationHandler
         // is the one to use for authorization. It would be good to make this more
         // robust, but we have no control over which Principals a given LoginModule
         // might choose to associate with the Subject following successful authentication
-        RoleResource userResource = RoleResource.role(principals.iterator().next().getName());
+        String name = principals.iterator().next().getName();
+        UserRolesAndPermissions user = userRolesAndPermissions.apply(name);
         // A role with superuser status can do anything
-        if (isSuperuser.apply(userResource))
+        if (user.isSuper())
             return true;
 
         // The method being invoked may be a method on an MBean, or it could belong
         // to the MBeanServer itself
         if (args != null && args[0] instanceof ObjectName)
-            return authorizeMBeanMethod(userResource, methodName, args);
-        else
-            return authorizeMBeanServerMethod(userResource, methodName);
+            return authorizeMBeanMethod(user, methodName, args);
+
+        return authorizeMBeanServerMethod(user, methodName);
     }
 
     /**
@@ -237,17 +230,17 @@ public class AuthorizationProxy implements InvocationHandler
      * set of MBeans managed by the server and so we check the DESCRIBE permission on the root
      * JMXResource (representing the MBeanServer)
      *
-     * @param subject
+     * @param user
      * @param methodName
      * @return the result of the method invocation, if authorized
      * @throws Throwable
      * @throws SecurityException if authorization fails
      */
-    private boolean authorizeMBeanServerMethod(RoleResource subject, String methodName)
+    private boolean authorizeMBeanServerMethod(UserRolesAndPermissions user, String methodName)
     {
         logger.trace("JMX invocation of {} on MBeanServer requires permission {}", methodName, CorePermission.DESCRIBE);
         return (MBEAN_SERVER_METHOD_WHITELIST.contains(methodName) &&
-            hasPermission(subject, CorePermission.DESCRIBE, JMXResource.root()));
+                user.hasPermission(JMXResource.root(), CorePermission.DESCRIBE));
     }
 
     /**
@@ -257,14 +250,14 @@ public class AuthorizationProxy implements InvocationHandler
      * wildcards) as their first argument. They both of those methods also accept null arguments,
      * in which case they will be handled by authorizedMBeanServerMethod
      *
-     * @param subject
+     * @param user
      * @param methodName
      * @param args
      * @return the result of the method invocation, if authorized
      * @throws Throwable
      * @throws SecurityException if authorization fails
      */
-    private boolean authorizeMBeanMethod(RoleResource subject, String methodName, Object[] args)
+    private boolean authorizeMBeanMethod(UserRolesAndPermissions user, String methodName, Object[] args)
     {
         ObjectName targetBean = (ObjectName)args[0];
 
@@ -275,162 +268,12 @@ public class AuthorizationProxy implements InvocationHandler
 
         logger.trace("JMX invocation of {} on {} requires permission {}", methodName, targetBean, requiredPermission);
 
-        Set<RoleResource> roles = DatabaseDescriptor.getAuthManager().getRoles(subject).blockingGet();
+        boolean hasJmxPermission = user.hasJMXPermission(mbs, targetBean, requiredPermission);
 
-        PermissionSets.Builder permissions = PermissionSets.builder();
+        if (!hasJmxPermission)
+            logger.trace("Subject does not have sufficient permissions on target MBean {}", targetBean);
 
-        // Check whether 'subject' is restricted (or granted) the 'requiredPermission' on the JMX resource root.
-        // If there is a match, there is no need to check permissions on individual resources.
-
-        for (RoleResource role : roles)
-        {
-            Map<IResource, PermissionSets> rolePermissions = getPermissions.apply(role);
-            PermissionSets rootPerms = rolePermissions.get(JMXResource.root());
-            if (rootPerms != null)
-            {
-                if (rootPerms.restricted.contains(requiredPermission))
-                {
-                    // this role is _restricted_ the required permission on the JMX root resource
-                    // I.e. restricted 'permission' on _any_ JMX resource.
-                    return false;
-                }
-                if (rootPerms.granted.contains(requiredPermission))
-                {
-                    // This role is _granted_ (and not restricted) the required permission on the JMX resource root.
-                    // I.e. granted 'permission' on _any_ JMX resource.
-                    return true;
-                }
-            }
-        }
-
-        // Check for individual JMX resources.
-        //
-        // Collecting the (permitted) JMXResource instances before checking the bean names feels
-        // cheaper than vice versa - especially for 'checkPattern', which performs a call to
-        // javax.management.MBeanServer.queryNames().
-
-        Set<JMXResource> permittedResources = new HashSet<>();
-        for (RoleResource role : roles)
-        {
-            Map<IResource, PermissionSets> rolePermissions = getPermissions.apply(role);
-            for (Map.Entry<IResource, PermissionSets> resourcePermissionSets : rolePermissions.entrySet())
-            {
-                if (!(resourcePermissionSets.getKey() instanceof JMXResource))
-                    continue;
-
-                {
-                    JMXResource res = (JMXResource) resourcePermissionSets.getKey();
-                    if (resourcePermissionSets.getValue().hasEffectivePermission(requiredPermission))
-                        permittedResources.add(res);
-                }
-            }
-        }
-
-        if (permittedResources.isEmpty())
-            return false;
-
-        // finally, check the JMXResource from the grants to see if we have either
-        // an exact match or a wildcard match for the target resource, whichever is
-        // applicable
-        return targetBean.isPattern()
-                ? checkPattern(targetBean, permittedResources)
-                : checkExact(targetBean, permittedResources);
-    }
-
-    /**
-     * Check whether a required permission has been granted to the authenticated subject on a specific resource
-     * @param subject
-     * @param permission
-     * @param resource
-     * @return true if the Subject has been granted the required permission on the specified resource; false otherwise
-     */
-    private boolean hasPermission(RoleResource subject, Permission permission, JMXResource resource)
-    {
-        PermissionSets.Builder permissions = PermissionSets.builder();
-        List<? extends IResource> chain = Resources.chain(resource);
-        for (RoleResource role : DatabaseDescriptor.getAuthManager().getRoles(subject).blockingGet())
-            permissions.addChainPermissions(chain, getPermissions.apply(role));
-        return permissions.build().hasEffectivePermission(permission);
-    }
-
-    /**
-     * Given a set of JMXResources upon which the Subject has been granted a particular permission,
-     * check whether any match the pattern-type ObjectName representing the target of the method
-     * invocation. At this point, we are sure that whatever the required permission, the Subject
-     * has definitely been granted it against this set of JMXResources. The job of this method is
-     * only to verify that the target of the invocation is covered by the members of the set.
-     *
-     * @param target
-     * @param permittedResources
-     * @return true if all registered beans which match the target can also be matched by the
-     *         JMXResources the subject has been granted permissions on; false otherwise
-     */
-    private boolean checkPattern(ObjectName target, Set<JMXResource> permittedResources)
-    {
-        // if the required permission was granted on the root JMX resource, then we're done
-        if (permittedResources.contains(JMXResource.root()))
-            return true;
-
-        // Get the full set of beans which match the target pattern
-        Set<ObjectName> targetNames = queryNames.apply(target);
-
-        // Iterate over the resources the permission has been granted on. Some of these may
-        // be patterns, so query the server to retrieve the full list of matching names and
-        // remove those from the target set. Once the target set is empty (i.e. all required
-        // matches have been satisfied), the requirement is met.
-        // If there are still unsatisfied targets after all the JMXResources have been processed,
-        // there are insufficient grants to permit the operation.
-        for (JMXResource resource : permittedResources)
-        {
-            try
-            {
-                Set<ObjectName> matchingNames = queryNames.apply(ObjectName.getInstance(resource.getObjectName()));
-                targetNames.removeAll(matchingNames);
-                if (targetNames.isEmpty())
-                    return true;
-            }
-            catch (MalformedObjectNameException e)
-            {
-                logger.warn("Permissions for JMX resource contains invalid ObjectName {}", resource.getObjectName());
-            }
-        }
-
-        logger.trace("Subject does not have sufficient permissions on all MBeans matching the target pattern {}", target);
-        return false;
-    }
-
-    /**
-     * Given a set of JMXResources upon which the Subject has been granted a particular permission,
-     * check whether any match the ObjectName representing the target of the method invocation.
-     * At this point, we are sure that whatever the required permission, the Subject has definitely
-     * been granted it against this set of JMXResources. The job of this method is only to verify
-     * that the target of the invocation is matched by a member of the set.
-     *
-     * @param target
-     * @param permittedResources
-     * @return true if at least one of the permitted resources matches the target; false otherwise
-     */
-    private boolean checkExact(ObjectName target, Set<JMXResource> permittedResources)
-    {
-        // if the required permission was granted on the root JMX resource, then we're done
-        if (permittedResources.contains(JMXResource.root()))
-            return true;
-
-        for (JMXResource resource : permittedResources)
-        {
-            try
-            {
-                if (ObjectName.getInstance(resource.getObjectName()).apply(target))
-                    return true;
-            }
-            catch (MalformedObjectNameException e)
-            {
-                logger.warn("Permissions for JMX resource contains invalid ObjectName {}", resource.getObjectName());
-            }
-        }
-
-        logger.trace("Subject does not have sufficient permissions on target MBean {}", target);
-        return false;
+        return hasJmxPermission;
     }
 
     /**

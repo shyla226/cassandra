@@ -275,7 +275,6 @@ public class JMXAuthTest extends CQLTester
         public NoSuperUserAuthorizationProxy()
         {
             super();
-            this.isSuperuser = (role) -> false;
             this.isAuthSetupComplete = () -> true;
         }
     }

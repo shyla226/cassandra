@@ -5,22 +5,17 @@
  */
 package org.apache.cassandra.auth.user;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Supplier;
 
-import org.apache.cassandra.auth.AuthenticatedUser;
-import org.apache.cassandra.auth.DataResource;
-import org.apache.cassandra.auth.FunctionResource;
-import org.apache.cassandra.auth.IAuthorizer;
-import org.apache.cassandra.auth.IResource;
-import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.auth.PermissionSets;
-import org.apache.cassandra.auth.Resources;
-import org.apache.cassandra.auth.RoleResource;
+import javax.management.MBeanServer;
+import javax.management.MalformedObjectNameException;
+import javax.management.ObjectName;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.functions.Function;
@@ -36,6 +31,8 @@ import org.apache.cassandra.schema.TableMetadataRef;
  */
 public abstract class UserRolesAndPermissions
 {
+    private static final Logger logger = LoggerFactory.getLogger(UserRolesAndPermissions.class);
+
     /**
      * The roles and permissions of the system.
      */
@@ -66,6 +63,12 @@ public abstract class UserRolesAndPermissions
 
         @Override
         protected boolean hasPermissionOnResourceChain(IResource resource, Permission perm)
+        {
+            return true;
+        }
+
+        @Override
+        public boolean hasJMXPermission(MBeanServer mbs, ObjectName object, Permission permission)
         {
             return true;
         }
@@ -108,6 +111,12 @@ public abstract class UserRolesAndPermissions
         protected boolean hasPermissionOnResourceChain(IResource resource, Permission perm)
         {
             return CorePermission.AUTHORIZE != perm;
+        }
+
+        @Override
+        public boolean hasJMXPermission(MBeanServer mbs, ObjectName object, Permission permission)
+        {
+            return true;
         }
 
         @Override
@@ -283,6 +292,16 @@ public abstract class UserRolesAndPermissions
 
         return hasPermissionOnResourceChain(resource, perm);
     }
+
+    /**
+     * Checks if the user has the specified permission on the JMX object.
+     * @param mbs The MBeanServer
+     * @param object the object
+     * @param perm the permission
+     * @return {@code true} if the user has the permission on the function resource,
+     * {@code false} otherwise.
+     */
+    public abstract boolean hasJMXPermission(MBeanServer mbs, ObjectName object, Permission permission);
 
     /**
      * Checks if the user has the specified permission on the resource.
@@ -564,6 +583,12 @@ public abstract class UserRolesAndPermissions
             return true;
         }
 
+        @Override
+        public boolean hasJMXPermission(MBeanServer mbs, ObjectName object, Permission permission)
+        {
+            return true;
+        }
+
         public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
         {
         }
@@ -625,6 +650,139 @@ public abstract class UserRolesAndPermissions
         {
             PermissionSets chainPermissions = resourceChainPermissions(resource);
             return chainPermissions.granted.contains(perm) && !chainPermissions.restricted.contains(perm);
+        }
+
+        @Override
+        public boolean hasJMXPermission(MBeanServer mbs, ObjectName object, Permission permission)
+        {
+            for (Map<IResource, PermissionSets> permissionsPerResource : permissions.values())
+            {
+                PermissionSets rootPerms = permissionsPerResource.get(JMXResource.root());
+                if (rootPerms != null)
+                {
+                    if (rootPerms.restricted.contains(permission))
+                    {
+                        // this role is _restricted_ the required permission on the JMX root resource
+                        // I.e. restricted 'permission' on _any_ JMX resource.
+                        return false;
+                    }
+                    if (rootPerms.granted.contains(permission))
+                    {
+                        // This role is _granted_ (and not restricted) the required permission on the JMX resource root.
+                        // I.e. granted 'permission' on _any_ JMX resource.
+                        return true;
+                    }
+                }
+            }
+
+            // Check for individual JMX resources.
+            //
+            // Collecting the (permitted) JMXResource instances before checking the bean names feels
+            // cheaper than vice versa - especially for 'checkPattern', which performs a call to
+            // javax.management.MBeanServer.queryNames().
+
+            Set<JMXResource> permittedResources = collectPermittedJmxResources(permission);
+
+            if (permittedResources.isEmpty())
+                return false;
+
+            // finally, check the JMXResource from the grants to see if we have either
+            // an exact match or a wildcard match for the target resource, whichever is
+            // applicable
+            return object.isPattern()
+                    ? checkPattern(mbs, object, permittedResources)
+                    : checkExact(mbs, object, permittedResources);
+        }
+
+        /**
+         * Given a set of JMXResources upon which the Subject has been granted a particular permission, check whether
+         * any match the pattern-type ObjectName representing the target of the method invocation. At this point, we are
+         * sure that whatever the required permission, the Subject has definitely been granted it against this set of
+         * JMXResources. The job of this method is only to verify that the target of the invocation is covered by the
+         * members of the set.
+         *
+         * @param target
+         * @param permittedResources
+         * @return true if all registered beans which match the target can also be matched by the JMXResources the
+         *         subject has been granted permissions on; false otherwise
+         */
+        private boolean checkPattern(MBeanServer mbs, ObjectName target, Set<JMXResource> permittedResources)
+        {
+            // Get the full set of beans which match the target pattern
+            Set<ObjectName> targetNames = mbs.queryNames(target, null);
+
+            // Iterate over the resources the permission has been granted on. Some of these may
+            // be patterns, so query the server to retrieve the full list of matching names and
+            // remove those from the target set. Once the target set is empty (i.e. all required
+            // matches have been satisfied), the requirement is met.
+            // If there are still unsatisfied targets after all the JMXResources have been processed,
+            // there are insufficient grants to permit the operation.
+            for (JMXResource resource : permittedResources)
+            {
+                try
+                {
+                    Set<ObjectName> matchingNames = mbs.queryNames(ObjectName.getInstance(resource.getObjectName()),
+                                                                   null);
+                    targetNames.removeAll(matchingNames);
+                    if (targetNames.isEmpty())
+                        return true;
+                }
+                catch (MalformedObjectNameException e)
+                {
+                    logger.warn("Permissions for JMX resource contains invalid ObjectName {}",
+                                resource.getObjectName());
+                }
+            }
+
+            return false;
+        }
+
+        /**
+         * Given a set of JMXResources upon which the Subject has been granted a particular permission, check whether
+         * any match the ObjectName representing the target of the method invocation. At this point, we are sure that
+         * whatever the required permission, the Subject has definitely been granted it against this set of
+         * JMXResources. The job of this method is only to verify that the target of the invocation is matched by a
+         * member of the set.
+         *
+         * @param target
+         * @param permittedResources
+         * @return true if at least one of the permitted resources matches the target; false otherwise
+         */
+        private boolean checkExact(MBeanServer mbs, ObjectName target, Set<JMXResource> permittedResources)
+        {
+            for (JMXResource resource : permittedResources)
+            {
+                try
+                {
+                    if (ObjectName.getInstance(resource.getObjectName()).apply(target))
+                        return true;
+                }
+                catch (MalformedObjectNameException e)
+                {
+                    logger.warn("Permissions for JMX resource contains invalid ObjectName {}",
+                                resource.getObjectName());
+                }
+            }
+
+            logger.trace("Subject does not have sufficient permissions on target MBean {}", target);
+            return false;
+        }
+
+        private Set<JMXResource> collectPermittedJmxResources(Permission permission)
+        {
+            Set<JMXResource> permittedResources = new HashSet<>();
+            for (Map<IResource, PermissionSets> permissionsPerResource : permissions.values())
+            {
+                for (Map.Entry<IResource, PermissionSets> resourcePermissionSets : permissionsPerResource.entrySet())
+                {
+                    if (resourcePermissionSets.getKey() instanceof JMXResource)
+                    {
+                        if (resourcePermissionSets.getValue().hasEffectivePermission(permission))
+                            permittedResources.add((JMXResource) resourcePermissionSets.getKey());
+                    }
+                }
+            }
+            return permittedResources;
         }
 
         /**
@@ -696,6 +854,12 @@ public abstract class UserRolesAndPermissions
 
         @Override
         protected boolean hasPermissionOnResourceChain(IResource resource, Permission perm)
+        {
+            return true;
+        }
+
+        @Override
+        public boolean hasJMXPermission(MBeanServer mbs, ObjectName object, Permission permission)
         {
             return true;
         }
