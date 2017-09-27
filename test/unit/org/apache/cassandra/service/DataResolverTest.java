@@ -137,19 +137,6 @@ public class DataResolverTest
         MessagingService.instance().clearInterceptors();
     }
 
-    /**
-     * Checks that the provided data resolver has the expected number of repair futures created.
-     * This method also "release" those future by faking replica responses to those repair, which is necessary or
-     * every test would timeout before closing or checking if the partition iterator has still data (since the
-     * underlying flow delays the final onComplete by waiting on the repair results future).
-     */
-    private void assertRepairFuture(DataResolver resolver, int expectedRepairs)
-    {
-        assertEquals(expectedRepairs, resolver.repairResults.outstandingRepairs());
-        while (expectedRepairs-- > 0)
-            resolver.repairResults.onResponse();
-    }
-
     private ReadContext readContext()
     {
         return ReadContext.builder(command, ConsistencyLevel.ALL).build(System.nanoTime());
@@ -176,7 +163,6 @@ public class DataResolverTest
                 assertColumns(row, "c1");
                 assertColumn(cfm, row, "c1", "v2", 1);
             }
-            assertRepairFuture(resolver, 1);
             assertFalse(data.hasNext());
         }
 
@@ -211,7 +197,6 @@ public class DataResolverTest
                 assertColumn(cfm, row, "c1", "v1", 0);
                 assertColumn(cfm, row, "c2", "v2", 1);
             }
-            assertRepairFuture(resolver, 2);
             assertFalse(data.hasNext());
         }
 
@@ -257,7 +242,6 @@ public class DataResolverTest
 
                 assertFalse(rows.hasNext());
             }
-            assertRepairFuture(resolver, 2);
             assertFalse(data.hasNext());
         }
 
@@ -324,7 +308,6 @@ public class DataResolverTest
 
                 assertFalse(rows.hasNext());
             }
-            assertRepairFuture(resolver, 4);
         }
 
         assertEquals(4, messageRecorder.repairsSent.size());
@@ -374,7 +357,6 @@ public class DataResolverTest
                 assertColumns(row, "c2");
                 assertColumn(cfm, row, "c2", "v2", 1);
             }
-            assertRepairFuture(resolver, 1);
             assertFalse(data.hasNext());
         }
 
@@ -395,7 +377,6 @@ public class DataResolverTest
 
         try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
-            assertRepairFuture(resolver, 0);
             assertFalse(data.hasNext());
         }
 
@@ -417,7 +398,6 @@ public class DataResolverTest
         try (PartitionIterator data = toPartitions(resolver.resolve()))
         {
             assertFalse(data.hasNext());
-            assertRepairFuture(resolver, 1);
         }
 
         // peer1 should get the deletion from peer2
@@ -457,7 +437,6 @@ public class DataResolverTest
                 assertColumns(row, "two");
                 assertColumn(cfm, row, "two", "B", 3);
             }
-            assertRepairFuture(resolver, 4);
             assertFalse(data.hasNext());
         }
 
@@ -544,7 +523,6 @@ public class DataResolverTest
         try (PartitionIterator data = toPartitions(resolver.resolve()))
         {
             assertFalse(data.hasNext());
-            assertRepairFuture(resolver, 2);
         }
 
         assertEquals(2, messageRecorder.repairsSent.size());
@@ -616,7 +594,6 @@ public class DataResolverTest
         try (PartitionIterator data = toPartitions(resolver.resolve()))
         {
             assertFalse(data.hasNext());
-            assertRepairFuture(resolver, shouldHaveRepair ? 1 : 0);
         }
 
         assertEquals(shouldHaveRepair? 1 : 0, messageRecorder.repairsSent.size());
@@ -663,8 +640,6 @@ public class DataResolverTest
         try (PartitionIterator data = toPartitions(resolver.resolve()))
         {
             assertFalse(data.hasNext());
-            // 2nd stream should get repaired
-            assertRepairFuture(resolver, 1);
         }
 
         assertEquals(1, messageRecorder.repairsSent.size());
@@ -709,8 +684,6 @@ public class DataResolverTest
         try (PartitionIterator data = toPartitions(resolver.resolve()))
         {
             assertFalse(data.hasNext());
-            // 2nd stream should get repaired
-            assertRepairFuture(resolver, 1);
         }
 
         assertEquals(1, messageRecorder.repairsSent.size());
@@ -795,9 +768,10 @@ public class DataResolverTest
                 Assert.assertNull(row.getCell(m, CellPath.create(bb(0))));
                 Assert.assertNotNull(row.getCell(m, CellPath.create(bb(1))));
             }
-            assertRepairFuture(resolver, 1);
             assertFalse(data.hasNext());
         }
+
+        assertEquals(1, messageRecorder.repairsSent.size());
 
         Request<Mutation, EmptyPayload> msg;
         msg = getSentMessage(peer1);
@@ -841,9 +815,9 @@ public class DataResolverTest
         try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
             assertFalse(data.hasNext());
-            assertRepairFuture(resolver, 1);
         }
 
+        assertEquals(1, messageRecorder.repairsSent.size());
         Request<Mutation, EmptyPayload> msg;
         msg = getSentMessage(peer1);
         Iterator<Row> rowIter = msg.payload().getPartitionUpdate(cfm2).iterator();
@@ -891,10 +865,10 @@ public class DataResolverTest
                 ComplexColumnData cd = row.getComplexColumnData(m);
                 assertEquals(Collections.singleton(expectedCell), Sets.newHashSet(cd));
             }
-            assertRepairFuture(resolver, 1);
             assertFalse(data.hasNext());
         }
 
+        assertEquals(1, messageRecorder.repairsSent.size());
         Assert.assertNull(messageRecorder.repairsSent.get(peer1));
 
         Request<Mutation, EmptyPayload> msg;
@@ -945,10 +919,10 @@ public class DataResolverTest
                 ComplexColumnData cd = row.getComplexColumnData(m);
                 assertEquals(Collections.singleton(expectedCell), Sets.newHashSet(cd));
             }
-            assertRepairFuture(resolver, 1);
             assertFalse(data.hasNext());
         }
 
+        assertEquals(1, messageRecorder.repairsSent.size());
         Request<Mutation, EmptyPayload> msg;
         msg = getSentMessage(peer1);
         Row row = Iterators.getOnlyElement(msg.payload().getPartitionUpdate(cfm2).iterator());
@@ -1005,10 +979,10 @@ public class DataResolverTest
                     assertColumns(row, "c1");
                     assertColumn(cfm, row, "c1", "v1", 1);
                 }
-                // send missing partition to other 2 hosts
-                assertRepairFuture(resolver, 2);
             }
 
+            // send missing partition to other 2 hosts (for 3 keys)
+            assertEquals(6, messageRecorder.totalRepairsSent());
             assertTrue("Not all keys were returned", keys.isEmpty());
         }
 
@@ -1061,10 +1035,10 @@ public class DataResolverTest
                     assertColumn(cfm, rows.get(0), "c1", "v1", 1);
                     assertColumn(cfm, rows.get(1), "c1", "v2", 1);
                 }
-
-                assertRepairFuture(resolver, 1); // clustering 1 sent to peer 2
             }
         }
+        // clustering 1 sent to peer 2
+        assertEquals(1, messageRecorder.repairsSent.size());
 
         Request<Mutation, EmptyPayload> message = getSentMessage(peer2);
         assertRepairContainsColumn(message, "1", "c1", "v1", 1);
@@ -1117,11 +1091,11 @@ public class DataResolverTest
                     assertColumn(cfm, rows.get(0), "c1", "v3", 2);
                     assertColumn(cfm, rows.get(1), "c1", "v4", 2);
                 }
-
-                assertRepairFuture(resolver, 2); // 1 repair each, peer1 gets the deletion and peer2 gets v4
                 assertFalse(data.hasNext());
             }
         }
+        // 1 repair each, peer1 gets the deletion and peer2 gets v4
+        assertEquals(2, messageRecorder.repairsSent.size());
 
         for (InetAddress peer : new InetAddress[] {peer1, peer2})
         {
@@ -1291,6 +1265,11 @@ public class DataResolverTest
             responses.add(response);
         }
 
+        public long totalRepairsSent()
+        {
+            return repairsSent.values().stream().mapToLong(Collection::size).sum();
+        }
+
         @SuppressWarnings("unchecked")
         public <M extends Message<?>> void intercept(M message, InterceptionContext<M> context)
         {
@@ -1299,14 +1278,10 @@ public class DataResolverTest
                 Request request = (Request)message;
                 if (request.verb() == Verbs.WRITES.READ_REPAIR)
                 {
-                    List<Request<Mutation, EmptyPayload>> requests = repairsSent.get(message.to());
-                    if (requests == null)
-                    {
-                        requests = new ArrayList<>(1);
-                        repairsSent.put(message.to(), requests);
-                    }
+                    List<Request<Mutation, EmptyPayload>> requests = repairsSent.computeIfAbsent(message.to(), k -> new ArrayList<>(1));
                     requests.add((Request<Mutation, EmptyPayload>) message);
-                    context.drop(message);
+                    // Fake answering read repair so the tests don't timeout on waiting for read repairs
+                    context.responseCallback().accept(request.respond(EmptyPayload.instance));
                     return;
                 }
                 else if (request.verb().group() == Verbs.READS)

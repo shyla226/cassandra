@@ -63,7 +63,6 @@ public abstract class ResponseResolver<T>
 
     public abstract Flow<T> getData();
     public abstract Flow<T> resolve() throws DigestMismatchException;
-    public abstract Completable completeOnReadRepairAnswersReceived();
 
     /**
      * Compares received responses, potentially triggering a digest mismatch (for a digest resolver) and read-repairs

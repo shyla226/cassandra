@@ -21,7 +21,6 @@ import java.net.InetAddress;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.collect.Iterables;
 
@@ -43,9 +42,6 @@ import org.apache.cassandra.utils.flow.Flow;
 
 public class DataResolver extends ResponseResolver<FlowablePartition>
 {
-    @VisibleForTesting
-    final ReadRepairFuture repairResults = new ReadRepairFuture();
-
     DataResolver(ReadCommand command, ReadContext ctx, int maxResponseCount)
     {
         super(command, ctx, maxResponseCount);
@@ -64,9 +60,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
     public Completable compareResponses()
     {
         // We need to fully consume the results to trigger read repairs if appropriate
-        return FlowablePartitions.allRows(resolve())
-                                 .processToRxCompletable()
-                                 .andThen(completeOnReadRepairAnswersReceived());
+        return FlowablePartitions.allRows(resolve()) .processToRxCompletable();
     }
 
     public Flow<FlowablePartition> resolve()
@@ -110,7 +104,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
      * @return a completable that will complete when all the read repair answers have been received
      * or when a timeout expires.
      */
-    public Completable completeOnReadRepairAnswersReceived()
+    private Completable completeOnReadRepairAnswersReceived(ReadRepairFuture repairResults)
     {
         return Completable.create(subscriber -> repairResults.whenComplete((result, error) -> {
             if (error != null)
@@ -145,16 +139,24 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
                 results.set(i, withShortReadProtection(sources[i], results.get(i), mergedResultCounter));
         }
 
-        return FlowablePartitions.mergePartitions(results, command.nowInSec(), new RepairMergeListener(sources));
+        ReadRepairFuture repairResults = new ReadRepairFuture();
+        FlowablePartitions.MergeListener listener = new RepairMergeListener(sources, repairResults);
+
+        // Merge all results, then signal all read-repairs have been sent, and then wait for those repairs.
+        return Flow.concat(FlowablePartitions.mergePartitions(results, command.nowInSec(), listener)
+                                             .doOnComplete(repairResults::onAllRepairSent),
+                           completeOnReadRepairAnswersReceived(repairResults));
     }
 
     private class RepairMergeListener implements FlowablePartitions.MergeListener
     {
         private final InetAddress[] sources;
+        private final ReadRepairFuture repairResults;
 
-        private RepairMergeListener(InetAddress[] sources)
+        private RepairMergeListener(InetAddress[] sources, ReadRepairFuture repairResults)
         {
             this.sources = sources;
+            this.repairResults = repairResults;
         }
 
         public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, FlowableUnfilteredPartition[] versions)
@@ -503,7 +505,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
                         ctx.readObserver.onRepair(source, repair);
 
                     Request<Mutation, EmptyPayload> request = Verbs.WRITES.READ_REPAIR.newRequest(source, new Mutation(repairs[i]));
-                    MessagingService.instance().send(request, repairResults.newRepairMessageCallback());
+                    MessagingService.instance().send(request, repairResults.getRepairCallback());
                 }
             }
         }
