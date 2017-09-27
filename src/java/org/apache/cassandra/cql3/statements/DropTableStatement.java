@@ -46,7 +46,7 @@ public class DropTableStatement extends SchemaAlteringStatement
     {
         try
         {
-            state.checkKeyspacePermission(keyspace(), CorePermission.DROP);
+            state.checkTablePermission(keyspace(), columnFamily(), CorePermission.DROP);
         }
         catch (InvalidRequestException e)
         {

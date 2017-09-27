@@ -69,6 +69,7 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
     @Override
     public void checkAccess(QueryState state)
     {
+        // TODO it was always like this - but it feels weird to check for DROP permission on the keyspace here
         state.checkKeyspacePermission(functionName.keyspace, CorePermission.DROP);
     }
 

@@ -42,7 +42,7 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
     @Override
     public void checkAccess(QueryState state)
     {
-        state.checkAllKeyspacesPermission(CorePermission.DROP);
+        state.checkKeyspacePermission(keyspace, CorePermission.DROP);
     }
 
     public void validate(QueryState state) throws RequestValidationException
