@@ -602,7 +602,7 @@ listen_address: localhost
 # internode_authenticator: org.apache.cassandra.auth.AllowAllInternodeAuthenticator
 
 # Whether to start the native transport server.
-# The address on which the native transport is bound is defined by rpc_address.
+# The address on which the native transport is bound is defined by native_transport_address.
 start_native_transport: true
 # port for the CQL native transport to listen for clients on
 # For security reasons, you should not expose this port to the internet.  Firewall it if needed.
@@ -634,35 +634,35 @@ native_transport_port: 9042
 
 # The address or interface to bind the native transport server to.
 #
-# Set rpc_address OR rpc_interface, not both.
+# Set native_transport_address OR native_transport_interface, not both.
 #
-# Leaving rpc_address blank has the same effect as on listen_address
+# Leaving native_transport_address blank has the same effect as on listen_address
 # (i.e. it will be based on the configured hostname of the node).
 #
 # Note that unlike listen_address, you can specify 0.0.0.0, but you must also
-# set broadcast_rpc_address to a value other than 0.0.0.0.
+# set native_transport_broadcast_address to a value other than 0.0.0.0.
 #
 # For security reasons, you should not expose this port to the internet.  Firewall it if needed.
-rpc_address: localhost
+native_transport_address: localhost
 
-# Set rpc_address OR rpc_interface, not both. Interfaces must correspond
+# Set native_transport_address OR native_transport_interface, not both. Interfaces must correspond
 # to a single address, IP aliasing is not supported.
-# rpc_interface: eth0
+# native_transport_interface: eth0
 
 # If you choose to specify the interface by name and the interface has an ipv4 and an ipv6 address
-# you can specify which should be chosen using rpc_interface_prefer_ipv6. If false the first ipv4
+# you can specify which should be chosen using native_transport_interface_prefer_ipv6. If false the first ipv4
 # address will be used. If true the first ipv6 address will be used. Defaults to false preferring
 # ipv4. If there is only one address it will be selected regardless of ipv4/ipv6.
-# rpc_interface_prefer_ipv6: false
+# native_transport_interface_prefer_ipv6: false
 
-# RPC address to broadcast to drivers and other Cassandra nodes. This cannot
+# Native transport address to broadcast to drivers and other Cassandra nodes. This cannot
 # be set to 0.0.0.0. If left blank, this will be set to the value of
-# rpc_address. If rpc_address is set to 0.0.0.0, broadcast_rpc_address must
+# native_transport_address. If native_transport_address is set to 0.0.0.0, native_transport_broadcast_address must
 # be set.
-# broadcast_rpc_address: 1.2.3.4
+# native_transport_broadcast_address: 1.2.3.4
 
-# enable or disable keepalive on rpc/native connections
-rpc_keepalive: true
+# enable or disable keepalive on native connections
+native_transport_keepalive: true
 
 # Uncomment to set socket buffer size for internode communication
 # Note that when setting this, the buffer size is limited by net.core.wmem_max
@@ -759,7 +759,7 @@ sstable_preemptive_open_interval_in_mb: 50
 # Throttles all outbound streaming file transfers on this node to the
 # given total throughput in Mbps. This is necessary because Cassandra does
 # mostly sequential IO when streaming data during bootstrap or repair, which
-# can lead to saturating the network connection and degrading rpc performance.
+# can lead to saturating the network connection and degrading native transport performance.
 # When unset, the default is 200 Mbps or 25 MB/s.
 # stream_throughput_outbound_megabits_per_sec: 200
 

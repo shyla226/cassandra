@@ -47,6 +47,12 @@ Upgrading
 
 Deprecation
 -----------
+    - The following properties were renamed and are now deprecated before they are removed in the next major release:
+      - rpc_address -> native_transport_address
+      - rpc_interface -> native_transport_interface
+      - rpc_interface_prefer_ipv6 -> native_transport_interface_prefer_ipv6
+      - broadcast_rpc_address -> native_transport_broadcast_address
+      - rpc_keepalive -> native_transport_keepalive
     - Removed org.apache.cassandra.metrics.Table.{AntiCompactedBytes|NonAntiCompactedBytes} metrics.
     - Removed following properties from cassandra.yaml: concurrent_reads, concurrent_writes,
       concurrent_counter_writes, concurrent_materialized_view_writes, streaming_socket_timeout_in_ms

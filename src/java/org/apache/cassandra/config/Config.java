@@ -128,11 +128,11 @@ public class Config
     public boolean listen_on_broadcast_address = false;
     public String internode_authenticator;
 
-    public String rpc_address;
-    public String rpc_interface;
-    public boolean rpc_interface_prefer_ipv6 = false;
-    public String broadcast_rpc_address;
-    public boolean rpc_keepalive = true;
+    public String native_transport_address;
+    public String native_transport_interface;
+    public Boolean native_transport_interface_prefer_ipv6;
+    public String native_transport_broadcast_address;
+    public Boolean native_transport_keepalive;
     public int internode_send_buff_size_in_bytes = 0;
     public int internode_recv_buff_size_in_bytes = 0;
 
@@ -472,4 +472,15 @@ public class Config
 
         logger.info("Node configuration:[{}]", Joiner.on("; ").join(configMap.entrySet()));
     }
+
+    @Deprecated
+    public String rpc_address = null;
+    @Deprecated
+    public String rpc_interface = null;
+    @Deprecated
+    public Boolean rpc_interface_prefer_ipv6  = null; //= false;
+    @Deprecated
+    public String broadcast_rpc_address = null;
+    @Deprecated
+    public Boolean rpc_keepalive = null;// = true;
 }
