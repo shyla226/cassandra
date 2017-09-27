@@ -77,7 +77,7 @@ public class ServerConnection extends Connection
         }
 
         if (clientState.getUser() == null)
-            return Single.just(new QueryState(clientState, null));
+            return Single.just(new QueryState(clientState, request.getStreamId(), null));
 
         return DatabaseDescriptor.getAuthManager()
                                  .getUserRolesAndPermissions(clientState.getUser())
