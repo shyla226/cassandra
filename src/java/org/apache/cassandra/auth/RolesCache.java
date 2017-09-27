@@ -62,10 +62,12 @@ public class RolesCache extends AuthCache<RoleResource, Role> implements RolesCa
 
             for (Entry<RoleResource, Role> entry : roles.entrySet())
             {
-                map.put(entry.getKey(), entry.getValue());
-                map = collectRolesIfPresent(entry.getValue().memberOf, map);
-                if (map == null)
-                    return null;
+                if (map.put(entry.getKey(), entry.getValue()) == null) // Prevent recursive roles
+                {
+                    map = collectRolesIfPresent(entry.getValue().memberOf, map);
+                    if (map == null)
+                        return null;
+                }
             }
         }
         return map;
@@ -92,7 +94,7 @@ public class RolesCache extends AuthCache<RoleResource, Role> implements RolesCa
             for (Entry<RoleResource, Role> entry : roles.entrySet())
             {
                 Role role = entry.getValue();
-                if (map.put(entry.getKey(), role) == null)
+                if (map.put(entry.getKey(), role) == null) // Prevent recursive roles
                     collectRoles(role.memberOf, map);
             }
         }
