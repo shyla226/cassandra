@@ -370,7 +370,7 @@ public class AuthorizationProxyTest extends CQLTester
     {
         return PermissionSets.builder()
                              .addGranted(permission)
-                             .buildSingleton();
+                             .build();
     }
 
     private static Subject subject(String roleName)

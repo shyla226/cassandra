@@ -15,8 +15,6 @@ import java.util.concurrent.Future;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.auth.user.UserRolesAndPermissions;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -29,7 +27,6 @@ import org.apache.cassandra.utils.flow.RxThreads;
 import static java.util.Collections.unmodifiableMap;
 import static java.util.Collections.unmodifiableSet;
 
-import io.reactivex.Completable;
 import io.reactivex.Single;
 
 /**
@@ -365,13 +362,10 @@ public final class AuthManager
         invalidate(invalidation.roles);
     }
 
-    private Completable invalidateRoles(Collection<RoleResource> roles)
+    private void invalidateRoles(Collection<RoleResource> roles)
     {
         invalidate(roles);
-        Completable invalidationCompletable = Completable.fromRunnable(() -> pushRoleInvalidation(roles));
-        if (TPC.isTPCThread())
-            invalidationCompletable = RxThreads.subscribeOn(invalidationCompletable, StageManager.getScheduler(Stage.AUTHZ), TPCTaskType.AUTHORIZATION);
-        return invalidationCompletable;
+        pushRoleInvalidation(roles);
     }
 
     private void pushRoleInvalidation(Collection<RoleResource> roles)

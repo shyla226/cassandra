@@ -625,31 +625,81 @@ public abstract class UserRolesAndPermissions
         @Override
         public boolean hasGrantPermission(IResource resource, Permission perm)
         {
-            return resourceChainPermissions(resource).grantables.contains(perm);
+            for (PermissionSets permissions : getAllPermissionSetsFor(resource))
+            {
+                if (permissions.grantables.contains(perm))
+                    return true;
+            }
+            return false;
         }
 
         @Override
         protected void checkPermissionOnResourceChain(IResource resource, Permission perm)
         {
-            PermissionSets chainPermissions = resourceChainPermissions(resource);
-            if (!chainPermissions.granted.contains(perm))
+            boolean granted = false;
+            for (PermissionSets permissions : getAllPermissionSetsFor(resource))
+            {
+                granted |= permissions.granted.contains(perm);
+                if (permissions.restricted.contains(perm))
+                    throw new UnauthorizedException(String.format("Access for user %s on %s or any of its parents with %s permission is restricted",
+                                                                  getName(),
+                                                                  resource,
+                                                                  perm));
+            }
+
+            if (!granted)
                 throw new UnauthorizedException(String.format("User %s has no %s permission on %s or any of its parents",
                                                               getName(),
                                                               perm,
                                                               resource));
+        }
 
-            if (chainPermissions.restricted.contains(perm))
-                throw new UnauthorizedException(String.format("Access for user %s on %s or any of its parents with %s permission is restricted",
-                                                              getName(),
-                                                              resource,
-                                                              perm));
+        private List<PermissionSets> getAllPermissionSetsFor(IResource resource)
+        {
+            List<? extends IResource> chain = Resources.chain(resource);
+
+            List<PermissionSets> list = new ArrayList<>(chain.size() * (super.roles.size() + 1));
+
+            for (RoleResource roleResource : super.roles)
+            {
+                for (IResource res : chain)
+                {
+                    PermissionSets permissions = getPermissions(roleResource, res);
+                    if (permissions != null)
+                        list.add(permissions);
+                }
+            }
+
+            if (additionalPermissions != null)
+            {
+                for (IResource res : chain)
+                {
+                    PermissionSets permissions = additionalPermissions.get(res);
+                    if (permissions != null)
+                        list.add(permissions);
+                }
+            }
+
+            return list;
         }
 
         @Override
         protected boolean hasPermissionOnResourceChain(IResource resource, Permission perm)
         {
-            PermissionSets chainPermissions = resourceChainPermissions(resource);
-            return chainPermissions.granted.contains(perm) && !chainPermissions.restricted.contains(perm);
+            boolean granted = false;
+            for (PermissionSets permissions : getAllPermissionSetsFor(resource))
+            {
+                granted |= permissions.granted.contains(perm);
+                if (permissions.restricted.contains(perm))
+                    return false;
+            }
+            return granted;
+        }
+
+        private PermissionSets getPermissions(RoleResource roleResource, IResource res)
+        {
+            Map<IResource, PermissionSets> map = this.permissions.get(roleResource);
+            return map == null ? null : map.get(res);
         }
 
         @Override
@@ -783,24 +833,6 @@ public abstract class UserRolesAndPermissions
                 }
             }
             return permittedResources;
-        }
-
-        /**
-         * Returns a cummulated view of all granted, restricted and grantable permissions on
-         * the resource <em>chain</em> of the given resource for this user.
-         */
-        private PermissionSets resourceChainPermissions(IResource resource)
-        {
-            PermissionSets.Builder permissions = PermissionSets.builder();
-
-            List<? extends IResource> chain = Resources.chain(resource);
-            if (this.permissions != null)
-            {
-                for (RoleResource roleResource : super.roles)
-                    permissions.addChainPermissions(chain, this.permissions.get(roleResource));
-            }
-            permissions.addChainPermissions(chain, additionalPermissions);
-            return permissions.buildSingleton();
         }
 
         public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)

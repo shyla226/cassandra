@@ -169,7 +169,7 @@ public class CassandraAuthorizer implements IAuthorizer
             IResource resource = Resources.fromName(row.getString(RESOURCE));
             PermissionSets.Builder builder = PermissionSets.builder();
             addPermissionsFromRow(row, builder);
-            resourcePermissions.put(resource, builder.buildSingleton());
+            resourcePermissions.put(resource, builder.build());
         }
 
         return resourcePermissions;

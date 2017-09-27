@@ -6,15 +6,10 @@
 package org.apache.cassandra.auth;
 
 import java.util.EnumSet;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 import com.google.common.base.MoreObjects;
 
-import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.permission.Permissions;
 
 /**
@@ -23,8 +18,6 @@ import org.apache.cassandra.auth.permission.Permissions;
 public final class PermissionSets
 {
     public static final PermissionSets EMPTY = builder().build();
-    public static final PermissionSets GRANTED_MODIFY = builder().addGranted(CorePermission.MODIFY).buildSingleton();
-    public static final PermissionSets GRANTED_SELECT = builder().addGranted(CorePermission.SELECT).buildSingleton();
 
     /**
      * Immutable set of granted permissions.
@@ -128,19 +121,6 @@ public final class PermissionSets
 
     public static final class Builder
     {
-
-        private static final ConcurrentMap<PermissionSets, PermissionSets> singletons = new ConcurrentHashMap<>();
-
-        private static PermissionSets singletonOf(PermissionSets permissions)
-        {
-            PermissionSets singleton = singletons.get(permissions);
-            if (singleton == null)
-            {
-                singletons.put(permissions, singleton = permissions);
-            }
-            return singleton;
-        }
-
         private final Set<Permission> granted = Permissions.setOf();
         private final Set<Permission> restricted = Permissions.setOf();
         private final Set<Permission> grantables = Permissions.setOf();
@@ -231,27 +211,12 @@ public final class PermissionSets
 
         public PermissionSets build()
         {
+            if (granted.isEmpty() && restricted.isEmpty() && grantables.isEmpty())
+                return EMPTY;
+
             return new PermissionSets(Permissions.immutableSetOf(granted),
                                       Permissions.immutableSetOf(restricted),
                                       Permissions.immutableSetOf(grantables));
-        }
-
-        public PermissionSets buildSingleton()
-        {
-            return singletonOf(new PermissionSets(Permissions.immutableSetOf(granted),
-                                                  Permissions.immutableSetOf(restricted),
-                                                  Permissions.immutableSetOf(grantables)));
-        }
-
-        public void addChainPermissions(List<? extends IResource> chain, Map<IResource, PermissionSets> resourcePermissionSets)
-        {
-            if (resourcePermissionSets != null)
-                for (IResource res : chain)
-                {
-                    PermissionSets roleResourcePermissions = resourcePermissionSets.get(res);
-                    if (roleResourcePermissions != null)
-                        add(roleResourcePermissions);
-                }
         }
     }
 }
