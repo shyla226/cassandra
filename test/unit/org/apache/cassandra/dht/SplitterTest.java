@@ -17,16 +17,17 @@
  */
 package org.apache.cassandra.dht;
 
+import static org.junit.Assert.*;
+
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.junit.Test;
-
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 public class SplitterTest
 {
@@ -65,6 +66,23 @@ public class SplitterTest
         randomSplitTestVNodes(ByteOrderedPartitioner.instance);
     }
 
+    @Test
+    public void randomSplitTestRandomPartitioner()
+    {
+        randomSplitTest(new RandomPartitioner());
+    }
+
+    @Test
+    public void randomSplitTestMurmur3Partitioner()
+    {
+        randomSplitTest(new Murmur3Partitioner());
+    }
+
+    @Test
+    public void randomSplitTestByteOrderedPartitioner()
+    {
+        randomSplitTest(ByteOrderedPartitioner.instance);
+    }
 
     public void randomSplitTestNoVNodes(IPartitioner partitioner)
     {
@@ -72,9 +90,45 @@ public class SplitterTest
         Random r = new Random();
         for (int i = 0; i < 10000; i++)
         {
-            List<Range<Token>> localRanges = generateLocalRanges(1, r.nextInt(4)+1, r, partitioner);
-            List<Token> boundaries = splitter.splitOwnedRanges(r.nextInt(9) + 1, localRanges, false);
-            assertTrue("boundaries = "+boundaries+" ranges = "+localRanges, assertRangeSizeEqual(localRanges, boundaries, partitioner, true));
+            int parts = r.nextInt(9) + 1;
+            boolean includeMin = r.nextBoolean();
+            boolean includeMax = r.nextBoolean();
+
+            List<Range<Token>> localRanges = generateLocalRanges(1,
+                                                                 r.nextInt(4) + 1,
+                                                                 r,
+                                                                 partitioner,
+                                                                 includeMin,
+                                                                 includeMax);
+            List<Token> boundaries = splitter.splitOwnedRanges(parts, localRanges, false);
+            assertEquals("localRange = " + localRanges, parts, boundaries.size());
+
+            assertTrue("boundaries = " + boundaries + " ranges = " + localRanges,
+                       assertRangeSizeEqual(localRanges, boundaries, partitioner, true));
+        }
+    }
+
+    public void randomSplitTest(IPartitioner partitioner)
+    {
+        Splitter splitter = partitioner.splitter().get();
+
+        Random r = new Random();
+        for (int i = 0; i < 10000; i++)
+        {
+            int numTokens = 1 + r.nextInt(32);
+            int rf = r.nextInt(4) + 1;
+            int parts = 1 + r.nextInt(32);
+            boolean includeMin = r.nextBoolean();
+            boolean includeMax = r.nextBoolean();
+
+            List<Range<Token>> localRanges = generateLocalRanges(numTokens, rf, r, partitioner, includeMin, includeMax);
+
+            List<Token> boundaries = splitter.splitOwnedRanges(parts, localRanges, false);
+
+            assertTrue("numTokens = " + numTokens + " parts = " + parts + " boundaries = " + boundaries.size(),
+                       parts == boundaries.size());
+            assertTrue("boundaries = " + boundaries + " ranges = " + localRanges,
+                       assertRangeSizeEqual(localRanges, boundaries, partitioner, true));
         }
     }
 
@@ -88,24 +142,34 @@ public class SplitterTest
             int numTokens = 172 + r.nextInt(128);
             int rf = r.nextInt(4) + 2;
             int parts = r.nextInt(5)+1;
-            List<Range<Token>> localRanges = generateLocalRanges(numTokens, rf, r, partitioner);
+            boolean includeMin = r.nextBoolean();
+            boolean includeMax = r.nextBoolean();
+            List<Range<Token>> localRanges = generateLocalRanges(numTokens, rf, r, partitioner, includeMin, includeMax);
             List<Token> boundaries = splitter.splitOwnedRanges(parts, localRanges, true);
             if (!assertRangeSizeEqual(localRanges, boundaries, partitioner, false))
                 fail(String.format("Could not split %d tokens with rf=%d into %d parts (localRanges=%s, boundaries=%s)", numTokens, rf, parts, localRanges, boundaries));
         }
     }
 
-    private boolean assertRangeSizeEqual(List<Range<Token>> localRanges, List<Token> tokens, IPartitioner partitioner, boolean splitIndividualRanges)
+    private boolean assertRangeSizeEqual(List<Range<Token>> localRanges, List<Token> tokens, IPartitioner partitioner, 
+                                         boolean splitIndividualRanges)
     {
         Token start = partitioner.getMinimumToken();
         List<Double> splits = new ArrayList<>();
 
         for (int i = 0; i < tokens.size(); i++)
         {
+            if (i < tokens.size() - 1) // sorted
+                assert tokens.get(i).compareTo(tokens.get(i + 1)) < 0;
             Token end = tokens.get(i);
             splits.add(sumOwnedBetween(localRanges, start, end, splitIndividualRanges));
             start = end;
         }
+
+        // For byte-order, the difference could be large. There is no real fixed max for byte-order
+        if (partitioner.preservesOrder())
+            return true;
+
         // when we dont need to keep around full ranges, the difference is small between the partitions
         double delta = splitIndividualRanges ? 0.001 : 0.2;
         boolean allBalanced = true;
@@ -141,12 +205,28 @@ public class SplitterTest
         return sum;
     }
 
-    private static List<Range<Token>> generateLocalRanges(int numTokens, int rf, Random r, IPartitioner partitioner)
+    private static List<Range<Token>> generateLocalRanges(int numTokens,
+                                                          int rf,
+                                                          Random r,
+                                                          IPartitioner partitioner,
+                                                          boolean includeMin,
+                                                          boolean includeMax)
     {
         int localTokens = numTokens * rf;
         List<Token> randomTokens = new ArrayList<>();
 
-        for (int i = 0; i < localTokens * 2; i++)
+        int i = 0;
+        if (includeMin)
+        {
+            i++;
+            randomTokens.add(partitioner.getMinimumToken());
+        }
+        if (includeMax)
+        {
+            i++;
+            randomTokens.add(partitioner.getMaximumToken());
+        }
+        for (; i < localTokens * 2; i++)
         {
             Token t = partitioner.getRandomToken(r);
             randomTokens.add(t);
@@ -155,7 +235,7 @@ public class SplitterTest
         Collections.sort(randomTokens);
 
         List<Range<Token>> localRanges = new ArrayList<>(localTokens);
-        for (int i = 0; i < randomTokens.size() - 1; i++)
+        for (i = 0; i < randomTokens.size() - 1; i++)
         {
             assert randomTokens.get(i).compareTo(randomTokens.get(i+1)) < 0;
             localRanges.add(new Range<>(randomTokens.get(i), randomTokens.get(i+1)));

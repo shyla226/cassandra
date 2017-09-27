@@ -495,9 +495,7 @@ public class Memtable implements Comparable<Memtable>
 
         for (MemtableSubrange partitionSubrange : this.subranges)
         {
-            SortedMap<PartitionPosition, AtomicBTreePartition> submap = from.compareTo(to) <= 0
-                    ? partitionSubrange.data.subMap(from, to)
-                    : partitionSubrange.data.subMap(to, from);
+            SortedMap<PartitionPosition, AtomicBTreePartition> submap = partitionSubrange.data.subMap(from, to);
             // TreeMap returns these in normal sorted order
             if (!submap.isEmpty())
             {

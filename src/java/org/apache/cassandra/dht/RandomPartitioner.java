@@ -65,6 +65,7 @@ public class RandomPartitioner implements IPartitioner
 
     public Token split(Token ltoken, Token rtoken, double ratioToLeft)
     {
+        assert ratioToLeft >= 0.0 && ratioToLeft <= 1.0;
         BigDecimal left = ltoken.equals(MINIMUM) ? BigDecimal.ZERO : new BigDecimal(((BigIntegerToken)ltoken).token),
                    right = rtoken.equals(MINIMUM) ? BigDecimal.ZERO : new BigDecimal(((BigIntegerToken)rtoken).token),
                    ratio = BigDecimal.valueOf(ratioToLeft);

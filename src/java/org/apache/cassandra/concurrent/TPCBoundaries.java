@@ -64,7 +64,9 @@ public class TPCBoundaries
         IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
         assert partitioner.splitter().isPresent() : partitioner.getClass().getName() + " doesn't support cpu boundary splitting";
         Splitter splitter = partitioner.splitter().get();
-        List<Token> boundaries = splitter.splitOwnedRanges(numCores, localRanges, DatabaseDescriptor.getNumTokens() > 1);
+        List<Token> boundaries = splitter.splitOwnedRanges(numCores,
+                                                           localRanges,
+                                                           false);
         // Note that boundaries will contain up-to numCores tokens (it can contain less in very rare cases, but will contain
         // at least 1) and that the last token it always partitioner.getMaximumToken(). So in practice we want to use those
         // token we leave out the last one.

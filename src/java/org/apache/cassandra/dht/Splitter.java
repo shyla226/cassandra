@@ -61,7 +61,8 @@ public class Splitter
             while (sum + currentRangeWidth >= perPart)
             {
                 double withinRangeBoundary = perPart - sum;
-                left = partitioner.split(left, r.right, withinRangeBoundary / currentRangeWidth);
+                double ratio = withinRangeBoundary / currentRangeWidth;
+                left = partitioner.split(left, r.right, Math.min(ratio, 1.0));
                 boundaries.add(left);
                 currentRangeWidth = currentRangeWidth - withinRangeBoundary;
                 sum = 0;

@@ -181,7 +181,7 @@ class ReplicationAwareTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
                 prev = curr;
             }
             assert t1 != null;
-            Token t = partitioner.split(t1, t2, minRatio + potentialRatioGrowth * random.nextDouble());
+            Token t = partitioner.split(t1, t2, Math.min(1.0, minRatio + potentialRatioGrowth * random.nextDouble()));
             tokens.add(t);
             sortedTokens.put(t, newUnit);
             unitToTokens.put(newUnit, t);

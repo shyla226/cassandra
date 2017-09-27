@@ -73,6 +73,7 @@ public class LengthPartitioner implements IPartitioner
 
     public Token split(Token tleft, Token tright, double ratio)
     {
+        assert ratio >= 0.0 && ratio <= 1.0;
         BigIntegerToken ltoken = (BigIntegerToken) tleft;
         BigIntegerToken rtoken = (BigIntegerToken) tright;
 

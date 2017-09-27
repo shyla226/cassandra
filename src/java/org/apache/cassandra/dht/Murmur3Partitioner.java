@@ -86,6 +86,7 @@ public class Murmur3Partitioner implements IPartitioner
 
     public Token split(Token lToken, Token rToken, double ratioToLeft)
     {
+        assert ratioToLeft >= 0.0 && ratioToLeft <= 1.0;
         BigDecimal l = BigDecimal.valueOf(((LongToken) lToken).token),
                    r = BigDecimal.valueOf(((LongToken) rToken).token),
                    ratio = BigDecimal.valueOf(ratioToLeft);

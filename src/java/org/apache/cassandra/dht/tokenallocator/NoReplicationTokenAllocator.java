@@ -212,7 +212,7 @@ public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
                 {
                     slice = MAX_TAKEOVER_RATIO;
                 }
-                token = partitioner.split(wt.value.prevInRing().token, wt.value.token, slice);
+                token = partitioner.split(wt.value.prevInRing().token, wt.value.token, Math.min(1.0, slice));
 
                 //Token selected, now change all data
                 sortedTokens.put(token, newUnit);

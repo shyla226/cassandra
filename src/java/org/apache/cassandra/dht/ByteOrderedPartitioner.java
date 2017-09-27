@@ -144,7 +144,9 @@ public class ByteOrderedPartitioner implements IPartitioner
             while (shift < other.length)
                 sz += Math.scalb(other[shift] & 0xFF, ++shift * -8);
             // Address wraparound.
-            if (sz <= 0.0)
+            // Note: sz may be 0 for different tokens if one adds zeroes at the end of the other. In that case we do
+            // an additional comparison to check for wraparound (APOLLO-934)
+            if (sz < 0.0 || sz == 0.0 && token.length >= other.length)
                 sz += 1;
 
             return sz;
@@ -205,20 +207,29 @@ public class ByteOrderedPartitioner implements IPartitioner
 
     public Token split(Token lt, Token rt, double ratioToLeft)
     {
+        assert ratioToLeft >= 0.0 && ratioToLeft <= 1.0;
+        // Explicitly check the boundary cases as they will not work with the differentiation check below.
+        if (ratioToLeft == 0.0)
+            return lt;
+        if (ratioToLeft == 1.0)
+            return rt;
+
         BytesToken ltoken = (BytesToken) lt;
         BytesToken rtoken = (BytesToken) rt;
 
         int sigbytes = Math.max(ltoken.token.length, rtoken.token.length);
-        BigDecimal left = new BigDecimal(bigForBytes(ltoken.token, sigbytes));
-        BigDecimal right = new BigDecimal(bigForBytes(rtoken.token, sigbytes));
+        BigInteger leftBytes = bigForBytes(ltoken.token, sigbytes);
+        BigDecimal left = new BigDecimal(leftBytes);
+        BigInteger rightBytes = bigForBytes(rtoken.token, sigbytes);
+        BigDecimal right = new BigDecimal(rightBytes);
 
         BigDecimal ratio = BigDecimal.valueOf(ratioToLeft);
 
-        BigInteger newToken;
+        BigDecimal splitPoint;
 
         if (left.compareTo(right) < 0)
         {
-            newToken = right.subtract(left).multiply(ratio).add(left).toBigInteger();
+            splitPoint = right.subtract(left).multiply(ratio).add(left);
         }
         else
         {
@@ -226,8 +237,20 @@ public class ByteOrderedPartitioner implements IPartitioner
             BigDecimal max = new BigDecimal(maxVal);
             // wrapping case
             // L + ((R - min) + (max - L)) * ratio
+            splitPoint = max.add(right).subtract(left).multiply(ratio).add(left);
+            if (splitPoint.compareTo(max) >= 0)
+                splitPoint = splitPoint.subtract(max);
+        }
 
-            newToken = max.add(right).subtract(left).multiply(ratio).add(left).toBigInteger().mod(maxVal);
+        // Make sure we have enough precision to differentiate the result from the two sources
+        BigInteger newToken = splitPoint.toBigInteger();
+        while (newToken.equals(leftBytes) || newToken.equals(rightBytes))
+        {
+            ++sigbytes;
+            leftBytes = leftBytes.shiftLeft(8);
+            rightBytes = rightBytes.shiftLeft(8);
+            splitPoint = splitPoint.multiply(BigDecimal.valueOf(256));
+            newToken = splitPoint.toBigInteger();
         }
 
         return new BytesToken(bytesForBig(newToken, sigbytes, false));
