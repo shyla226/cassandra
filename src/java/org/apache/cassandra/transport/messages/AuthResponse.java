@@ -88,7 +88,7 @@ public class AuthResponse extends Message.Request
                         AuthenticatedUser user = negotiator.getAuthenticatedUser();
                         // As the user is not logged in yet we know that no Auth data has to be fetched and that
                         // we can safely call blockingGet()
-                        queryState.blockingGet().getClientState().login(user);
+                        queryState.blockingGet().getClientState().login(user).blockingGet();
                         AuthMetrics.instance.markSuccess();
                         // authentication is complete, send a ready message to the client
                         return new AuthSuccess(challenge);

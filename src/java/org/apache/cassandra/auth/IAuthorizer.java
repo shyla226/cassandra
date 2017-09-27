@@ -26,13 +26,14 @@ import org.apache.cassandra.exceptions.*;
  */
 public interface IAuthorizer
 {
-    /**
-     * Return this {@code IAuthenticator} name.
-     * @return this {@code IAuthenticator} name.
-     */
-    default String getName()
+    default <T extends IAuthorizer> T implementation()
     {
-        return getClass().getName();
+        return (T) this;
+    }
+
+    default <T extends IAuthorizer> boolean isImplementationOf(Class<T> implClass)
+    {
+        return implClass.isAssignableFrom(implementation().getClass());
     }
 
     /**

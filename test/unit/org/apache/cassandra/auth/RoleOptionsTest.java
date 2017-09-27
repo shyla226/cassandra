@@ -73,7 +73,7 @@ public class RoleOptionsTest
         setupRoleManager(roleManager);
         RoleOptions opts = new RoleOptions();
         opts.setOption(IRoleManager.Option.PASSWORD, "test");
-        assertInvalidOptions(opts, String.format("%s doesn't support PASSWORD", roleManager.getName()));
+        assertInvalidOptions(opts, String.format("%s doesn't support PASSWORD", roleManager.implementation().getClass().getName()));
     }
 
     @Test

@@ -20,19 +20,21 @@ package org.apache.cassandra.auth;
 import java.net.InetAddress;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 public interface IAuthenticator
 {
-    /**
-     * Return this {@code IAuthenticator} name.
-     * @return this {@code IAuthenticator} name.
-     */
-    default String getName()
+    default <T extends IAuthenticator> T implementation()
     {
-        return getClass().getName();
+        return (T) this;
+    }
+
+    default <T extends IAuthenticator> boolean isImplementationOf(Class<T> implClass)
+    {
+        return implClass.isAssignableFrom(implementation().getClass());
     }
 
     /**

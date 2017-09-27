@@ -402,9 +402,9 @@ public final class AuthManager
         }
 
         @Override
-        public String getName()
+        public <T extends IRoleManager> T implementation()
         {
-            return roleManager.getName();
+            return (T) roleManager;
         }
 
         @Override
@@ -574,9 +574,9 @@ public final class AuthManager
         }
 
         @Override
-        public String getName()
+        public <T extends IAuthorizer> T implementation()
         {
-            return authorizer.getName();
+            return (T) authorizer;
         }
 
         @Override

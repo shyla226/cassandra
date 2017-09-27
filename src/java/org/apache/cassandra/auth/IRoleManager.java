@@ -45,13 +45,14 @@ public interface IRoleManager
         SUPERUSER, PASSWORD, LOGIN, OPTIONS
     }
 
-    /**
-     * Return this {@code IRoleManager} name.
-     * @return this {@code IRoleManager} name.
-     */
-    default String getName()
+    default <T extends IRoleManager> T implementation()
     {
-        return getClass().getName();
+        return (T) this;
+    }
+
+    default <T extends IRoleManager> boolean isImplementationOf(Class<T> implClass)
+    {
+        return implClass.isAssignableFrom(implementation().getClass());
     }
 
     /**

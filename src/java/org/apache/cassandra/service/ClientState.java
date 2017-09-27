@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryHandler;
@@ -348,15 +349,24 @@ public class ClientState
     /**
      * Attempts to login the given user.
      */
-    public void login(AuthenticatedUser user) throws AuthenticationException
+    public Single<Boolean> login(AuthenticatedUser user) throws AuthenticationException
     {
+        if (user.isAnonymous())
+        {
+            this.user = user;
+            return Single.just(true);
+        }
+
         // Login privilege is not inherited via granted roles, so just
         // verify that the role with the credentials that were actually
         // supplied has it
-        if (user.isAnonymous() || DatabaseDescriptor.getAuthManager().canLogin(user.getLoginRole()).blockingGet())
-            this.user = user;
-        else
-            throw new AuthenticationException(String.format("%s is not permitted to log in", user.getName()));
+        return DatabaseDescriptor.getAuthManager().canLogin(user.getLoginRole()).map(r -> {
+            if (r)
+                this.user = user;
+            else
+                throw new AuthenticationException(String.format("%s is not permitted to log in", user.getName()));
+            return r;
+        });
     }
 
     public AuthenticatedUser getUser()

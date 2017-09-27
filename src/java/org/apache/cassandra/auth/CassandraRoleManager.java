@@ -124,10 +124,10 @@ public class CassandraRoleManager implements IRoleManager
 
     public CassandraRoleManager()
     {
-        supportedOptions = DatabaseDescriptor.getAuthenticator().getClass() == PasswordAuthenticator.class
+        supportedOptions = DatabaseDescriptor.getAuthenticator().isImplementationOf(PasswordAuthenticator.class)
                          ? ImmutableSet.of(Option.LOGIN, Option.SUPERUSER, Option.PASSWORD)
                          : ImmutableSet.of(Option.LOGIN, Option.SUPERUSER);
-        alterableOptions = DatabaseDescriptor.getAuthenticator().getClass().equals(PasswordAuthenticator.class)
+        alterableOptions = DatabaseDescriptor.getAuthenticator().isImplementationOf(PasswordAuthenticator.class)
                          ? ImmutableSet.of(Option.PASSWORD)
                          : ImmutableSet.of();
     }
@@ -283,7 +283,7 @@ public class CassandraRoleManager implements IRoleManager
         return getRole(role);
     }
 
-    public ImmutableSet<RoleResource> filterExistingRoleNames(List<String> roleNames)
+    public Set<RoleResource> filterExistingRoleNames(List<String> roleNames)
     {
         List<ByteBuffer> params = Collections.singletonList(ListType.getInstance(UTF8Type.instance, false)
                                                                     .getSerializer()
@@ -292,11 +292,11 @@ public class CassandraRoleManager implements IRoleManager
                                                                                    QueryOptions.forInternalCalls(consistencyForRole("-"), params),
                                                                                    System.nanoTime()));
 
-        ImmutableSet.Builder<RoleResource> roles = ImmutableSet.builder();
+        Set<RoleResource> roles = new HashSet<>(roleNames.size(), 1.0f);
         for (UntypedResultSet.Row row : UntypedResultSet.create(rows.result))
             roles.add(RoleResource.role(row.getString("role")));
 
-        return roles.build();
+        return roles;
     }
 
     public boolean isExistingRole(RoleResource role)
