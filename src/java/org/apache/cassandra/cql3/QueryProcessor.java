@@ -471,39 +471,23 @@ public class QueryProcessor implements QueryHandler
 
     public static Single<ResultMessage.Prepared> prepare(String queryString, QueryState state)
     {
-        return prepareWithStatement(queryString, state);
+        return prepare(queryString, state, true);
     }
 
-    public static Single<ResultMessage.Prepared> prepareWithStatement(String queryString, QueryState state)
+    public static Single<ResultMessage.Prepared> prepare(String queryString,
+                                                         QueryState state,
+                                                         boolean storeStatementOnDisk)
     {
-        ResultMessage.Prepared existing = getStoredPreparedStatement(queryString, state.getClientState().getRawKeyspace());
+        final String rawKeyspace = state.getClientState().getRawKeyspace();
+        ResultMessage.Prepared existing = getStoredPreparedStatement(queryString, rawKeyspace);
         if (existing != null)
             return Single.just(existing);
 
-        return Single.defer(() -> {
-            try
-            {
-                return prepareWithStatementInner(queryString, state, true);
-            }
-            catch (TPCUtils.WouldBlockException ex)
-            {
-                if (logger.isTraceEnabled())
-                    logger.trace("Failed to execute blocking operation, retrying on io schedulers");
-
-                Single<ResultMessage.Prepared> single = Single.defer(() -> prepareWithStatementInner(queryString, state, true));
-                return RxThreads.subscribeOnIo(single, TPCTaskType.EXECUTE_STATEMENT);
-            }
-        });
-    }
-
-    private static Single<ResultMessage.Prepared> prepareWithStatementInner(String queryString, QueryState state,
-                                                                            boolean store)
-    {
         ParsedStatement.Prepared prepared = getStatement(queryString, state);
         prepared.rawCQLStatement = queryString;
         validateBindingMarkers(prepared);
 
-        return storePreparedStatement(queryString, state.getClientState().getRawKeyspace(), prepared, store);
+        return storePreparedStatement(queryString, rawKeyspace, prepared, storeStatementOnDisk);
     }
 
     public static void validateBindingMarkers(ParsedStatement.Prepared prepared)
@@ -533,9 +517,10 @@ public class QueryProcessor implements QueryHandler
         return new ResultMessage.Prepared(statementId, existing);
     }
 
-    private static Single<ResultMessage.Prepared> storePreparedStatement(String queryString, String keyspace,
-                                                                         ParsedStatement.Prepared prepared, boolean store)
-    throws InvalidRequestException
+    private static Single<ResultMessage.Prepared> storePreparedStatement(String queryString,
+                                                                         String keyspace,
+                                                                         ParsedStatement.Prepared prepared,
+                                                                         boolean storeStatementOnDisk)
     {
         // Concatenate the current keyspace so we don't mix prepared statements between keyspace (#5352).
         // (if the keyspace is null, queryString has to have a fully-qualified keyspace so it's fine.
@@ -550,7 +535,7 @@ public class QueryProcessor implements QueryHandler
         preparedStatements.put(statementId, prepared);
         ResultMessage.Prepared result = new ResultMessage.Prepared(statementId, prepared);
 
-        if (!store)
+        if (!storeStatementOnDisk)
             return Single.just(result);
 
         Single<UntypedResultSet> observable = SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
