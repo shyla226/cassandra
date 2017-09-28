@@ -168,7 +168,7 @@ public class Scrubber implements Closeable
         boolean completed = false;
         outputHandler.output(String.format("Scrubbing %s (%s)", sstable, FBUtilities.prettyPrintMemory(dataFile.length())));
 
-        try (SSTableRewriter writer = SSTableRewriter.construct(cfs, transaction, false, sstable.maxDataAge))
+        try (SSTableRewriter writer = SSTableRewriter.constructWithoutEarlyOpening(transaction, false, sstable.maxDataAge))
         {
             if (indexIterator != null)
             {
