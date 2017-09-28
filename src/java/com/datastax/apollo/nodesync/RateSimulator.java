@@ -45,7 +45,7 @@ import org.apache.cassandra.utils.units.Units;
  * too low (see {@link NodeSyncService}), but is also expose to users through nodetool ({@link RateSimulatorCmd}) in
  * order to help with rate configuration.
  * <p>
- * To perform its computation, the simulator rely on the {@link Info} class that groups the information on tables
+ * To perform its computation, the simulator relies on the {@link Info} class that groups the information on tables
  * necessary to the simulations. Note that those information intrinsically represents a single replica, and as such
  * the simulator simulate rates for that replica. However, as in most clusters, data is evenly distributed among
  * replica, the rate can generally be the same on all replica.

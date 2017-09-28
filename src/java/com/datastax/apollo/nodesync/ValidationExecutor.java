@@ -5,26 +5,17 @@
  */
 package com.datastax.apollo.nodesync;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Set;
-import java.util.SortedSet;
-import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
-import com.google.common.base.Joiner;
 import com.google.common.math.DoubleMath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,17 +25,10 @@ import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.concurrent.TracingAwareExecutorService;
 import org.apache.cassandra.config.NodeSyncConfig;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.schema.NodeSyncParams;
 import org.apache.cassandra.utils.collection.History;
 import org.apache.cassandra.utils.units.RateUnit;
-import org.apache.cassandra.utils.units.RateValue;
-import org.apache.cassandra.utils.units.SizeUnit;
-import org.apache.cassandra.utils.units.SizeValue;
-import org.apache.cassandra.utils.units.TimeValue;
 import org.apache.cassandra.utils.units.Units;
 
 /**

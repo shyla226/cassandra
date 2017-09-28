@@ -133,7 +133,7 @@ public interface NodeSyncServiceMBean
     /**
      * Returns the serialized-for-JMX information on tables required by the rate simulator.
      * <p>
-     * This include, for every NodeSync-enabled table on the node (or all table if {@code includeAllTables} is true),
+     * This includes, for every NodeSync-enabled table on the node (or all table if {@code includeAllTables} is true),
      * the table replication factor, data size and NodeSync deadline target. The information is build using
      * {@link RateSimulator.Info#compute} and serialized for JMX using {@link RateSimulator.Info#toJMX()}.
      *

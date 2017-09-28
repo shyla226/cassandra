@@ -39,8 +39,8 @@ abstract class NodeSyncHelpers
 
     // For unit testing, we sometime want to fake the size on disk of tables, as well as the local ranges of a keyspace
     // (some NodeSync unit tests only depend on those parameters and it's easier to provide it that way than to go
-    // through the painful setup that would yield the same results). This what the follow static variables allow us
-    // to achieve.
+    // through the painful setup that would yield the same results). This is what the following static variables allow
+    // us to achieve.
 
     private static final ToLongFunction<ColumnFamilyStore> DEFAULT_TABLE_SIZE_PROVIDER = t -> t.getMemtablesLiveSize() + t.metric.liveDiskSpaceUsed.getCount();
     private static final Function<String, Collection<Range<Token>>> DEFAULT_LOCAL_RANGES_PROVIDER = StorageService.instance::getLocalRanges;
