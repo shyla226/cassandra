@@ -113,6 +113,14 @@ public class TPCRunnable implements Runnable
     public static TPCRunnable wrap(Runnable runnable,
                                    ExecutorLocals locals,
                                    TPCTaskType defaultStage,
+                                   StagedScheduler scheduler)
+    {
+        return wrap(runnable, locals, defaultStage, scheduler.metricsCoreId());
+    }
+
+    public static TPCRunnable wrap(Runnable runnable,
+                                   ExecutorLocals locals,
+                                   TPCTaskType defaultStage,
                                    int defaultCore)
     {
         if (runnable instanceof TPCRunnable)

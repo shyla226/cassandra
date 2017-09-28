@@ -40,6 +40,11 @@ public interface TPCEventLoop extends EventLoop
         return thread().coreId();
     }
 
+    default boolean canExecuteImmediately(TPCRunnable runnable)
+    {
+        return false;
+    }
+
     @Override
     public TPCEventLoopGroup parent();
 }

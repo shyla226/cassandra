@@ -19,7 +19,6 @@
 package org.apache.cassandra.utils.flow;
 
 import io.reactivex.Scheduler;
-import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 
@@ -63,6 +62,6 @@ public interface TaggedRunnable extends Runnable
 
     static int scheduledOnCore(TaggedRunnable runnable)
     {
-        return runnable.scheduledOn() instanceof TPCScheduler ? ((TPCScheduler)runnable.scheduledOn()).coreId() : TPC.getNumCores();
+        return TPCScheduler.coreIdOf(runnable.scheduledOn());
     }
 }

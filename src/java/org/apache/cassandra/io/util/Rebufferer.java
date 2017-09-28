@@ -99,7 +99,7 @@ public interface Rebufferer extends ReaderFileProxy
             else
             {
                 //Track the ThreadLocals
-                Runnable wrappedOnReady = new TPCRunnable(onReady, ExecutorLocals.create(), TPCTaskType.READ_DISK_ASYNC, scheduler.coreId());
+                Runnable wrappedOnReady = TPCRunnable.wrap(onReady, ExecutorLocals.create(), TPCTaskType.READ_DISK_ASYNC, scheduler);
 
                 asyncBuffer.thenRunAsync(wrappedOnReady, scheduler.getExecutor())
                             .exceptionally(onError);

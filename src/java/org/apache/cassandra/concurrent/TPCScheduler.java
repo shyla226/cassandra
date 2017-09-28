@@ -41,12 +41,14 @@ public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
         super(eventLoop);
     }
 
-    public void execute(Runnable runnable, ExecutorLocals locals, TPCTaskType stage)
+    @Override
+    public void execute(TPCRunnable runnable)
     {
-        eventLoop.execute(new TPCRunnable(runnable,
-                                          locals,
-                                          stage,
-                                          coreId()));
+        // we can't immediately execute pendable tasks if we are at the queue limit
+        if (eventLoop.canExecuteImmediately(runnable))
+            runnable.run();
+        else
+            eventLoop.execute(runnable);
     }
 
     @Override
@@ -82,6 +84,12 @@ public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
     public int coreId()
     {
         return thread().coreId();
+    }
+
+    @Override
+    public int metricsCoreId()
+    {
+        return coreId();
     }
 
     public static int coreIdOf(Scheduler scheduler)

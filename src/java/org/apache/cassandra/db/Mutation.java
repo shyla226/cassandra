@@ -23,11 +23,11 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 import io.reactivex.Completable;
+import org.apache.cassandra.concurrent.Schedulable;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.Scheduleable;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -51,7 +51,7 @@ import org.apache.cassandra.utils.versioning.Versioned;
 
 // TODO convert this to a Builder pattern instead of encouraging M.add directly,
 // which is less-efficient since we have to keep a mutable HashMap around
-public class Mutation implements IMutation, Scheduleable
+public class Mutation implements IMutation, Schedulable
 {
     /**
      * The raw serializer is used for local serialization (commit log, hints, schema), we need to expose

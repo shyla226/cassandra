@@ -37,7 +37,7 @@ import io.reactivex.SingleSource;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.Scheduleable;
+import org.apache.cassandra.concurrent.Schedulable;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -58,7 +58,7 @@ import org.apache.cassandra.utils.flow.RxThreads;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
-public class CounterMutation implements IMutation, Scheduleable
+public class CounterMutation implements IMutation, Schedulable
 {
     public static final Versioned<WriteVersion, Serializer<CounterMutation>> serializers = WriteVersion.versioned(CounterMutationSerializer::new);
 

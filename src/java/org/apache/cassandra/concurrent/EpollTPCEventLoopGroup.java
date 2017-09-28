@@ -287,6 +287,20 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         }
 
         @Override
+        public boolean canExecuteImmediately(TPCRunnable task)
+        {
+            if (coreId() != TPC.getCoreId())
+                return false;
+            if (!task.isPendable())
+                return true;
+            if (!pendingQueue.isEmpty())
+                return false;
+            if (queue.size() >= metrics.maxQueueSize())
+                return false;
+            return true;
+        }
+
+        @Override
         protected void addTask(Runnable task)
         {
             if (task instanceof TPCRunnable)

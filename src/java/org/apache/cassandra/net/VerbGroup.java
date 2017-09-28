@@ -28,7 +28,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.concurrent.ExecutorSupplier;
-import org.apache.cassandra.concurrent.Scheduleable;
+import org.apache.cassandra.concurrent.Schedulable;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
@@ -150,8 +150,8 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
 
     private static <T> ExecutorSupplier<T> maybeGetRequestExecutor(Class<T> requestClass, Stage defaultStage)
     {
-        if (Scheduleable.class.isAssignableFrom(requestClass))
-            return (p) -> ((Scheduleable)p).getOperationExecutor();
+        if (Schedulable.class.isAssignableFrom(requestClass))
+            return (p) -> ((Schedulable)p).getOperationExecutor();
 
         return defaultStage == null ? null : (p) -> StageManager.getStage(defaultStage);
     }
@@ -165,8 +165,8 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
     // don't need that for now).
     private static <T> ExecutorSupplier<T> maybeGetResponseExecutor(Class<T> requestClass, boolean isInternal)
     {
-        if (Scheduleable.class.isAssignableFrom(requestClass))
-            return (p) -> ((Scheduleable)p).getOperationExecutor();
+        if (Schedulable.class.isAssignableFrom(requestClass))
+            return (p) -> ((Schedulable)p).getOperationExecutor();
 
         return (p) -> StageManager.getStage(isInternal ? Stage.INTERNAL_RESPONSE : Stage.REQUEST_RESPONSE);
     }
@@ -407,7 +407,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
             protected Verb.Info<P> info()
             {
                 if (requestExecutor == null)
-                    throw new IllegalStateException("Unless the request payload implements the Scheduleable interface, a request stage is required (either at the RegistrationHelper level or at the VerbBuilder one)");
+                    throw new IllegalStateException("Unless the request payload implements the Schedulable interface, a request stage is required (either at the RegistrationHelper level or at the VerbBuilder one)");
                 if (isOneWay && supportsBackPressure)
                     throw new IllegalStateException("Back pressure doesn't make sense for one-way message (no response is sent so we can't keep track of in-flight requests to an host)");
                 if (!isOneWay && droppedGroup == null)

@@ -135,10 +135,10 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
                             StagedScheduler scheduler = mutation.getScheduler();
                             // Get the locals and create TPCRunnable now: locals will be lost when the future is called,
                             // and we want to still track the task as active.
-                            TPCRunnable us = new TPCRunnable(this,
-                                                             ExecutorLocals.create(),
-                                                             TPCTaskType.WRITE_POST_COMMIT_LOG_SEGMENT,
-                                                             TPCScheduler.coreIdOf(scheduler));
+                            TPCRunnable us = TPCRunnable.wrap(this,
+                                                              ExecutorLocals.create(),
+                                                              TPCTaskType.WRITE_POST_COMMIT_LOG_SEGMENT,
+                                                              scheduler);
                             advanceAllocatingFrom(segment).thenRun(() -> scheduler.execute(us));
                         }
                     }

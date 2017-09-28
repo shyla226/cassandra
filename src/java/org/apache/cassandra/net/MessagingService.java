@@ -43,11 +43,9 @@ import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.ExecutorLocal;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
@@ -230,6 +228,8 @@ public final class MessagingService implements MessagingServiceMBean
         for (Request<?, Q> request : dispatcher.remoteRequests())
             send(request, callback);
 
+        // Note that it's important that local delivery is done _after_ sending the other request, because if the are
+        // already on the right thread, said local delivery will be done inline.
         if (dispatcher.hasLocalRequest())
             deliverLocally(dispatcher.localRequest(), callback);
     }
@@ -237,8 +237,9 @@ public final class MessagingService implements MessagingServiceMBean
     private <P, Q> void deliverLocally(Request<P, Q> request, MessageCallback<Q> callback)
     {
         Consumer<Response<Q>> handleResponse = response ->
-                                               request.responseExecutor().execute(() -> deliverLocalResponse(request, response, callback),
-                                                                                  ExecutorLocals.create());
+                                               request.responseExecutor()
+                                                      .execute(() -> deliverLocalResponse(request, response, callback),
+                                                               ExecutorLocals.create());
 
         Consumer<Response<Q>> onResponse = messageInterceptors.isEmpty()
                                            ? handleResponse
@@ -350,6 +351,8 @@ public final class MessagingService implements MessagingServiceMBean
         for (OneWayRequest<?> request : dispatcher.remoteRequests())
             sendRequest(request, null);
 
+        // Note that it's important that local delivery is done _after_ sending the other request, because if the are
+        // already on the right thread, said local delivery will be done inline.
         if (dispatcher.hasLocalRequest())
             deliverLocallyOneWay(dispatcher.localRequest());
     }
@@ -390,9 +393,8 @@ public final class MessagingService implements MessagingServiceMBean
                                                                         Consumer<M> consumer,
                                                                         MessageCallback<Q> callback)
     {
-        messageInterceptors.interceptRequest(request,
-                                             rq -> rq.requestExecutor().execute(() -> consumer.accept(rq), ExecutorLocals.create()),
-                                             callback);
+        Consumer<M> delivery = rq -> rq.requestExecutor().execute(() -> consumer.accept(rq), ExecutorLocals.create());
+        messageInterceptors.interceptRequest(request, delivery, callback);
     }
 
     /**
@@ -747,6 +749,13 @@ public final class MessagingService implements MessagingServiceMBean
 
     private <P, Q> void receiveRequestInternal(Request<P, Q> request, ExecutorLocals locals)
     {
+        // Note: theoretically, we could optimize the case where the current thread is already on the request executor
+        // like we do on the sending side/for local delivery (see deliverLocallyInternal for instance), but it's a tiny
+        // bit more complex here because even if we skip the executor, we still need to set the ExecutorLocals as they
+        // come from the remote message (and unset them after execution). Further, we know this optimization would be
+        // useless in the current code as receiveInternal() is always called from the IncomingTcpConnection thread,
+        // which will never be "on the request executor". We can revisit this once MS has been switched to Netty as
+        // this may provide some benefits sometimes, but for now, we keep it simple.
         request.requestExecutor().execute(MessageDeliveryTask.forRequest(request), locals);
     }
 
@@ -755,10 +764,11 @@ public final class MessagingService implements MessagingServiceMBean
         CallbackInfo<Q> info = getRegisteredCallback(response, false);
         // Ignore expired callback info (we already logged in getRegisteredCallback)
         if (info != null)
+            // Same remark than in receiveRequestInternal regarding optimizing for when we're already on the executor
             info.responseExecutor.execute(MessageDeliveryTask.forResponse(response), locals);
     }
 
-    // Only required by legacy serialization. Can inline in following metho when we get rid of that.
+    // Only required by legacy serialization. Can inline in following method when we get rid of that.
     CallbackInfo<?> getRegisteredCallback(int id, boolean remove, InetAddress from)
     {
         ExpiringMap.CacheableObject<CallbackInfo<?>> cObj = remove ? callbacks.remove(id) : callbacks.get(id);

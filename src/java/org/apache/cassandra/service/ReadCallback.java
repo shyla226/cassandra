@@ -47,7 +47,6 @@ import org.apache.cassandra.net.FailureResponse;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageCallback;
 import org.apache.cassandra.net.Response;
-import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;

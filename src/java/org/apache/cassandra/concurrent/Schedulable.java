@@ -24,7 +24,7 @@ package org.apache.cassandra.concurrent;
  * see {@link org.apache.cassandra.db.ReadCommand} and {@link org.apache.cassandra.db.Mutation}
  * as examples.
  */
-public interface Scheduleable
+public interface Schedulable
 {
     /**
      * Returns the executor to use for submitting the runnables of the operation. This will augment them with

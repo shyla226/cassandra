@@ -91,12 +91,12 @@ public class IOScheduler extends StagedScheduler
         this.pool = new AtomicReference<>(new WorkersPool(workerSupplier));
     }
 
-    public void execute(Runnable runnable, ExecutorLocals locals, TPCTaskType stage)
+    public int metricsCoreId()
     {
-        ((PooledWorker)createWorker()).execute(TPCRunnable.wrap(runnable, locals, stage, TPC.getNumCores()));
+        return TPC.getNumCores();
     }
 
-    public void execute(TPCRunnable runnable)
+    public void enqueue(TPCRunnable runnable)
     {
         ((PooledWorker)createWorker()).execute(runnable);
     }

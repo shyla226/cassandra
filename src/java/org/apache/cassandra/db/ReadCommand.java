@@ -34,7 +34,7 @@ import org.apache.cassandra.net.Request;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.flow.Flow;
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.Scheduleable;
+import org.apache.cassandra.concurrent.Schedulable;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.selection.ResultBuilder;
@@ -66,7 +66,7 @@ import org.apache.cassandra.utils.versioning.VersionDependent;
  * <p>
  * This contains all the information needed to do a local read.
  */
-public abstract class ReadCommand implements ReadQuery, Scheduleable
+public abstract class ReadCommand implements ReadQuery, Schedulable
 {
     protected static final Logger logger = LoggerFactory.getLogger(ReadCommand.class);
 
