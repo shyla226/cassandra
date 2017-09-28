@@ -2770,6 +2770,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return keyspace.getColumnFamilyStore(table.id);
     }
 
+    public static TableMetrics metricsFor(TableId tableId)
+    {
+        return getIfExists(tableId).metric;
+    }
+
     public long getMemtablesLiveSize()
     {
         return StreamSupport.stream(data.getView().getAllMemtables().spliterator(), false)

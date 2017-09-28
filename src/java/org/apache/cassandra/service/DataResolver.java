@@ -37,7 +37,6 @@ import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.net.*;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.flow.Flow;
@@ -55,6 +54,19 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
     public Flow<FlowablePartition> getData()
     {
         return fromSingleResponseFiltered(responses.iterator().next().payload());
+    }
+
+    public boolean isDataPresent()
+    {
+        return !responses.isEmpty();
+    }
+
+    public Completable compareResponses()
+    {
+        // We need to fully consume the results to trigger read repairs if appropriate
+        return FlowablePartitions.allRows(resolve())
+                                 .processToRxCompletable()
+                                 .andThen(completeOnReadRepairAnswersReceived());
     }
 
     public Flow<FlowablePartition> resolve()
@@ -85,11 +97,12 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
          * See CASSANDRA-13747 for more details.
          */
 
-        DataLimits.Counter counter = command.limits().newCounter(command.nowInSec(), true, command.selectsFullPartition(), command.metadata().enforceStrictLiveness());
+        DataLimits.Counter mergedResultCounter =
+            command.limits().newCounter(command.nowInSec(), true, command.selectsFullPartition(), command.metadata().enforceStrictLiveness());
 
-        Flow<FlowableUnfilteredPartition> merged = mergeWithShortReadProtection(results, sources, counter);
+        Flow<FlowableUnfilteredPartition> merged = mergeWithShortReadProtection(results, sources, mergedResultCounter);
         Flow<FlowablePartition> filtered = FlowablePartitions.filter(merged, command.nowInSec());
-        Flow<FlowablePartition> counted = DataLimits.truncateFiltered(filtered, counter);
+        Flow<FlowablePartition> counted = DataLimits.truncateFiltered(filtered, mergedResultCounter);
         return FlowablePartitions.skipEmptyPartitions(counted);
     }
 
@@ -116,33 +129,23 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
         });
     }
 
-    public Completable compareResponses()
-    {
-        // We need to fully consume the results to trigger read repairs if appropriate
-        return FlowablePartitions.allRows(resolve())
-                                 .processToRxCompletable()
-                                 .andThen(completeOnReadRepairAnswersReceived());
-    }
-
     private Flow<FlowableUnfilteredPartition> mergeWithShortReadProtection(List<Flow<FlowableUnfilteredPartition>> results,
                                                                            InetAddress[] sources,
-                                                                           DataLimits.Counter resultCounter)
+                                                                           DataLimits.Counter mergedResultCounter)
     {
         // If we have only one results, there is no read repair to do and we can't get short reads
         if (results.size() == 1)
             return results.get(0);
-
-        FlowablePartitions.MergeListener listener = new RepairMergeListener(sources);
 
         // So-called "short reads" stems from nodes returning only a subset of the results they have for a partition due to the limit,
         // but that subset not being enough post-reconciliation. So if we don't have limit, don't bother.
         if (!command.limits().isUnlimited())
         {
             for (int i = 0; i < results.size(); i++)
-                results.set(i, withShortReadProtection(sources[i], results.get(i), resultCounter));
+                results.set(i, withShortReadProtection(sources[i], results.get(i), mergedResultCounter));
         }
 
-        return FlowablePartitions.mergePartitions(results, command.nowInSec(), listener);
+        return FlowablePartitions.mergePartitions(results, command.nowInSec(), new RepairMergeListener(sources));
     }
 
     private class RepairMergeListener implements FlowablePartitions.MergeListener
@@ -508,34 +511,37 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
 
     private Flow<FlowableUnfilteredPartition> withShortReadProtection(InetAddress source,
                                                                       Flow<FlowableUnfilteredPartition> data,
-                                                                      DataLimits.Counter counter)
+                                                                      DataLimits.Counter mergedResultCounter)
     {
-        ShortReadProtection shortReadProtection = new ShortReadProtection(source, counter);
+        ShortReadResponseProtection shortReadProtection = new ShortReadResponseProtection(source, mergedResultCounter);
         return shortReadProtection.apply(data);
     }
 
-    private class ShortReadProtection
+    private class ShortReadResponseProtection
     {
         private final InetAddress source;
-        private final DataLimits.Counter counter;
-        private final DataLimits.Counter postReconciliationCounter;
+        private final DataLimits.Counter singleResultCounter;
+        private final DataLimits.Counter mergedResultCounter;
 
         private volatile DecoratedKey lastPartitionKey;
         private volatile Clustering lastClustering;
-        private volatile int lastCount = 0;
 
-        private ShortReadProtection(InetAddress source, DataLimits.Counter postReconciliationCounter)
+        private volatile int lastCounted = 0; // last seen recorded # before attempting to fetch more rows
+        private volatile int lastFetched = 0; // # rows returned by last attempt to get more (or by the original read command)
+        private volatile int lastQueried = 0; // # extra rows requested from the replica last time
+
+        private ShortReadResponseProtection(InetAddress source, DataLimits.Counter mergedResultCounter)
         {
             this.source = source;
-            this.counter = command.limits().newCounter(command.nowInSec(), false, command.selectsFullPartition(), command.metadata().enforceStrictLiveness());
-            this.postReconciliationCounter = postReconciliationCounter;
+            this.singleResultCounter = command.limits().newCounter(command.nowInSec(), false, command.selectsFullPartition(), command.metadata().enforceStrictLiveness());
+            this.mergedResultCounter = mergedResultCounter;
         }
 
         private Flow<FlowableUnfilteredPartition> apply(Flow<FlowableUnfilteredPartition> data)
         {
-            return DataLimits.countUnfilteredPartitions(data, counter)
+            return DataLimits.countUnfilteredPartitions(data, singleResultCounter)
                 .map(this::applyPartition)
-                .doOnClose(counter::endOfIteration);
+                .doOnClose(singleResultCounter::endOfIteration);
         }
 
         private FlowableUnfilteredPartition applyPartition(FlowablePartitionBase<? extends Unfiltered> p)
@@ -543,13 +549,13 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
             FlowableUnfilteredPartition partition = (FlowableUnfilteredPartition)p;
             lastPartitionKey = partition.header.partitionKey;
             lastClustering = null;
-            lastCount = 0;
+            lastCounted = 0;
 
             return partition.withContent(
                 partition.content
                     .concatWith(this::moreContents)
                     .map(this::applyUnfiltered)
-                    .doOnClose(counter::endOfPartition));
+                    .doOnClose(singleResultCounter::endOfPartition));
         }
 
         private Unfiltered applyUnfiltered(Unfiltered unfiltered)
@@ -560,70 +566,124 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
             return unfiltered;
         }
 
+        /*
+         * We have a potential short read if the result from a given node contains the requested number of rows
+         * for that partition (i.e. it has stopped returning results due to the limit), but some of them haven't
+         * made it into the final post-reconciliation result due to other nodes' tombstones.
+         *
+         * If that is the case, then that node may have more rows that we should fetch, as otherwise we could
+         * ultimately return fewer rows than required. Also, those additional rows may contain tombstones which
+         * which we also need to fetch as they may shadow rows from other replicas' results, which we would
+         * otherwise return incorrectly.
+         *
+         * Also note that we only get here once all the rows for this partition have been iterated over, and so
+         * if the node had returned the requested number of rows but we still get here, then some results were
+         * skipped during reconciliation.
+         */
         private Flow<Unfiltered> moreContents()
         {
-            // We have a short read if the node this is the result of has returned the requested number of
-            // rows for that partition (i.e. it has stopped returning results due to the limit), but some of
-            // those results haven't made it in the final result post-reconciliation due to other nodes
-            // tombstones. If that is the case, then the node might have more results that we should fetch
-            // as otherwise we might return less results than required, or results that shouldn't be returned
-            // (because the node has tombstone that hides future results from other nodes but that haven't
-            // been returned due to the limit).
-            // Also note that we only get here once all the results for this node have been returned, and so
-            // if the node had returned the requested number but we still get there, it imply some results were
-            // skipped during reconciliation.
-            // Finally, if the latest clustering is just empty, it means we have no more in-partition rows to extend to,
-            // so just return.
-            if (lastCount == counted(counter) || !counter.isDoneForPartition() || lastClustering == Clustering.EMPTY)
+            // never try to request additional rows from replicas if our reconciled partition is already filled to the limit
+            assert !mergedResultCounter.isDoneForPartition();
+
+            // we do not apply short read protection when we have no limits at all
+            assert !command.limits().isUnlimited();
+
+            // if the returned partition doesn't have enough rows to satisfy even the original limit, don't ask for more
+            if (!singleResultCounter.isDoneForPartition())
                 return null;
 
-            lastCount = counted(counter);
+            /*
+             * If the replica has no live rows in the partition, don't try to fetch more.
+             *
+             * Note that the previous branch [if (!singleResultCounter.isDoneForPartition()) return null] doesn't
+             * always cover this scenario:
+             * isDoneForPartition() is defined as [isDone() || rowInCurrentPartition >= perPartitionLimit],
+             * and will return true if isDone() returns true, even if there are 0 rows counted in the current partition.
+             *
+             * This can happen with a range read if after 1+ rounds of short read protection requests we managed to fetch
+             * enough extra rows for other partitions to satisfy the singleResultCounter's total row limit, but only
+             * have tombstones in the current partition.
+             *
+             * One other way we can hit this condition is when the partition only has a live static row and no regular
+             * rows. In that scenario the counter will remain at 0 until the partition is closed - which happens after
+             * the moreContents() call.
+             */
+            if (countedInCurrentPartition(singleResultCounter) == 0)
+                return null;
 
-            assert !postReconciliationCounter.isDoneForPartition();
+            /*
+             * This is a table with no clustering columns, and has at most one row per partition - with EMPTY clustering.
+             * We already have the row, so there is no point in asking for more from the partition.
+             */
+            if (Clustering.EMPTY == lastClustering)
+                return null;
 
-            // We need to try to query enough additional results to fulfill our query, but because we could still
-            // get short reads on that additional query, just querying the number of results we miss may not be
-            // enough. But we know that when this node answered n rows (counter.countedInCurrentPartition), only
-            // x rows (postReconciliationCounter.countedInCurrentPartition()) made it in the final result.
-            // So our ratio of live rows to requested rows is x/n, so since we miss n-x rows, we estimate that
-            // we should request m rows so that m * x/n = n-x, that is m = (n^2/x) - n.
-            // Also note that it's ok if we retrieve more results that necessary since we have applied a counter
-            // at the top level
-            int n = countedInCurrentPartition(postReconciliationCounter);
-            int x = countedInCurrentPartition(counter);
-            int toQuery = Math.max(((n * n) / x) - Math.max(x, 1), 1);
+            lastFetched = countedInCurrentPartition(singleResultCounter) - lastCounted;
+            lastCounted = countedInCurrentPartition(singleResultCounter);
 
-            DataLimits retryLimits = command.limits().forShortReadRetry(toQuery);
-            ClusteringIndexFilter filter = command.clusteringIndexFilter(lastPartitionKey);
-            ClusteringIndexFilter retryFilter = lastClustering == null ? filter : filter.forPaging(command.metadata().comparator, lastClustering, false);
-            SinglePartitionReadCommand cmd = SinglePartitionReadCommand.create(command.metadata(),
-                                                                               command.nowInSec(),
-                                                                               command.columnFilter(),
-                                                                               command.rowFilter(),
-                                                                               retryLimits,
-                                                                               lastPartitionKey,
-                                                                               retryFilter);
+            // getting back fewer rows than we asked for means the partition on the replica has been fully consumed
+            if (lastQueried > 0 && lastFetched < lastQueried)
+                return null;
 
-            Tracing.trace("Requesting {} extra rows from {} for short read protection", toQuery, source);
-            Schema.instance.getColumnFamilyStoreInstance(cmd.metadata().id).metric.shortReadProtectionRequests.mark();
+            /*
+             * At this point we know that:
+             *     1. the replica returned [repeatedly?] as many rows as we asked for and potentially has more
+             *        rows in the partition
+             *     2. at least one of those returned rows was shadowed by a tombstone returned from another
+             *        replica
+             *     3. we haven't satisfied the client's limits yet, and should attempt to query for more rows to
+             *        avoid a short read
+             *
+             * In the ideal scenario, we would get exactly min(a, b) or fewer rows from the next request, where a and b
+             * are defined as follows:
+             *     [a] limits.count() - mergedResultCounter.counted()
+             *     [b] limits.perPartitionCount() - mergedResultCounter.countedInCurrentPartition()
+             *
+             * It would be naive to query for exactly that many rows, as it's possible and not unlikely
+             * that some of the returned rows would also be shadowed by tombstones from other hosts.
+             *
+             * Note: we don't know, nor do we care, how many rows from the replica made it into the reconciled result;
+             * we can only tell how many in total we queried for, and that [0, mrc.countedInCurrentPartition()) made it.
+             *
+             * In general, our goal should be to minimise the number of extra requests - *not* to minimise the number
+             * of rows fetched: there is a high transactional cost for every individual request, but a relatively low
+             * marginal cost for each extra row requested.
+             *
+             * As such it's better to overfetch than to underfetch extra rows from a host; but at the same
+             * time we want to respect paging limits and not blow up spectacularly.
+             *
+             * Note: it's ok to retrieve more rows that necessary since singleResultCounter is not stopping and only
+             * counts.
+             *
+             * With that in mind, we'll just request the minimum of (count(), perPartitionCount()) limits,
+             * but no fewer than 8 rows (an arbitrary round lower bound), to ensure that we won't fetch row by row
+             * for SELECT DISTINCT queries (that set per partition limit to 1).
+             *
+             * See CASSANDRA-13794 for more details.
+             */
+            lastQueried = Math.max(Math.min(command.limits().count(), command.limits().perPartitionCount()), 8);
 
-            return DataLimits.countUnfilteredRows(doShortReadRetry(cmd).flatMap(fup -> fup.content), counter);
+            ColumnFamilyStore.metricsFor(command.metadata().id).shortReadProtectionRequests.mark();
+            Tracing.trace("Requesting {} extra rows from {} for short read protection", lastQueried, source);
+
+            Flow<FlowableUnfilteredPartition> rows = executeReadCommand(makeFetchAdditionalRowsReadCommand(lastQueried));
+
+            return DataLimits.countUnfilteredRows(rows.flatMap(fup -> fup.content), singleResultCounter);
         }
 
-        /**
-         * Returns the number of results counted by the counter.
-         *
-         * @param counter the counter.
-         * @return the number of results counted by the counter
-         */
-        private int counted(Counter counter)
+        private SinglePartitionReadCommand makeFetchAdditionalRowsReadCommand(int toQuery)
         {
-            // We are interested by the number of rows but for GROUP BY queries 'counted' returns the number of
-            // groups.
-            if (command.limits().isGroupByLimit())
-                return counter.rowCounted();
+            ClusteringIndexFilter filter = command.clusteringIndexFilter(lastPartitionKey);
+            if (null != lastClustering)
+                filter = filter.forPaging(command.metadata().comparator, lastClustering, false);
 
-            return counter.counted();
+            return SinglePartitionReadCommand.create(command.metadata(),
+                                                     command.nowInSec(),
+                                                     command.columnFilter(),
+                                                     command.rowFilter(),
+                                                     command.limits().forShortReadRetry(toQuery),
+                                                     lastPartitionKey,
+                                                     filter);
         }
 
         /**
@@ -642,19 +702,14 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
             return counter.countedInCurrentPartition();
         }
 
-        private Flow<FlowableUnfilteredPartition> doShortReadRetry(SinglePartitionReadCommand retryCommand)
+        private Flow<FlowableUnfilteredPartition> executeReadCommand(SinglePartitionReadCommand cmd)
         {
-            RetryResolver resolver = new RetryResolver(retryCommand, ctx.withConsistency(ConsistencyLevel.ONE));
+            RetryResolver resolver = new RetryResolver(cmd, ctx.withConsistency(ConsistencyLevel.ONE));
             ReadCallback<FlowableUnfilteredPartition> handler = ReadCallback.forResolver(resolver, Collections.singletonList(source));
-            MessagingService.instance().send(retryCommand.requestTo(source), handler);
+            MessagingService.instance().send(cmd.requestTo(source), handler);
 
             return handler.result();
         }
-    }
-
-    public boolean isDataPresent()
-    {
-        return !responses.isEmpty();
     }
 
     private static class RetryResolver extends ResponseResolver<FlowableUnfilteredPartition>
