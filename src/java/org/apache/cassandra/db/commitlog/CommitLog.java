@@ -281,7 +281,8 @@ public class CommitLog implements CommitLogMBean
                                               alloc.markWritten();
                                           }
 
-                                          return executor.finishWriteFor(alloc).toSingle(alloc::getCommitLogPosition);
+                                          return executor.finishWriteFor(alloc, mutation.getScheduler())
+                                                         .toSingle(alloc::getCommitLogPosition);
                                       });
     }
 

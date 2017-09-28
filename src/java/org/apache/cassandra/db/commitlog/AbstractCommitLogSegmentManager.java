@@ -22,16 +22,16 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.*;
 import io.reactivex.*;
-import io.reactivex.Observable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -52,26 +52,35 @@ public abstract class AbstractCommitLogSegmentManager
     static final Logger logger = LoggerFactory.getLogger(AbstractCommitLogSegmentManager.class);
 
     /**
-     * Segment that is ready to be used. The management thread fills this and blocks until consumed.
+     * The segment we are currently allocating commit log records to.
      *
-     * A single management thread produces this, and consumers are already synchronizing to make sure other work is
-     * performed atomically with consuming this. Volatile to make sure writes by the management thread become
-     * visible (ordered/lazySet would suffice). Consumers (advanceAllocatingFrom and discardAvailableSegment) must
-     * synchronize on 'this'.
+     * Written only by SegmentAdvancer.run().
      */
-    private volatile CommitLogSegment availableSegment = null;
+    private volatile CommitLogSegment allocatingFrom = null;
 
-    private final WaitQueue segmentPrepared = new WaitQueue();
-
-    /** Active segments, containing unflushed data. The tail of this queue is the one we allocate writes to */
+    /**
+     * Active segments, containing unflushed data. The tail of this queue matches allocatingFrom.
+     */
     private final ConcurrentLinkedQueue<CommitLogSegment> activeSegments = new ConcurrentLinkedQueue<>();
 
     /**
-     * The segment we are currently allocating commit log records to.
+     * Segment that is ready to be used. The management thread fills this and blocks until consumed.
      *
-     * Written by advanceAllocatingFrom which synchronizes on 'this'. Volatile to ensure reads get current value.
+     * A single management thread produces this, and it is consumed (and moved to both allocatingFrom and activeSegments)
+     * during SegmentAdvancer.run().
      */
-    private volatile CommitLogSegment allocatingFrom = null;
+    private final AtomicReference<CommitLogSegment> availableSegment = new AtomicReference<>(null);
+
+    /**
+     * Runnable to call when a new segment was prepared by the management thread.
+     */
+    private final AtomicReference<Runnable> segmentPreparedCallback = new AtomicReference<>();
+
+    /**
+     * Requests to advance allocating segment go through this reference so that multiple concurrent requests are
+     * only executed once.
+     */
+    private final AtomicReference<SegmentAdvancer> activeAdvanceRequest = new AtomicReference<>();
 
     final String storageDirectory;
 
@@ -86,7 +95,7 @@ public abstract class AbstractCommitLogSegmentManager
     private Thread managerThread;
     protected final CommitLog commitLog;
     private volatile boolean shutdown;
-    private final BooleanSupplier managerThreadWaitCondition = () -> (availableSegment == null && !atSegmentBufferLimit()) || shutdown;
+    private final BooleanSupplier managerThreadWaitCondition = () -> (availableSegment.get() == null && !atSegmentBufferLimit()) || shutdown;
     private final WaitQueue managerThreadWaitQueue = new WaitQueue();
 
     private static final SimpleCachedBufferPool bufferPool =
@@ -109,9 +118,11 @@ public abstract class AbstractCommitLogSegmentManager
                 {
                     try
                     {
-                        assert availableSegment == null;
                         logger.debug("No segments in reserve; creating a fresh one");
-                        availableSegment = createSegment();
+
+                        CommitLogSegment prev = availableSegment.getAndSet(createSegment());
+                        assert prev == null : "Only management thread can construct segments.";
+
                         if (shutdown)
                         {
                             // If shutdown() started and finished during segment creation, we are now left with a
@@ -120,10 +131,11 @@ public abstract class AbstractCommitLogSegmentManager
                             return;
                         }
 
-                        segmentPrepared.signalAll();
-                        Thread.yield();
+                        Runnable callback = segmentPreparedCallback.getAndSet(null);
+                        if (callback != null)
+                            callback.run(); // This will consume the segment.
 
-                        if (availableSegment == null && !atSegmentBufferLimit())
+                        if (availableSegment.get() == null && !atSegmentBufferLimit())
                             // Writing threads need another segment now.
                             continue;
 
@@ -155,7 +167,7 @@ public abstract class AbstractCommitLogSegmentManager
         managerThread.start();
 
         // for simplicity, ensure the first segment is allocated before continuing
-        advanceAllocatingFrom(null);
+        advanceAllocatingFrom(null).join();
     }
 
     private boolean atSegmentBufferLimit()
@@ -213,62 +225,120 @@ public abstract class AbstractCommitLogSegmentManager
 
     /**
      * Advances the allocatingFrom pointer to the next prepared segment, but only if it is currently the segment provided.
+     * Returns a future that can be used to schedule following async actions.
+     *
+     * Note: No work should be done on the thread that completes this future.
      *
      * WARNING: Assumes segment management thread always succeeds in allocating a new segment or kills the JVM.
      */
-    @DontInline
-    void advanceAllocatingFrom(CommitLogSegment old)
+    CompletableFuture<Void> advanceAllocatingFrom(CommitLogSegment old)
     {
-        while (true)
-        {
-            synchronized (this)
-            {
-                // do this in a critical section so we can maintain the order of segment construction when moving to allocatingFrom/activeSegments
-                if (allocatingFrom != old)
-                    return;
+        SegmentAdvancer activeAdvancer;
+        SegmentAdvancer ourAdvancer;
 
-                // If a segment is ready, take it now, otherwise wait for the management thread to construct it.
-                if (availableSegment != null)
-                {
-                    // Success! Change allocatingFrom and activeSegments (which must be kept in order) before leaving
-                    // the critical section.
-                    activeSegments.add(allocatingFrom = availableSegment);
-                    availableSegment = null;
-                    break;
-                }
-            }
-
-            awaitAvailableSegment(old);
-        }
-
-        // Signal the management thread to prepare a new segment.
-        wakeManager();
-
-        if (old != null)
-        {
-            // Now we can run the user defined command just after switching to the new commit log.
-            // (Do this here instead of in the recycle call so we can get a head start on the archive.)
-            commitLog.archiver.maybeArchive(old);
-
-            // ensure we don't continue to use the old file; not strictly necessary, but cleaner to enforce it
-            old.discardUnusedTail();
-        }
-
-        // request that the CL be synced out-of-band, as we've finished a segment
-        commitLog.requestExtraSync();
-    }
-
-    void awaitAvailableSegment(CommitLogSegment currentAllocatingFrom)
-    {
         do
         {
-            WaitQueue.Signal prepared = segmentPrepared.register(Thread.currentThread(), commitLog.metrics.waitingOnSegmentAllocation.timer());
-            if (availableSegment == null && allocatingFrom == currentAllocatingFrom)
-                prepared.awaitUninterruptibly();
-            else
-                prepared.cancel();
+            // First check if the active/last request is for the same segment.
+            activeAdvancer = activeAdvanceRequest.get();
+            if (activeAdvancer != null && activeAdvancer.oldSegment == old)
+                return activeAdvancer;
+
+            // If not, maybe we were delayed and the segment is already switched.
+            if (allocatingFrom != old)
+                return CompletableFuture.completedFuture(null);
+
+            // Ok, we need an advance for a newer segment. Create one and attach it.
+            ourAdvancer = new SegmentAdvancer(old);
         }
-        while (availableSegment == null && allocatingFrom == currentAllocatingFrom);
+        while (!activeAdvanceRequest.compareAndSet(activeAdvancer, ourAdvancer));
+
+        // If the CAS succeeded, we are the one thread that has set the current request. Activate it.
+        if (availableSegment.get() != null)
+            ourAdvancer.run();
+        else
+            runWhenSegmentIsAvailable(ourAdvancer);
+
+        return ourAdvancer;
+    }
+
+    /**
+     * This class is a combination of a runnable executing a segment switch and a completable future that represents
+     * the completion of the switch.
+     *
+     * Created by advanceAllocatingFrom once per segment switch, and given to all concurrent requests to switch from the
+     * same segment. Normally executed immediately after construction, unless the management thread has not yet produced
+     * a new segment, in which case it is run after one becomes ready.
+     */
+    class SegmentAdvancer extends CompletableFuture<Void> implements Runnable
+    {
+        final CommitLogSegment oldSegment;
+
+        SegmentAdvancer(CommitLogSegment oldSegment)
+        {
+            this.oldSegment = oldSegment;
+        }
+
+        public void run()
+        {
+            // Only one thread can be running this at any time.
+            assert allocatingFrom == oldSegment;
+            CommitLogSegment next = availableSegment.getAndSet(null);
+
+            if (next == null)
+            {
+                // This shouldn't happen, unless we are shutting a log down in tests.
+                logger.warn("Available segment callback without available segment. This is only expected to happen while running commit log tests.");
+                runWhenSegmentIsAvailable(this);
+                return;
+            }
+
+            // Add segment to activeSegments before allowing allocations from it to ensure active segments are kept in order.
+            activeSegments.add(next);
+            allocatingFrom = next;     // now we have opened the gates, concurrent execution of the rest of this method is possible
+
+            // Signal the management thread to prepare a new segment.
+            wakeManager();
+
+            this.complete(null);
+
+            // Note: If we clear the active request to null we become open to an ABA problem, so leave that alone.
+
+            if (oldSegment != null)
+            {
+                // Now we can run the user defined command just after switching to the new commit log.
+                // (Do this here instead of in the recycle call so we can get a head start on the archive.)
+                commitLog.archiver.maybeArchive(oldSegment);
+
+                // ensure we don't continue to use the old file; not strictly necessary, but cleaner to enforce it
+                oldSegment.discardUnusedTail();
+            }
+
+            // request that the CL be synced out-of-band, as we've finished a segment
+            commitLog.requestExtraSync();
+        }
+    }
+
+    void runWhenSegmentIsAvailable(Runnable runnable)
+    {
+        assert runnable != null;
+        Runnable combined, prev;
+        do
+        {
+            prev = segmentPreparedCallback.get();
+            Runnable other = prev;
+            combined = prev != null
+                       ? () -> { other.run(); runnable.run(); }     // This should only happen in tests
+                       : runnable;
+        }
+        while (!segmentPreparedCallback.compareAndSet(prev, combined));
+
+        if (availableSegment.get() != null)
+        {
+            // Segment appeared while we were setting callback. There's a chance management thread has already checked
+            // and not found a callback. If that's the case, we should run it.
+            if (segmentPreparedCallback.compareAndSet(combined, null))
+                combined.run();
+        }
     }
 
     /**
@@ -280,7 +350,7 @@ public abstract class AbstractCommitLogSegmentManager
     {
         List<CommitLogSegment> segmentsToRecycle = new ArrayList<>(activeSegments);
         CommitLogSegment last = segmentsToRecycle.get(segmentsToRecycle.size() - 1);
-        advanceAllocatingFrom(last);
+        advanceAllocatingFrom(last).join();
 
         // wait for the commit log modifications
         last.waitForModifications();
@@ -431,9 +501,11 @@ public abstract class AbstractCommitLogSegmentManager
      */
     void awaitManagementTasksCompletion()
     {
-        if (availableSegment == null && !atSegmentBufferLimit())
+        if (availableSegment.get() == null && !atSegmentBufferLimit())
         {
-            awaitAvailableSegment(allocatingFrom);
+            CountDownLatch latch = new CountDownLatch(1);
+            runWhenSegmentIsAvailable(latch::countDown);
+            Uninterruptibles.awaitUninterruptibly(latch);
         }
     }
 
@@ -468,12 +540,7 @@ public abstract class AbstractCommitLogSegmentManager
 
     private void discardAvailableSegment()
     {
-        CommitLogSegment next = null;
-        synchronized (this)
-        {
-            next = availableSegment;
-            availableSegment = null;
-        }
+        CommitLogSegment next = availableSegment.getAndSet(null);
         if (next != null)
             next.discard(true);
     }

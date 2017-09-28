@@ -17,10 +17,10 @@
  */
 package org.apache.cassandra.db.commitlog;
 
+import java.util.concurrent.TimeUnit;
+
 import io.reactivex.Completable;
 import io.reactivex.Scheduler;
-import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.flow.RxThreads;
@@ -32,18 +32,19 @@ class BatchCommitLogService extends AbstractCommitLogService
         super(commitLog, "COMMIT-LOG-WRITER", (int) DatabaseDescriptor.getCommitLogSyncBatchWindow());
     }
 
-    protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc)
+    protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc, Scheduler observeOn)
     {
         // wait until record has been safely persisted to disk
-        return RxThreads.subscribeOnIo(
-            Completable.fromAction(() ->
-                                   {
-                                       // TODO: This needs to be made async.
-                                       pending.incrementAndGet();
-                                       requestExtraSync();
-                                       alloc.awaitDiskSync(commitLog.metrics.waitingOnCommit);
-                                       pending.decrementAndGet();
-                                   }),
-            TPCTaskType.COMMIT_LOG_SYNC);
+        pending.incrementAndGet();
+        long startTime = System.nanoTime();
+        requestExtraSync();
+
+        Completable sync = awaitSyncAt(startTime)
+                           .doOnComplete(() ->
+                                         {
+                                             commitLog.metrics.waitingOnCommit.update(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+                                             pending.decrementAndGet();
+                                         });
+        return RxThreads.observeOn(sync, observeOn, TPCTaskType.WRITE_POST_COMMIT_LOG_SYNC);
     }
 }

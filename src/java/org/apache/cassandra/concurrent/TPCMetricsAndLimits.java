@@ -40,6 +40,8 @@ public class TPCMetricsAndLimits implements TPCMetrics
     }
     final EnumMap<TPCTaskType, TaskStats> stats;
 
+    AtomicLong activeCountedTasks = new AtomicLong();
+
     int maxConcurrentRequests = DatabaseDescriptor.getTPCConcurrentRequestsLimit();
     int maxPendingQueueSize = DatabaseDescriptor.getTPCPendingRequestsLimit();
 
@@ -54,6 +56,8 @@ public class TPCMetricsAndLimits implements TPCMetrics
     {
         TaskStats stat = stats.get(stage);
         stat.scheduledTasks.incrementAndGet();
+        if (stage.counted)
+            activeCountedTasks.incrementAndGet();
     }
 
 
@@ -66,12 +70,16 @@ public class TPCMetricsAndLimits implements TPCMetrics
     {
         TaskStats stat = stats.get(stage);
         stat.failedTasks.incrementAndGet();
+        if (stage.counted)
+            activeCountedTasks.decrementAndGet();
     }
 
     public void completed(TPCTaskType stage)
     {
         TaskStats stat = stats.get(stage);
         stat.completedTasks.incrementAndGet();
+        if (stage.counted)
+            activeCountedTasks.decrementAndGet();
     }
 
     public void cancelled(TPCTaskType stage)
@@ -124,8 +132,7 @@ public class TPCMetricsAndLimits implements TPCMetrics
 
     public int maxQueueSize()
     {
-        TaskStats stat = stats.get(TPCTaskType.READ_DISK_ASYNC);
-        long activeReads = stat.scheduledTasks.get() - stat.completedTasks.get();
+        long activeReads = activeCountedTasks.get();
         return (int) Math.max(maxConcurrentRequests - activeReads, 0);
     }
 

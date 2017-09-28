@@ -93,7 +93,12 @@ public class IOScheduler extends StagedScheduler
 
     public void execute(Runnable runnable, ExecutorLocals locals, TPCTaskType stage)
     {
-        ((PooledWorker)createWorker()).execute(new TPCRunnable(runnable, locals, stage, TPC.getNumCores()));
+        ((PooledWorker)createWorker()).execute(TPCRunnable.wrap(runnable, locals, stage, TPC.getNumCores()));
+    }
+
+    public void execute(TPCRunnable runnable)
+    {
+        ((PooledWorker)createWorker()).execute(runnable);
     }
 
     @Override

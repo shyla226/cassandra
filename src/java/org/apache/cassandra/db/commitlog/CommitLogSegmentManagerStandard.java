@@ -21,12 +21,15 @@ package org.apache.cassandra.db.commitlog;
 import java.io.File;
 
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
+import io.reactivex.SingleObserver;
+import io.reactivex.disposables.Disposable;
+import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPCRunnable;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.flow.RxThreads;
 
 public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentManager
 {
@@ -53,39 +56,61 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
      */
     public Single<CommitLogSegment.Allocation> allocate(Mutation mutation, int size)
     {
-        return Single.defer(() -> {
-            CommitLogSegment segment = allocatingFrom();
-            if (logger.isTraceEnabled())
-                logger.trace("Allocating mutation of size {} on segment {} with space {}", size, segment.id, segment.availableSize());
-
-            CommitLogSegment.Allocation alloc = segment.allocate(mutation, size);
-            if (alloc != null)
-                return Single.just(alloc);
-
-            // failed to allocate, so move to a new segment with enough room
-            Single<CommitLogSegment.Allocation> allocationSingle =
-            Single.fromCallable(() -> {
-                if (logger.isTraceEnabled())
-                    logger.trace("Waiting for segment allocation...");
-                CommitLogSegment.Allocation nalloc;
-                CommitLogSegment nsegment = segment;
-                do
+        return new Single<CommitLogSegment.Allocation>()
+        {
+            protected void subscribeActual(SingleObserver observer)
+            {
+                class AllocationSource implements Runnable, Disposable
                 {
-                    advanceAllocatingFrom(nsegment);
-                    nsegment = allocatingFrom();
+                    volatile boolean disposed = false;
+
+                    public void run()
+                    {
+                        if (isDisposed())
+                            return;
+
+                        CommitLogSegment segment = allocatingFrom();
+                        if (logger.isTraceEnabled())
+                            logger.trace("Allocating mutation of size {} on segment {} with space {}", size, segment.id, segment.availableSize());
+
+                        CommitLogSegment.Allocation alloc = segment.allocate(mutation, size);
+                        if (alloc != null)
+                        {
+                            observer.onSuccess(alloc);
+                        }
+                        else
+                        {
+                            if (logger.isTraceEnabled())
+                                logger.trace("Waiting for segment allocation...");
+
+                            // No room in current segment. Reschedule for after segment is switched.
+                            StagedScheduler scheduler = mutation.getScheduler();
+                            // Get the locals and create TPCRunnable now: locals will be lost when the future is called,
+                            // and we want to still track the task as active.
+                            TPCRunnable us = new TPCRunnable(this,
+                                                             ExecutorLocals.create(),
+                                                             TPCTaskType.WRITE_POST_COMMIT_LOG_SEGMENT,
+                                                             TPCScheduler.coreIdOf(scheduler));
+                            advanceAllocatingFrom(segment).thenRun(() -> scheduler.execute(us));
+                        }
+                    }
+
+                    public void dispose()
+                    {
+                        disposed = true;
+                    }
+
+                    public boolean isDisposed()
+                    {
+                        return disposed;
+                    }
                 }
-                while ((nalloc = nsegment.allocate(mutation, size)) == null);
 
-                if (logger.isTraceEnabled())
-                    logger.trace("Returning segment allocated {}", nalloc);
-                return nalloc;
-            });
-
-            // Do blocking on background IO scheduler, continue on TPC thread
-            allocationSingle = RxThreads.subscribeOnBackgroundIo(allocationSingle, TPCTaskType.COMMIT_LOG_ALLOCATE);
-            allocationSingle = RxThreads.observeOn(allocationSingle, mutation.getScheduler(), TPCTaskType.WRITE_POST_COMMIT_LOG);
-            return allocationSingle;
-        });
+                AllocationSource source = new AllocationSource();
+                observer.onSubscribe(source);
+                source.run();
+            }
+        };
     }
 
     /**

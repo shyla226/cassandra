@@ -30,11 +30,10 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.reactivex.functions.Function;
-import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.LineNumberInference;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 
 import static org.junit.Assert.fail;
@@ -293,13 +292,13 @@ public class FlowTest
                 currentThread.set(Thread.currentThread().getName());
                 return ignored;
             })
-            .observeOn(Schedulers.newThread(), TPCTaskType.UNKNOWN)
+            .observeOn(TPC.ioScheduler(), TPCTaskType.UNKNOWN)
             .map(ignored ->
             {
                 transformedThread1.set(Thread.currentThread().getName());
                 return ignored;
             })
-            .observeOn(Schedulers.newThread(), TPCTaskType.UNKNOWN)
+            .observeOn(TPC.bestTPCScheduler(), TPCTaskType.UNKNOWN)
             .reduceBlocking("ignored", (i, o) ->
             {
                 transformedThread2.set(Thread.currentThread().getName());

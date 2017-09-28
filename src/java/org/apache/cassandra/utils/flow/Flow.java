@@ -52,11 +52,12 @@ import io.reactivex.functions.BooleanSupplier;
 import io.reactivex.functions.Consumer;
 import io.reactivex.functions.Function;
 import io.reactivex.functions.Predicate;
+import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.LineNumberInference;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 
@@ -118,10 +119,11 @@ public abstract class Flow<T>
      */
     static class SchedulingTransformer<I> extends FlowTransformNext<I, I>
     {
-        final Scheduler scheduler;
+        final StagedScheduler scheduler;
         final TPCTaskType taskType;
+        final ExecutorLocals locals = ExecutorLocals.create();
 
-        public SchedulingTransformer(Flow<I> source, Scheduler scheduler, TPCTaskType taskType)
+        public SchedulingTransformer(Flow<I> source, StagedScheduler scheduler, TPCTaskType taskType)
         {
             super(source);
             this.scheduler = scheduler;
@@ -134,13 +136,7 @@ public abstract class Flow<T>
             if (TPC.isOnScheduler(scheduler))
                 subscriber.onNext(next);
             else
-                scheduler.scheduleDirect(new TaggedRunnable.Base(taskType, scheduler)
-                                         {
-                                             public void run()
-                                             {
-                                                 subscriber.onNext(next);
-                                             }
-                                         });
+                scheduler.execute(() -> subscriber.onNext(next), locals, taskType);
         }
 
         public String toString()
@@ -153,7 +149,7 @@ public abstract class Flow<T>
      * Applies any subsequent transformations (i.e. map, reduce...) on the given scheduler
      * (similarly to RxJava's observeOn()).
      */
-    public Flow<T> observeOn(Scheduler scheduler, TPCTaskType taskType)
+    public Flow<T> observeOn(StagedScheduler scheduler, TPCTaskType taskType)
     {
         return new SchedulingTransformer<>(this, scheduler, taskType);
     }

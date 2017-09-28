@@ -50,6 +50,11 @@ public class EventLoopBasedScheduler<E extends EventLoop> extends StagedSchedule
 
     public void execute(Runnable runnable, ExecutorLocals locals, TPCTaskType stage)
     {
+        eventLoop.execute(TPCRunnable.wrap(runnable, locals, stage, TPCScheduler.coreIdOf(this)));
+    }
+
+    public void execute(TPCRunnable runnable)
+    {
         eventLoop.execute(runnable);
     }
 

@@ -25,16 +25,17 @@ package org.apache.cassandra.concurrent;
 public enum TPCTaskType
 {
     UNKNOWN,
-    READ(true),
-    READ_RANGE(true),
+    READ(true, false),
+    READ_RANGE(true, false),
     READ_SWITCH_FOR_MEMTABLE,
     READ_FROM_ITERATOR,
     READ_SECONDARY_INDEX,
-    READ_DISK_ASYNC,
-    WRITE(true),
-    WRITE_DEFRAGMENT(true),
+    READ_DISK_ASYNC(false, true),
+    WRITE(true, false),
+    WRITE_DEFRAGMENT(true, false),
     WRITE_SWITCH_FOR_MEMTABLE,
-    WRITE_POST_COMMIT_LOG,
+    WRITE_POST_COMMIT_LOG_SEGMENT(false, true),
+    WRITE_POST_COMMIT_LOG_SYNC(false, true),
     COUNTER_ACQUIRE_LOCK,
     VIEW_ACQUIRE_LOCK,
     EXECUTE_STATEMENT_INTERNAL,
@@ -45,8 +46,6 @@ public enum TPCTaskType
     LWT_PROPOSE,
     LWT_COMMIT,
     TRUNCATE,
-    COMMIT_LOG_SYNC,
-    COMMIT_LOG_ALLOCATE,
     COMMIT_LOG_REPLAY,
     ANNOUNCE_TABLE,
     MIGRATION,
@@ -65,14 +64,16 @@ public enum TPCTaskType
     COUNTER_CACHE_LOAD;
 
     public final boolean pendable;
+    public final boolean counted;
 
-    TPCTaskType(boolean pendable)
+    TPCTaskType(boolean pendable, boolean counted)
     {
         this.pendable = pendable;
+        this.counted = counted;
     }
 
     TPCTaskType()
     {
-        this(false);
+        this(false, false);
     }
 }

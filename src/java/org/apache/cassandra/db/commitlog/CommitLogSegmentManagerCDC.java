@@ -32,15 +32,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
+import io.reactivex.SingleObserver;
+import io.reactivex.disposables.Disposable;
+import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPCRunnable;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLogSegment.CDCState;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.DirectorySizeCalculator;
-import org.apache.cassandra.utils.flow.RxThreads;
 
 public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
 {
@@ -97,49 +100,65 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     @Override
     public Single<CommitLogSegment.Allocation> allocate(Mutation mutation, int size) throws CDCSegmentFullException
     {
-        return Single.defer(() -> {
-            CommitLogSegment segment = allocatingFrom();
-            throwIfForbidden(mutation, segment);
-
-            if (logger.isTraceEnabled())
-                logger.trace("Allocating mutation of size {} on segment {} with space {}", size, segment.id, segment.availableSize());
-
-            CommitLogSegment.Allocation alloc = segment.allocate(mutation, size);
-            if (alloc != null)
+        return new Single<CommitLogSegment.Allocation>()
+        {
+            protected void subscribeActual(SingleObserver observer)
             {
-                if (mutation.trackedByCDC())
-                    segment.setCDCState(CDCState.CONTAINS);
-                return Single.just(alloc);
-            }
+                class AllocationSource implements Runnable, Disposable
+                {
+                    volatile boolean disposed = false;
 
-            // failed to allocate, so move to a new segment with enough room
-            Single<CommitLogSegment.Allocation> allocationSingle =
-                Single.fromCallable(() -> {
-                    if (logger.isTraceEnabled())
-                        logger.trace("Waiting for segment allocation...");
-                    CommitLogSegment.Allocation nalloc;
-                    CommitLogSegment nsegment = segment;
-                    do
+                    public void run()
                     {
-                        advanceAllocatingFrom(nsegment);
-                        nsegment = allocatingFrom();
-                        throwIfForbidden(mutation, nsegment);
+                        if (isDisposed())
+                            return;
+
+                        CommitLogSegment segment = allocatingFrom();
+                        throwIfForbidden(mutation, segment);
+                        if (logger.isTraceEnabled())
+                            logger.trace("Allocating mutation of size {} on segment {} with space {}", size, segment.id, segment.availableSize());
+
+                        CommitLogSegment.Allocation alloc = segment.allocate(mutation, size);
+                        if (alloc != null)
+                        {
+                            if (mutation.trackedByCDC())
+                                segment.setCDCState(CDCState.CONTAINS);
+
+                            observer.onSuccess(alloc);
+                        }
+                        else
+                        {
+                            if (logger.isTraceEnabled())
+                                logger.trace("Waiting for segment allocation...");
+
+                            // No room in current segment. Reschedule for after segment is switched.
+                            StagedScheduler scheduler = mutation.getScheduler();
+                            // Get the locals and create TPCRunnable now: locals will be lost when the future is called,
+                            // and we want to still track the task as active.
+                            TPCRunnable us = new TPCRunnable(this,
+                                                             ExecutorLocals.create(),
+                                                             TPCTaskType.WRITE_POST_COMMIT_LOG_SEGMENT,
+                                                             TPCScheduler.coreIdOf(scheduler));
+                            advanceAllocatingFrom(segment).thenRun(() -> scheduler.execute(us));
+                        }
                     }
-                    while ((nalloc = nsegment.allocate(mutation, size)) == null);
 
-                    if (logger.isTraceEnabled())
-                        logger.trace("Returning segment allocated {}", nalloc);
+                    public void dispose()
+                    {
+                        disposed = true;
+                    }
 
-                    if (mutation.trackedByCDC())
-                        nsegment.setCDCState(CDCState.CONTAINS);
-                    return nalloc;
-                });
+                    public boolean isDisposed()
+                    {
+                        return disposed;
+                    }
+                }
 
-            // Do blocking on background IO scheduler, continue on TPC thread
-            allocationSingle = RxThreads.subscribeOnBackgroundIo(allocationSingle, TPCTaskType.COMMIT_LOG_ALLOCATE);
-            allocationSingle = RxThreads.observeOn(allocationSingle, mutation.getScheduler(), TPCTaskType.WRITE_POST_COMMIT_LOG);
-            return allocationSingle;
-        });
+                AllocationSource source = new AllocationSource();
+                observer.onSubscribe(source);
+                source.run();
+            }
+        };
     }
 
     private void throwIfForbidden(Mutation mutation, CommitLogSegment segment) throws CDCSegmentFullException

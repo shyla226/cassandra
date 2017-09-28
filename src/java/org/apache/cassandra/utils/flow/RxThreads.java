@@ -26,6 +26,7 @@ import io.reactivex.Single;
 import io.reactivex.SingleObserver;
 import io.reactivex.SingleOperator;
 import io.reactivex.disposables.Disposable;
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCRunnable;
 import org.apache.cassandra.concurrent.TPCScheduler;
@@ -109,6 +110,7 @@ public class RxThreads
         class ObserveOn implements SingleObserver<T>
         {
             final SingleObserver<? super T> subscriber;
+            final ExecutorLocals locals = ExecutorLocals.create();
 
             ObserveOn(SingleObserver<? super T> subscriber)
             {
@@ -125,9 +127,10 @@ public class RxThreads
                 if (TPC.isOnScheduler(scheduler))
                     subscriber.onSuccess(value);
                 else
-                    scheduler.scheduleDirect(TPCRunnable.wrap(() -> subscriber.onSuccess(value),
-                                                              taskType,
-                                                              TPCScheduler.coreIdOf(scheduler)));
+                    scheduler.scheduleDirect(new TPCRunnable(() -> subscriber.onSuccess(value),
+                                                             locals,
+                                                             taskType,
+                                                             TPCScheduler.coreIdOf(scheduler)));
             }
 
             public void onError(Throwable throwable)
@@ -150,12 +153,17 @@ public class RxThreads
 
     public static CompletableOperator observeOnCompletable(Scheduler scheduler, TPCTaskType taskType)
     {
-        class ObserveOn implements CompletableObserver
+        class ObserveOn extends TPCRunnable implements CompletableObserver
         {
             final CompletableObserver subscriber;
 
             ObserveOn(CompletableObserver subscriber)
             {
+                // Create TPCRunnable on subscription so that we track the waiting task.
+                super(subscriber::onComplete,
+                      ExecutorLocals.create(),
+                      taskType,
+                      TPCScheduler.coreIdOf(scheduler));
                 this.subscriber = subscriber;
             }
 
@@ -167,11 +175,9 @@ public class RxThreads
             public void onComplete()
             {
                 if (TPC.isOnScheduler(scheduler))
-                    subscriber.onComplete();
+                    run();
                 else
-                    scheduler.scheduleDirect(TPCRunnable.wrap(subscriber::onComplete,
-                                                              taskType,
-                                                              TPCScheduler.coreIdOf(scheduler)));
+                    scheduler.scheduleDirect(this);
             }
 
             public void onError(Throwable throwable)

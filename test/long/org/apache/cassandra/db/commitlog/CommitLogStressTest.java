@@ -40,6 +40,9 @@ import io.netty.util.concurrent.FastThreadLocalThread;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.UpdateBuilder;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCMetrics;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.Config.CommitLogSync;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.Mutation;
@@ -51,6 +54,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
+import org.apache.cassandra.service.StorageService;
 
 
 public class CommitLogStressTest
@@ -145,6 +149,8 @@ public class CommitLogStressTest
 
         SchemaLoader.loadSchema();
         SchemaLoader.schemaDefinition(""); // leave def. blank to maintain old behaviour
+
+        StorageService.instance.stopTransportsAsync().join();
 
         CommitLog.instance.stopUnsafe(true);
     }
@@ -396,12 +402,27 @@ public class CommitLogStressTest
                                       mb(commitLog.getActiveContentSize()),
                                       mb(commitLog.getActiveOnDiskSize()),
                                       mb(sz / time)));
+                dumpTpStats(TPCTaskType.WRITE_POST_COMMIT_LOG_SEGMENT);
+                dumpTpStats(TPCTaskType.WRITE_POST_COMMIT_LOG_SYNC);
                 lastUpdate = temp;
             }
         };
         ScheduledExecutorService scheduled = Executors.newScheduledThreadPool(1);
         scheduled.scheduleAtFixedRate(printRunnable, 1, 1, TimeUnit.SECONDS);
         return scheduled;
+    }
+
+    private void dumpTpStats(TPCTaskType stage)
+    {
+        String v = "";
+        for (int i = 0; i < TPC.perCoreMetrics.length; ++i)
+        {
+            TPCMetrics metrics = TPC.perCoreMetrics[i];
+            if (metrics.scheduledTaskCount(stage) > 0)
+                v += String.format(" %d: %,d(completed %,d)", i, metrics.activeTaskCount(stage), metrics.completedTaskCount(stage));
+        }
+        if (!v.isEmpty())
+            System.out.println(stage + ":" + v);
     }
 
     private static double mb(long maxMemory)

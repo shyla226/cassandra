@@ -33,8 +33,6 @@ public abstract class StagedScheduler extends Scheduler
 {
     private final EnumMap<TPCTaskType, TracingAwareExecutor> executorsForTaskType = new EnumMap<>(TPCTaskType.class);
 
-    public abstract void execute(Runnable runnable, ExecutorLocals locals, TPCTaskType stage);
-
     public abstract Disposable scheduleDirect(Runnable run, TPCTaskType stage, long delay, TimeUnit unit);
 
     /**
@@ -46,6 +44,10 @@ public abstract class StagedScheduler extends Scheduler
      * @return true if the thread is part of the thread pool for the scheduler, false otherwise.
      */
     public abstract boolean isOnScheduler(Thread thread);
+
+    public abstract void execute(TPCRunnable runnable);
+
+    public abstract void execute(Runnable runnable, ExecutorLocals locals, TPCTaskType stage);
 
     /**
      * Returns an executor that assigns the given task type to the runnables it receives.

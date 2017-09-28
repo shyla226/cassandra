@@ -97,21 +97,29 @@ public class TPCRunnable implements Runnable
 
     public static TPCRunnable wrap(Runnable runnable)
     {
-        return wrap(runnable, TPCTaskType.UNKNOWN, TPC.getNumCores());
+        return wrap(runnable, ExecutorLocals.create(), TPCTaskType.UNKNOWN, TPC.getNumCores());
     }
 
     public static TPCRunnable wrap(Runnable runnable, int defaultCore)
     {
-        return wrap(runnable, TPCTaskType.UNKNOWN, defaultCore);
+        return wrap(runnable, ExecutorLocals.create(), TPCTaskType.UNKNOWN, defaultCore);
     }
 
     public static TPCRunnable wrap(Runnable runnable, TPCTaskType defaultStage, int defaultCore)
+    {
+        return wrap(runnable, ExecutorLocals.create(), defaultStage, defaultCore);
+    }
+
+    public static TPCRunnable wrap(Runnable runnable,
+                                   ExecutorLocals locals,
+                                   TPCTaskType defaultStage,
+                                   int defaultCore)
     {
         if (runnable instanceof TPCRunnable)
             return (TPCRunnable) runnable;
         if (runnable instanceof TaggedRunnable)
             return new TPCRunnable((TaggedRunnable) runnable);
 
-        return new TPCRunnable(runnable, ExecutorLocals.create(), defaultStage, defaultCore);
+        return new TPCRunnable(runnable, locals, defaultStage, defaultCore);
     }
 }

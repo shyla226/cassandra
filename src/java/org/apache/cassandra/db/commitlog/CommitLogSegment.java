@@ -139,8 +139,8 @@ public abstract class CommitLogSegment
      */
     static boolean usesBufferPool(CommitLog commitLog)
     {
-        Configuration config = commitLog.configuration;
-        return config.useEncryption() || config.useCompression();
+        // The memory-mapped segments are the only ones that don't use buffers. We currently don't offer these.
+        return true;
     }
 
     static long getNextId()
