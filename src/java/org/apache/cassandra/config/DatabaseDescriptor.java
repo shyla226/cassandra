@@ -780,48 +780,102 @@ public class DatabaseDescriptor
         broadcastAddress = null;
         broadcastNativeTransportAddress = null;
 
-        if (config.native_transport_address == null && config.rpc_address != null)
+        // Support to deprecated rpc_* properties
+        if (config.rpc_address != null)
         {
-            logger.warn("The 'rpc_address' property is deprecated and will be removed on the next major release. Please update your yaml to use 'native_transport_address' instead.");
+            if (config.native_transport_address == null)
+            {
+                logger.warn("The 'rpc_address' property is deprecated and will be removed on the next major release. Please update your yaml to " +
+                            "use 'native_transport_address' instead.");
+            }
+            else
+            {
+                //When both are specified, fallback to the old one but log a warning
+                logger.warn("Both 'rpc_address={}' and 'native_transport_address={}' are specified. Using deprecated property 'rpc_address={}'. " +
+                            "Please update your yaml to specify only 'native_transport_address'.", config.rpc_address, config.native_transport_address, config.rpc_address);
+            }
             config.native_transport_address = config.rpc_address;
         }
 
-        if (config.native_transport_interface == null && config.rpc_interface != null)
+        if (config.rpc_interface != null)
         {
-            logger.warn("The 'rpc_interface' property is deprecated and will be removed on the next major release. Please update your yaml to use 'native_transport_interface' instead.");
+            if (config.native_transport_interface == null)
+            {
+                logger.warn("The 'rpc_interface' property is deprecated and will be removed on the next major release. Please update your yaml to " +
+                            "use 'native_transport_interface' instead.");
+            }
+            else
+            {
+                //When both are specified, fallback to the old one but log a warning
+                logger.warn("Both 'rpc_interface={}' and 'native_transport_interface={}' are specified. Using deprecated property 'rpc_interface={}'. " +
+                            "Please update your yaml to specify only 'native_transport_interface'.", config.rpc_interface, config.native_transport_interface, config.rpc_interface);
+            }
             config.native_transport_interface = config.rpc_interface;
+        }
+
+        if (config.rpc_interface_prefer_ipv6 != null)
+        {
+            if (config.native_transport_interface_prefer_ipv6 == null)
+            {
+                logger.warn("The 'rpc_interface_prefer_ipv6' property is deprecated and will be removed on the next major release. Please update your yaml to " +
+                            "use 'native_transport_interface_prefer_ipv6' instead.");
+            }
+            else
+            {
+                //When both are specified, fallback to the old one but log a warning
+                logger.warn("Both 'rpc_interface_prefer_ipv6={}' and 'rpc_interface_prefer_ipv6={}' are specified. Using deprecated property 'rpc_interface={}'. " +
+                            "Please update your yaml to specify only 'native_transport_interface_prefer_ipv6'.", config.rpc_interface_prefer_ipv6,
+                            config.native_transport_interface_prefer_ipv6, config.rpc_interface_prefer_ipv6);
+            }
+            config.native_transport_interface_prefer_ipv6 = config.rpc_interface_prefer_ipv6;
+        }
+
+        if (config.broadcast_rpc_address != null)
+        {
+            if (config.native_transport_broadcast_address == null)
+            {
+                logger.warn("The 'broadcast_rpc_address' property is deprecated and will be removed on the next major release. Please update your yaml to " +
+                            "use 'native_transport_broadcast_address' instead.");
+            }
+            else
+            {
+                //When both are specified, fallback to the old one but log a warning
+                logger.warn("Both 'broadcast_rpc_address={}' and 'native_transport_broadcast_address={}' are specified. Using deprecated property 'broadcast_rpc_address={}'. " +
+                            "Please update your yaml to specify only 'native_transport_broadcast_address'.", config.broadcast_rpc_address,
+                            config.native_transport_broadcast_address, config.broadcast_rpc_address);
+            }
+            config.native_transport_broadcast_address = config.broadcast_rpc_address;
+        }
+
+        if (config.rpc_keepalive != null)
+        {
+            if (config.native_transport_keepalive == null)
+            {
+                logger.warn("The 'rpc_keepalive' property is deprecated and will be removed on the next major release. Please update your yaml to " +
+                            "use 'native_transport_keepalive' instead.");
+            }
+            else
+            {
+                //When both are specified, fallback to the old one but log a warning
+                logger.warn("Both 'rpc_keepalive={}' and 'native_transport_keepalive={}' are specified. Using deprecated property 'rpc_keepalive={}'. " +
+                            "Please update your yaml to specify only 'native_transport_keepalive'.", config.rpc_keepalive, config.native_transport_keepalive,
+                            config.rpc_keepalive);
+            }
+            config.native_transport_keepalive = config.rpc_keepalive;
+        }
+
+        // Set default values for for 'native_transport_keepalive' and 'native_transport_interface_prefer_ipv6' if unset
+        // We cannot set them directly on Config because we need to differentiate between the default and when the user
+        // explicitly set them to print the warnings above.
+
+        if (config.native_transport_keepalive == null)
+        {
+            config.native_transport_keepalive = true;
         }
 
         if (config.native_transport_interface_prefer_ipv6 == null)
         {
-            if (config.rpc_interface_prefer_ipv6 == null)
-            {
-                config.native_transport_interface_prefer_ipv6 = false;
-            }
-            else
-            {
-                logger.warn("The 'rpc_interface_prefer_ipv6' property is deprecated and will be removed on the next major release. Please update your yaml to use 'native_transport_interface_prefer_ipv6' instead.");
-                config.native_transport_interface_prefer_ipv6 = config.rpc_interface_prefer_ipv6;
-            }
-        }
-
-        if (config.native_transport_broadcast_address == null && config.broadcast_rpc_address != null)
-        {
-            logger.warn("The 'broadcast_rpc_address' property is deprecated and will be removed on the next major release. Please update your yaml to use 'native_transport_broadcast_address' instead.");
-            config.native_transport_broadcast_address = config.broadcast_rpc_address;
-        }
-
-        if (config.native_transport_keepalive == null)
-        {
-            if (config.rpc_keepalive == null)
-            {
-                config.native_transport_keepalive = true;
-            }
-            else
-            {
-                logger.warn("The 'rpc_keepalive' property is deprecated and will be removed on the next major release. Please update your yaml to use 'native_transport_keepalive' instead.");
-                config.native_transport_keepalive = config.rpc_keepalive;
-            }
+            config.native_transport_interface_prefer_ipv6 = false;
         }
 
         /* Local IP, hostname or interface to bind services to */

@@ -36,6 +36,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -253,16 +254,20 @@ public class DatabaseDescriptorTest
     }
 
     @Test
-    public void testRpcAddress() throws Exception
+    public void testDeprecatedProperties() throws Exception
     {
         Config testConfig = DatabaseDescriptor.loadConfig();
         testConfig.rpc_address = suitableInterface.getInterfaceAddresses().get(0).getAddress().getHostAddress();
         testConfig.rpc_interface = null;
+        testConfig.native_transport_keepalive = false;
+        testConfig.rpc_keepalive = true;
         assertNull(testConfig.native_transport_address);
         assertNull(testConfig.native_transport_interface);
         DatabaseDescriptor.applyAddressConfig(testConfig);
         assertEquals(suitableInterface.getInterfaceAddresses().get(0).getAddress().getHostAddress(), testConfig.native_transport_address);
         assertNull(testConfig.native_transport_interface);
+        assertTrue(testConfig.native_transport_keepalive); //rpc_keepalive should override native_transport_keepalive if set
+        assertFalse(testConfig.native_transport_interface_prefer_ipv6); //test default
     }
 
     @Test
