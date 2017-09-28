@@ -17,7 +17,9 @@ import org.apache.cassandra.auth.permission.Permissions;
  */
 public final class PermissionSets
 {
-    public static final PermissionSets EMPTY = builder().build();
+    public static final PermissionSets EMPTY = new PermissionSets(Permissions.immutableSetOf(),
+                                                                  Permissions.immutableSetOf(),
+                                                                  Permissions.immutableSetOf());
 
     /**
      * Immutable set of granted permissions.

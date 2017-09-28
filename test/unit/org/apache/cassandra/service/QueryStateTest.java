@@ -65,8 +65,6 @@ public class QueryStateTest
 
         System.out.println("before queryState 1");
         QueryState queryState = getQueryState(user);
-        // lazy init!
-        queryState.getUser();
 
         System.out.println("before grant EXECUTE");
         authorizer.grant(null, Collections.singleton(CorePermission.EXECUTE), ks, user.getPrimaryRole(), GrantMode.GRANT);
