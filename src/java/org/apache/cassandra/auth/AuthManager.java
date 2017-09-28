@@ -6,10 +6,7 @@
 package org.apache.cassandra.auth;
 
 import java.net.InetAddress;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.Future;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -445,6 +442,7 @@ public final class AuthManager
                                RoleOptions options)
         {
             roleManager.createRole(performer, role, options);
+            invalidateRoles(Collections.singleton(role));
         }
 
         @Override
