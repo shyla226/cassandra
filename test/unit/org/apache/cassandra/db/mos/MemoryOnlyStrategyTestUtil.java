@@ -55,7 +55,7 @@ class MemoryOnlyStrategyTestUtil
 
     void verifyTotals(MemoryOnlyStatus mosStatus)
     {
-        MemoryOnlyStatusMBean.TotalInfo totals = mosStatus.getMemoryOnlyTotals();
+        MemoryOnlyStatusMXBean.TotalInfo totals = mosStatus.getMemoryOnlyTotals();
         logger.info(String.format("Max Memory to Lock:                    %10dB\n", totals.getMaxMemoryToLock()));
         logger.info(String.format("Current Total Memory Locked:           %10dB\n", totals.getUsed()));
         logger.info(String.format("Current Total Memory Not Able To Lock: %10dB\n", totals.getNotAbleToLock()));
@@ -65,7 +65,7 @@ class MemoryOnlyStrategyTestUtil
 
         logger.info(String.format("%-30s %-30s %12s %17s %7s\n", "Keyspace", "ColumnFamily", "Size", "Couldn't Lock",
                                   "Usage"));
-        for (MemoryOnlyStatusMBean.TableInfo mi : mosStatus.getMemoryOnlyTableInformation())
+        for (MemoryOnlyStatusMXBean.TableInfo mi : mosStatus.getMemoryOnlyTableInformation())
         {
             logger.info(String.format("%-30s %-30s %10dB %15dB %6.0f%%\n", mi.getKs(), mi.getCf(), mi.getUsed(),
                                       mi.getNotAbleToLock(), (100.0 * mi.getUsed()) / mi.getMaxMemoryToLock()));

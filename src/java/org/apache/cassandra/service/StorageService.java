@@ -44,7 +44,6 @@ import com.google.common.util.concurrent.*;
 
 import com.datastax.apollo.utils.concurrent.CompletableFutures;
 import io.reactivex.Completable;
-import io.reactivex.Single;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -68,12 +67,11 @@ import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
-import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.mos.MemoryOnlyStatus;
-import org.apache.cassandra.db.mos.MemoryOnlyStatusMBean;
+import org.apache.cassandra.db.mos.MemoryOnlyStatusMXBean;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token.TokenFactory;
@@ -288,7 +286,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             mbs.registerMBean(this, jmxObjectName);
 
             mbs.registerMBean(StreamManager.instance, new ObjectName(StreamManager.OBJECT_NAME));
-            mbs.registerMBean(MemoryOnlyStatus.instance, new ObjectName(MemoryOnlyStatusMBean.MBEAN_NAME));
+            mbs.registerMBean(MemoryOnlyStatus.instance, new ObjectName(MemoryOnlyStatusMXBean.MBEAN_NAME));
         }
         catch (Exception e)
         {

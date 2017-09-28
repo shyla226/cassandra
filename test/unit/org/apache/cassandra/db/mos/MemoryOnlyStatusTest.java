@@ -78,7 +78,7 @@ public class MemoryOnlyStatusTest
         assertEquals(0, memoryOnlyStatus.getMemoryOnlyPercentUsed(), Math.ulp(0.0));
 
         // check that the totals are available and zero
-        MemoryOnlyStatusMBean.TotalInfo info = memoryOnlyStatus.getMemoryOnlyTotals();
+        MemoryOnlyStatusMXBean.TotalInfo info = memoryOnlyStatus.getMemoryOnlyTotals();
         assertNotNull(info);
         assertEquals(maxToLock, info.getMaxMemoryToLock());
         assertEquals(0, info.getUsed());
@@ -147,7 +147,7 @@ public class MemoryOnlyStatusTest
             countDownLatch.await(1, TimeUnit.MINUTES);
             assertEquals(0, errors.get());
 
-            MemoryOnlyStatusMBean.TotalInfo info = memoryOnlyStatus.getMemoryOnlyTotals();
+            MemoryOnlyStatusMXBean.TotalInfo info = memoryOnlyStatus.getMemoryOnlyTotals();
             assertNotNull(info);
             assertEquals(maxToLock, info.getMaxMemoryToLock());
             assertEquals(maxToLock, info.getUsed());
@@ -183,7 +183,7 @@ public class MemoryOnlyStatusTest
             countDownLatch.await(1, TimeUnit.MINUTES);
             assertEquals(0, errors.get());
 
-            MemoryOnlyStatusMBean.TotalInfo info = memoryOnlyStatus.getMemoryOnlyTotals();
+            MemoryOnlyStatusMXBean.TotalInfo info = memoryOnlyStatus.getMemoryOnlyTotals();
             assertNotNull(info);
             assertEquals(maxToLock, info.getMaxMemoryToLock());
             assertEquals(0, info.getUsed());
@@ -193,7 +193,7 @@ public class MemoryOnlyStatusTest
 
     private MemoryLockedBuffer lockBuffer(MappedByteBuffer buffer, boolean shouldSucceed)
     {
-        MemoryOnlyStatusMBean.TotalInfo before = memoryOnlyStatus.getMemoryOnlyTotals();
+        MemoryOnlyStatusMXBean.TotalInfo before = memoryOnlyStatus.getMemoryOnlyTotals();
 
         MemoryLockedBuffer lockedBuffer = memoryOnlyStatus.lock(buffer);
         assertNotNull(lockedBuffer);
@@ -201,7 +201,7 @@ public class MemoryOnlyStatusTest
         assertEquals(roundTo4K(buffer.capacity()), lockedBuffer.amount);
         assertEquals(shouldSucceed, buffer.isLoaded());
 
-        MemoryOnlyStatusMBean.TotalInfo after = memoryOnlyStatus.getMemoryOnlyTotals();
+        MemoryOnlyStatusMXBean.TotalInfo after = memoryOnlyStatus.getMemoryOnlyTotals();
         if (shouldSucceed)
             assertEquals(before.getUsed() + lockedBuffer.amount, after.getUsed());
         else

@@ -87,7 +87,7 @@ public class LegacyMemoryOnlyStrategyTest extends DseTestRunner
             logger.info("testTruncateClearsData(): " + ("".equals(sstableCompressor) ? "sstable_compression turned off" : String.format("Using sstable_compression: %s", sstableCompressor)));
             String cf = LegacyMemoryOnlyStrategyTestUtil.createNewTable(KEYSPACE, sstableCompressor);
             MBeanServerConnection connection = getMBeanServerConnection();
-            MemoryOnlyStatusMBean mosStatus = LegacyMemoryOnlyStrategyTestUtil.getMOSMBeanProxy(connection);
+            MemoryOnlyStatusMXBean mosStatus = LegacyMemoryOnlyStrategyTestUtil.getMOSMBeanProxy(connection);
             final int numInserts = 4000;
             LegacyMemoryOnlyStrategyTestUtil.insertData(getNativeClientForNode(1).newSession(), numInserts, KEYSPACE, cf);
 
@@ -142,7 +142,7 @@ public class LegacyMemoryOnlyStrategyTest extends DseTestRunner
             String cf = LegacyMemoryOnlyStrategyTestUtil.createNewTable(KEYSPACE, sstableCompressor);
             MBeanServerConnection connection = getMBeanServerConnection();
 
-            MemoryOnlyStatusMBean mosStatus = LegacyMemoryOnlyStrategyTestUtil.getMOSMBeanProxy(connection);
+            MemoryOnlyStatusMXBean mosStatus = LegacyMemoryOnlyStrategyTestUtil.getMOSMBeanProxy(connection);
 
             final int numInserts = 4000;
             LegacyMemoryOnlyStrategyTestUtil.insertData(getNativeClientForNode(1).newSession(), numInserts, KEYSPACE, cf);

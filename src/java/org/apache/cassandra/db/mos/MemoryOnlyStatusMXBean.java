@@ -14,7 +14,7 @@ import java.util.List;
  * Return information about any in-memory tables through JMX.  Currently returns the memory used
  * vs total capacity of the table.
  */
-public interface MemoryOnlyStatusMBean
+public interface MemoryOnlyStatusMXBean
 {
     public static final String MBEAN_NAME = "org.apache.cassandra.db:type=MemoryOnlyStatus";
 
