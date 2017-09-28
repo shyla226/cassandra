@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.cassandra.db.mos.MemoryOnlyStatusMBean;
+import org.apache.cassandra.db.mos.MemoryOnlyStatusMXBean;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool;
 
@@ -40,12 +40,12 @@ public class InMemoryStatus extends NodeTool.NodeToolCmd
         }
     }
 
-    private void printInmemoryInfo(MemoryOnlyStatusMBean proxy)
+    private void printInmemoryInfo(MemoryOnlyStatusMXBean proxy)
     {
         printInmemoryInfo(proxy.getMemoryOnlyTableInformation(), proxy.getMemoryOnlyTotals());
     }
 
-    private void printInmemoryInfo(MemoryOnlyStatusMBean proxy, String ks, String cf)
+    private void printInmemoryInfo(MemoryOnlyStatusMXBean proxy, String ks, String cf)
     {
         printInmemoryInfo(
         Collections.singletonList(proxy.getMemoryOnlyTableInformation(ks, cf)),
@@ -53,7 +53,7 @@ public class InMemoryStatus extends NodeTool.NodeToolCmd
         );
     }
 
-    private void printInmemoryInfo(List<MemoryOnlyStatusMBean.TableInfo> infos, MemoryOnlyStatusMBean.TotalInfo totals)
+    private void printInmemoryInfo(List<MemoryOnlyStatusMXBean.TableInfo> infos, MemoryOnlyStatusMXBean.TotalInfo totals)
     {
         System.out.format("Max Memory to Lock:                    %10dMB\n", totals.getMaxMemoryToLock() / 0x100000);
         System.out.format("Current Total Memory Locked:           %10dMB\n", totals.getUsed() / 0x100000);
@@ -61,7 +61,7 @@ public class InMemoryStatus extends NodeTool.NodeToolCmd
         if (infos.size() > 0)
         {
             System.out.format("%-30s %-30s %12s %17s %7s\n", "Keyspace", "ColumnFamily", "Size", "Couldn't Lock", "Usage");
-            for (MemoryOnlyStatusMBean.TableInfo mi : infos)
+            for (MemoryOnlyStatusMXBean.TableInfo mi : infos)
             {
                 System.out.format("%-30s %-30s %10dMB %15dMB %6.0f%%\n", mi.getKs(), mi.getCf(), mi.getUsed() / 0x100000,
                                   mi.getNotAbleToLock() / 0x100000, (100.0 * mi.getUsed()) / mi.getMaxMemoryToLock());

@@ -7,7 +7,6 @@
 package org.apache.cassandra.db.mos;
 
 
-import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,7 +31,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 
-public class MemoryOnlyStatus implements MemoryOnlyStatusMBean
+public class MemoryOnlyStatus implements MemoryOnlyStatusMXBean
 {
     private static final Logger logger = LoggerFactory.getLogger(MemoryOnlyStatus.class);
 
