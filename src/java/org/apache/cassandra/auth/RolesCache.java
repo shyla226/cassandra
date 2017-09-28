@@ -48,7 +48,8 @@ public class RolesCache extends AuthCache<RoleResource, Set<RoleResource>> imple
         // to reload after an exception
         Set<RoleResource> ret = get(role, !TPC.isTPCThread());
         if (ret == null)
-            throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve resources for %s, would block TPC thread", role));
+            throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve resources for %s, would block TPC thread %s",
+                                                                 role, Thread.currentThread().getName()));
         return ret;
     }
 }

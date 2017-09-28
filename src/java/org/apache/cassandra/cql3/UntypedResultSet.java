@@ -249,7 +249,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         public Iterator<Row> iterator()
         {
             if (TPC.isTPCThread())
-                throw new TPCUtils.WouldBlockException("Iterating would block a TPC thread");
+                throw new TPCUtils.WouldBlockException("Iterating would block TPC thread " + Thread.currentThread().getName());
 
             return new AbstractIterator<Row>()
             {

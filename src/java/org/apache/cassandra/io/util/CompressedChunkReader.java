@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.CompletionHandler;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Supplier;
@@ -31,7 +32,10 @@ import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.CorruptBlockException;
@@ -96,6 +100,11 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         return new BufferManagingRebufferer.Aligned(this);
     }
 
+    private static Executor ioExecutor()
+    {
+        return (runnable) -> TPC.ioScheduler().execute(runnable, ExecutorLocals.create(), TPCTaskType.UNKNOWN);
+    }
+
     public static class Standard extends CompressedChunkReader
     {
         final Supplier<Integer> bufferSize;
@@ -125,99 +134,113 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         @Override
         public CompletableFuture<ByteBuffer> readChunk(long position, ByteBuffer uncompressed)
         {
-            CompletableFuture<ByteBuffer> futureBuffer = new CompletableFuture<>();
+            CompletableFuture<ByteBuffer> ret = new CompletableFuture<>();
             BufferHandle bufferHandle = scratchBuffers.get();
 
             try
             {
-                // accesses must always be aligned
-                assert (position & -metadata.chunkLength()) == position;
-                assert position <= fileLength;
-
-                CompressionMetadata.Chunk chunk = metadata.chunkFor(position);
-                ByteBuffer compressed = bufferHandle.get(bufferSize.get());
-
-                // TODO: We need to evaluate what effect alignment has on Java AIO, and whether or not we should
-                // have a CompressedChunkReader subclass that does not apply alignment (and therefore is also
-                // able to skip copying for non-compressed chunks).
-
-                //O_DIRECT read positions must be aligned to DMA size
-                long alignedOffset = TPC.roundDownToBlockSize(chunk.offset);
-                int alignmentShift = Ints.checkedCast(chunk.offset - alignedOffset);
-
-                // We could optimize for non-compressed chunk with alignmentShift == 0 && !shouldCheckCrc, but that will
-                // unfortunately be too rare to have any noticeable effect.
-
-                compressed.clear();
-                compressed.limit(TPC.roundUpToBlockSize(chunk.length + alignmentShift + CHECKSUM_BYTES));
-
-                channel.read(compressed, alignedOffset, new CompletionHandler<Integer, ByteBuffer>()
-                {
-                    public void completed(Integer result, ByteBuffer attachment)
-                    {
-                        try
-                        {
-                            if (result < chunk.length + alignmentShift + CHECKSUM_BYTES)
-                                throw new CorruptBlockException(channel.filePath() + " result = " + result, chunk);
-
-                            compressed.limit(chunk.length + alignmentShift);
-                            compressed.position(alignmentShift);
-                            uncompressed.clear();
-
-                            //CASSANDRA-10520 adds this threshold where we skip decompressing if
-                            //the compression ratio is not enough of a win to be worth it.
-                            if (chunk.length < maxCompressedLength)
-                            {
-                                try
-                                {
-                                    metadata.compressor().uncompress(compressed, uncompressed);
-                                }
-                                catch (IOException e)
-                                {
-                                    throw new CorruptBlockException(channel.filePath(), chunk, e);
-                                }
-                            }
-                            else
-                            {
-                                uncompressed.put(compressed);
-                            }
-                            uncompressed.flip();
-
-                            if (shouldCheckCrc())
-                            {
-                                compressed.limit(chunk.length + alignmentShift).position(alignmentShift);
-                                int checksum = (int) ChecksumType.CRC32.of(compressed);
-
-                                //Change the limit to include the checksum
-                                compressed.limit(compressed.capacity());
-                                if (compressed.getInt() != checksum)
-                                    throw new CorruptBlockException(channel.filePath(), chunk);
-                            }
-
-                        }
-                        catch (Throwable t)
-                        {
-                            error(t, uncompressed, futureBuffer, bufferHandle);
-                            return;
-                        }
-
-                        // Pass control outside the try..finally block as we don't want to catch processing exceptions.
-                        bufferHandle.recycle();
-                        futureBuffer.complete(uncompressed);
-                    }
-
-                    public void failed(Throwable t, ByteBuffer attachment)
-                    {
-                        error(t, uncompressed, futureBuffer, bufferHandle);
-                    }
-                });
+                doReadChunk(position, uncompressed, ret, bufferHandle);
+            }
+            catch (TPCUtils.WouldBlockException e)
+            {
+                ioExecutor().execute(() -> doReadChunk(position, uncompressed, ret, bufferHandle));
             }
             catch (Throwable t)
             {
-                error(t, uncompressed, futureBuffer, bufferHandle);
+                error(t, uncompressed, ret, bufferHandle);
             }
 
-            return futureBuffer;
+            return ret;
+        }
+
+        private void doReadChunk(long position, ByteBuffer uncompressed, CompletableFuture<ByteBuffer> futureBuffer, BufferHandle bufferHandle)
+        {
+            // accesses must always be aligned
+            assert (position & -metadata.chunkLength()) == position;
+            assert position <= fileLength;
+
+            CompressionMetadata.Chunk chunk = metadata.chunkFor(position);
+            ByteBuffer compressed = bufferHandle.get(bufferSize.get());
+
+            // TODO: We need to evaluate what effect alignment has on Java AIO, and whether or not we should
+            // have a CompressedChunkReader subclass that does not apply alignment (and therefore is also
+            // able to skip copying for non-compressed chunks).
+
+            //O_DIRECT read positions must be aligned to DMA size
+            long alignedOffset = TPC.roundDownToBlockSize(chunk.offset);
+            int alignmentShift = Ints.checkedCast(chunk.offset - alignedOffset);
+
+            // We could optimize for non-compressed chunk with alignmentShift == 0 && !shouldCheckCrc, but that will
+            // unfortunately be too rare to have any noticeable effect.
+
+            compressed.clear();
+            compressed.limit(TPC.roundUpToBlockSize(chunk.length + alignmentShift + CHECKSUM_BYTES));
+
+            channel.read(compressed, alignedOffset, new CompletionHandler<Integer, ByteBuffer>()
+            {
+                public void completed(Integer result, ByteBuffer attachment)
+                {
+                    try
+                    {
+                        if (result < chunk.length + alignmentShift + CHECKSUM_BYTES)
+                            throw new CorruptBlockException(channel.filePath() + " result = " + result, chunk);
+
+                        compressed.limit(chunk.length + alignmentShift);
+                        compressed.position(alignmentShift);
+                        uncompressed.clear();
+
+                        //CASSANDRA-10520 adds this threshold where we skip decompressing if
+                        //the compression ratio is not enough of a win to be worth it.
+                        if (chunk.length < maxCompressedLength)
+                        {
+                            try
+                            {
+                                metadata.compressor().uncompress(compressed, uncompressed);
+                            }
+                            catch (IOException e)
+                            {
+                                throw new CorruptBlockException(channel.filePath(), chunk, e);
+                            }
+                        }
+                        else
+                        {
+                            uncompressed.put(compressed);
+                        }
+                        uncompressed.flip();
+
+                        if (shouldCheckCrc())
+                        {
+                            compressed.limit(chunk.length + alignmentShift).position(alignmentShift);
+                            int checksum = (int) ChecksumType.CRC32.of(compressed);
+
+                            //Change the limit to include the checksum
+                            compressed.limit(compressed.capacity());
+                            if (compressed.getInt() != checksum)
+                                throw new CorruptBlockException(channel.filePath(), chunk);
+                        }
+
+                    }
+                    catch (TPCUtils.WouldBlockException ex)
+                    {
+                        ioExecutor().execute(() -> completed(result, attachment));
+                        return;
+                    }
+                    catch (Throwable t)
+                    {
+                        error(t, uncompressed, futureBuffer, bufferHandle);
+                        return;
+                    }
+
+                    // Pass control outside the try..finally block as we don't want to catch processing exceptions.
+                    bufferHandle.recycle();
+                    futureBuffer.complete(uncompressed);
+                }
+
+                public void failed(Throwable t, ByteBuffer attachment)
+                {
+                    error(t, uncompressed, futureBuffer, bufferHandle);
+                }
+            });
         }
 
         void error(Throwable t, ByteBuffer uncompressed, CompletableFuture<ByteBuffer> futureBuffer, BufferHandle bufferHandle)
@@ -244,7 +267,33 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         public CompletableFuture<ByteBuffer> readChunk(long position, ByteBuffer uncompressed)
         {
             CompletableFuture<ByteBuffer> future = new CompletableFuture<>();
+            try
+            {
+                future.complete(doReadChunk(position, uncompressed));
+            }
+            catch (TPCUtils.WouldBlockException e)
+            {
+                // we use this instead of CompletableFuture.supplyAsync() to avoid wrapping exceptions into CompletionException
+                ioExecutor().execute(() -> {
+                    try
+                    {
+                        future.complete(doReadChunk(position, uncompressed));
+                    }
+                    catch (Throwable t)
+                    {
+                        future.completeExceptionally(t);
+                    }
+                });
+            }
+            catch (Throwable t)
+            {
+               future.completeExceptionally(t);
+            }
+            return future;
+        }
 
+        private ByteBuffer doReadChunk(long position, ByteBuffer uncompressed)
+        {
             try
             {
                 // accesses must always be aligned
@@ -285,16 +334,16 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                     if (compressedChunk.getInt() != checksum)
                         throw new CorruptBlockException(channel.filePath(), chunk);
                 }
+
+                return uncompressed;
             }
-            catch (CorruptBlockException e)
+            catch (CorruptBlockException ex)
             {
                 // Make sure reader does not see stale data.
                 uncompressed.position(0).limit(0);
-                future.completeExceptionally(new CorruptSSTableException(e, channel.filePath()));
-            }
 
-            future.complete(uncompressed);
-            return future;
+               throw new CorruptSSTableException(ex, channel.filePath());
+            }
         }
 
         public void close()

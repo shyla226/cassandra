@@ -49,7 +49,8 @@ public class PermissionsCache extends AuthCache<Pair<AuthenticatedUser, IResourc
         // to reload after an exception
         Set<Permission> ret = get(Pair.create(user, resource), !TPC.isTPCThread());
         if (ret == null)
-            throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve %s/%s, would block TPC thread", user, resource));
+            throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve %s/%s, would block TPC thread %s",
+                                                                 user, resource, Thread.currentThread().getName()));
         return ret;
     }
 }

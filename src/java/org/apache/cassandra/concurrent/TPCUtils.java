@@ -40,7 +40,7 @@ public class TPCUtils
     public static <T> T blockingGet(Single<T> single)
     {
         if (TPC.isTPCThread())
-            throw new WouldBlockException("Calling blockingGet would block a TPC thread");
+            throw new WouldBlockException("Calling blockingGet would block TPC thread " + Thread.currentThread().getName());
 
         return single.blockingGet();
     }
@@ -48,7 +48,7 @@ public class TPCUtils
     public static void blockingAwait(Completable completable)
     {
         if (TPC.isTPCThread())
-            throw new WouldBlockException("Calling blockingAwait would block a TPC thread");
+            throw new WouldBlockException("Calling blockingAwait would block TPC thread " + Thread.currentThread().getName());
 
         completable.blockingAwait();
     }
@@ -56,7 +56,7 @@ public class TPCUtils
     public static <T> T blockingGet(CompletableFuture<T> future)
     {
         if (TPC.isTPCThread())
-            throw new WouldBlockException("Calling blockingGet would block a TPC thread");
+            throw new WouldBlockException("Calling blockingGet would block TPC thread " + Thread.currentThread().getName());
 
         try
         {
@@ -75,7 +75,7 @@ public class TPCUtils
     public static void blockingAwait(CompletableFuture future)
     {
         if (TPC.isTPCThread())
-            throw new WouldBlockException("Calling blockingAwait would block a TPC thread");
+            throw new WouldBlockException("Calling blockingAwait would block TPC thread " + Thread.currentThread().getName());
 
         try
         {
