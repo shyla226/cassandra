@@ -23,8 +23,6 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
-import org.apache.cassandra.utils.AbstractIterator;
-
 /**
  * A collection storing a given number of the last values that has been added to it, automatically removing older values
  * when new ones are added, and where iteration is from the latest added value to the oldest that is stored.
@@ -71,6 +69,19 @@ public class History<E> extends AbstractCollection<E>
     }
 
     /**
+     * Returns the last element of this history (if any).
+     *
+     * @return the most recent element in this history, or {@code null} if the history is empty.
+     */
+    public E last()
+    {
+        if (isEmpty())
+            return null;
+
+        return array[(idx - 1 + array.length) % array.length];
+    }
+
+    /**
      * Returns an immutable list view of the elements in this history (from the newest to the oldest).
      * <p>
      * This is a shortcut for {@code last(capacity())}.
@@ -112,6 +123,18 @@ public class History<E> extends AbstractCollection<E>
     public int size()
     {
         return atCapacity ? array.length : idx;
+    }
+
+    /**
+     * Whether the history is "at capacity", that is if {@code capacity() == size()}.
+     * <p>
+     * Once the history is at capacity, any new addition will evict the oldest element stored.
+     *
+     * @return {@code true} if the history is at capacity, {@code false} otherwise.
+     */
+    public boolean isAtCapacity()
+    {
+        return atCapacity;
     }
 
     /**

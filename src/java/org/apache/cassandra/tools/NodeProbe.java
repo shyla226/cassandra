@@ -1668,6 +1668,11 @@ public class NodeProbe implements AutoCloseable
         nodeSyncProxy.cancelUserValidation(idStr);
     }
 
+    public List<Map<String, String>> getNodeSyncRateSimulatorInfo(boolean includeAllTables)
+    {
+        return nodeSyncProxy.getRateSimulatorInfo(includeAllTables);
+    }
+
     public void markAllSSTablesAsUnrepaired(PrintStream out, String keyspace, String[] tables) throws IOException
     {
         int marked = ssProxy.forceMarkAllSSTablesAsUnrepaired(keyspace, tables);

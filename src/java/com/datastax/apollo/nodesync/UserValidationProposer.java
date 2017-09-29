@@ -19,8 +19,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
@@ -101,11 +99,9 @@ public class UserValidationProposer extends AbstractValidationProposer
                                    String id,
                                    TableMetadata table,
                                    int depth,
-                                   ImmutableList<Range<Token>> validatedRanges,
-                                   Function<String, Collection<Range<Token>>> localRangesProvider,
-                                   ToLongFunction<ColumnFamilyStore> tableSizeProvider)
+                                   ImmutableList<Range<Token>> validatedRanges)
     {
-        super(service, table, depth, localRangesProvider, tableSizeProvider);
+        super(service, table, depth);
         assert validatedRanges == null || !validatedRanges.isEmpty();
         this.id = id;
         this.validatedRanges = validatedRanges;
@@ -167,14 +163,12 @@ public class UserValidationProposer extends AbstractValidationProposer
 
     static UserValidationProposer create(NodeSyncService service, UserValidationOptions options)
     {
-        return create(service, options, DEFAULT_LOCAL_RANGES_PROVIDER, DEFAULT_TABLE_SIZE_PROVIDER, NodeSyncService.SEGMENT_SIZE_TARGET);
+        return create(service, options, NodeSyncService.SEGMENT_SIZE_TARGET);
     }
 
     @VisibleForTesting
     static UserValidationProposer create(NodeSyncService service,
                                          UserValidationOptions options,
-                                         Function<String, Collection<Range<Token>>> localRangesProvider,
-                                         ToLongFunction<ColumnFamilyStore> tableSizeProvider,
                                          long maxSegmentSize)
 
     {
@@ -190,7 +184,7 @@ public class UserValidationProposer extends AbstractValidationProposer
                                                              + "(keyspace %s has replication factor %d)",
                                                              table, table.keyspace, rf));
 
-        List<Range<Token>> local = Range.normalize(localRangesProvider.apply(table.keyspace));
+        List<Range<Token>> local = Range.normalize(NodeSyncHelpers.localRanges(table.keyspace));
         List<Range<Token>> requested = options.validatedRanges;
 
         ImmutableList<Range<Token>> validated = requested == null ? null : ImmutableList.copyOf(requested);
@@ -201,8 +195,8 @@ public class UserValidationProposer extends AbstractValidationProposer
             checkAllLocalRanges(validated, local);
         }
 
-        int depth = computeDepth(store, local.size(), tableSizeProvider, maxSegmentSize);
-        return new UserValidationProposer(service, options.id, table, depth, validated, localRangesProvider, tableSizeProvider);
+        int depth = computeDepth(store, local.size(), maxSegmentSize);
+        return new UserValidationProposer(service, options.id, table, depth, validated);
     }
 
     private static void checkAllLocalRanges(List<Range<Token>> validatedRanges, List<Range<Token>> localRanges)

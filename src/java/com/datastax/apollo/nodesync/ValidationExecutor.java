@@ -9,10 +9,8 @@ import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -27,7 +25,6 @@ import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.concurrent.TracingAwareExecutorService;
 import org.apache.cassandra.config.NodeSyncConfig;
 import org.apache.cassandra.utils.collection.History;
@@ -74,6 +71,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     // For an update interval, if we spend more than this waiting on rate limiting, we consider it significant.
     // TODO(Sylvain): this definitely needs testing to check if this is a decent value. May want to make configurable at least for test.
     private static final long LIMITER_WAIT_TIME_THRESHOLD_MS = 5 * CONTROLLER_INTERVAL_MS / 100;
+    // For an update interval, if we spend more than this blocking on getting new task, we consider it significant.
+    // TODO(Sylvain): this definitely needs testing to check if this is a decent value. May want to make configurable at least for test.
+    private static final long BLOCKED_ON_NEW_TASK_THRESHOLD_MS = 10 * CONTROLLER_INTERVAL_MS / 100;
 
     private enum State
     {
@@ -115,6 +115,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     private final AtomicLong processingWaitTimeNanos = new AtomicLong();
     private final AtomicLong limiterWaitTimeNanos = new AtomicLong();
     private final AtomicLong dataValidatedBytes = new AtomicLong();
+    private final AtomicLong blockedOnNewTaskTimeNanos = new AtomicLong();
 
     ValidationExecutor(ValidationScheduler scheduler, NodeSyncConfig config)
     {
@@ -250,7 +251,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                     // we shouldn't block as, given that we can have more threads than segments, we could end up
                     // starving the processing of an ongoing segment otherwise). And we have nothing else to do if
                     // there is no other in-flight validations (keeping in mind we do have a permit ourselves).
+                    long start = System.nanoTime();
                     Validator validator = scheduler.getNextValidation(inFlightValidations.get() <= 1);
+                    blockedOnNewTaskTimeNanos.addAndGet(System.nanoTime() - start);
                     if (validator != null)
                     {
                         submit(validator);
@@ -341,7 +344,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     {
         INCREASE_THREADS,
         INCREASE_INFLIGHT_VALIDATIONS,
+        MAXED_OUT, // Indicates we wanted to increase, but were already max-ed out so nothing was done in practice
         DO_NOTHING,
+        MINED_OUT, // Indicates we wanted to decrease, but were already min-ed out so nothing was done in practice
         DECREASE_THREADS,
         DECREASE_INFLIGHT_VALIDATIONS;
 
@@ -360,6 +365,10 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
      * The controller runs at regular intervals and is in charge of deciding if the number of threads and number of
      * inflight validations of the executor should be increased, decreased, or left as is, and this by using the
      * heuristics described in the {@link ValidationExecutor} javadoc.
+     * <p>
+     * Additionally, the controller runs a few checks that allow to warn the user if either we don't seem to be able
+     * to achieve the requested rate, or if that rate is simply set too low to meet all tables validation targets (given
+     * the current size of the data each table currently hold).
      *
      * TODO(Sylvain): we should detect when we're at max allowed capacity but still can't achieve our rate and log a
      * warning in the log. The one issue is that on tiny clusters where we have almost to validate, we're likely going
@@ -374,9 +383,14 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         private final DiffValue processingWaitTimeMsDiff = new DiffValue();
         private final DiffValue limiterWaitTimeMsDiff = new DiffValue();
         private final DiffValue dataValidatedBytesDiff = new DiffValue();
+        private final DiffValue blockedOnNewTaskMsDiff = new DiffValue();
 
-        /** An history of the last 6 actions we took (so covers the last 30 minutes with the default of this running every 5 minutes)  */
-        private final History<Action> history = new History<>(6);
+        /** An history of the recent actions we took (covers the last hour with the default of this running every 5 minutes)  */
+        private final History<Action> history = new History<>(12);
+
+        /** Timestamp of the last time we warned about the executor being maxed out (without achieving the requested rate
+         * that is). Negative if we haven't warned (or should warn unconditionally next time the situation arise). */
+        private long lastMaxedOutWarn = -1;
 
         /**
          * Whether we recently attempted a decrease immediately followed by an increase.
@@ -407,6 +421,14 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             return limiterWaitTimeMsDiff.currentDiff() > LIMITER_WAIT_TIME_THRESHOLD_MS;
         }
 
+        private boolean hasSignificantBlockOnNewTaskSinceLastCheck()
+        {
+            // blockedOnNewTaskMsDiff is the total time waited by all threads, so divide by our number of threads so
+            // it can be more meaningfully compared to the controller interval
+            long perThreadAvgBlockTime = blockedOnNewTaskMsDiff.currentDiff() / validationExecutor.getCorePoolSize();
+            return perThreadAvgBlockTime > BLOCKED_ON_NEW_TASK_THRESHOLD_MS;
+        }
+
         private boolean canIncreaseThreads()
         {
             // We shouldn't go over the configured max, but we also never want more threads than validations (doesn't make sense)
@@ -434,7 +456,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         private Action pickDecreaseAction()
         {
             if (!canDecreaseInflightValidations())
-                return Action.DECREASE_THREADS;
+                return canDecreaseThreads() ? Action.DECREASE_THREADS : Action.MINED_OUT;
             if (!canDecreaseThreads())
                 return Action.DECREASE_INFLIGHT_VALIDATIONS;
 
@@ -447,7 +469,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         private Action pickIncreaseAction()
         {
             if (!canIncreaseInflightValidations())
-                return Action.INCREASE_THREADS;
+                return canIncreaseThreads() ? Action.INCREASE_THREADS : Action.MAXED_OUT;
             if (!canIncreaseThreads())
                 return Action.INCREASE_INFLIGHT_VALIDATIONS;
 
@@ -463,6 +485,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             processingWaitTimeMsDiff.update(TimeUnit.NANOSECONDS.toMillis(processingWaitTimeNanos.get()));
             limiterWaitTimeMsDiff.update(TimeUnit.NANOSECONDS.toMillis(limiterWaitTimeNanos.get()));
             dataValidatedBytesDiff.update(dataValidatedBytes.get());
+            blockedOnNewTaskMsDiff.update(TimeUnit.NANOSECONDS.toMillis(blockedOnNewTaskTimeNanos.get()));
         }
 
         public void run()
@@ -478,19 +501,41 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                 // The recent rate is withing 5% of our target, we're basically good. That said, we might be
                 // over-committed. To know if we are, we check how much we've been waiting on the limiter acquire()
                 // method. If that's a non-negligible amount of time, it means our current number of in-flight
-                // validations and threads generate more work than we want. In that case, we consider lowering one of those.
+                // validations and threads generate more work than the limiter allows. In that case, we consider lowering
+                // one of those.
                 // Note however that we want to avoid changing our mind on every "tick", so check our little history to
                 // see if we already already tried decreasing our values without success (i.e. we ended up bumping them
                 // again afterwards).
-                if (!hasRecentUnsuccessfulDecrease() && hasSignificantLimiterWaitTimeSinceLastCheck() && (canDecreaseThreads() || canDecreaseInflightValidations()))
+                if (!hasRecentUnsuccessfulDecrease() && hasSignificantLimiterWaitTimeSinceLastCheck())
                     action = pickDecreaseAction();
             }
             else
             {
-                // We're not achieving our target rate. Unless we're already maxing our allowed number of in-flight
-                // validations and threads, bump one of them to (try to) speed things up.
-                if (canIncreaseThreads() || canIncreaseInflightValidations())
+                // We're not achieving our target rate. This can actually have 2 causes:
+                // 1) we're not using enough threads and/or in-flight validations to meet our rate goal. Then, assuming
+                //    we're not already maxing out both of those resources, we try to increase one to (try to) speed
+                //    things up.
+                // 2) we haven't add much work to do during the last interval, typically because the cluster has little
+                //    to no data to validate. In that case, we may actually want to decrease our resource used unless
+                //    we're already to the min.
+                // We detect whether we are in case 2) by checking what percentage of the last interval time was spend
+                // (on average per thread) simply waiting for work to do. If that's non-negligible, we assume we're in
+                // case 2), otherwise, that we're in case 1).
+                if (hasSignificantBlockOnNewTaskSinceLastCheck())
+                {
+                    action = pickDecreaseAction();
+                }
+                else
+                {
                     action = pickIncreaseAction();
+                    // It's possible we are already maxing out on both threads and inflight validations. In that case,
+                    // this suggests the node is not able to achieve the requested rate within the resources constraint
+                    // of NodeSyncConfig.max_threads and max_inflight_validations, and there is nothing we can do, the
+                    // user need to change one of those setting (or simply accept the rate he has set isn't being
+                    // achieved).
+                    if (action == Action.MAXED_OUT)
+                        maybeWarnOnMaxedOut(recentRate);
+                }
             }
 
             if (logger.isDebugEnabled())
@@ -518,6 +563,62 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                     break;
             }
             history.add(action);
+
+            postRunCleanup();
+        }
+
+        /**
+         * Called when we're not achieving the requested rate, but we are maxing out threads and in-flight validations
+         * so we can't "go faster" so we inform the user of that situation.
+         * <p>
+         * To avoid premature or repetitive warnings, we use the 2 following heuristics:
+         * 1) we only warn once every {@link NodeSyncService#MIN_WARN_INTERVAL_MS}. The idea is to not bother the user
+         *    every controller interval while things are maxed out, but with a cap after which we consider that maybe
+         *    the user has forgotten and reminding him of the problem may be worth it.
+         * 2) we only warn on either 2 consecutive interval being maxed out, or if we detect that more than 1/3 of our
+         *    history is maxed out. The general idea being that we want to avoid warning the user on a single interval
+         *    fluke (hence the 2 consecutive interval rule), but still want to detect case where we alternate too
+         *    much between maxed out and not max out since those would mean our average rate may be genuinely lower
+         *    than the configured one.
+         */
+        private void maybeWarnOnMaxedOut(double recentRate)
+        {
+            long now = System.currentTimeMillis();
+            if (lastMaxedOutWarn >= 0 && (now - lastMaxedOutWarn) < NodeSyncService.MIN_VALIDATION_INTERVAL_MS)
+                return;
+
+            // As mentioned above, we only log if either the previous interval was also maxed out (we haven't added the
+            // current interval action yet when this method is called), or more than 30% of our history is maxed out.
+            if (history.last() != Action.MAXED_OUT
+                && (history.isAtCapacity() && history.stream().filter(a -> a == Action.MAXED_OUT).count() <= (30 * history.size()) / 100))
+                return;
+
+            lastMaxedOutWarn = now;
+            logger.warn("NodeSync doesn't seem to be able to sustain the configured rate (over the last {}, the "
+                        + "effective rate was {} for a configured rate of {}) and this despite using {} threads and "
+                        + "{} parallel range validations (maximums allowed). "
+                        + "You may try to improve throughput by increasing the maximum allowed number of threads and/or "
+                        + "parallel range validations with the understanding that this may result in NodeSync using "
+                        + "more of the node resources. "
+                        + "If doing so doesn't help, this suggests the configured rate cannot be sustained by NodeSync "
+                        + "on the current hardware.",
+                        Units.toString(CONTROLLER_INTERVAL_MS, TimeUnit.MILLISECONDS),
+                        Units.toString((long)recentRate, RateUnit.B_S),
+                        config.getRate(),
+                        validationExecutor.getCorePoolSize(),
+                        maxInFlightValidations);
+        }
+
+        private void postRunCleanup()
+        {
+            // If we've recently warned about the executor being maxed out, but we haven't done so in recent history
+            // (last hour currently), clear up lastMaxedOutWarn so that if we get maxed out again we log again (without
+            // waiting for MIN_WARN_INTERVAL_MS. The rational is that if we haven't max out for an hour, this is a good
+            // indication that the user has somehow fixed whatever was making the executor max out (maybe the rate was
+            // lowered, or maybe the max threads/inflight validations was upped). In which case, it feels worth warning
+            // ASAP if conditions changes.
+            if (lastMaxedOutWarn >= 0 && history.isAtCapacity() && history.stream().noneMatch(a -> a == Action.MAXED_OUT))
+                lastMaxedOutWarn = -1;
         }
     }
 
