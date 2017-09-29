@@ -27,7 +27,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import org.apache.cassandra.concurrent.ExecutorSupplier;
 import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -148,27 +147,41 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
         return id.toString();
     }
 
-    private static <T> ExecutorSupplier<T> maybeGetRequestExecutor(Class<T> requestClass, Stage defaultStage)
+    private static <T> Function<T, MessageExecutor.Local> maybeGetLocalExecutorSupplier(Class<T> requestClass, Stage defaultStage, boolean isInternal)
     {
+        // We current want all 'scheduleable' requests to use direct location execution for performance reason (see
+        // APOLLO-1194), so default it here is convenient. Arguably, it could be cleaner to move that choice to the
+        // Scheduleable interface, but we can clean that up later.
         if (Scheduleable.class.isAssignableFrom(requestClass))
-            return (p) -> ((Scheduleable)p).getOperationExecutor();
+            return p -> MessageExecutor.Local.DIRECT;
 
-        return defaultStage == null ? null : (p) -> StageManager.getStage(defaultStage);
+        return defaultStage == null ? null : localExecutor(defaultStage, isInternal);
+
     }
 
-    // Note that the response executor depends on the _request_ payload, not the _response_ one. This is because
-    // the request is what contains the most information on the actual request-response exchange in practice (so, is
-    // more likely to be useful at deciding the executor of its response. In fact, in case like reads, we need to
-    // know the executor before we truly deserialize the payload, so making the executor choice based on the response
-    // payload wouldn't work (of course, we could make imagine making the decision be based on both the request
-    // and response payload, but that would require a new 'ExecutorSupplier' class taking 2 arguments and we simply
-    // don't need that for now).
-    private static <T> ExecutorSupplier<T> maybeGetResponseExecutor(Class<T> requestClass, boolean isInternal)
+    private static <T> Function<T, MessageExecutor.Remote> maybeGetRemoteExecutorSupplier(Class<T> requestClass, Stage defaultStage, boolean isInternal)
     {
         if (Scheduleable.class.isAssignableFrom(requestClass))
-            return (p) -> ((Scheduleable)p).getOperationExecutor();
+        {
+            return p -> {
+                TracingAwareExecutor executor = ((Scheduleable) p).getOperationExecutor();
+                return new MessageExecutor.Remote(executor, executor);
+            };
+        }
 
-        return (p) -> StageManager.getStage(isInternal ? Stage.INTERNAL_RESPONSE : Stage.REQUEST_RESPONSE);
+        return defaultStage == null ? null : remoteExecutor(defaultStage, isInternal);
+    }
+
+    private static <T> Function<T, MessageExecutor.Local> localExecutor(Stage requestStage, boolean isInternal)
+    {
+        return p -> new MessageExecutor.Local(StageManager.getStage(requestStage),
+                                              StageManager.getStage(isInternal ? Stage.INTERNAL_RESPONSE : Stage.REQUEST_RESPONSE));
+    }
+
+    private static <T> Function<T, MessageExecutor.Remote> remoteExecutor(Stage requestStage, boolean isInternal)
+    {
+        return p -> new MessageExecutor.Remote(StageManager.getStage(requestStage),
+                                               StageManager.getStage(isInternal ? Stage.INTERNAL_RESPONSE : Stage.REQUEST_RESPONSE));
     }
 
     @SuppressWarnings("unchecked")
@@ -225,7 +238,6 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
         private final int[] versionCodes = new int[versionClass.getEnumConstants().length];
         private Stage defaultStage;
         private DroppedMessages.Group defaultDroppedGroup;
-        private boolean executeOnIOScheduler;
 
         public RegistrationHelper stage(Stage defaultStage)
         {
@@ -251,18 +263,12 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
 
         public <P, Q> RequestResponseBuilder<P, Q> requestResponse(String verbName, Class<P> requestClass, Class<Q> responseClass)
         {
-            return new RequestResponseBuilder<>(verbName, idx++, requestClass, responseClass, executeOnIOScheduler);
+            return new RequestResponseBuilder<>(verbName, idx++, requestClass, responseClass);
         }
 
         public <P extends Monitorable, Q> MonitoredRequestResponseBuilder<P, Q> monitoredRequestResponse(String verbName, Class<P> requestClass, Class<Q> responseClass)
         {
             return new MonitoredRequestResponseBuilder<>(verbName, idx++, requestClass, responseClass);
-        }
-
-        public RegistrationHelper executeOnIOScheduler()
-        {
-            this.executeOnIOScheduler = true;
-            return this;
         }
 
         public class VerbBuilder<P, Q, T>
@@ -272,8 +278,9 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
             private final boolean isOneWay;
 
             private TimeoutSupplier<P> timeoutSupplier;
-            private ExecutorSupplier<P> requestExecutor;
-            private ExecutorSupplier<P> responseExecutor;
+
+            private Function<P, MessageExecutor.Local> localExecutorSupplier;
+            private Function<P, MessageExecutor.Remote> remoteExecutorSupplier;
 
             private Serializer<P> requestSerializer;
             private Serializer<Q> responseSerializer;
@@ -293,8 +300,10 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
                 this.name = name;
                 this.groupIdx = groupIdx;
                 this.isOneWay = isOneWay;
-                this.requestExecutor = maybeGetRequestExecutor(requestClass, defaultStage);
-                this.responseExecutor = maybeGetResponseExecutor(requestClass, isInternal);
+
+                this.localExecutorSupplier = maybeGetLocalExecutorSupplier(requestClass, defaultStage, isInternal);
+                this.remoteExecutorSupplier = maybeGetRemoteExecutorSupplier(requestClass, defaultStage, isInternal);
+
                 this.requestSerializer = maybeGetSerializer(requestClass);
                 this.responseSerializer = maybeGetSerializer(responseClass);
                 this.requestSerializerFct = maybeGetVersionedSerializers(requestClass);
@@ -326,21 +335,29 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
                 return timeout(request -> timeoutMillis);
             }
 
-            public T requestStage(Stage stage)
+            public T onStage(Stage stage)
             {
-                this.requestExecutor = (p) -> StageManager.getStage(stage);
+                this.localExecutorSupplier = localExecutor(stage, isInternal);
+                this.remoteExecutorSupplier = remoteExecutor(stage, isInternal);
                 return us();
             }
 
-            public T requestExecutor(TracingAwareExecutor tae)
+            public T onExecutor(TracingAwareExecutor tae)
             {
-                this.requestExecutor = (p) -> tae;
+                MessageExecutor.Local local = new MessageExecutor.Local(tae, tae);
+                MessageExecutor.Remote remote = new MessageExecutor.Remote(tae, tae);
+                this.localExecutorSupplier = p -> local;
+                this.remoteExecutorSupplier = p -> remote;
                 return us();
             }
 
-            public T responseExecutor(ExecutorSupplier<P> responseExecutor)
+            public T responseExecutor(Function<P, TracingAwareExecutor> supplier)
             {
-                this.responseExecutor = responseExecutor;
+                Function<P, MessageExecutor.Local> previousLocal = localExecutorSupplier;
+                Function<P, MessageExecutor.Remote> previousRemote = remoteExecutorSupplier;
+                assert previousLocal != null && previousRemote != null;
+                this.localExecutorSupplier = p -> previousLocal.apply(p).withResponseExecutor(supplier.apply(p));
+                this.remoteExecutorSupplier = p -> previousRemote.apply(p).withResponseExecutor(supplier.apply(p));
                 return us();
             }
 
@@ -406,14 +423,14 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
 
             protected Verb.Info<P> info()
             {
-                if (requestExecutor == null)
+                if (localExecutorSupplier == null || remoteExecutorSupplier == null)
                     throw new IllegalStateException("Unless the request payload implements the Scheduleable interface, a request stage is required (either at the RegistrationHelper level or at the VerbBuilder one)");
                 if (isOneWay && supportsBackPressure)
                     throw new IllegalStateException("Back pressure doesn't make sense for one-way message (no response is sent so we can't keep track of in-flight requests to an host)");
                 if (!isOneWay && droppedGroup == null)
                     throw new IllegalStateException("Missing 'dropped group', should be indicated either at the RegistrationHelper lever or at the VerbBuilder one");
 
-                return new Verb.Info<>(VerbGroup.this, groupIdx, name, requestExecutor, responseExecutor, supportsBackPressure, isOneWay ? null : droppedGroup);
+                return new Verb.Info<>(VerbGroup.this, groupIdx, name, localExecutorSupplier, remoteExecutorSupplier, supportsBackPressure, isOneWay ? null : droppedGroup);
             }
 
             TimeoutSupplier<P> timeoutSupplier()
@@ -497,7 +514,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
 
         public class RequestResponseBuilder<P, Q> extends VerbBuilder<P, Q, RequestResponseBuilder<P, Q>>
         {
-            private RequestResponseBuilder(String name, int groupIdx, Class<P> requestClass, Class<Q> responseClass, boolean executeOnIOScheduler)
+            private RequestResponseBuilder(String name, int groupIdx, Class<P> requestClass, Class<Q> responseClass)
             {
                 super(name, groupIdx, false, requestClass, responseClass);
             }

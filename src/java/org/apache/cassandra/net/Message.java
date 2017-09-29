@@ -94,7 +94,7 @@ public abstract class Message<P>
      */
     static class Data<P>
     {
-        private final P payload;
+        final P payload;
         // The size of the payload serialized in the current messaging version. This is cached here because we need this
         // both to segregate messages by size (big/small for OutboundTcpConnectionPool) and then for the actual serialization
         final long payloadSize;
