@@ -78,11 +78,6 @@ public class DigestResolver extends ResponseResolver<FlowablePartition>
                            fromSingleResponseFiltered(dataResponse.payload()));
     }
 
-    public Completable completeOnReadRepairAnswersReceived()
-    {
-        return Completable.complete();
-    }
-
     public Completable compareResponses() throws DigestMismatchException
     {
         final long start = System.nanoTime();

@@ -187,9 +187,7 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
 
         try
         {
-            return Flow.concat(blockfor == 1 ? resolver.getData() : resolver.resolve(),
-                               resolver.completeOnReadRepairAnswersReceived())
-                       .doOnError(this::onError);
+            return (blockfor == 1 ? resolver.getData() : resolver.resolve()).doOnError(this::onError);
         }
         catch (Throwable e)
         { // typically DigestMismatchException, but safer to report all errors to the subscriber
