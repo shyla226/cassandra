@@ -12,7 +12,6 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -24,7 +23,6 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.cql3.PageSize;
@@ -254,9 +252,7 @@ class Validator
 
     private Flow<FlowablePartition> moreContents(ValidationExecutor executor, QueryPager pager, ReadContext context)
     {
-        if (pager.isExhausted() || state.get() == State.CANCELLED)
-            return null;
-
+        assert !pager.isExhausted();
         try
         {
             // Maybe schedule a refresh of the lock.
@@ -264,7 +260,9 @@ class Validator
             observer.onNewPage();
             return pager.fetchPage(new PageSize((int) pageSize, PageSize.PageUnit.BYTES), context)
                         .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), executor))
-                        .concatWith(() -> moreContents(executor, pager, context));
+                        .concatWith(() -> isDone(pager)
+                                          ? null :
+                                          moreContents(executor, pager, context.forNewQuery(System.nanoTime())));
 
         }
         catch (Throwable t)
@@ -277,6 +275,11 @@ class Validator
             executor.asExecutor().execute(() -> handleError(t, executor));
             return null;
         }
+    }
+
+    private boolean isDone(QueryPager pager)
+    {
+        return pager.isExhausted() || state.get() == State.CANCELLED;
     }
 
     private void handleError(Throwable t, PageProcessingStatsListener listener)
