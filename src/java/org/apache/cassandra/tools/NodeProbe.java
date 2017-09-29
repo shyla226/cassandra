@@ -228,7 +228,7 @@ public class NodeProbe implements AutoCloseable
             arsProxy = JMX.newMBeanProxy(mbeanServerConn, name, ActiveRepairServiceMBean.class);
             name = new ObjectName(NodeSyncServiceMBean.MBEAN_NAME);
             nodeSyncProxy = JMX.newMBeanProxy(mbeanServerConn, name, NodeSyncServiceMBean.class);
-            mosProxy = JMX.newMBeanProxy(mbeanServerConn, new ObjectName(MemoryOnlyStatusMXBean.MBEAN_NAME), MemoryOnlyStatusMXBean.class);
+            mosProxy = JMX.newMBeanProxy(mbeanServerConn, new ObjectName(MemoryOnlyStatusMXBean.MXBEAN_NAME), MemoryOnlyStatusMXBean.class);
         }
         catch (MalformedObjectNameException e)
         {

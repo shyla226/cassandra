@@ -174,7 +174,7 @@ public class MemoryOnlyStatus implements MemoryOnlyStatusMXBean
             }
         }
 
-        return new TableInfo(cfs.keyspace.getName(), cfs.getTableName(), lockedBuffers, maxAvailableBytes);
+        return createTableInfo(cfs.keyspace.getName(), cfs.getTableName(), lockedBuffers, maxAvailableBytes);
     }
 
     // Pull out some information about any tables which aren't affected by the metered flusher
@@ -227,5 +227,12 @@ public class MemoryOnlyStatus implements MemoryOnlyStatusMXBean
         {
             return 0;
         }
+    }
+
+    private static TableInfo createTableInfo(String ks, String cf, List<MemoryLockedBuffer> buffers, long maxMemoryToLock)
+    {
+        return new TableInfo(ks, cf, buffers.stream().map(MemoryLockedBuffer::locked).reduce(0L, Long::sum),
+                             buffers.stream().map(MemoryLockedBuffer::notLocked).reduce(0L, Long::sum),
+                             maxMemoryToLock);
     }
 }

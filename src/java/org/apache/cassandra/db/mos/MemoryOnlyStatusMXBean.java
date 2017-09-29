@@ -16,7 +16,7 @@ import java.util.List;
  */
 public interface MemoryOnlyStatusMXBean
 {
-    public static final String MBEAN_NAME = "org.apache.cassandra.db:type=MemoryOnlyStatus";
+    public static final String MXBEAN_NAME = "org.apache.cassandra.db:type=MemoryOnlyStatus";
 
     // Simple class to serialize a tuple of (keyspace, columnfamily, used memory, not able to lock memory, max memory)
     public class TableInfo implements Serializable
@@ -28,12 +28,12 @@ public interface MemoryOnlyStatusMXBean
         private final long maxMemoryToLock;
 
         @ConstructorProperties({ "ks", "cf", "used", "notAbleToLock", "maxMemoryToLock" })
-        public TableInfo(String ks, String cf, List<MemoryLockedBuffer> buffers, long maxMemoryToLock)
+        public TableInfo(String ks, String cf, long used, long notAbleToLock, long maxMemoryToLock)
         {
             this.ks = ks;
             this.cf = cf;
-            this.used = buffers.stream().map(MemoryLockedBuffer::locked).reduce(0L, Long::sum);
-            this.notAbleToLock = buffers.stream().map(MemoryLockedBuffer::notLocked).reduce(0L, Long::sum);
+            this.used = used;
+            this.notAbleToLock = notAbleToLock;
             this.maxMemoryToLock = maxMemoryToLock;
         }
 

@@ -27,6 +27,7 @@ import org.apache.cassandra.service.StorageServiceMBean;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 
 /**
  * Legacy test for MemoryOnlyStrategy. This test is obsoleted by {@link MemoryOnlyStrategyTest} and only
@@ -87,7 +88,7 @@ public class LegacyMemoryOnlyStrategyTest extends DseTestRunner
             logger.info("testTruncateClearsData(): " + ("".equals(sstableCompressor) ? "sstable_compression turned off" : String.format("Using sstable_compression: %s", sstableCompressor)));
             String cf = LegacyMemoryOnlyStrategyTestUtil.createNewTable(KEYSPACE, sstableCompressor);
             MBeanServerConnection connection = getMBeanServerConnection();
-            MemoryOnlyStatusMXBean mosStatus = LegacyMemoryOnlyStrategyTestUtil.getMOSMBeanProxy(connection);
+            MemoryOnlyStatusMXBean mosStatus = LegacyMemoryOnlyStrategyTestUtil.getMosProxy(connection);
             final int numInserts = 4000;
             LegacyMemoryOnlyStrategyTestUtil.insertData(getNativeClientForNode(1).newSession(), numInserts, KEYSPACE, cf);
 
@@ -107,7 +108,7 @@ public class LegacyMemoryOnlyStrategyTest extends DseTestRunner
 
             // Now flush and do it
             // now flush & redo the read. We should read it from the sstable
-            StorageServiceMBean ssProxy = LegacyMemoryOnlyStrategyTestUtil.getMOSMBeanProxy(connection, "org.apache.cassandra.db:type=StorageService", StorageServiceMBean.class);
+            StorageServiceMBean ssProxy = LegacyMemoryOnlyStrategyTestUtil.getProxy(connection, "org.apache.cassandra.db:type=StorageService", StorageServiceMBean.class);
             LegacyMemoryOnlyStrategyTestUtil.insertData(getNativeClientForNode(1).newSession(), numInserts, KEYSPACE, cf);
             ssProxy.forceKeyspaceFlush(KEYSPACE, cf);
             LegacyMemoryOnlyStrategyTestUtil.insertData(getNativeClientForNode(1).newSession(), numInserts, KEYSPACE, cf);
@@ -117,7 +118,7 @@ public class LegacyMemoryOnlyStrategyTest extends DseTestRunner
             LegacyMemoryOnlyStrategyTestUtil.waitForCompaction(connection, KEYSPACE, cf);
             LegacyMemoryOnlyStrategyTestUtil.insertData(getNativeClientForNode(1).newSession(), numInserts, KEYSPACE, cf);
 
-            assertFalse(0 == mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getUsed());
+            assertNotEquals(0, mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getUsed());
             LegacyMemoryOnlyStrategyTestUtil.verifyTotals(mosStatus);
 
             assertEquals(numInserts, sendCql3Native(1, KEYSPACE, select).all().size());
@@ -142,7 +143,7 @@ public class LegacyMemoryOnlyStrategyTest extends DseTestRunner
             String cf = LegacyMemoryOnlyStrategyTestUtil.createNewTable(KEYSPACE, sstableCompressor);
             MBeanServerConnection connection = getMBeanServerConnection();
 
-            MemoryOnlyStatusMXBean mosStatus = LegacyMemoryOnlyStrategyTestUtil.getMOSMBeanProxy(connection);
+            MemoryOnlyStatusMXBean mosStatus = LegacyMemoryOnlyStrategyTestUtil.getMosProxy(connection);
 
             final int numInserts = 4000;
             LegacyMemoryOnlyStrategyTestUtil.insertData(getNativeClientForNode(1).newSession(), numInserts, KEYSPACE, cf);
@@ -159,7 +160,7 @@ public class LegacyMemoryOnlyStrategyTest extends DseTestRunner
 
             // Now flush and do it
             // now flush & redo the read. We should read it from the sstable
-            StorageServiceMBean ssProxy = LegacyMemoryOnlyStrategyTestUtil.getMOSMBeanProxy(connection, "org.apache.cassandra.db:type=StorageService", StorageServiceMBean.class);
+            StorageServiceMBean ssProxy = LegacyMemoryOnlyStrategyTestUtil.getProxy(connection, "org.apache.cassandra.db:type=StorageService", StorageServiceMBean.class);
 
             cf = LegacyMemoryOnlyStrategyTestUtil.createNewTable(KEYSPACE, sstableCompressor);
             select = String.format("SELECT * FROM %s.%s", KEYSPACE, cf);
@@ -176,7 +177,7 @@ public class LegacyMemoryOnlyStrategyTest extends DseTestRunner
 
             LegacyMemoryOnlyStrategyTestUtil.verifyTotals(mosStatus);
 
-            assertFalse(0 == mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getUsed());
+            assertNotEquals(0, mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getUsed());
             LegacyMemoryOnlyStrategyTestUtil.verifyTotals(mosStatus);
 
             assertEquals(numInserts, sendCql3Native(1, KEYSPACE, select).all().size());
