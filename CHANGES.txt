@@ -132,6 +132,7 @@
  * CQLSH: Don't pause when capturing data (CASSANDRA-13743)
 
 3.11.1
+ * Fix the computation of cdc_total_space_in_mb for exabyte filesystems (CASSANDRA-13808)
  * AbstractTokenTreeBuilder#serializedSize returns wrong value when there is a single leaf and overflow collisions (CASSANDRA-13869)
  * BTree.Builder memory leak (CASSANDRA-13754)
  * Revert CASSANDRA-10368 of supporting non-pk column filtering due to correctness (CASSANDRA-13798)
