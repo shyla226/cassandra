@@ -138,13 +138,17 @@ public class LegacyMemoryOnlyStrategyTestUtil
         });
     }
 
-    static MemoryOnlyStatusMXBean getMOSMBeanProxy(MBeanServerConnection connection) throws MalformedObjectNameException
+    static MemoryOnlyStatusMXBean getMosProxy(MBeanServerConnection connection) throws MalformedObjectNameException
     {
-        return getMOSMBeanProxy(connection, MemoryOnlyStatusMXBean.MBEAN_NAME, MemoryOnlyStatusMXBean.class);
+        return getProxy(connection, MemoryOnlyStatusMXBean.MXBEAN_NAME, MemoryOnlyStatusMXBean.class);
     }
 
-    static <T> T getMOSMBeanProxy(MBeanServerConnection connection, String mbeanName, Class<T> mbeanClass) throws MalformedObjectNameException
+    static <T> T getProxy(MBeanServerConnection connection, String mbeanName, Class<T> mbeanClass) throws MalformedObjectNameException
     {
+        if (JMX.isMXBeanInterface(mbeanClass))
+        {
+            return JMX.newMXBeanProxy(connection, new ObjectName(mbeanName), mbeanClass);
+        }
         return JMX.newMBeanProxy(connection, new ObjectName(mbeanName), mbeanClass);
     }
 }

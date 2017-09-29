@@ -286,7 +286,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             mbs.registerMBean(this, jmxObjectName);
 
             mbs.registerMBean(StreamManager.instance, new ObjectName(StreamManager.OBJECT_NAME));
-            mbs.registerMBean(MemoryOnlyStatus.instance, new ObjectName(MemoryOnlyStatusMXBean.MBEAN_NAME));
+            mbs.registerMBean(MemoryOnlyStatus.instance, new ObjectName(MemoryOnlyStatusMXBean.MXBEAN_NAME));
         }
         catch (Exception e)
         {

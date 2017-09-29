@@ -84,7 +84,7 @@ public class LegacyMemoryOnlyStrategyDiskAccessModeTest extends DseTestRunner
             String cf = LegacyMemoryOnlyStrategyTestUtil.createNewTable(KEYSPACE, sstableCompressor);
             MBeanServerConnection connection = getMBeanServerConnection();
 
-            MemoryOnlyStatusMXBean mosStatus = LegacyMemoryOnlyStrategyTestUtil.getMOSMBeanProxy(connection);
+            MemoryOnlyStatusMXBean mosStatus = LegacyMemoryOnlyStrategyTestUtil.getMosProxy(connection);
             final int numInserts = 4000;
             LegacyMemoryOnlyStrategyTestUtil.insertData(getNativeClientForNode(1).newSession(), numInserts, KEYSPACE, cf);
 
