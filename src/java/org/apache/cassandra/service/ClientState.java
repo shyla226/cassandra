@@ -349,12 +349,12 @@ public class ClientState
     /**
      * Attempts to login the given user.
      */
-    public Single<Boolean> login(AuthenticatedUser user) throws AuthenticationException
+    public Single<ClientState> login(AuthenticatedUser user) throws AuthenticationException
     {
         if (user.isAnonymous())
         {
             this.user = user;
-            return Single.just(true);
+            return Single.just(this);
         }
 
         // Login privilege is not inherited via granted roles, so just
@@ -365,7 +365,7 @@ public class ClientState
                 this.user = user;
             else
                 throw new AuthenticationException(String.format("%s is not permitted to log in", user.getName()));
-            return r;
+            return this;
         });
     }
 
