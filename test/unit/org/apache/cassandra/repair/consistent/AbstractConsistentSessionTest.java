@@ -86,7 +86,6 @@ public abstract class AbstractConsistentSessionTest
                                                                  Sets.newHashSet(RANGE1, RANGE2, RANGE3),
                                                                  true,
                                                                  System.currentTimeMillis(),
-                                                                 true,
                                                                  PreviewKind.NONE);
         return sessionId;
     }

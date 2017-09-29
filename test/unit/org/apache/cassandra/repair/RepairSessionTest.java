@@ -68,7 +68,7 @@ public class RepairSessionTest
         Set<InetAddress> endpoints = Sets.newHashSet(remote);
         RepairSession session = new RepairSession(parentSessionId, sessionId, Arrays.asList(repairRange),
                                                   "Keyspace1", RepairParallelism.SEQUENTIAL,
-                                                  endpoints, false, false, false,
+                                                  endpoints, false, false,
                                                   PreviewKind.NONE, "Standard1");
 
         RepairJobDesc desc = new RepairJobDesc(parentSessionId, sessionId, "ks", "table", Collections.emptyList());

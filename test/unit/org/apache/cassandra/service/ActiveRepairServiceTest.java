@@ -267,7 +267,7 @@ public class ActiveRepairServiceTest
         ActiveRepairService.instance.registerParentRepairSession(prsId, FBUtilities.getBroadcastAddress(), Collections.singletonList(store),
                                                                  Collections.singleton(new Range<>(store.getPartitioner().getMinimumToken(),
                                                                                                    store.getPartitioner().getMinimumToken())),
-                                                                 true, System.currentTimeMillis(), true, PreviewKind.NONE);
+                                                                 true, System.currentTimeMillis(), PreviewKind.NONE);
         ActiveRepairService.instance.getParentRepairSession(prsId).maybeSnapshot(store.metadata.id, prsId);
 
         UUID prsId2 = UUID.randomUUID();
@@ -276,7 +276,7 @@ public class ActiveRepairServiceTest
                                                                  Collections.singleton(new Range<>(store.getPartitioner().getMinimumToken(),
                                                                                                    store.getPartitioner().getMinimumToken())),
                                                                  true, System.currentTimeMillis(),
-                                                                 true, PreviewKind.NONE);
+                                                                 PreviewKind.NONE);
         createSSTables(store, 2);
         ActiveRepairService.instance.getParentRepairSession(prsId).maybeSnapshot(store.metadata.id, prsId);
         try (Refs<SSTableReader> refs = store.getSnapshotSSTableReaders(prsId.toString()))
@@ -329,29 +329,50 @@ public class ActiveRepairServiceTest
         return Boolean.toString(b);
     }
 
+
     /**
      * Tests the expected repairedAt value is returned, based on different RepairOption
      */
     @Test
-    public void repairedAt() throws Exception
+    public void repairedAtWithoutSkippedReplicas() throws Exception
     {
         // regular incremental repair
-        Assert.assertNotEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(true))));
+        Assert.assertNotEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(true)), false));
+
         // subrange incremental repair
         Assert.assertNotEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(true),
-                                                                      RANGES_KEY, "1:2")));
+                                                                      RANGES_KEY, "1:2"), false));
 
         // hosts incremental repair
         Assert.assertEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(true),
-                                                                   HOSTS_KEY, "127.0.0.1")));
+                                                                   HOSTS_KEY, "127.0.0.1"), false));
         // dc incremental repair
         Assert.assertEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(true),
-                                                                   DATACENTERS_KEY, "DC2")));
-        // forced incremental repair
-        Assert.assertEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(true),
-                                                                   FORCE_REPAIR_KEY, b2s(true))));
-
+                                                                   DATACENTERS_KEY, "DC2"), false));
         // full repair
-        Assert.assertEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(false))));
+        Assert.assertEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(false)), false));
+    }
+
+    /**
+     * When there are skipped replicas, incremental repair should never mark sstables as repaired
+     */
+    @Test
+    public void repairedAtWithSkippedReplicas() throws Exception
+    {
+        // regular incremental repair
+        Assert.assertEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(true)), true));
+
+        // subrange incremental repair
+        Assert.assertEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(true),
+                                                                      RANGES_KEY, "1:2"), true));
+
+        // hosts incremental repair
+        Assert.assertEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(true),
+                                                                   HOSTS_KEY, "127.0.0.1"), true));
+        // dc incremental repair
+        Assert.assertEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(true),
+                                                                   DATACENTERS_KEY, "DC2"), true));
+        // full repair
+        Assert.assertEquals(UNREPAIRED_SSTABLE, getRepairedAt(opts(INCREMENTAL_KEY, b2s(false)), true));
     }
 }

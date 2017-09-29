@@ -202,7 +202,6 @@ public class LeveledCompactionStrategyTest
                                                                  Arrays.asList(range),
                                                                  false,
                                                                  ActiveRepairService.UNREPAIRED_SSTABLE,
-                                                                 true,
                                                                  PreviewKind.NONE);
         RepairJobDesc desc = new RepairJobDesc(parentRepSession, UUID.randomUUID(), KEYSPACE1, CF_STANDARDDLEVELED, Arrays.asList(range));
         Validator validator = new Validator(desc, FBUtilities.getBroadcastAddress(), gcBefore, PreviewKind.NONE);

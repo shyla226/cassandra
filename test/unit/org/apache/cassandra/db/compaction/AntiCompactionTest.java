@@ -100,7 +100,7 @@ public class AntiCompactionTest
                                                                  InetAddress.getByName("10.0.0.1"),
                                                                  Lists.newArrayList(cfs), ranges,
                                                                  pendingRepair != null || repairedAt != UNREPAIRED_SSTABLE,
-                                                                 repairedAt, true, PreviewKind.NONE);
+                                                                 repairedAt, PreviewKind.NONE);
     }
 
     private void antiCompactOne(long repairedAt, UUID pendingRepair) throws Exception

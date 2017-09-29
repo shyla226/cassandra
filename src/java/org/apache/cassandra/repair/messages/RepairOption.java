@@ -343,11 +343,6 @@ public class RepairOption
         return hosts;
     }
 
-    public boolean isGlobal()
-    {
-        return dataCenters.isEmpty() && hosts.isEmpty();
-    }
-
     public PreviewKind getPreviewKind()
     {
         return previewKind;

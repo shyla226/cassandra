@@ -307,8 +307,9 @@ public final class SystemDistributedKeyspace
 
     public static void successfulParentRepair(UUID parent_id, Collection<Range<Token>> successfulRanges)
     {
-        String query = "UPDATE %s.%s SET finished_at = toTimestamp(now()), successful_ranges = {'%s'} WHERE parent_id=%s";
-        String fmtQuery = format(query, DISTRIBUTED_KEYSPACE_NAME, PARENT_REPAIR_HISTORY, Joiner.on("','").join(successfulRanges), parent_id.toString());
+        String query = "UPDATE %s.%s SET finished_at = toTimestamp(now()), successful_ranges = {%s} WHERE parent_id=%s";
+        String rangesAsString = successfulRanges.isEmpty() ? "" : String.format("'%s'", Joiner.on("','").join(successfulRanges));
+        String fmtQuery = format(query, DISTRIBUTED_KEYSPACE_NAME, PARENT_REPAIR_HISTORY, rangesAsString, parent_id.toString());
         processSilentBlocking(fmtQuery);
     }
 

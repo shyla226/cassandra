@@ -230,7 +230,6 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                                              Set<InetAddress> endpoints,
                                              boolean isIncremental,
                                              boolean pullRepair,
-                                             boolean force,
                                              PreviewKind previewKind,
                                              ListeningExecutorService executor,
                                              String... cfnames)
@@ -241,7 +240,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         if (cfnames.length == 0)
             return null;
 
-        final RepairSession session = new RepairSession(parentRepairSession, UUIDGen.getTimeUUID(), range, keyspace, parallelismDegree, endpoints, isIncremental, pullRepair, force, previewKind, cfnames);
+        final RepairSession session = new RepairSession(parentRepairSession, UUIDGen.getTimeUUID(), range, keyspace, parallelismDegree, endpoints, isIncremental, pullRepair, previewKind, cfnames);
 
         sessions.put(session.getId(), session);
         // register listeners
@@ -392,16 +391,13 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
     }
 
     /**
-     * we only want to set repairedAt for incremental repairs including all replicas for a token range. For non-global
-     * incremental repairs, forced incremental repairs, and full repairs, the UNREPAIRED_SSTABLE value will prevent
-     * sstables from being promoted to repaired or preserve the repairedAt/pendingRepair values, respectively.
+     * We only want to set repairedAt for incremental repairs when all replicas are included.
+     * So we do not set repairedAt for hosts, dcs or force repairs with skipped replicas.
      */
     @VisibleForTesting
-    static long getRepairedAt(RepairOption options)
+    static long getRepairedAt(RepairOption options, boolean skippedReplicas)
     {
-        // we only want to set repairedAt for incremental repairs including all replicas for a token range. For non-global incremental repairs, forced incremental repairs, and
-        // full repairs, the UNREPAIRED_SSTABLE value will prevent sstables from being promoted to repaired or preserve the repairedAt/pendingRepair values, respectively.
-        if (options.isIncremental() && options.isGlobal() && !options.isForcedRepair())
+        if (options.isIncremental() && options.getDataCenters().isEmpty() && options.getHosts().isEmpty() && !skippedReplicas)
         {
             return Clock.instance.currentTimeMillis();
         }
@@ -411,10 +407,11 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         }
     }
 
-    public UUID prepareForRepair(UUID parentRepairSession, InetAddress coordinator, Set<InetAddress> endpoints, RepairOption options, List<ColumnFamilyStore> columnFamilyStores)
+    public UUID prepareForRepair(UUID parentRepairSession, InetAddress coordinator, Set<InetAddress> endpoints, RepairOption options, List<ColumnFamilyStore> columnFamilyStores,
+                                 boolean skippedReplicas)
     {
-        long repairedAt = getRepairedAt(options);
-        registerParentRepairSession(parentRepairSession, coordinator, columnFamilyStores, options.getRanges(), options.isIncremental(), repairedAt, options.isGlobal(), options.getPreviewKind());
+        long repairedAt = getRepairedAt(options, skippedReplicas);
+        registerParentRepairSession(parentRepairSession, coordinator, columnFamilyStores, options.getRanges(), options.isIncremental(), repairedAt, options.getPreviewKind());
         final CountDownLatch prepareLatch = new CountDownLatch(endpoints.size());
         final AtomicBoolean status = new AtomicBoolean(true);
         final Set<String> failedNodes = Collections.synchronizedSet(new HashSet<String>());
@@ -441,7 +438,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         {
             if (FailureDetector.instance.isAlive(neighbour))
             {
-                PrepareMessage message = new PrepareMessage(parentRepairSession, tableIds, options.getRanges(), options.isIncremental(), repairedAt, options.isGlobal(), options.getPreviewKind());
+                PrepareMessage message = new PrepareMessage(parentRepairSession, tableIds, options.getRanges(), options.isIncremental(), repairedAt, options.getPreviewKind());
                 MessagingService.instance().send(Verbs.REPAIR.PREPARE.newRequest(neighbour, message), callback);
             }
             else
@@ -484,7 +481,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         throw new RuntimeException(errorMsg);
     }
 
-    public void registerParentRepairSession(UUID parentRepairSession, InetAddress coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, boolean isGlobal, PreviewKind previewKind)
+    public void registerParentRepairSession(UUID parentRepairSession, InetAddress coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, PreviewKind previewKind)
     {
         assert isIncremental || repairedAt == ActiveRepairService.UNREPAIRED_SSTABLE;
         if (!registeredForEndpointChanges)
@@ -494,7 +491,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             registeredForEndpointChanges = true;
         }
 
-        parentRepairSessions.put(parentRepairSession, new ParentRepairSession(coordinator, columnFamilyStores, ranges, isIncremental, repairedAt, isGlobal, previewKind));
+        parentRepairSessions.put(parentRepairSession, new ParentRepairSession(coordinator, columnFamilyStores, ranges, isIncremental, repairedAt, previewKind));
     }
 
     public ParentRepairSession getParentRepairSession(UUID parentSessionId)
@@ -612,7 +609,6 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                                     prepareMessage.ranges,
                                     prepareMessage.isIncremental,
                                     prepareMessage.timestamp,
-                                    prepareMessage.isGlobal,
                                     prepareMessage.previewKind);
     }
 
@@ -625,20 +621,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             throw new DroppedTableException(desc.keyspace, desc.columnFamily);
 
         ActiveRepairService.ParentRepairSession prs = getParentRepairSession(desc.parentSessionId);
-        if (prs.isGlobal)
-        {
-            prs.maybeSnapshot(cfs.metadata.id, desc.parentSessionId);
-        }
-        else
-        {
-            cfs.snapshot(desc.sessionId.toString(),
-                         sstable -> sstable != null
-                                    && !sstable.metadata().isIndex() // exclude SSTables from 2i
-                                    && new Bounds<>(sstable.first.getToken(), sstable.last.getToken()).intersects(desc.ranges),
-                         true,
-                         false,
-                         new HashSet<>()); //ephemeral snapshot, if repair fails, it will be cleaned next startup
-        }
+        prs.maybeSnapshot(cfs.metadata.id, desc.parentSessionId);
     }
 
     /**
@@ -651,12 +634,11 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         private final Map<TableId, ColumnFamilyStore> columnFamilyStores = new HashMap<>();
         private final Collection<Range<Token>> ranges;
         public final boolean isIncremental;
-        public final boolean isGlobal;
         public final long repairedAt;
         public final InetAddress coordinator;
         public final PreviewKind previewKind;
 
-        public ParentRepairSession(InetAddress coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, boolean isGlobal, PreviewKind previewKind)
+        public ParentRepairSession(InetAddress coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, PreviewKind previewKind)
         {
             this.coordinator = coordinator;
             for (ColumnFamilyStore cfs : columnFamilyStores)
@@ -666,7 +648,6 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             this.ranges = ranges;
             this.repairedAt = repairedAt;
             this.isIncremental = isIncremental;
-            this.isGlobal = isGlobal;
             this.previewKind = previewKind;
         }
 

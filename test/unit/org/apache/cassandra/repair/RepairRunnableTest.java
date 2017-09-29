@@ -30,36 +30,62 @@ import org.junit.Test;
 
 import org.apache.cassandra.repair.RepairRunnable.CommonRange;
 
-import static org.apache.cassandra.repair.RepairRunnable.filterCommonRanges;
+import static org.apache.cassandra.repair.RepairRunnable.filterRanges;
 
 public class RepairRunnableTest extends AbstractRepairTest
 {
+    private static final CommonRange COMMON_RANGE1 = new CommonRange(Sets.newHashSet(PARTICIPANT1, PARTICIPANT2), Sets.newHashSet(RANGE1, RANGE2));
+    private static final CommonRange COMMON_RANGE2 = new CommonRange(Sets.newHashSet(PARTICIPANT1, PARTICIPANT2, PARTICIPANT3), Sets.newHashSet(RANGE3));
+    private static final CommonRange COMMON_RANGE3 = new CommonRange(Sets.newHashSet(PARTICIPANT1, PARTICIPANT4), Sets.newHashSet(RANGE4));
+
+    private static final List<CommonRange> ALL_COMMON_RANGES = Lists.newArrayList(COMMON_RANGE1, COMMON_RANGE2, COMMON_RANGE3);
+
+    private static final Set<InetAddress> ALL_PARTICIPANTS = Sets.newHashSet(PARTICIPANT1, PARTICIPANT2, PARTICIPANT3, PARTICIPANT4);
+
     /**
-     * For non-forced repairs, common ranges should be passed through as-is
+     * Filter by all participants should return all ranges
      */
     @Test
-    public void filterCommonIncrementalRangesNotForced() throws Exception
+    public void testFilterRangesAllParticipants()
     {
-        CommonRange cr = new CommonRange(PARTICIPANTS, ALL_RANGES);
-
-        List<CommonRange> expected = Lists.newArrayList(cr);
-        List<CommonRange> actual = filterCommonRanges(expected, Collections.emptySet(), false);
-
-        Assert.assertEquals(expected, actual);
+        Assert.assertEquals(ALL_COMMON_RANGES, filterRanges(ALL_COMMON_RANGES, ALL_PARTICIPANTS));
     }
 
+    /**
+     * Filter by no participants should throw exception
+     */
     @Test
-    public void forceFilterCommonIncrementalRanges() throws Exception
+    public void testFilterRangesNoParticipants()
     {
-        CommonRange cr1 = new CommonRange(Sets.newHashSet(PARTICIPANT1, PARTICIPANT2), Sets.newHashSet(RANGE1, RANGE2));
-        CommonRange cr2 = new CommonRange(Sets.newHashSet(PARTICIPANT1, PARTICIPANT2, PARTICIPANT3), Sets.newHashSet(RANGE3));
-        Set<InetAddress> liveEndpoints = Sets.newHashSet(PARTICIPANT2, PARTICIPANT3); // PARTICIPANT1 is excluded
+        try
+        {
+            filterRanges(ALL_COMMON_RANGES, Collections.emptySet());
+            Assert.fail("Should have thrown exception.");
+        } catch (IllegalStateException e)
+        {
+            Assert.assertEquals("Not enough live endpoints for a repair", e.getMessage());
+        }
+    }
 
-        List<CommonRange> initial = Lists.newArrayList(cr1, cr2);
+    /**
+     * when filtering by 1 participant, return only ranges of that participant
+     */
+    @Test
+    public void testFilterRangesOneParticipant() throws Exception
+    {
+        Assert.assertEquals(Lists.newArrayList(new CommonRange(Collections.singleton(PARTICIPANT4), Collections.singleton(RANGE4))),
+                            filterRanges(ALL_COMMON_RANGES, Collections.singleton(PARTICIPANT4)));
+    }
+
+    /**
+     * when filtering by 2 participants, return only ranges of those participants
+     */
+    @Test
+    public void testFilterRangesTwoParticipants()
+    {
+        Set<InetAddress> liveEndpoints = Sets.newHashSet(PARTICIPANT2, PARTICIPANT3); // PARTICIPANT1 and PARTICIPANT4 is excluded
         List<CommonRange> expected = Lists.newArrayList(new CommonRange(Sets.newHashSet(PARTICIPANT2), Sets.newHashSet(RANGE1, RANGE2)),
                                                         new CommonRange(Sets.newHashSet(PARTICIPANT2, PARTICIPANT3), Sets.newHashSet(RANGE3)));
-        List<CommonRange> actual = filterCommonRanges(initial, liveEndpoints, true);
-
-        Assert.assertEquals(expected, actual);
+        Assert.assertEquals(expected, filterRanges(ALL_COMMON_RANGES, liveEndpoints));
     }
 }
