@@ -320,7 +320,7 @@ public class RangeFetchMapCalculatorTest
                 return true;
             }
         };
-        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, SourceFilters.excludeLocalNode(), "Test");
+        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, filter, "Test");
         Multimap<InetAddress, Range<Token>> optMap = calculator.getRangeFetchMapForNonTrivialRanges(true);
         Multimap<InetAddress, Range<Token>> trivialMap = calculator.getRangeFetchMapForTrivialRanges(optMap);
 

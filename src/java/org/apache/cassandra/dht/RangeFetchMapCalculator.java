@@ -76,7 +76,9 @@ public class RangeFetchMapCalculator
     private final Vertex destinationVertex = OuterVertex.getDestinationVertex();
     private final Set<Range<Token>> trivialRanges;
 
-    public RangeFetchMapCalculator(Multimap<Range<Token>, InetAddress> rangesWithSources, ISourceFilter filter, String keyspace)
+    public RangeFetchMapCalculator(Multimap<Range<Token>, InetAddress> rangesWithSources,
+                                   ISourceFilter filter,
+                                   String keyspace)
     {
         this.rangesWithSources = rangesWithSources;
         this.filter = filter;
@@ -105,8 +107,13 @@ public class RangeFetchMapCalculator
     public Multimap<InetAddress, Range<Token>> getRangeFetchMap(boolean useStrictConsistency)
     {
         Multimap<InetAddress, Range<Token>> fetchMap = HashMultimap.create();
+
         fetchMap.putAll(getRangeFetchMapForNonTrivialRanges(useStrictConsistency));
         fetchMap.putAll(getRangeFetchMapForTrivialRanges(fetchMap));
+
+        logger.info("Output from RangeFetchMapCalculator for keyspace {}", keyspace);
+        validateRangeFetchMap(rangesWithSources, fetchMap, keyspace, useStrictConsistency);
+
         return fetchMap;
     }
 
@@ -138,12 +145,7 @@ public class RangeFetchMapCalculator
             flow = newFlow;
         }
 
-        Multimap<InetAddress, Range<Token>> rangeFetchMap = getRangeFetchMapFromGraphResult(graph, result);
-
-        logger.info("Output from RangeFetchMapCalculator for keyspace {}", keyspace);
-        validateRangeFetchMap(rangesWithSources, rangeFetchMap, keyspace, useStrictConsistency);
-
-        return rangeFetchMap;
+        return getRangeFetchMapFromGraphResult(graph, result);
     }
 
     /**
