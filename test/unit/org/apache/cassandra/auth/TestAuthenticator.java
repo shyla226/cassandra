@@ -190,7 +190,7 @@ public class TestAuthenticator implements IAuthenticator
 
             public Set<? extends IResource> protectedResources()
             {
-                return null;
+                return Collections.emptySet();
             }
 
             public void validateConfiguration() throws ConfigurationException
