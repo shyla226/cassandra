@@ -313,9 +313,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     // should only be called via JMX
     public void stopGossiping()
     {
+        stopGossiping("by operator request");
+    }
+
+    private void stopGossiping(String reason)
+    {
         if (gossipActive)
         {
-            logger.warn("Stopping gossip by operator request");
+            logger.warn("Stopping gossip {}", reason);
             Gossiper.instance.stop();
             gossipActive = false;
         }
@@ -400,11 +405,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             return TPCUtils.completedFuture();
 
         return CompletableFuture.supplyAsync(() -> {
-            if (isGossipActive())
-            {
-                logger.error("Stopping gossiper");
-                stopGossiping();
-            }
+            stopGossiping("by internal request (typically an unrecoverable error)");
             return null;
         }, StageManager.getStage(Stage.GOSSIP));
     }
