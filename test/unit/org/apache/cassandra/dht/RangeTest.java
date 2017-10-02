@@ -391,7 +391,7 @@ public class RangeTest
         collection.add(makeRange(1000L, 0));
         assertRanges(range.subtractAll(collection), 100L, 200L, 500L, 1000L);
     }
-    
+
     private Range<Token> makeRange(String token1, String token2)
     {
         return new Range<Token>(new BigIntegerToken(token1), new BigIntegerToken(token2));
