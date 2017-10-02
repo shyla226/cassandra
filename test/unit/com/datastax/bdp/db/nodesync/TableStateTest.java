@@ -17,7 +17,6 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.bdp.db.nodesync.TableState.Ref.Status;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.Range;
@@ -28,6 +27,7 @@ import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.utils.TestTimeSource;
 import org.apache.cassandra.utils.TimeSource;
 
+import static com.datastax.bdp.db.nodesync.NodeSyncTracing.SegmentTracing.NO_TRACING;
 import static org.junit.Assert.*;
 import static com.datastax.bdp.db.nodesync.NodeSyncTestTools.*;
 import static java.util.Arrays.asList;
@@ -85,8 +85,8 @@ public class TableStateTest
 
         TableState.Ref next = state.nextSegmentToValidate();
         assertEquals(s1, next.segment());
-        assertEquals(Status.UP_TO_DATE, next.checkStatus());
-        ValidationLifecycle v1 = ValidationLifecycle.createAndStart(next);
+        assertTrue(next.checkStatus().isUpToDate());
+        ValidationLifecycle v1 = ValidationLifecycle.createAndStart(next, NO_TRACING);
 
         log(state);
         timeSource.sleep(1, TimeUnit.SECONDS);
@@ -94,22 +94,22 @@ public class TableStateTest
         // We pretended to start validation on the first segment, make sure we get the next one now.
         next = state.nextSegmentToValidate();
         assertEquals(s2, next.segment());
-        assertEquals(Status.UP_TO_DATE, next.checkStatus());
-        ValidationLifecycle v2 = ValidationLifecycle.createAndStart(next);
+        assertTrue(next.checkStatus().isUpToDate());
+        ValidationLifecycle v2 = ValidationLifecycle.createAndStart(next, NO_TRACING);
 
         log(state);
         timeSource.sleep(1, TimeUnit.SECONDS);
 
         // Complete the first one and make sure we still get the next one first.
-        v1.onCompletion(fullInSync(0));
+        v1.onCompletion(fullInSync(0), new ValidationMetrics());
 
         log(state);
         timeSource.sleep(1, TimeUnit.SECONDS);
 
         next = state.nextSegmentToValidate();
         assertEquals(s3, next.segment());
-        assertEquals(Status.UP_TO_DATE, next.checkStatus());
-        ValidationLifecycle v3 = ValidationLifecycle.createAndStart(next);
+        assertTrue( next.checkStatus().isUpToDate());
+        ValidationLifecycle v3 = ValidationLifecycle.createAndStart(next, NO_TRACING);
 
         log(state);
         timeSource.sleep(1, TimeUnit.SECONDS);
@@ -119,8 +119,8 @@ public class TableStateTest
         assertTrue(state.nextSegmentToValidate().segmentStateAtCreation().isLocallyLocked());
 
         // Complete both the validation on the 2nd and 3rd segment (with the one for 3rd segment not successful)...
-        v2.onCompletion(fullInSync(0));
-        v3.onCompletion(partialRepaired(0));
+        v2.onCompletion(fullInSync(0), new ValidationMetrics());
+        v3.onCompletion(partialRepaired(0), new ValidationMetrics());
 
         log(state);
         timeSource.sleep(1, TimeUnit.SECONDS);
@@ -128,8 +128,8 @@ public class TableStateTest
         // ... and the next segment should be the 3rd one (s1 and s2 last were successful, not s3 so it should be retried first).
         next = state.nextSegmentToValidate();
         assertEquals(s3, next.segment());
-        assertEquals(Status.UP_TO_DATE, next.checkStatus());
-        ValidationLifecycle v4 = ValidationLifecycle.createAndStart(next);
+        assertTrue(next.checkStatus().isUpToDate());
+        ValidationLifecycle v4 = ValidationLifecycle.createAndStart(next, NO_TRACING);
 
         log(state);
         timeSource.sleep(1, TimeUnit.SECONDS);
@@ -140,10 +140,10 @@ public class TableStateTest
 
         // Now have s3 validation come back failing before we check the status of the s1 proposal. Because it is failing,
         // s3 should be the one with the most priority and checkStatus should indicate that.
-        v4.onCompletion(partialRepaired(0));
+        v4.onCompletion(partialRepaired(0), new ValidationMetrics());
         log(state);
 
-        assertEquals(Status.UPDATED, next.checkStatus());
+        assertFalse(next.checkStatus().isUpToDate());
 
         log(state);
         timeSource.sleep(1, TimeUnit.SECONDS);
@@ -224,12 +224,12 @@ public class TableStateTest
         // would be as valid). We do rely on this ordering below however so make sure this doesn't change (if it does,
         // the test can be adapted but it's a tad more annoying).
         assertEquals(range(0, 10), ref.segment().range);
-        ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(ref);
+        ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(ref, NO_TRACING);
 
         // Increase the depth and _then_ finish the validation
         state.update(1);
 
-        lifecycle.onCompletion(fullInSync(0));
+        lifecycle.onCompletion(fullInSync(0), new ValidationMetrics());
 
         // We increased the depth by 1, so all segment got split in 2, and the validation was on the first state, so
         // the 2 first segment should now have been validated (and the 2 last shouldn't).

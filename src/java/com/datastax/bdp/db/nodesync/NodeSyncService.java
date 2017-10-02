@@ -6,9 +6,11 @@
 package com.datastax.bdp.db.nodesync;
 
 import java.lang.management.ManagementFactory;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -159,6 +161,8 @@ public class NodeSyncService implements NodeSyncServiceMBean
         }
     }
 
+    private final NodeSyncTracing tracing = new NodeSyncTracing();
+
     public NodeSyncService()
     {
         this(NodeSyncStatusTableProxy.DEFAULT);
@@ -179,6 +183,11 @@ public class NodeSyncService implements NodeSyncServiceMBean
     public NodeSyncConfig config()
     {
         return config;
+    }
+
+    NodeSyncTracing tracing()
+    {
+        return tracing;
     }
 
     private void registerJMX()
@@ -483,6 +492,31 @@ public class NodeSyncService implements NodeSyncServiceMBean
     public List<Map<String, String>> getRateSimulatorInfo(boolean includeAllTables)
     {
         return RateSimulator.Info.compute(includeAllTables).toJMX();
+    }
+
+    public UUID enableTracing()
+    {
+        return enableTracing(Collections.emptyMap());
+    }
+
+    public UUID enableTracing(Map<String, String> optionMap)
+    {
+        return tracing.enable(TracingOptions.fromMap(optionMap));
+    }
+
+    public UUID currentTracingSession()
+    {
+        return tracing.currentTracingSession();
+    }
+
+    public boolean isTracingEnabled()
+    {
+        return tracing.isEnabled();
+    }
+
+    public void disableTracing()
+    {
+        tracing.disable();
     }
 
     static class NodeSyncServiceException extends RuntimeException

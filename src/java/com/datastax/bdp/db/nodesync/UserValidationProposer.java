@@ -24,9 +24,6 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableList;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.dht.Range;
@@ -69,8 +66,6 @@ import org.apache.cassandra.utils.units.TimeValue;
  */
 public class UserValidationProposer extends ValidationProposer implements Iterator<ValidationProposal>
 {
-    private static final Logger logger = LoggerFactory.getLogger(UserValidationProposer.class);
-
     // An identifier of the user validation; see UserValidationOptions for details.
     private final String id;
     private final long createdTime = NodeSyncHelpers.time().currentTimeMillis();
@@ -269,8 +264,8 @@ public class UserValidationProposer extends ValidationProposer implements Iterat
             if (startTime < 0)
                 startTime = NodeSyncHelpers.time().currentTimeMillis();
 
-            logger.trace("Submitting user validation of {} for execution", segment());
-            Validator validator = Validator.create(ValidationLifecycle.createAndStart(segmentRef));
+            NodeSyncTracing.SegmentTracing segTracing = service().tracing().forUserValidation(segment());
+            Validator validator = Validator.create(ValidationLifecycle.createAndStart(segmentRef, segTracing));
             validator.completionFuture()
                      .thenAccept(i -> onValidationDone(i, validator.metrics()))
                      .exceptionally(e -> { onValidationError(e); return null; });

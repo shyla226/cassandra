@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -1693,6 +1694,21 @@ public class NodeProbe implements AutoCloseable
         {
             out.println(String.format("Marked %d SSTable(s) as unrepaired.", marked));
         }
+    }
+
+    public void enableNodeSyncTracing(Map<String, String> options)
+    {
+        nodeSyncProxy.enableTracing(options);
+    }
+
+    public void disableNodeSyncTracing()
+    {
+        nodeSyncProxy.disableTracing();
+    }
+
+    public UUID currentNodeSyncTracingSession()
+    {
+        return nodeSyncProxy.currentTracingSession();
     }
 }
 

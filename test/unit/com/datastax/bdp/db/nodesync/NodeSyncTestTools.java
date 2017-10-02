@@ -175,8 +175,9 @@ public class NodeSyncTestTools
             {
                 ValidationProposal toReturn = next;
                 // Fake an activation and completion of validation to get progress; This will update next.
-                ValidationLifecycle.createAndStart(toReturn.segmentRef)
-                                   .onCompletion(new ValidationInfo(++clock, ValidationOutcome.FULL_IN_SYNC, null));
+                ValidationLifecycle.createAndStart(toReturn.segmentRef, NodeSyncTracing.SegmentTracing.NO_TRACING)
+                                   .onCompletion(new ValidationInfo(++clock, ValidationOutcome.FULL_IN_SYNC, null),
+                                                 new ValidationMetrics());
                 proposer.generateNextProposal();
                 return toReturn;
             }

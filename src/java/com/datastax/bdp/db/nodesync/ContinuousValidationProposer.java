@@ -16,7 +16,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.schema.NodeSyncParams;
 import org.apache.cassandra.utils.NoSpamLogger;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.units.Units;
 
 /**
@@ -186,34 +185,27 @@ class ContinuousValidationProposer extends ValidationProposer
         {
             // Things may have changed since we created the proposal and the segment may be or have been validated by
             // another node, so refresh the state for the system table.
-            switch (segmentRef.checkStatus())
+            TableState.Ref.Status status = segmentRef.checkStatus();
+            if (status.isUpToDate())
             {
-                case LOCKED:
-                    logger.trace("Skipping proposal on {}: locked by another node", segment());
-                    // Note: if the segment was already (remotely) locked at proposal, this would mean that despite the
-                    // lock penalty to the priority, that segment was still the highest priority, but it is still
-                    // locked remotely. In that case, it's probably worth waiting a small delay before retrying
-                    // generation to avoid spinning on that segment.
-                    if (stateAtProposal().isRemotelyLocked())
-                        ScheduledExecutors.nonPeriodicTasks.schedule(ContinuousValidationProposer.this::generateNextProposal, RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
-                    else
-                        generateNextProposal();
-                    return null;
-                case UPDATED:
-                    if (logger.isTraceEnabled())
-                        logger.trace("Skipping proposal on {}: the state has been updated since the proposal creation", segment());
-                    generateNextProposal();
-                    return null;
-                case UP_TO_DATE:
-                    logger.trace("Submitting validation of {} for execution ({})", segment(), stateAtProposal());
-                    ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(segmentRef);
-                    // Note: it's important generating the next proposal is after the lifecycle has been created, as that
-                    // is what locks the segment locally and make sure we don't re-generate that same segment.
-                    generateNextProposal();
-                    return Validator.create(lifecycle);
-                default:
-                    throw new AssertionError();
+                NodeSyncTracing.SegmentTracing tracing  = service().tracing().startContinuous(segment(), stateAtProposal().toTraceString());
+                ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(segmentRef, tracing);
+                // Note: it's important generating the next proposal is after the lifecycle has been created, as that
+                // is what locks the segment locally and make sure we don't re-generate that same segment.
+                generateNextProposal();
+                return Validator.create(lifecycle);
             }
+
+            service().tracing().skipContinuous(segment(), status.toString());
+            // Note: if the segment was already (remotely) locked at proposal, this would mean that despite the
+            // lock penalty to the priority, that segment was still the highest priority, but it is still
+            // locked remotely. In that case, it's probably worth waiting a small delay before retrying
+            // generation to avoid spinning on that segment.
+            if (status.isRemotelyLocked() && stateAtProposal().isRemotelyLocked())
+                ScheduledExecutors.nonPeriodicTasks.schedule(ContinuousValidationProposer.this::generateNextProposal, RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
+            else
+                generateNextProposal();
+            return null;
         }
 
         /**

@@ -8,10 +8,16 @@ package com.datastax.bdp.db.tools;
 import com.google.common.base.Throwables;
 import com.datastax.bdp.db.nodesync.NodeSyncService;
 import com.datastax.bdp.db.tools.nodesync.CancelValidation;
+import com.datastax.bdp.db.tools.nodesync.DisableTracing;
+import com.datastax.bdp.db.tools.nodesync.EnableTracing;
+import com.datastax.bdp.db.tools.nodesync.InvalidOptionException;
 import com.datastax.bdp.db.tools.nodesync.ListValidations;
+import com.datastax.bdp.db.tools.nodesync.NodeSyncCommand;
 import com.datastax.bdp.db.tools.nodesync.NodeSyncException;
+import com.datastax.bdp.db.tools.nodesync.ShowTracing;
 import com.datastax.bdp.db.tools.nodesync.SubmitValidation;
 import com.datastax.bdp.db.tools.nodesync.Toggle;
+import com.datastax.bdp.db.tools.nodesync.TracingStatus;
 import com.datastax.driver.core.exceptions.AuthenticationException;
 import com.datastax.driver.core.exceptions.NoHostAvailableException;
 import com.datastax.driver.core.exceptions.OperationTimedOutException;
@@ -62,8 +68,10 @@ public class NodeSync
         try
         {
             runnable = cli.parse(args);
+            if (runnable instanceof NodeSyncCommand)
+                ((NodeSyncCommand)runnable).validateOptions();
         }
-        catch (ParseException e)
+        catch (ParseException | InvalidOptionException e)
         {
             printBadUse(e);
             System.exit(1);
@@ -94,10 +102,18 @@ public class NodeSync
                .withCommand(CancelValidation.class)
                .withCommand(ListValidations.class);
 
+        builder.withGroup("tracing")
+               .withDescription("Enable/disable tracing for NodeSync")
+               .withDefaultCommand(Help.class)
+               .withCommand(EnableTracing.class)
+               .withCommand(DisableTracing.class)
+               .withCommand(TracingStatus.class)
+               .withCommand(ShowTracing.class);
+
         return builder.build();
     }
 
-    private static void printBadUse(ParseException e)
+    private static void printBadUse(Exception e)
     {
         System.err.printf("%s: %s%n", TOOL_NAME, e.getMessage());
         System.err.printf("See '%s help' or '%s help <command>'.%n", TOOL_NAME, TOOL_NAME);
@@ -105,7 +121,7 @@ public class NodeSync
 
     private static void printExpectedError(Throwable e)
     {
-        System.err.println("error: " + e.getMessage());
+        System.err.println("Error: " + e.getMessage());
     }
 
     private static void printUnexpectedError(Throwable e)

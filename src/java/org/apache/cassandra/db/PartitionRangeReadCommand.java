@@ -25,7 +25,6 @@ import java.util.List;
 
 import com.google.common.collect.Iterables;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;

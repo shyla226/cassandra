@@ -5,11 +5,16 @@
  */
 package com.datastax.bdp.db.tools.nodesync;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Splitter;
 
 import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.KeyspaceMetadata;
@@ -23,6 +28,8 @@ public abstract class NodeSyncCommand implements Runnable
 {
     @VisibleForTesting
     static final Pattern TABLE_NAME_PATTERN = Pattern.compile("((?<k>(\\w+|\"\\w+\"))\\.)?(?<t>(\\w+|\"\\w+\"))");
+
+    private static Splitter ON_COMMA = Splitter.on(',').trimResults().omitEmptyStrings();
 
     @Option(type = OptionType.GLOBAL, name = { "-h", "--host" }, description = "CQL contact point address")
     private String cqlHost = "127.0.0.1";
@@ -57,6 +64,9 @@ public abstract class NodeSyncCommand implements Runnable
     @Option(type = OptionType.COMMAND, name = { "-v", "--verbose" }, description = "Verbose output")
     private boolean verbose = false;
 
+    @Option(type = OptionType.COMMAND, name = { "--quiet" }, description = "Quiet output; don't print warnings")
+    private boolean quiet = false;
+
     @Override
     public void run()
     {
@@ -64,6 +74,12 @@ public abstract class NodeSyncCommand implements Runnable
         {
             execute(cluster.getMetadata(), session, buildNodeProbes(session));
         }
+    }
+
+    public void validateOptions() throws InvalidOptionException
+    {
+        if (verbose && quiet)
+            throw new InvalidOptionException("Cannot use both --verbose and --quiet at the same time.");
     }
 
     private Cluster buildCluster()
@@ -139,9 +155,51 @@ public abstract class NodeSyncCommand implements Runnable
         return tableMetadata;
     }
 
+    /**
+     * Parse a comma-separated list of inet addresses.
+     * <p>
+     * Note that this method do validate that the addresses are valid, but does not check the liveness of the node
+     * corresponding to those addresses in any way.
+     *
+     * @param addressList the string containing the comma-separated list ot parse.
+     * @return the parsed list.
+     */
+    static Set<InetAddress> parseInetAddressList(String addressList)
+    {
+        Set<InetAddress> addresses = new HashSet<>();
+        for (String s : ON_COMMA.split(addressList))
+        {
+            try
+            {
+                addresses.add(InetAddress.getByName(s));
+            }
+            catch (UnknownHostException e)
+            {
+                throw new NodeSyncException("Unknown or invalid address: " + s);
+            }
+        }
+
+        if (addresses.isEmpty())
+            throw new NodeSyncException("Invalid empty list of addresses provided.");
+
+        return addresses;
+    }
+
+    /**
+     * Print a non essential informational message that will only show if the --verbose option is used.
+     */
     void printVerbose(String msg, Object... args)
     {
         if (verbose)
             System.out.println(String.format(msg, args));
+    }
+
+    /**
+     * Print a warning message, which will show by default but can be quiet down by the --quiet option.
+     */
+    void printWarning(String msg, Object... args)
+    {
+        if (!quiet)
+            System.err.println(String.format("Warning: " + msg, args));
     }
 }

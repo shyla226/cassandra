@@ -35,6 +35,13 @@ import org.apache.cassandra.db.rows.Row;
 public interface ReadReconciliationObserver
 {
     /**
+     * Calls just before queries are sent with the hosts to which the query is sent.
+     *
+     * @param queried the queried nodes.
+     */
+    public void queried(Collection<InetAddress> queried);
+
+    /**
      * Called just before any reconciliation happens with the nodes whose response was received.
      *
      * @param responded the nodes whose response has been received.

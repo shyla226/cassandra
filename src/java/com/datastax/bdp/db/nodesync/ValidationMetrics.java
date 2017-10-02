@@ -90,6 +90,16 @@ public class ValidationMetrics implements Serializable
             ++objectsRepaired;
     }
 
+    long dataValidated()
+    {
+        return dataValidated;
+    }
+
+    long dataRepaired()
+    {
+        return dataRepaired;
+    }
+
     void addTo(NodeSyncMetrics metrics)
     {
         for (ValidationOutcome outcome : ValidationOutcome.values())

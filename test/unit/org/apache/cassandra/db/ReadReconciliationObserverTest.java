@@ -285,6 +285,10 @@ public class ReadReconciliationObserverTest extends CQLTester
 
         private int repairSent;
 
+        public void queried(Collection<InetAddress> queried)
+        {
+        }
+
         public void responsesReceived(Collection<InetAddress> responded)
         {
             this.responded = responded;

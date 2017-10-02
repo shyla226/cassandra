@@ -55,7 +55,8 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
     {
         NONE,
         QUERY,
-        REPAIR;
+        REPAIR,
+        NODESYNC;
 
         private static final TraceType[] ALL_VALUES = values();
 
@@ -73,7 +74,8 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
 
         private static final int[] TTLS = { DatabaseDescriptor.getTracetypeQueryTTL(),
                                             DatabaseDescriptor.getTracetypeQueryTTL(),
-                                            DatabaseDescriptor.getTracetypeRepairTTL() };
+                                            DatabaseDescriptor.getTracetypeRepairTTL(),
+                                            DatabaseDescriptor.getTracetypeNodeSyncTTL() };
 
         public int getTTL()
         {
@@ -154,6 +156,11 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
     public UUID newSession(TraceType traceType)
     {
         return newSession(UUIDGen.getTimeUUID(), traceType, Collections.emptyMap());
+    }
+
+    public UUID newSession(UUID sessionId, TraceType traceType)
+    {
+        return newSession(sessionId, traceType, Collections.emptyMap());
     }
 
     /**

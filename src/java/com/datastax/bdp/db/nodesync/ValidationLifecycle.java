@@ -7,12 +7,16 @@ package com.datastax.bdp.db.nodesync;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.cql3.PageSize;
+import org.apache.cassandra.utils.units.SizeUnit;
+import org.apache.cassandra.utils.units.Units;
+
 /**
  * An object that allows acting on the main events of the lifecycle of a segment validation.
  * <p>
  * Such lifecycle object is created when the validation is started, after which the {@link #onNewPage} method will be
  * called at the start of every new page of data, and either {@link #onCompletion} is called on the completion of the
- * segment validation, or that validation is cancelled and {@link #cancel()} is called.
+ * segment validation, or that validation is cancelled and {@link #cancel} is called.
  */
 class ValidationLifecycle
 {
@@ -25,14 +29,16 @@ class ValidationLifecycle
     static final int LOCK_TIMEOUT_SEC = Integer.getInteger("dse.nodesync.segment_lock_timeout_sec", (int)TimeUnit.MINUTES.toSeconds(10));
 
     private final TableState.Ref segmentRef;
+    private final NodeSyncTracing.SegmentTracing tracing;
 
     private final long startTime;
 
     private volatile int nextLockRefreshTimeSec;
 
-    private ValidationLifecycle(TableState.Ref segmentRef, long startTime)
+    private ValidationLifecycle(TableState.Ref segmentRef, NodeSyncTracing.SegmentTracing tracing, long startTime)
     {
         this.segmentRef = segmentRef;
+        this.tracing = tracing;
         this.startTime = startTime;
         this.nextLockRefreshTimeSec = computeNextLockRefresh((int)(startTime / 1000));
     }
@@ -46,11 +52,14 @@ class ValidationLifecycle
      *
      * @param segmentRef a reference to the state of the segment on which this is a lifecycle. This reference allow to
      *                   update said state based on the progress of the validation lifecycle.
+     * @param tracing tracing session for the segment validation.
      * @return the newly created and started {@link ValidationLifecycle}.
      */
-    static ValidationLifecycle createAndStart(TableState.Ref segmentRef)
+    static ValidationLifecycle createAndStart(TableState.Ref segmentRef, NodeSyncTracing.SegmentTracing tracing)
     {
-        ValidationLifecycle lifecycle = new ValidationLifecycle(segmentRef, NodeSyncHelpers.time().currentTimeMillis());
+        ValidationLifecycle lifecycle = new ValidationLifecycle(segmentRef,
+                                                                tracing,
+                                                                NodeSyncHelpers.time().currentTimeMillis());
         lifecycle.onStart();
         return lifecycle;
     }
@@ -66,6 +75,11 @@ class ValidationLifecycle
     NodeSyncService service()
     {
         return segmentRef.service();
+    }
+
+    NodeSyncTracing.SegmentTracing tracing()
+    {
+        return tracing;
     }
 
     /**
@@ -98,15 +112,19 @@ class ValidationLifecycle
     }
 
     /**
-     *  Called by {@link Validator} at the start of every new page of the data correspond to this segment validation.
+     * Called by {@link Validator} at the start of every new page of the data correspond to this segment validation.
+     *
+     * @param pageSize the size of the page that will be requested.
      */
-    void onNewPage()
+    void onNewPage(PageSize pageSize)
     {
         checkForInvalidation();
+        tracing.trace("Querying new page (of max {})", pageSize);
 
         int nowInSec = NodeSyncHelpers.time().currentTimeSeconds();
         if (nowInSec > nextLockRefreshTimeSec)
         {
+            tracing.trace("Refreshing lock on validation");
             statusTable().lockNodeSyncSegment(segment(), LOCK_TIMEOUT_SEC, TimeUnit.SECONDS);
             segmentRef.refreshLock();
             nextLockRefreshTimeSec = computeNextLockRefresh(nowInSec);
@@ -114,11 +132,28 @@ class ValidationLifecycle
     }
 
     /**
+     * Called once a page has completed.
+     *
+     * @param outcome the outcome for the page.
+     * @param pageMetrics the metrics for the page.
+     */
+    void onCompletedPage(ValidationOutcome outcome, ValidationMetrics pageMetrics)
+    {
+        if (tracing.isEnabled())
+            tracing.trace("Page completed: outcome={}, validated={}, repaired={}",
+                          outcome,
+                          Units.toString(pageMetrics.dataValidated(), SizeUnit.BYTES),
+                          Units.toString(pageMetrics.dataRepaired(), SizeUnit.BYTES));
+    }
+
+    /**
      *  Called by {@link Validator} on the completion of the validation with the information regarding said validation.
      */
-    void onCompletion(ValidationInfo info)
+    void onCompletion(ValidationInfo info, ValidationMetrics metrics)
     {
         checkForInvalidation();
+
+        tracing.onSegmentCompletion(info.outcome, metrics);
 
         // This will release the lock.
         statusTable().recordNodeSyncValidation(segment(), info, segmentRef.segmentStateAtCreation().lastValidationWasSuccessful());
@@ -128,8 +163,9 @@ class ValidationLifecycle
     /**
      *  Called by {@link Validator} if the validation is cancelled before it is completed.
      */
-    void cancel()
+    void cancel(String reason)
     {
+        tracing.trace("Cancelling validation: {}", reason);
         statusTable().forceReleaseNodeSyncSegmentLock(segment());
         segmentRef.forceUnlock();
     }

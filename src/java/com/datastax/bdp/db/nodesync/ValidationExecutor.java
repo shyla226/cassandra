@@ -189,7 +189,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
 
         // Then, if it's a hard shutdown that was requested, actively cancel any running validations
         if (interruptValidations)
-            inFlightValidators.forEach(Validator::cancel);
+            inFlightValidators.forEach(v -> v.cancel("Shutting down NodeSync forcefully"));
 
         // The shutdown future will then be notified once all inflight validations finish, or have been cancelled.
         // It's possible however that we had no in-flight validations in the first place, so signal now in that case
@@ -303,7 +303,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         if (isShutdown())
         {
             // Since the validator has been created, cancel() it so anyone waiting on it's completion future gets notified
-            validator.cancel();
+            validator.cancel("NodeSync has been shutdown");
             return;
         }
 
@@ -506,7 +506,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                 // 1) we're not using enough threads and/or in-flight validations to meet our rate goal. Then, assuming
                 //    we're not already maxing out both of those resources, we try to increase one to (try to) speed
                 //    things up.
-                // 2) we haven't add much work to do during the last interval, typically because the cluster has little
+                // 2) we haven't had much work to do during the last interval, typically because the cluster has little
                 //    to no data to validate. In that case, we may actually want to decrease our resource used unless
                 //    we're already to the min.
                 // We detect whether we are in case 2) by checking what percentage of the last interval time was spend

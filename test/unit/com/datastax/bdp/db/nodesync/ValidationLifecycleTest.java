@@ -12,6 +12,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.TestTimeSource;
@@ -26,6 +27,8 @@ public class ValidationLifecycleTest
 {
     private static final boolean debugLog = false; // Set to true to have details logs; make debugging (and
                                                    // understanding) the tests easier.
+
+    private static final PageSize pageSize = PageSize.bytesSize(100);
 
     @BeforeClass
     public static void init()
@@ -47,7 +50,8 @@ public class ValidationLifecycleTest
 
         TableState.Ref ref = state.nextSegmentToValidate();
 
-        ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(ref);
+        ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(ref,
+                                                                           NodeSyncTracing.SegmentTracing.NO_TRACING);
         assertTrue(ref.currentState().isLocallyLocked());
         assertEquals(1, statusProxy.lockCalls);
 
@@ -55,7 +59,7 @@ public class ValidationLifecycleTest
         state.update(Collections.singleton(range(10, 20)));
 
         // The next onNewPage should now throw
-        lifecycle.onNewPage();
+        lifecycle.onNewPage(pageSize);
     }
 
     @Test
@@ -75,26 +79,27 @@ public class ValidationLifecycleTest
 
         TableState.Ref ref = state.nextSegmentToValidate();
 
-        ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(ref);
+        ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(ref,
+                                                                           NodeSyncTracing.SegmentTracing.NO_TRACING);
 
         // Starting the lifecycle should have locked it
         assertEquals(1, statusProxy.lockCalls);
         assertTrue(ref.currentState().isLocallyLocked());
 
         // First call to newPage; shouldn't do anything. Shouldn't refresh the lock in particular
-        lifecycle.onNewPage();
+        lifecycle.onNewPage(pageSize);
         assertEquals(1, statusProxy.lockCalls);
 
         // Now advance the clock enough that the lock should be refreshed, and check that it is
         // Note: we know the lock is refreshed if it's older than 3/4 the lock timeout.
         timeSource.sleep(4 * ValidationLifecycle.LOCK_TIMEOUT_SEC / 5, TimeUnit.SECONDS);
 
-        lifecycle.onNewPage();
+        lifecycle.onNewPage(pageSize);
         assertEquals(2, statusProxy.lockCalls);
 
         // Complete and check that we 1) have save the validation and 2) unlocked the segment
         long beforeValidation = ref.currentState().lastValidationTimeMs();
-        lifecycle.onCompletion(fullInSync(0));
+        lifecycle.onCompletion(fullInSync(0), new ValidationMetrics());
         assertEquals(2, statusProxy.lockCalls); // Sanity check that it hasn't changed
         assertFalse(ref.currentState().isLocallyLocked());
         assertEquals(1, statusProxy.recordValidationCalls);
@@ -114,11 +119,12 @@ public class ValidationLifecycleTest
 
         TableState.Ref ref = state.nextSegmentToValidate();
 
-        ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(ref);
+        ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(ref,
+                                                                           NodeSyncTracing.SegmentTracing.NO_TRACING);
         assertTrue(ref.currentState().isLocallyLocked());
         assertEquals(1, statusProxy.lockCalls);
 
-        lifecycle.cancel();
+        lifecycle.cancel("Test");
 
         assertFalse(ref.currentState().isLocallyLocked());
         assertEquals(1, statusProxy.forceUnlockCalls);

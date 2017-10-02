@@ -84,6 +84,9 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
 
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockfor, StringUtils.join(this.endpoints, ","));
+
+        if (readContext().readObserver != null)
+            readContext().readObserver.queried(endpoints);
     }
 
     static <T> ReadCallback<T> forResolver(ResponseResolver<T> resolver, List<InetAddress> targets)

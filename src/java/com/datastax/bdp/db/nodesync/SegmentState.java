@@ -152,18 +152,30 @@ abstract class SegmentState
         return priority - Math.max(5000, Math.min((9 * deadlineTargetMs) / 10, diff));
     }
 
-    private String durationStr(long now, long time)
+    /**
+     * A String representation more suitable for tracing (where the segment itself is part of the context in particular).
+     */
+    String toTraceString()
     {
-        // Negative values means we don't have a record for it
-        return time < 0
-               ? "<not recorded>"
-               : String.format("%s ago (%d)", Units.toString(now - time, TimeUnit.MILLISECONDS), time);
+        long last = lastValidationTimeMs();
+        long lastSucc = lastSuccessfulValidationTimeMs();
+        if (last < 0 && lastSucc < 0)
+            return "never validated";
+
+        if (last == lastSucc)
+            return String.format("validated %s", NodeSyncHelpers.sinceStr(last));
+
+        if (lastSucc < 0)
+            return String.format("validated unsuccessfully %s (no known success)", NodeSyncHelpers.sinceStr(last));
+
+        return String.format("validated unsuccessfully %s (last success: %s)",
+                             NodeSyncHelpers.sinceStr(last),
+                             NodeSyncHelpers.sinceStr(lastSucc));
     }
 
     @Override
     public String toString()
     {
-        long now = NodeSyncHelpers.time().currentTimeMillis();
         String deadlineStr = Units.toString(deadlineTargetMs(), TimeUnit.MILLISECONDS);
         long last = lastValidationTimeMs();
         long lastSucc = lastSuccessfulValidationTimeMs();
@@ -172,9 +184,10 @@ abstract class SegmentState
             return String.format("%s(<never validated>)%s", segment(), lockString);
 
         if (lastValidationWasSuccessful())
-            return String.format("%s(last validation=%s (successful), deadline=%s)%s", segment(), durationStr(now, last), deadlineStr, lockString);
+            return String.format("%s(last validation=%s (successful), deadline=%s)%s",
+                                 segment(), NodeSyncHelpers.sinceStr(last), deadlineStr, lockString);
         else
             return String.format("%s(last validation=%s, last successful one=%s, deadline=%s)%s",
-                                 segment(), durationStr(now, last), durationStr(now, lastSucc), deadlineStr, lockString);
+                                 segment(), NodeSyncHelpers.sinceStr(last), NodeSyncHelpers.sinceStr(lastSucc), deadlineStr, lockString);
     }
 }

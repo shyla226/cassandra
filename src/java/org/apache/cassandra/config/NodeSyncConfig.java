@@ -8,6 +8,7 @@ package org.apache.cassandra.config;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Joiner;
 import com.google.common.util.concurrent.RateLimiter;
@@ -25,7 +26,7 @@ public class NodeSyncConfig
 {
     private static final boolean DEFAULT_ENABLED = true;
     private static final long DEFAULT_RATE_KB = 1024;
-    private static final long DEFAULT_PAGE_SIZE_KB = 100;
+    private static final long DEFAULT_PAGE_SIZE_KB = 512;
 
     private static final int DEFAULT_MIN_THREADS = 1;
     // Note that while we're trying to limit how often our threads wait on blocking operations, it's not perfect, so it
@@ -42,6 +43,8 @@ public class NodeSyncConfig
     // in-flights validations to compensate. That said, each validation does consume resources, so don't get totally crazy.
     private static final int DEFAULT_MAX_VALIDATIONS = DEFAULT_MAX_THREADS * 2;
 
+    private static final int DEFAULT_TRACE_TTL_SEC = (int) TimeUnit.DAYS.toSeconds(7);
+
     private boolean enabled = DEFAULT_ENABLED;
     private long rate_in_kb = DEFAULT_RATE_KB;
 
@@ -51,6 +54,8 @@ public class NodeSyncConfig
     private volatile int max_threads = DEFAULT_MAX_THREADS;
     private volatile int min_inflight_validations = DEFAULT_MIN_VALIDATIONS;
     private volatile int max_inflight_validations = DEFAULT_MAX_VALIDATIONS;
+
+    private int trace_ttl_sec = DEFAULT_TRACE_TTL_SEC;
 
     public final RateLimiter rateLimiter = RateLimiter.create(SizeUnit.BYTES.convert(DEFAULT_RATE_KB, SizeUnit.KILOBYTES));
 
@@ -91,6 +96,11 @@ public class NodeSyncConfig
     public void setMax_inflight_validations(int max_inflight_validations)
     {
         this.max_inflight_validations = max_inflight_validations;
+    }
+
+    public void setTrace_ttl_sec(int trace_ttl_sec)
+    {
+        this.trace_ttl_sec = trace_ttl_sec;
     }
 
     /* Proper setters and getters for access in the rest of the code. */
@@ -143,6 +153,11 @@ public class NodeSyncConfig
     public int getMaxInflightValidations()
     {
         return max_inflight_validations;
+    }
+
+    public long traceTTL(TimeUnit unit)
+    {
+        return unit.convert(trace_ttl_sec, TimeUnit.SECONDS);
     }
 
     public void validate() throws ConfigurationException

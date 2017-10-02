@@ -20,6 +20,8 @@ package org.apache.cassandra.cql3;
 import java.util.Objects;
 
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.utils.units.SizeUnit;
+import org.apache.cassandra.utils.units.Units;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
 
@@ -31,8 +33,25 @@ public class PageSize
 {
     public enum PageUnit
     {
-        BYTES,
+        BYTES
+        {
+            @Override
+            String toString(long value)
+            {
+                return Units.toString(value, SizeUnit.BYTES);
+            }
+        },
+
         ROWS
+        {
+            @Override
+            String toString(long value)
+            {
+                return String.format("%d rows", value);
+            }
+        };
+
+        abstract String toString(long value);
     }
     
     public static PageSize NULL = new PageSize();
@@ -220,6 +239,6 @@ public class PageSize
     @Override
     public String toString()
     {
-        return String.format("%d %s", size, unit);
+        return unit.toString(size);
     }
 }

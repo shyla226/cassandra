@@ -6,6 +6,7 @@
 package com.datastax.bdp.db.nodesync;
 
 import java.util.Collection;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Stream;
@@ -21,13 +22,14 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.SystemTimeSource;
 import org.apache.cassandra.utils.TimeSource;
 import org.apache.cassandra.utils.units.SizeUnit;
+import org.apache.cassandra.utils.units.Units;
 
 /**
  * Static helper methods for NodeSync.
  */
 abstract class NodeSyncHelpers
 {
-    public static final long NO_VALIDATION_TIME = Long.MIN_VALUE;
+    static final long NO_VALIDATION_TIME = Long.MIN_VALUE;
 
     private NodeSyncHelpers() {}
 
@@ -208,5 +210,17 @@ abstract class NodeSyncHelpers
         return StorageService.instance.getTokenMetadata().getAllEndpoints().size() > 1
                && isReplicated(store.keyspace)
                && store.metadata().params.nodeSync.isEnabled(store.metadata());
+    }
+
+    /**
+     * Creates a string used for pretty printing when a validation happened base on the provided time of said validation.
+     */
+    static String sinceStr(long validationTimeMs)
+    {
+        if (validationTimeMs < 0)
+            return "<no validation recorded>";
+
+        long now = NodeSyncHelpers.time().currentTimeMillis();
+        return String.format("%s ago", Units.toString(now - validationTimeMs, TimeUnit.MILLISECONDS));
     }
 }

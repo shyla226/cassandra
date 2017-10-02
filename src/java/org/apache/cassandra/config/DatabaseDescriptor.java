@@ -25,6 +25,7 @@ import java.lang.reflect.Constructor;
 import java.net.*;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -2469,6 +2470,11 @@ public class DatabaseDescriptor
     public static int getTracetypeRepairTTL()
     {
         return conf.tracetype_repair_ttl;
+    }
+
+    public static int getTracetypeNodeSyncTTL()
+    {
+        return (int)conf.nodesync.traceTTL(TimeUnit.SECONDS);
     }
 
     public static int getTracetypeQueryTTL()

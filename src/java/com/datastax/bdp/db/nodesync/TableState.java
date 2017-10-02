@@ -5,6 +5,7 @@
  */
 package com.datastax.bdp.db.nodesync;
 
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -19,6 +20,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+import javax.annotation.Nullable;
+
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Uninterruptibles;
 
@@ -388,7 +391,6 @@ public class TableState
 
     /**
      * A testing method, not meant to be used anywhere else.
-     * @return
      */
     @VisibleForTesting
     List<SegmentState> dumpSegmentStates()
@@ -398,6 +400,14 @@ public class TableState
         for (int i = 0; i < current.size; i++)
             segments.add(current.immutableSegmentState(i));
         return segments;
+    }
+
+    private static boolean isRemotelyLocked(NodeSyncRecord record)
+    {
+        // We check if the node that locked is alive. If it isn't, we ignore the lock. Because the locks in the status
+        // table are timed out, this is not essential, but it makes the system more reactive and thus easier to reason
+        // about and test.
+        return record.lockedBy != null && FailureDetector.instance.isAlive(record.lockedBy);
     }
 
     @Override
@@ -685,10 +695,7 @@ public class TableState
                            record.lastValidationTimeMs(),
                            record.lastSuccessfulValidationTimeMs(),
                            localLocks[i], // keep whatever local lock we had
-                           // We check if the node that locked is alive. If it isn't, we ignore the lock (and in fact clear any
-                           // we may have had from a previous read. Because the locks in the status table are timed out, this is
-                           // not essential, but it makes the system more reactive and thus easier to reason about and test.
-                           record.lockedBy != null && FailureDetector.instance.isAlive(record.lockedBy));
+                           isRemotelyLocked(record));
         }
 
         private void lockLocally(int i)
@@ -806,12 +813,83 @@ public class TableState
     {
         /**
          * Status as returned by the {@link #checkStatus()} method. The state is either up-to-date or it is not, but for
-         * logging purposes, we distinguish between the case where the segment is currently locked from the case where the
-         * current state isn't locked but has been otherwise updated compared to the state of which we're checking the
-         * status. In other words, {@link #LOCKED} is a sub-case of {@link #UPDATED} that exists to provide finer grained
-         * logging, but should be handled the same way overall.
+         * logging purposes, we include a few other information when it is not up to date.
          */
-        enum Status { UP_TO_DATE, UPDATED, LOCKED }
+        static class Status
+        {
+            private final boolean upToDate;
+            private final Ref ref;
+
+            /** Only present if not up to date because locked remotely. */
+            @Nullable
+            private final InetAddress lockedBy;
+
+            private Status(boolean upToDate, Ref ref, InetAddress lockedBy)
+            {
+                this.upToDate = upToDate;
+                this.ref = ref;
+                this.lockedBy = lockedBy;
+            }
+
+            boolean isUpToDate()
+            {
+                return upToDate;
+            }
+
+            boolean isRemotelyLocked()
+            {
+                return lockedBy != null;
+            }
+
+            private static Status upToDate(Ref ref)
+            {
+                return new Status(true, ref, null);
+            }
+
+            private static Status updated(Ref ref)
+            {
+                return new Status(false, ref, null);
+            }
+
+            private static Status locked(Ref ref, InetAddress lockedBy)
+            {
+                return new Status(false, ref, lockedBy);
+            }
+
+            public String toString()
+            {
+                if (upToDate)
+                    return "up to date";
+
+                if (lockedBy != null)
+                    return "segment locked by " + lockedBy;
+
+                String reason;
+                if (ref.isInvalidated())
+                {
+                    reason = "the topology or depth has changed";
+                }
+                else
+                {
+                    SegmentState currentState = ref.currentState();
+                    if (ref.segmentAtCreation.lastValidationTimeMs() != currentState.lastValidationTimeMs())
+                    {
+                        reason = String.format("was recently validated by another node (%s, previously know: %s)",
+                                               NodeSyncHelpers.sinceStr(currentState.lastValidationTimeMs()),
+                                               NodeSyncHelpers.sinceStr(ref.segmentAtCreation.lastValidationTimeMs()));
+                    }
+                    else
+                    {
+                        // The segment wasn't validated since the proposal was created but it's not the one with the
+                        // most priority anymore: some concurrent validation came up (probably unsuccessfully) and
+                        // took the lead.
+                        reason = String.format("segment %s has now higher priority",
+                                               ref.tableState.nextSegmentToValidate().segment());
+                    }
+                }
+                return String.format("state updated: %s", reason);
+            }
+        }
 
         private final TableState tableState;
         private final SegmentState segmentAtCreation;
@@ -914,11 +992,9 @@ public class TableState
         Status checkStatus()
         {
             // Do a quick check to see if the state has changed in memory before bothering with reading the status
-            // table. Note that this doesn't really have to be protected by the lock because worth case, we miss
-            // an update and we do read the status table but we'll then check again correctly protected. In other
-            // words, just an optimization.
+            // table.
             if (!versionAtCreation.equals(tableState.version))
-                return Status.UPDATED;
+                return Status.updated(this);
 
             try
             {
@@ -932,9 +1008,17 @@ public class TableState
                                          if (!isInvalidated())
                                              tableState.stateHolder.update(indexAtCreation, record);
 
+                                         // Note that it's possible that a remotely locked segment is still the one
+                                         // with the highest priority and so that the version hasn't changed. And we
+                                         // could decide to double-validate the segment in that case, it wouldn't exactly
+                                         // be wrong or break things, but it's waste of resources and likely unexpected,
+                                         // so we don't.
+                                         if (isRemotelyLocked(record))
+                                             return Status.locked(this, record.lockedBy);
+
                                          return versionAtCreation.equals(tableState.version)
-                                                ? Status.UP_TO_DATE
-                                                : (record.lockedBy == null ? Status.UPDATED : Status.LOCKED);
+                                                ? Status.upToDate(this)
+                                                : Status.updated(this);
                                      }
                                      finally
                                      {
@@ -946,7 +1030,7 @@ public class TableState
             {
                 logger.error("Unexpected error while checking status of segment to validate; this is a bug, but will NodeSync "
                              + "will proceed validating the segment to ensure progress. This may result in non optimal behavior", e);
-                return Status.UP_TO_DATE;
+                return Status.upToDate(this);
             }
         }
 
@@ -996,7 +1080,7 @@ public class TableState
      * This concretely track 3 numbers, major, minor and priority that are updated in the following way and with the
      * following meaning:
      * <ul>
-     * <li>major: incremented on updates to the state that invalidate any in-flight validations (any {@link Ref} objec
+     * <li>major: incremented on updates to the state that invalidate any in-flight validations (any {@link Ref} object
      * created before the update). In practice, corresponds to change of local range or depth decrease.</li>
      * <li>minor: incremented when the underlying state-holder changes (the segments considered have changed), but
      * without invalidating in-flight validations. This happen on depth increase, where we can relatively easily

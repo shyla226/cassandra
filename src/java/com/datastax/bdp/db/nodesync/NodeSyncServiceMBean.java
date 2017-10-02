@@ -7,11 +7,13 @@ package com.datastax.bdp.db.nodesync;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.cassandra.metrics.NodeSyncMetrics;
 import org.apache.cassandra.tools.nodetool.nodesync.RateSimulatorCmd;
+import org.apache.cassandra.tracing.TraceKeyspace;
 
 public interface NodeSyncServiceMBean
 {
@@ -156,4 +158,51 @@ public interface NodeSyncServiceMBean
      * @return the result of calling {@code RateSimulator.Info.compute().toJMX()}.
      */
     public List<Map<String, String>> getRateSimulatorInfo(boolean includeAllTables);
+
+    /**
+     * Starts NodeSync tracing on this node with default options.
+     * <p>
+     * This is a shortcut for {@code enableTracing(Collections.emptyMap())}.
+     *
+     * @return the ID of the trace session, which can be used to query the trace from {@link TraceKeyspace#EVENTS}.
+     *
+     * @throws IllegalStateException if NodeSync tracing is already enabled on this node at the time of this call.
+     */
+    public UUID enableTracing();
+
+    /**
+     * Enables NodeSync tracing on this node.
+     * <p>
+     * Once enabled, the tracing events will be collected in {@link TraceKeyspace#EVENTS} table under the session ID
+     * provided to this method. Please note that this tracing can generate a fair amount of tracing events rapidly
+     * (especially with the "high" level), so is not meant to be enabled for long periods of times, and certainly not
+     * indefinitely.
+     *
+     *
+     * @param options options for the tracing session. This is a map for the sake of JMX, but this is parsed with
+     *                {@link TracingOptions#fromMap(Map)} and the javadoc of this method describes the available
+     *                options..
+     * @return the ID of the trace session, which can be use to query the trace from {@link TraceKeyspace#EVENTS}.
+     *
+     * @throws IllegalStateException if NodeSync tracing is already enabled on this node at the time of this call.
+     * @throws IllegalArgumentException if any of the options provided is invalid/has an invalid value.
+     */
+    public UUID enableTracing(Map<String, String> options);
+
+    /**
+     * The UUID of the current tracing session if tracing is enabled, or {@code null} if it isn't.
+     */
+    public UUID currentTracingSession();
+
+    /**
+     * Whether NodeSync tracing is currently enabled on this node..
+     * <p>
+     * Note that in practice, this is just a shortcut for {@code currentTracingSession() != null}.
+     */
+    public boolean isTracingEnabled();
+
+    /**
+     * Disable tracing if enabled.
+     */
+    public void disableTracing();
 }

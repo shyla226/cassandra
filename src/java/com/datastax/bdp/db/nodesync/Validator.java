@@ -11,7 +11,6 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.Nullable;
@@ -41,7 +40,6 @@ import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestFailureException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
@@ -189,6 +187,11 @@ class Validator
         return segment().range;
     }
 
+    private NodeSyncTracing.SegmentTracing tracing()
+    {
+        return lifecycle.tracing();
+    }
+
     Future executeOn(ValidationExecutor executor)
     {
         // We can only call this once.
@@ -252,15 +255,22 @@ class Validator
     {
         assert !pager.isExhausted();
         // Maybe schedule a refresh of the lock.
-        lifecycle.onNewPage();
+        lifecycle.onNewPage(pageSize);
         observer.onNewPage();
         return pager.fetchPage(pageSize, context)
-                    .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), executor));
+                    .doOnComplete(() -> onPageComplete(executor));
     }
 
     private boolean isDone(QueryPager pager)
     {
         return pager.isExhausted() || state.get() == State.CANCELLED;
+    }
+
+    private void onPageComplete(ValidationExecutor executor)
+    {
+        ValidationOutcome outcome = ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch);
+        recordPage(outcome, executor);
+        lifecycle.onCompletedPage(outcome, observer.pageMetrics);
     }
 
     private void handleError(Throwable t, PageProcessingStatsListener listener)
@@ -274,25 +284,22 @@ class Validator
 
         if (t instanceof InvalidatedNodeSyncStateException)
         {
-            logger.trace("Validation of {} was invalidated by either a topology change or a depth decrease. " +
-                         "The segment will be retried. ", segment());
-            cancel();
+            cancel("Validation invalidated by either a topology change or a depth decrease. " +
+                   "The segment will be retried.");
         }
         else if (isException(t, UnknownKeyspaceException.class, RequestFailureReason.UNKNOWN_KEYSPACE))
         {
             // This means the keyspace has been dropped concurrently from us.
-            logger.trace("Keyspace {} has been dropped while validating segment for table {}", table().keyspace, table());
-            cancel();
+            cancel(String.format("Keyspace %s was dropped while validating", table().keyspace));
         }
         else if (isException(t, UnknownTableException.class, RequestFailureReason.UNKNOWN_TABLE))
         {
             // This means the table has been dropped concurrently from us.
-            logger.trace("Table {} has been dropped while validating one of its segment", table());
-            cancel();
+            cancel(String.format("Table %s was dropped while validating", table()));
         }
         else if ((t instanceof UnavailableException) || (t instanceof RequestTimeoutException))
         {
-            logger.trace("Failed validation on page of range {} of {}, got {}", range(), table(), t.getMessage());
+            tracing().trace("Unable to complete page (and validation): {}", t.getMessage());
 
             // As we ultimately use CL.TWO, it means this is either the only live replica (unavailable) or the only
             // one that answered (timeout). In that case, we can't do more for this segment so record the outcome but
@@ -302,6 +309,7 @@ class Validator
         }
         else
         {
+            tracing().trace("Unexpected error: {}", t.getMessage());
             logger.error("Unexpected error during synchronization of table {} on range {}", table(), range(), t);
             // If we don't know what happens, we can't assume anything so marking the whole segment failed.
             recordPage(ValidationOutcome.FAILED, listener);
@@ -336,15 +344,14 @@ class Validator
      * @return {@code true} if the validator is now cancelled (meaning that it was either already cancelled, or this
      * call cancelled it). {@code false} if the validator has already finished (without having being cancelled).
      */
-    boolean cancel()
+    boolean cancel(String reason)
     {
         // If we were already done, do nothing. Mark cancelled otherwise and proceed.
         State previous = state.getAndUpdate(s -> s.isDone() ? s : State.CANCELLED);
         if (previous.isDone())
             return previous == State.CANCELLED;
 
-        logger.trace("Cancelling validation of segment {}", segment());
-        lifecycle.cancel();
+        lifecycle.cancel(reason);
 
         if (flowFuture != null)
             flowFuture.cancel(true);
@@ -358,12 +365,9 @@ class Validator
         if (state.getAndUpdate(s -> s.isDone() ? s : State.FINISHED).isDone())
             return;
 
-        if (logger.isTraceEnabled())
-            logger.trace("Finished execution of validation on {}: metrics={}", segment(), metrics.toDebugString());
-
         lifecycle.service().updateMetrics(table(), metrics);
         ValidationInfo info = new ValidationInfo(lifecycle.startTime(), validationOutcome, missingNodes);
-        lifecycle.onCompletion(info);
+        lifecycle.onCompletion(info, metrics);
         completionFuture.complete(info);
     }
 
@@ -390,7 +394,7 @@ class Validator
      * <p>
      * This future will be completed exceptionally with a {@link CancellationException} if the underlying validator
      * is cancelled (which can be done either through this future {@link #cancel(boolean)} method, or directly with
-     * {@link Validator#cancel()}).
+     * {@link Validator#cancel}).
      * <p>
      * Implementation note: the real reason we extend CompletableFuture is so {@link #cancel(boolean)} can actually
      * cancel the underlying validator. Costs us nothing to add a few conveniences while we're at it.
@@ -429,7 +433,7 @@ class Validator
         {
             // Note and cancelling the validator actually cancels the future, so we have nothing to do for the future
             // itself here.
-            return Validator.this.cancel();
+            return Validator.this.cancel("cancelled through validation future");
         }
     }
 
@@ -448,23 +452,52 @@ class Validator
         private volatile long responseReceivedTimeNanos;
         private volatile long timeIdleBeforeProcessingPage;
 
+        // Only collected when tracing is enabled.
+        private volatile ValidationMetrics pageMetrics;
+
         private void onNewPage()
         {
             hasMismatch = false;
             limiterWaitTimeNanosForPage = 0;
             dataValidatedBytesForPage = 0;
             timeIdleBeforeProcessingPage = 0;
+
+            if (tracing().isEnabled())
+                pageMetrics = new ValidationMetrics();
+        }
+
+        public void queried(Collection<InetAddress> queried)
+        {
+            tracing().trace("Querying {} replica: {}", queried.size(), queried);
         }
 
         public void responsesReceived(Collection<InetAddress> responded)
         {
             responseReceivedTimeNanos = System.nanoTime();
             isComplete = responded.size() == replicationFactor;
-            if (!isComplete)
+            if (isComplete)
+            {
+                tracing().trace("All replica responded ({})", responded);
+            }
+            else
             {
                 if (missingNodes == null)
                     missingNodes = new HashSet<>();
-                missingNodes.addAll(Sets.difference(segmentReplicas, setOf(responded)));
+                Set<InetAddress> missingThisTime = Sets.difference(segmentReplicas, setOf(responded));
+                missingNodes.addAll(missingThisTime);
+
+                if (tracing().isEnabled())
+                {
+                    // If the cluster has less node than the RF, missingThisTime will be empty, so make sure we don't write
+                    // a weird message. Note that while this is a bit of an edge case, tests cluster (typically 2 nodes-ones)
+                    // will get there by virtue of some of our distributed system keyspace being RF=3.
+                    if (missingThisTime.isEmpty())
+                        tracing().trace("Partial responses: {} responded ({}) but RF={}",
+                                      responded.size(), responded, replicationFactor);
+                    else
+                        tracing().trace("Partial responses: {} responded ({}) but {} did not ({})",
+                                      responded.size(), responded, missingThisTime.size(), missingThisTime);
+                }
             }
         }
 
@@ -481,6 +514,7 @@ class Validator
         public void onDigestMismatch()
         {
             hasMismatch = true;
+            tracing().trace("Digest mismatch, issuing full data request");
         }
 
         public void onPartition(DecoratedKey partitionKey)
@@ -499,12 +533,16 @@ class Validator
         public void onRow(Row row, boolean isConsistent)
         {
             metrics.incrementRowsRead(isConsistent);
+            if (pageMetrics != null)
+                pageMetrics.incrementRowsRead(isConsistent);
             onData(row.dataSize(), isConsistent);
         }
 
         public void onRangeTombstoneMarker(RangeTombstoneMarker marker, boolean isConsistent)
         {
             metrics.incrementRangeTombstoneMarkersRead(isConsistent);
+            if (pageMetrics != null)
+                pageMetrics.incrementRangeTombstoneMarkersRead(isConsistent);
             onData(dataSize(marker), isConsistent);
         }
 
@@ -523,6 +561,8 @@ class Validator
                 timeIdleBeforeProcessingPage = System.nanoTime() - responseReceivedTimeNanos;
 
             metrics.addDataValidated(size, isConsistent);
+            if (pageMetrics != null)
+                pageMetrics.addDataValidated(size, isConsistent);
             dataValidatedBytesForPage += size;
 
             // Save some calls to System.nanoTime if we're not blocking at all
@@ -547,6 +587,8 @@ class Validator
         public void onRepair(InetAddress endpoint, PartitionUpdate repair)
         {
             metrics.addRepair(repair);
+            if (pageMetrics != null)
+                pageMetrics.addRepair(repair);
         }
     }
 }
