@@ -106,11 +106,33 @@ public class ReadContext
     }
 
     /**
-     * Given the live replicas for the read, return the subset that should actually be queried based on teh consistency
-     * level and read-repair parameters.
+     * A copy of this {@code ReadContext} suitable for doing a new query.
+     * <p>
+     * This basically is the same context than {@code this} but with an updated query start time. This must be used when
+     * paging internally so that each new page get a full timeout.
+     *
+     * @param newQueryStartNanos the start time for the new query in which to use the returned context.
+     * @return a newly created context, equivalent to {@code this} except for the provided query start time.
+     */
+    public ReadContext forNewQuery(long newQueryStartNanos)
+    {
+        return new ReadContext(keyspace,
+                               consistencyLevel,
+                               clientState,
+                               newQueryStartNanos,
+                               withDigests,
+                               forContinuousPaging,
+                               blockForAllReplicas,
+                               readObserver,
+                               readRepairDecision);
+    }
+
+    /**
+     * Given the live replicas for the read, return the subset that should actually be queried based on the consistency
+     * level and other parameters.
      *
      * @param liveEndpoints the live replicas for the read.
-     * @return the subset of {@code liveEndpoints} to which the query should be sent (this can all endpoints).
+     * @return the subset of {@code liveEndpoints} to which the query should be sent (this can be all endpoints).
      */
     public List<InetAddress> filterForQuery(List<InetAddress> liveEndpoints)
     {
