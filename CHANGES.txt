@@ -1,4 +1,5 @@
 4.0
+ * Throttle base partitions during MV repair streaming to prevent OOM (CASSANDRA-13299)
  * Improve short read protection performance (CASSANDRA-13794)
  * Add command line tool for NodeSync (APOLLO-948)
  * Fix AssertionError in short read protection (CASSANDRA-13747)

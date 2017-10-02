@@ -23,7 +23,7 @@ import java.util.NoSuchElementException;
 
 import com.google.common.collect.PeekingIterator;
 
-public abstract class AbstractIterator<V> implements Iterator<V>, PeekingIterator<V>
+public abstract class AbstractIterator<V> implements Iterator<V>, PeekingIterator<V>, CloseableIterator<V>
 {
 
     private static enum State { MUST_FETCH, HAS_NEXT, DONE, FAILED }
@@ -87,5 +87,11 @@ public abstract class AbstractIterator<V> implements Iterator<V>, PeekingIterato
     public void remove()
     {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void close()
+    {
+        // no-op
     }
 }

@@ -25,7 +25,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,18 +37,17 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.ThrottledUnfilteredIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.WrappedBoolean;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 /**
@@ -60,6 +58,8 @@ public class StreamReceiveTask extends StreamTask
     private static final Logger logger = LoggerFactory.getLogger(StreamReceiveTask.class);
 
     private static final ExecutorService executor = Executors.newCachedThreadPool(new NamedThreadFactory("StreamReceiveTask"));
+
+    private static final int MAX_ROWS_PER_BATCH = Integer.getInteger("cassandra.repair.mutation_repair_rows_per_batch", 100);
 
     // number of files to receive
     private final int totalFiles;
@@ -176,24 +176,24 @@ public class StreamReceiveTask extends StreamTask
             for (SSTableReader reader : readers)
             {
                 Keyspace ks = Keyspace.open(reader.getKeyspaceName());
-                try (ISSTableScanner scanner = reader.getScanner())
+                // When doing mutation-based repair we split each partition into smaller batches
+                // ({@link Stream MAX_ROWS_PER_BATCH}) to avoid OOMing and generating heap pressure
+                try (ISSTableScanner scanner = reader.getScanner();
+                     CloseableIterator<UnfilteredRowIterator> throttledPartitions = ThrottledUnfilteredIterator.throttle(scanner, MAX_ROWS_PER_BATCH))
                 {
-                    while (scanner.hasNext())
+                    while (throttledPartitions.hasNext())
                     {
-                        try (UnfilteredRowIterator rowIterator = scanner.next())
-                        {
-                            // MV *can* be applied unsafe if there's no CDC on the CFS as we flush
-                            // before transaction is done.
-                            //
-                            // If the CFS has CDC, however, these updates need to be written to the CommitLog
-                            // so they get archived into the cdc_raw folder
-                            writes.add(ks.apply(createMutation(cfs, rowIterator), cfs.isCdcEnabled(), true, false));
-                        }
+                        // MV *can* be applied unsafe if there's no CDC on the CFS as we flush
+                        // before transaction is done.
+                        //
+                        // If the CFS has CDC, however, these updates need to be written to the CommitLog
+                        // so they get archived into the cdc_raw folder
+                        writes.add(ks.apply(createMutation(cfs, throttledPartitions.next()), cfs.isCdcEnabled(), true, false));
                     }
                 }
                 Completable.concat(writes).blockingAwait();
+                writes.clear();
             }
-
         }
 
         public void run()
