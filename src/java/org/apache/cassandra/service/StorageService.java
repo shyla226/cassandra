@@ -2106,15 +2106,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     case NATIVE_TRANSPORT_ADDRESS:
                         try
                         {
-                            updatePeerInfoBlocking(endpoint, "rpc_address", InetAddress.getByName(value.value));
-                        }
-                        catch (UnknownHostException e)
-                        {
-                            throw new RuntimeException(e);
-                        }
-                        try
-                        {
-                            updatePeerInfoBlocking(endpoint, "native_transport_address", InetAddress.getByName(value.value));
+                            InetAddress address = InetAddress.getByName(value.value);
+                            updatePeerInfoBlocking(endpoint, "rpc_address", address);
+                            updatePeerInfoBlocking(endpoint, "native_transport_address", address);
                         }
                         catch (UnknownHostException e)
                         {
@@ -2209,15 +2203,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 case NATIVE_TRANSPORT_ADDRESS:
                     try
                     {
-                        updatePeerInfoBlocking(endpoint, "rpc_address", InetAddress.getByName(entry.getValue().value));
-                    }
-                    catch (UnknownHostException e)
-                    {
-                        throw new RuntimeException(e);
-                    }
-                    try
-                    {
-                        updatePeerInfoBlocking(endpoint, "native_transport_address", InetAddress.getByName(entry.getValue().value));
+                        InetAddress address = InetAddress.getByName(entry.getValue().value);
+                        updatePeerInfoBlocking(endpoint, "rpc_address", address);
+                        updatePeerInfoBlocking(endpoint, "native_transport_address", address);
                     }
                     catch (UnknownHostException e)
                     {
