@@ -362,7 +362,11 @@ public class CompressionMetadata
         {
             try
             {
-                out.writeUTF(parameters.getSstableCompressor().getClass().getSimpleName());
+                if (parameters.getSstableCompressor().getClass().getCanonicalName().startsWith("org.apache.cassandra.io.compress"))
+                    out.writeUTF(parameters.getSstableCompressor().getClass().getSimpleName());
+                else
+                    out.writeUTF(parameters.getSstableCompressor().getClass().getCanonicalName());
+
                 out.writeInt(parameters.getOtherOptions().size());
                 for (Map.Entry<String, String> entry : parameters.getOtherOptions().entrySet())
                 {

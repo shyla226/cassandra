@@ -272,7 +272,8 @@ public class PasswordAuthenticator implements IAuthenticator
             // to reload after an exception
             String ret = get(roleName, !TPC.isTPCThread());
             if (ret == null)
-                throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve credentials for %s, would block TPC thread", roleName));
+                throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve credentials for %s, would block TPC thread %s",
+                                                                     roleName, Thread.currentThread().getName()));
             return ret;
         }
     }

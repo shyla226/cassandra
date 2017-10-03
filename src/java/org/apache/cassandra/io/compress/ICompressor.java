@@ -23,8 +23,20 @@ import java.util.Set;
 
 public interface ICompressor
 {
+    /**
+     * WARNING: This method should not be called on a TPC thread or WouldBlockException should be handled: some
+     * DSE compressors need to block and will therefore throw {@link org.apache.cassandra.concurrent.TPCUtils.WouldBlockException}.
+     *
+     * @return the initial compressed buffer length.
+     */
     public int initialCompressedBufferLength(int chunkLength);
 
+    /**
+     * Decompression for byte buffers.
+     *
+     * WARNING: This method should not be called on a TPC thread or WouldBlockException should be handled: some
+     * DSE compressors need to block and will therefore throw {@link org.apache.cassandra.concurrent.TPCUtils.WouldBlockException}.
+     */
     public int uncompress(byte[] input, int inputOffset, int inputLength, byte[] output, int outputOffset) throws IOException;
 
     /**
@@ -32,6 +44,9 @@ public interface ICompressor
      *
      * The data between input.position() and input.limit() is compressed and placed into output starting from output.position().
      * Positions in both buffers are moved to reflect the bytes read and written. Limits are not changed.
+     *
+     * WARNING: This method should not be called on a TPC thread or WouldBlockException should be handled: some
+     * DSE compressors need to block and will therefore throw {@link org.apache.cassandra.concurrent.TPCUtils.WouldBlockException}.
      */
     public void compress(ByteBuffer input, ByteBuffer output) throws IOException;
 
@@ -40,6 +55,9 @@ public interface ICompressor
      *
      * The data between input.position() and input.limit() is uncompressed and placed into output starting from output.position().
      * Positions in both buffers are moved to reflect the bytes read and written. Limits are not changed.
+     *
+     * WARNING: This method should not be called on a TPC thread or WouldBlockException should be handled: some
+     * DSE compressors need to block and will therefore throw {@link org.apache.cassandra.concurrent.TPCUtils.WouldBlockException}.
      */
     public void uncompress(ByteBuffer input, ByteBuffer output) throws IOException;
 
