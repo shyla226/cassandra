@@ -18,22 +18,32 @@
 package org.apache.cassandra.db.view;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Striped;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.concurrent.CoordinatedAction;
+import org.apache.cassandra.utils.concurrent.ExecutableLock;
 
 /**
  * Manages {@link View}'s for a single {@link ColumnFamilyStore}. All of the views for that table are created when this
@@ -55,6 +65,8 @@ public class ViewManager
     private static final Logger logger = LoggerFactory.getLogger(ViewManager.class);
 
     private static final Striped<Semaphore> SEMAPHORES = Striped.lazyWeakSemaphore(TPC.getNumCores() * 1024, 1);
+    private static final ConcurrentMap<Semaphore, Pair<Long, ExecutableLock>> LOCKS = new ConcurrentHashMap<>();
+    private static final AtomicLong LOCK_ID_GEN = new AtomicLong();
 
     private static final boolean enableCoordinatorBatchlog = Boolean.getBoolean("cassandra.mv_enable_coordinator_batchlog");
 
@@ -188,19 +200,89 @@ public class ViewManager
         return views;
     }
 
-    public static Semaphore acquireLockFor(int keyAndCfidHash)
+    /**
+     * Update the views via the the supplied action by first acquiring locks over the given mutation updates;
+     * each lock is acquired in order based on its id, so to avoid deadlocks.
+     *
+     * @param mutation The mutation to acquire locks for.
+     * @param update The update action to execute.
+     * @param isDroppable True if we should timeout if unable to acquire all locks after write RPC timeout.
+     * @return The future that will be completed when all locks are acquired and the action executed.
+     * Locks are released after such future completes.
+     */
+    public CompletableFuture<Void> updateWithLocks(Mutation mutation, Supplier<CompletableFuture<Void>> update, boolean isDroppable)
     {
-        Semaphore ret = SEMAPHORES.get(keyAndCfidHash);
+        if (mutation.viewLockAcquireStart == 0)
+            mutation.viewLockAcquireStart = System.currentTimeMillis();
+        
+        // Get the locks for the mutation:
+        SortedMap<Long, ExecutableLock> locks = getLocksFor(mutation);
 
-        if (ret.tryAcquire(1))
-            return ret;
+        // The coordinated action to execute:
+        CoordinatedAction coordinator = new CoordinatedAction(
+            () -> 
+            {
+                // Collect metrics before actually applying the update.
+                // Bulk non-droppable operations (e.g. commitlog replay, hint delivery) are not measured.
+                if (isDroppable)
+                {
+                    long acquireTime = System.currentTimeMillis() - mutation.viewLockAcquireStart;
+                    Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
+                    for (TableId tableId : mutation.getTableIds())
+                        keyspace.getColumnFamilyStore(tableId).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
+                }
+                // Apply the original update:
+                return update.get();
+            },
+            locks.size(),
+            mutation.createdAt,
+            isDroppable ? DatabaseDescriptor.getWriteRpcTimeout() : Long.MAX_VALUE, TimeUnit.MILLISECONDS);
 
-        return null;
+        // Loop over the locks and execute the action by chaining them: chaining is necessary to make sure each lock
+        // is taken only after the previous one (again, to avoid deadlocks):
+        CompletableFuture<Void> first = new CompletableFuture<>();
+        CompletableFuture<Void> prev = first;
+        CompletableFuture<Void> result = null;
+        for (ExecutableLock lock : locks.values())
+        {
+            CompletableFuture<Void> current = new CompletableFuture<>();
+            // Chain / compose:
+            result = prev.thenCompose(ignored ->
+            {
+                return lock.execute(() ->
+                {
+                    // Complete the current future, so that the next chained one can run:
+                    current.complete(null);
+                    // Return the action future:
+                    return coordinator.get();
+                }, TPC.bestTPCScheduler().getExecutor());
+            });
+            prev = current;
+        }
+        // Kickoff the chain:
+        first.complete(null);
+
+        // Return the result of chaining all locks:
+        return result;
     }
 
-    public static void release(Semaphore semaphore)
+    /**
+     * Get locks for the given mutation updates in sorted order and into a map to get rid of duplicates
+     * (which could arise due to underlying striping). IMPORTANT: the locks must be acquired in the provided order,
+     * to avoid deadlocks.
+     */
+    private SortedMap<Long, ExecutableLock> getLocksFor(Mutation mutation)
     {
-        if (semaphore != null)
-            semaphore.release(1);
+        SortedMap<Long, ExecutableLock> locks = mutation.getTableIds().stream()
+            .map(t -> Objects.hash(mutation.key().getKey(), t))
+            .map(k -> getLockFor(k))
+            .collect(Collectors.toMap(p -> p.left, p -> p.right, (v1, v2) -> v1, () -> new TreeMap<>((k1, k2) -> k1.compareTo(k2))));
+        return locks;
+    }
+
+    private Pair<Long, ExecutableLock> getLockFor(int keyAndCfidHash)
+    {
+        Semaphore semaphore = SEMAPHORES.get(keyAndCfidHash);
+        return LOCKS.computeIfAbsent(semaphore, s -> Pair.create(LOCK_ID_GEN.incrementAndGet(), new ExecutableLock(s)));
     }
 }

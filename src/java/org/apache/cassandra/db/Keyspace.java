@@ -22,18 +22,20 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 
 import io.reactivex.*;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCBoundaries;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -47,7 +49,6 @@ import org.apache.cassandra.exceptions.InternalRequestExecutionException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.UnknownKeyspaceException;
 import org.apache.cassandra.exceptions.UnknownTableException;
-import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
@@ -74,7 +75,6 @@ public class Keyspace
 
     private static final String TEST_FAIL_WRITES_KS = System.getProperty("cassandra.test.fail_writes_ks", "");
     private static final boolean TEST_FAIL_WRITES = !TEST_FAIL_WRITES_KS.isEmpty();
-    private static int TEST_FAIL_MV_LOCKS_COUNT = Integer.getInteger("cassandra.test.fail_mv_locks_count", 0);
 
     public final KeyspaceMetrics metric;
 
@@ -542,26 +542,11 @@ public class Keyspace
 
     private Completable applyWithViews(Mutation mutation, boolean writeCommitLog, boolean updateIndexes, boolean isDroppable)
     {
-        Single<Semaphore[]> lockAcquisition =  acquireLocksForView(mutation, isDroppable);
-        return lockAcquisition.flatMapCompletable(locks ->
-            Completable.using(writeOrder::start,
-                              opGroup -> applyInternal(opGroup, mutation, writeCommitLog, updateIndexes, true),
-                              opGroup -> {
-                                  opGroup.close();
+        Supplier<CompletableFuture<Void>> update = () -> TPCUtils.toFuture(Completable.using(writeOrder::start,
+                                                                                             opGroup -> applyInternal(opGroup, mutation, writeCommitLog, updateIndexes, true),
+                                                                                             opGroup -> opGroup.close()));
 
-                                  try
-                                  {
-                                      for (Semaphore lock : locks)
-                                          ViewManager.release(lock);
-                                  }
-                                  catch (Throwable t)
-                                  {
-                                      JVMStabilityInspector.inspectThrowable(t);
-                                      logger.error("Fail to release view locks", t);
-                                  }
-                              }
-            )
-        );
+        return TPCUtils.toCompletable(viewManager.updateWithLocks(mutation, update, isDroppable));
     }
 
     private Completable applyNoViews(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
@@ -659,97 +644,6 @@ public class Keyspace
         logger.debug(FBUtilities.Debug.getStackTrace());
         logger.error("Attempted to apply mutation {} after final write barrier", mutation);
         return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Keyspace closed to new mutations"));
-    }
-
-    /**
-     * Acquire the locks necessary to update view, assuming the provide mutation does have views associated.
-     * This will keep on trying to acquire them until we succeed or the timeout expires.
-     *
-     * @param mutation - the mutation to be applied
-     * @param isDroppable - {@code true} if this should throw {@link WriteTimeoutException} if it does not acquire lock within
-     *                    write_request_timeout_in_ms. Otherwise, this will try as long as required.
-     *
-     * @return a Single of an array containing the locks that have been acquired for updating the views associated to
-     * {@code mutation}. Those locks <b>must</b> be released by the caller on all path.
-     */
-    private Single<Semaphore[]> acquireLocksForView(final Mutation mutation, final boolean isDroppable)
-    {
-        Semaphore[] locks = new Semaphore[mutation.getTableIds().size()];
-        return Single.create(source -> acquireLocksForView(source, mutation, locks, isDroppable));
-    }
-
-    // Helper method for maybeAcquireLocksForView that recursively reschedules itself if the locks are not available
-    private void acquireLocksForView(final SingleEmitter<Semaphore[]> source, final Mutation mutation, final Semaphore[] locks, final boolean isDroppable)
-    {
-        if (mutation.viewLockAcquireStart == 0)
-            mutation.viewLockAcquireStart = System.currentTimeMillis();
-
-        // the order of lock acquisition doesn't matter (from a deadlock perspective) because we only use tryLock()
-        Collection<TableId> tableIds = mutation.getTableIds();
-        Iterator<TableId> idIterator = tableIds.iterator();
-
-        for (int i = 0; i < tableIds.size(); i++)
-        {
-            TableId tableId = idIterator.next();
-            int lockKey = Objects.hash(mutation.key().getKey(), tableId);
-            Semaphore lock = null;
-
-            if (TEST_FAIL_MV_LOCKS_COUNT == 0)
-                lock = ViewManager.acquireLockFor(lockKey);
-            else
-                TEST_FAIL_MV_LOCKS_COUNT--;
-
-            if (lock == null)
-            { // the lock could not be acquired, release previous locks and either fail or try again later
-                for (int j = 0; j < i; j++)
-                {
-                    ViewManager.release(locks[j]);
-                    locks[j] = null;
-                }
-
-                //throw WTE only if request is droppable
-                if (isDroppable && (System.currentTimeMillis() - mutation.createdAt) > DatabaseDescriptor.getWriteRpcTimeout())
-                { // we've waited for too long, give up
-                    if (logger.isTraceEnabled())
-                        logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
-
-                    Tracing.trace("Could not acquire MV lock");
-                    source.onError(new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1));
-                    return;
-                }
-                else
-                { // reschedule for later
-                    if (logger.isTraceEnabled())
-                        logger.trace("Could not acquire lock for {} and table {}, retrying later", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
-
-                    // This view update can't happen right now, so schedule another attempt later.
-                    // TODO: 1 microsecond is an arbitrary value that was chosen to avoid spinning the CPU too much, we
-                    // should perform some tests to see if there is an impact in changing this value (APOLLO-799)
-                    mutation.getScheduler().scheduleDirect(() -> acquireLocksForView(source, mutation, locks, isDroppable),
-                                                           TPCTaskType.VIEW_ACQUIRE_LOCK,
-                                                           1,
-                                                           TimeUnit.MICROSECONDS);
-                    return;
-                }
-            }
-            else
-            { // the lock was acquired, carry on
-                if (logger.isTraceEnabled())
-                    logger.trace("Acquired lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
-                locks[i] = lock;
-            }
-        }
-
-        long acquireTime = System.currentTimeMillis() - mutation.viewLockAcquireStart;
-        // Metrics are only collected for droppable write operations
-        // Bulk non-droppable operations (e.g. commitlog replay, hint delivery) are not measured
-        if (isDroppable)
-        {
-            for (TableId tableId : tableIds)
-                columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
-        }
-
-        source.onSuccess(locks);
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

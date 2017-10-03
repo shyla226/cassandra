@@ -32,7 +32,17 @@ import java.util.function.Supplier;
 public class ExecutableLock
 {
     private final Queue<AsyncAction> queue = new ConcurrentLinkedQueue<>();
-    private final Semaphore lock = new Semaphore(1);
+    private final Semaphore lock;
+
+    public ExecutableLock()
+    {
+        this.lock = new Semaphore(1);
+    }
+
+    public ExecutableLock(Semaphore lock)
+    {
+        this.lock = lock;
+    }
 
     /**
      * Executes the given action guarded by this lock, either synchronously if the lock is available, or asynchronously
