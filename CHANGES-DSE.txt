@@ -1,4 +1,5 @@
 dse 6.0.0
+ * Add command line tool for NodeSync (APOLLO-948)
  * Always split local token range based on num of cores (APOLLO-934)
  * Update bundled Python driver to 2.2.0.post0-d075d57 (APOLLO-1152)
  * Rename ITrigger interface method from "augment" to "augmentNonBlocking" (APOLLO-1046)
