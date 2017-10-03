@@ -21,13 +21,14 @@ package org.apache.cassandra.stress.operations.userdefined;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import javax.naming.OperationNotSupportedException;
 
+import com.datastax.driver.core.AsyncContinuousPagingResult;
 import com.datastax.driver.core.ColumnDefinitions;
 import com.datastax.driver.core.ColumnMetadata;
 import com.datastax.driver.core.ContinuousPagingOptions;
@@ -58,6 +59,7 @@ public class TokenRangeQuery extends Operation
     private final int pageSize;
     private final boolean isWarmup;
     private final PrintWriter resultsWriter;
+    private final int timeoutSeconds;
 
     public TokenRangeQuery(Timer timer,
                            StressSettings settings,
@@ -73,6 +75,7 @@ public class TokenRangeQuery extends Operation
         this.pageSize = isWarmup ? Math.min(100, def.page_size) : def.page_size;
         this.isWarmup = isWarmup;
         this.resultsWriter = maybeCreateResultsWriter(settings.tokenRange);
+        this.timeoutSeconds = def.timeout_sec;
     }
 
     private static PrintWriter maybeCreateResultsWriter(SettingsTokenRange settings)
@@ -108,7 +111,7 @@ public class TokenRangeQuery extends Operation
     {
         public final TokenRange tokenRange;
         public final String query;
-        public Iterator<Row> it;
+        public AsyncContinuousPagingResult result;
         public Set<Token> partitions = new HashSet<>();
 
         public State(TokenRange tokenRange, String query)
@@ -164,18 +167,23 @@ public class TokenRangeQuery extends Operation
                 currentState.set(state);
             }
 
-            if (state.it == null)
+            if (state.result == null || state.result.isLast())
             {
                 SimpleStatement statement = new SimpleStatement(state.query);
+                statement.setReadTimeoutMillis((int)TimeUnit.SECONDS.toMillis(timeoutSeconds));
                 statement.setRoutingToken(state.tokenRange.getEnd());
                 statement.setConsistencyLevel(JavaDriverClient.from(ThriftConversion.fromThrift(settings.command.consistencyLevel)));
-                state.it = client.execute(statement, ContinuousPagingOptions.builder().withPageSize(pageSize, ContinuousPagingOptions.PageUnit.ROWS).build()).iterator();
+                state.result = client.execute(statement, ContinuousPagingOptions.builder()
+                                                                            .withPageSize(pageSize, ContinuousPagingOptions.PageUnit.ROWS)
+                                                                            .build()).get(timeoutSeconds, TimeUnit.SECONDS);
+            }
+            else
+            {
+                state.result = state.result.nextPage().get(timeoutSeconds, TimeUnit.SECONDS);
             }
 
-            int rowsToProcess = pageSize;
-            while (state.it.hasNext())
+            for (Row row : state.result.currentPage())
             {
-                Row row = state.it.next();
                 rowCount++;
 
                 // this call will only succeed if we've added token(partition keys) to the query
@@ -188,18 +196,16 @@ public class TokenRangeQuery extends Operation
 
                 if (shouldSaveResults())
                     saveRow(row);
-
-                // each cassandra-stress operation is one page, so if we've processed pageSize rows,
-                // we stop and resume later on with the next operation
-                if (--rowsToProcess == 0)
-                    break;
             }
 
             if (shouldSaveResults())
                 flushResults();
 
-            if (!state.it.hasNext() || isWarmup)
+            if (isWarmup || state.result.isLast())
             { // no more pages to fetch or just warming up, ready to move on to another token range
+                if (isWarmup)
+                    state.result.cancel();
+
                 currentState.set(null);
             }
 
@@ -315,8 +321,16 @@ public class TokenRangeQuery extends Operation
             return 0;
 
         int numLeft = workManager.takePermits(1);
+        int ret = numLeft > 0 ? 1 : 0;
 
-        return numLeft > 0 ? 1 : 0;
+        if (ret == 0)
+        {
+            State state = currentState.get();
+            if (state != null && state.result != null)
+                state.result.cancel(); // be nice to the driver
+        }
+
+        return ret;
     }
 
     public String key()
