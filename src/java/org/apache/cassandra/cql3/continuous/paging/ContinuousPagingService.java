@@ -22,12 +22,9 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -38,6 +35,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.buffer.ByteBuf;
+import io.reactivex.Single;
+import io.reactivex.SingleObserver;
+import io.reactivex.annotations.NonNull;
+import io.reactivex.internal.disposables.EmptyDisposable;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.ContinuousPagingConfig;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.PagingResult;
@@ -58,7 +60,6 @@ import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Frame;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.transport.ServerError;
 import org.apache.cassandra.transport.messages.ErrorMessage;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -226,13 +227,13 @@ public class ContinuousPagingService
     }
 
     /**
-     * Cancel an ongoing continuous paging session.
+     * Asynchronously cancel an ongoing continuous paging session.
      *
      * @param queryState - the queryState
      * @param streamId - the initial frame id of the continuous paging request message
      * @return true if the session was cancelled, false if the session was not found
      */
-    public static boolean cancel(QueryState queryState, int streamId)
+    public static Single<Boolean> cancel(QueryState queryState, int streamId)
     {
         SessionKey key = new SessionKey(queryState.getClientState().getRemoteAddress(), streamId);
         ContinuousPagingSession session = removeSession(key);
@@ -240,26 +241,15 @@ public class ContinuousPagingService
         {
             if (logger.isTraceEnabled())
                 logger.trace("Cannot cancel continuous paging session {}: not found", key);
-            return false;
+            return Single.just(false);
         }
 
         if (logger.isTraceEnabled())
             logger.trace("Cancelling continuous paging session {}", key);
 
-        ContinuousPagingConfig config = session.config();
-
-        try
-        {
-            session.cancel().get(config.cancel_timeout_sec, TimeUnit.SECONDS);
-            return true;
-        }
-        catch (InterruptedException | CancellationException | TimeoutException | ExecutionException ex)
-        {
-            logger.warn("Failed to wait for last page to be delivered when cancelling continuous " +
-                        "paging session {}, waited for {} seconds", key, config.cancel_timeout_sec);
-
-            throw new ServerError("Failed to wait for last page to be delivered when cancelling continuous paging session");
-        }
+        return TPCUtils.toSingle(session.cancel()
+                                        .thenCompose(ret -> TPCUtils.completedFuture(true)))
+                       .timeout(session.config().cancel_timeout_sec, TimeUnit.SECONDS);
     }
 
     /**

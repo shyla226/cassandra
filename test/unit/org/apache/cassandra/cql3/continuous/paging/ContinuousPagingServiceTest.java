@@ -11,6 +11,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.reactivex.Scheduler;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.ContinuousPagingConfig;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
@@ -49,7 +50,7 @@ public class ContinuousPagingServiceTest
     {
         // Always set the direct event loop, so that the cancellation can be processed:
         test.channel.setEventLoop(new ContinuousPagingTestStubs.DirectEventLoop());
-        ContinuousPagingService.cancel(test.queryState, test.streamId);
+        TPCUtils.blockingGet(ContinuousPagingService.cancel(test.queryState, test.streamId));
     }
 
     @Test(expected = ContinuousBackPressureException.class)

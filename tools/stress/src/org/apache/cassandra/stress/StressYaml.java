@@ -53,6 +53,7 @@ public class StressYaml
     {
         public String columns;
         public int page_size = 5000;
+        public int queue_size = 16;
         public int timeout_sec = 30;
         public String getConfigAsString()
         {
