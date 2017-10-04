@@ -89,7 +89,7 @@ public class ReducingKeyIterator implements KeyIterator
         {
             this.sstable = sstable;
             this.range = range;
-            bytesTotal += total = sstable.getDataChannel().size();
+            bytesTotal += total = sstable.uncompressedLength();
         }
 
         @Override

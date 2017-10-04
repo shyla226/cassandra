@@ -48,7 +48,7 @@ import static org.junit.Assert.fail;
 
 public class PerRangeReducingKeyIteratorTest
 {
-    public static final String KEYSPACE1 = "ReducingKeyIteratorTest";
+    public static final String KEYSPACE1 = "PerRangeReducingKeyIteratorTest";
     public static final String CF_STANDARD = "Standard1";
 
     @BeforeClass
