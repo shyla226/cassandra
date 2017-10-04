@@ -24,6 +24,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import javax.net.ssl.SSLContext;
 
+import com.google.common.util.concurrent.ListenableFuture;
+
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.LoadBalancingPolicy;
@@ -219,12 +221,12 @@ public class JavaDriverClient
         return result;
     }
 
-    public ContinuousPagingResult execute(Statement statement, ContinuousPagingOptions pagingOptions)
+    public ListenableFuture<AsyncContinuousPagingResult> execute(Statement statement, ContinuousPagingOptions pagingOptions)
     {
-        ContinuousPagingResult result = null;
+        ListenableFuture<AsyncContinuousPagingResult> result;
         try
         {
-            result = getSession().executeContinuously(statement, pagingOptions);
+            result = getSession().executeContinuouslyAsync(statement, pagingOptions);
         }
         finally
         {
