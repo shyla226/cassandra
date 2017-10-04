@@ -423,7 +423,7 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
      *
      * This exists only because {@link #isWrapAround()} is a tad dumb and return true if right is the minimum token,
      * no matter what left is, but for most intent and purposes, such range doesn't truly warp around (unwrap produces
-     * the identity in thise case).
+     * the identity in this case).
      * <p>
      * Also note that it could be that the remaining uses of {@link #isWrapAround()} could be replaced by this method,
      * but that is to be checked carefully at some other time (Sylvain).

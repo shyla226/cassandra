@@ -927,45 +927,31 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      */
     public long estimatedKeysForRanges(Collection<Range<Token>> ranges)
     {
-        try
-        {
-            long sampleKeyCount = 0;
-            for (Range<Token> range : ranges)
-            {
-                try (PartitionIndexIterator iter = coveredKeysIterator(Range.makeRowRange(range)))
-                {
-                    while (iter.key() != null)
-                    {
-                        ++sampleKeyCount;
-                        iter.advance();
-                    }
-                }
-            }
-
-            return sampleKeyCount;
-        }
-        catch (IOException e)
-        {
-            markSuspect();
-            throw new CorruptSSTableException(e, dataFile.path());
-        }
+        return getKeySamplesInternal(ranges).size();
     }
 
     public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
     {
-        // FIXME: This should probably be sampled.
+        return getKeySamplesInternal(Collections.singleton(range));
+    }
+
+    private Collection<DecoratedKey> getKeySamplesInternal(final Collection<Range<Token>> ranges)
+    {
         try
         {
             ArrayList<DecoratedKey> keys = new ArrayList<>();
-            try (PartitionIndexIterator iter = coveredKeysIterator(Range.makeRowRange(range)))
+            for (AbstractBounds<PartitionPosition> bound : SSTableScanner.makeBounds(this, ranges))
             {
-                while (iter.key() != null)
+                try (PartitionIndexIterator iter = coveredKeysIterator(bound))
                 {
-                    keys.add(iter.key());
-                    iter.advance();
+                    while (iter.key() != null)
+                    {
+                        keys.add(iter.key());
+                        iter.advance();
+                    }
                 }
-                return keys;
             }
+            return keys;
         }
         catch (IOException e)
         {
@@ -1053,8 +1039,15 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
 
 
-    public PartitionIndexIterator coveredKeysIterator(AbstractBounds<? extends PartitionPosition> bounds) throws IOException
+    /**
+     * @param bounds. Must not be wrapped around ranges
+     * @return PartitionIndexIterator within the given bounds
+     * @throws IOException
+     */
+    public PartitionIndexIterator coveredKeysIterator(AbstractBounds<PartitionPosition> bounds) throws IOException
     {
+        assert !AbstractBounds.strictlyWrapsAround(bounds.left, bounds.right) : "[" + bounds.left + "," + bounds.right + "]";
+        
         PartitionPosition left = bounds.left;
         boolean inclusiveLeft = bounds.inclusiveLeft();
         if (filterFirst() && first.compareTo(left) > 0)

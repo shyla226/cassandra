@@ -24,9 +24,11 @@ import static org.junit.Assert.assertTrue;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -40,6 +42,7 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.LocalPartitioner.LocalToken;
 import org.apache.cassandra.dht.Range;
@@ -84,6 +87,12 @@ public class SSTableReaderTest
                                                 .caching(CachingParams.CACHE_NOTHING));
     }
 
+    @After
+    public void Cleanup() {
+        Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
+        Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
+    }
+
     @Test
     public void testGetPositionsForRanges()
     {
@@ -123,6 +132,65 @@ public class SSTableReaderTest
             assert section.left < section.right : section.left + " ! < " + section.right;
             previous = section.right;
         }
+    }
+
+    @Test
+    public void testEstimatedKeysForRangesAndKeySamples()
+    {
+        // prepare data
+        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard2");
+        partitioner = store.getPartitioner();
+
+        for (int j = 0; j < 100; j++)
+        {
+            new RowUpdateBuilder(store.metadata(), j, String.valueOf(j)).clustering("0")
+                                                                        .add("val", ByteBufferUtil.EMPTY_BYTE_BUFFER)
+                                                                        .build()
+                                                                        .applyUnsafe();
+        }
+        store.forceBlockingFlush();
+        assertEquals(1, store.getLiveSSTables().size());
+        SSTableReader sstable = store.getLiveSSTables().iterator().next();
+
+        // check non wrapped around
+        Range<Token> nonWrappedAroundRange = new Range<>(t(10), t(1));
+        assertTrue(!nonWrappedAroundRange.isWrapAround());
+        verifyEstimatedKeysAndKeySamples(sstable, nonWrappedAroundRange);
+
+        // check wrapped around
+        Range<Token> wrappedAroundRange = new Range<>(t(10), partitioner.getMinimumToken());
+        assertTrue(wrappedAroundRange.isWrapAround());
+        verifyEstimatedKeysAndKeySamples(sstable, nonWrappedAroundRange);
+    }
+
+    private void verifyEstimatedKeysAndKeySamples(SSTableReader sstable, Range<Token> range)
+    {
+        List<DecoratedKey> expectedKeys = new ArrayList<>();
+        try (ISSTableScanner scanner = sstable.getScanner())
+        {
+            while (scanner.hasNext())
+            {
+                try (UnfilteredRowIterator rowIterator = scanner.next())
+                {
+                    if (range.contains(rowIterator.partitionKey().getToken()))
+                        expectedKeys.add(rowIterator.partitionKey());
+                }
+            }
+        }
+        assertTrue(expectedKeys.size() >= 1);
+
+        // check estimated key
+        long estimated = sstable.estimatedKeysForRanges(Collections.singleton(range));
+        assertTrue("Range: " + range + " having " + expectedKeys.size() + " partitions, but estimated "
+                + estimated, estimated == expectedKeys.size());
+
+        // check key samples
+        List<DecoratedKey> sampledKeys = new ArrayList<>();
+        sstable.getKeySamples(range).forEach(sampledKeys::add);
+
+        assertTrue("Range: " + range + " having " + expectedKeys + " keys, but keys sampled: "
+                + sampledKeys, sampledKeys.equals(expectedKeys));
     }
 
     @Test

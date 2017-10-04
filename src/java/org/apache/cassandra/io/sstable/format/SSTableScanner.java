@@ -108,7 +108,7 @@ class SSTableScanner implements ISSTableScanner
         this.listener = listener;
     }
 
-    private static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, Collection<Range<Token>> tokenRanges)
+    public static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, Collection<Range<Token>> tokenRanges)
     {
         List<AbstractBounds<PartitionPosition>> boundsList = new ArrayList<>(tokenRanges.size());
         for (Range<Token> range : Range.normalize(tokenRanges))
@@ -155,7 +155,7 @@ class SSTableScanner implements ISSTableScanner
         }
         else
         {
-            assert requested.left.compareTo(requested.right) <= 0 || requested.right.isMinimum();
+            assert !AbstractBounds.strictlyWrapsAround(requested.left, requested.right);
             Boundary<PartitionPosition> left, right;
             left = requested.leftBoundary();
             right = requested.rightBoundary();
