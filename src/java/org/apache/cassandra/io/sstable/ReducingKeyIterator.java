@@ -136,7 +136,7 @@ public class ReducingKeyIterator implements KeyIterator
 
                 long pos = source.key() != null
                            ? source.dataPosition()
-                           : total;
+                           : computeEndPosition(key);
 
                 bytesRead += pos - prevPos;
 
@@ -146,6 +146,20 @@ public class ReducingKeyIterator implements KeyIterator
             {
                 throw new FSReadError(e, sstable.getFilename());
             }
+        }
+
+        private long computeEndPosition(DecoratedKey lastKey)
+        {
+            // If we are restricted by a range, such range might finish before the actual last key on the sstable, so
+            // the end position is equal to the next key after the last key of the range:
+            if (range != null)
+            {
+                RowIndexEntry entry = sstable.getPosition(lastKey, SSTableReader.Operator.GT);
+                if (entry != null)
+                    return entry.position;
+            }
+            // Otherwise the end position is just the total number of bytes:
+            return total;
         }
     }
 
