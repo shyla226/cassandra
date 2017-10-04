@@ -23,10 +23,14 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -74,13 +78,62 @@ public class SystemKeyspaceTest
         }
     }
 
-    @Test(expected=IllegalStateException.class)
-    public void testMissingStartup()
+    @Test
+    public void testMissingStartup() throws Exception
+    {
+        final InetAddress address = InetAddress.getByName("127.0.0.2");
+        final CassandraVersion version = new CassandraVersion("1.2.3");
+
+        try
+        {
+            SystemKeyspace.resetStartupBlocking();
+            assertNotNull(SystemKeyspace.loadDcRackInfo());
+
+            SystemKeyspace.resetStartupBlocking();
+            assertNotNull(SystemKeyspace.getHostIds());
+
+            SystemKeyspace.resetStartupBlocking();
+            TPCUtils.blockingAwait(SystemKeyspace.updatePreferredIP(address, address));
+            assertEquals(address, SystemKeyspace.getPreferredIP(address));
+
+            SystemKeyspace.resetStartupBlocking();
+            TPCUtils.blockingAwait(SystemKeyspace.updatePeerInfo(address, "release_version", "1.2.3"));
+            assertEquals(version, SystemKeyspace.getReleaseVersion(address));
+        }
+        finally
+        {
+            SystemKeyspace.removeEndpoint(address);
+            SystemKeyspace.finishStartupBlocking();
+        }
+    }
+
+    @Test
+    public void testMissingStartupOnTPCThread() throws Exception
     {
         try
         {
             SystemKeyspace.resetStartupBlocking();
-            SystemKeyspace.loadDcRackInfo();
+
+            CountDownLatch latch = new CountDownLatch(1);
+            AtomicReference<Throwable> err = new AtomicReference<>(null);
+            TPC.getForCore(0).scheduleDirect(() -> {
+                try
+                {
+                    SystemKeyspace.loadDcRackInfo();
+                }
+                catch (Throwable t)
+                {
+                    err.set(t);
+                }
+                finally
+                {
+                    latch.countDown();
+                }
+            });
+
+            latch.await(30, TimeUnit.SECONDS);
+            assertNotNull(err.get());
+            assertEquals(TPCUtils.WouldBlockException.class, err.get().getClass());
         }
         finally
         {
