@@ -641,8 +641,16 @@ public class Keyspace
     {
         assert writeBarrier != null : "Expected non null write barrier";
 
+        if (SchemaConstants.isSystemKeyspace(mutation.getKeyspaceName()))
+        {
+            logger.warn("Attempted to apply system mutation {} during shutdown but keyspace was already closed to mutations",
+                         mutation);
+            return Completable.complete();
+        }
+
         logger.debug(FBUtilities.Debug.getStackTrace());
-        logger.error("Attempted to apply mutation {} after final write barrier", mutation);
+        logger.error("Attempted to apply user mutation {} during shutdown but keyspace was already closed to mutations",
+                    mutation);
         return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Keyspace closed to new mutations"));
     }
 

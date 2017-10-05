@@ -4625,6 +4625,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     logger.warn("Wasn't able to stop the SSTable read hotness tracker with 1 minute.");
             }
 
+            // Wait for any sstable deletions because the non periodic tasks can create mutations when deleting sstables
+            // in the sstable activity table, see the callers of SystemKeyspace.clearSSTableReadMeter
+            LifecycleTransaction.waitForDeletions();
+
             // Flush the system tables after all other tables are flushed, just in case flushing modifies any system state
             // like CASSANDRA-5151. Don't bother with progress tracking since system data is tiny.
             // Flush system tables after stopping compactions since they modify
