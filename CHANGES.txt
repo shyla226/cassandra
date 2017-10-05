@@ -1,5 +1,5 @@
 4.0
- * Update lz4 to 1.4.0 (13741)
+ * Update lz4 to 1.4.0 (CASSANDRA-13741)
  * Throttle base partitions during MV repair streaming to prevent OOM (CASSANDRA-13299)
  * Improve short read protection performance (CASSANDRA-13794)
  * Fix AssertionError in short read protection (CASSANDRA-13747)
