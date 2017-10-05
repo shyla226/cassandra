@@ -1,4 +1,5 @@
 DSE 5.0.11
+ * Backport CASSANDRA-13299, Throttle base partitions during MV repair streaming to prevent OOM (APOLLO-878)
  * Backport CASSANDRA-13079: Warn user to run full repair when increasing replication factor (APOLLO-602)
  * Add anticompaction metrics and warn users when incremental repair is inefficient (APOLLO-689)
 

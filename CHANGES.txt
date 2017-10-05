@@ -1,5 +1,5 @@
 3.0.15
- * Backport CASSANDRA-13299, Throttle base partitions during MV repair streaming to prevent OOM (APOLLO-878)
+ * AssertionError prepending to a list (CASSANDRA-13149)
  * Fix support for SuperColumn tables (CASSANDRA-12373)
  * Handle limit correctly on tables with strict liveness (CASSANDRA-13883)
  * Fix missing original update in TriggerExecutor (CASSANDRA-13894)
