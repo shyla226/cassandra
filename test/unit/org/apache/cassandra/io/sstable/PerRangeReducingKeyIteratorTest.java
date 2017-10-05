@@ -48,7 +48,7 @@ import static org.junit.Assert.fail;
 
 public class PerRangeReducingKeyIteratorTest
 {
-    public static final String KEYSPACE1 = "ReducingKeyIteratorTest";
+    public static final String KEYSPACE1 = "PerRangeReducingKeyIteratorTest";
     public static final String CF_STANDARD = "Standard1";
 
     @BeforeClass
@@ -197,6 +197,7 @@ public class PerRangeReducingKeyIteratorTest
             Assert.assertTrue(bounds.get(idx++ % bounds.size()).contains(next.getToken()));
         }
         Assert.assertEquals(100, idx);
+        Assert.assertEquals(reducingIterator.getTotalBytes(), reducingIterator.getBytesRead());
     }
 
     private long brutallyGetKeyFor(TableMetadata metadata, IPartitioner partitioner, AbstractBounds<Token> bounds, long current)
