@@ -1191,6 +1191,11 @@ public class SinglePartitionReadCommand extends ReadCommand
              + ClusteringIndexFilter.serializer.serializedSize(clusteringIndexFilter(), version);
     }
 
+    public boolean isLimitedToOnePartition()
+    {
+        return true;
+    }
+
     /**
      * Groups multiple single partition read commands.
      */
