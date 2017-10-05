@@ -1,4 +1,5 @@
 4.0
+ * Update lz4 to 1.4.0 (13741)
  * Throttle base partitions during MV repair streaming to prevent OOM (CASSANDRA-13299)
  * Improve short read protection performance (CASSANDRA-13794)
  * Fix AssertionError in short read protection (CASSANDRA-13747)
@@ -144,6 +145,7 @@
  * Duplicate the buffer before passing it to analyser in SASI operation (CASSANDRA-13512)
  * Properly evict pstmts from prepared statements cache (CASSANDRA-13641)
 Merged from 3.0:
+ * AssertionError prepending to a list (CASSANDRA-13149)
  * Handle limit correctly on tables with strict liveness (CASSANDRA-13883)
  * Remove non-rpc-ready nodes from counter leader candidates (CASSANDRA-13043)
  * Fix sstable reader to support range-tombstone-marker for multi-slices (CASSANDRA-13787)
