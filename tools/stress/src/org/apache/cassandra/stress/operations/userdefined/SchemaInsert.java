@@ -109,7 +109,10 @@ public class SchemaInsert extends SchemaStatement
             else
             {
                 BatchStatement batch = new BatchStatement(batchType);
-                batch.setConsistencyLevel(JavaDriverClient.from(cl));
+                if (cl.isSerialConsistency())
+                        batch.setSerialConsistencyLevel(JavaDriverClient.from(cl));
+                    else
+                        batch.setConsistencyLevel(JavaDriverClient.from(cl));
                 batch.addAll(stmts);
                 stmt = batch;
             }
