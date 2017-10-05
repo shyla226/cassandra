@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.BufferType;
-import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.utils.SyncUtil;
 
 /**
@@ -60,7 +59,7 @@ public class UncompressedSegment extends FileDirectSegment
 
         try
         {
-            writeSyncMarker(buffer, startMarker, startMarker, nextMarker);
+            writeSyncMarker(id, buffer, startMarker, startMarker, nextMarker);
 
             ByteBuffer inputBuffer = buffer.duplicate();
             inputBuffer.limit(nextMarker).position(startMarker);

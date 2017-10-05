@@ -1,4 +1,5 @@
 4.0
+ * Correctly close netty channels when a stream session ends (CASSANDRA-13905)
  * Update lz4 to 1.4.0 (CASSANDRA-13741)
  * Throttle base partitions during MV repair streaming to prevent OOM (CASSANDRA-13299)
  * Improve short read protection performance (CASSANDRA-13794)
@@ -241,6 +242,7 @@ Merged from 2.1:
  * Fix cqlsh automatic protocol downgrade regression (CASSANDRA-13307)
  * Tracing payload not passed from QueryMessage to tracing session (CASSANDRA-12835)
 Merged from 3.0:
+ * Filter header only commit logs before recovery (CASSANDRA-13918)
  * Fix MV timestamp issues (CASSANDRA-11500)
  * Ensure int overflow doesn't occur when calculating large partition warning size (CASSANDRA-13172)
  * Ensure consistent view of partition columns between coordinator and replica in ColumnFilter (CASSANDRA-13004)
