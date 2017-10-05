@@ -135,6 +135,12 @@
  * Switch to client init for sstabledump (CASSANDRA-13683)
  * CQLSH: Don't pause when capturing data (CASSANDRA-13743)
 
+
+3.11.2
+Merged from 3.0:
+ * Deserialise sstable metadata in nodetool verify (CASSANDRA-13922)
+
+
 3.11.1
  * Fix the computation of cdc_total_space_in_mb for exabyte filesystems (CASSANDRA-13808)
  * AbstractTokenTreeBuilder#serializedSize returns wrong value when there is a single leaf and overflow collisions (CASSANDRA-13869)
