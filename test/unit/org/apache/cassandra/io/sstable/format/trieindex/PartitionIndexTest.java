@@ -331,7 +331,7 @@ public class PartitionIndexTest
                  PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder);
             )
             {
-                writer.setPostFlushListener(() -> builder.markPartitionIndexSynced(writer.getLastFlushOffset()));
+                writer.setFileSyncListener(() -> builder.markPartitionIndexSynced(writer.getLastFlushOffset()));
                 for (int i = 0; i < COUNT; i++)
                 {
                     DecoratedKey key = generateRandomLengthKey();
@@ -355,6 +355,7 @@ public class PartitionIndexTest
                                              index.close();
                                              callCount.incrementAndGet();
                                          }, 0, i * 1024);
+                    writer.requestSyncOnNextFlush();
                     builder.markDataSynced(i * 1024);
                     // verifier will be called when the sequentialWriter finishes a chunk
                 }
@@ -511,7 +512,7 @@ public class PartitionIndexTest
              PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder);
             )
         {
-            writer.setPostFlushListener(() -> builder.markPartitionIndexSynced(writer.getLastFlushOffset()));
+            writer.setFileSyncListener(() -> builder.markPartitionIndexSynced(writer.getLastFlushOffset()));
             for (int i = 0; i < COUNT; i++)
             {
                 DecoratedKey key = generateRandomKey();

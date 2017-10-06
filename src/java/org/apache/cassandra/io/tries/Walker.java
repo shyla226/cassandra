@@ -340,7 +340,7 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
     @Override
     public String toString()
     {
-        return String.format("[Trie Walker - NodeType: %s, buffer: %s, file offset: %d, Buffer offset: %d, position: %d]",
-                             nodeType, buf, bh.offset(), offset ,position);
+        return String.format("[Trie Walker - NodeType: %s, source: %s, buffer: %s, buffer file offset: %d, Node buffer offset: %d, Node file position: %d]",
+                             nodeType, source, buf, bh.offset(), offset ,position);
     }
 }

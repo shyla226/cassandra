@@ -274,6 +274,11 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     public boolean openEarly(Consumer<SSTableReader> callWhenReady)
     {
         long dataLength = dataFile.position();
+
+        dataFile.requestSyncOnNextFlush();
+        iwriter.rowIndexFile.requestSyncOnNextFlush();
+        iwriter.partitionIndexFile.requestSyncOnNextFlush();
+
         return iwriter.buildPartial(dataLength, partitionIndex ->
         {
             StatsMetadata stats = statsMetadata();
@@ -308,6 +313,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         // we must ensure the data is completely flushed to disk
         dataFile.sync();
         iwriter.rowIndexFile.sync();
+        iwriter.partitionIndexFile.sync();
 
         return openFinal(SSTableReader.OpenReason.EARLY);
     }
@@ -440,9 +446,9 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder);
             bf = FilterFactory.getFilter(keyCount, metadata().params.bloomFilterFpChance, true);
             // register listeners to be alerted when the data files are flushed
-            partitionIndexFile.setPostFlushListener(() -> partitionIndex.markPartitionIndexSynced(partitionIndexFile.getLastFlushOffset()));
-            rowIndexFile.setPostFlushListener(() -> partitionIndex.markRowIndexSynced(rowIndexFile.getLastFlushOffset()));
-            dataFile.setPostFlushListener(() -> partitionIndex.markDataSynced(dataFile.getLastFlushOffset()));
+            partitionIndexFile.setFileSyncListener(() -> partitionIndex.markPartitionIndexSynced(partitionIndexFile.getLastFlushOffset()));
+            rowIndexFile.setFileSyncListener(() -> partitionIndex.markRowIndexSynced(rowIndexFile.getLastFlushOffset()));
+            dataFile.setFileSyncListener(() -> partitionIndex.markDataSynced(dataFile.getLastFlushOffset()));
         }
 
         public long append(DecoratedKey key, RowIndexEntry indexEntry) throws IOException
