@@ -126,9 +126,19 @@ public interface StorageServiceMBean extends NotificationEmitter
      * Retrieve a map of range to rpc addresses that describe the ring topology
      * of a Cassandra cluster.
      *
+     * @deprecated use {@link this#getRangeToNativeTransportAddressMap(String)} instead.
      * @return mapping of ranges to rpc addresses
      */
+    @Deprecated
     public Map<List<String>, List<String>> getRangeToRpcaddressMap(String keyspace);
+
+    /**
+     * Retrieve a map of range to native transport addresses that describe the ring topology
+     * of a Cassandra cluster.
+     *
+     * @return mapping of ranges to rpc addresses
+     */
+    public Map<List<String>, List<String>> getRangeToNativeTransportAddressMap(String keyspace);
 
     /**
      * The same as {@code describeRing(String)} but converts TokenRange to the String for JMX compatibility

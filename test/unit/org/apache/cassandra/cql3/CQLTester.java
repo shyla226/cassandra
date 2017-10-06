@@ -171,7 +171,7 @@ public abstract class CQLTester
         // from being initialized.
         DatabaseDescriptor.daemonInitialization();
 
-        nativeAddr = DatabaseDescriptor.getRpcAddress();
+        nativeAddr = DatabaseDescriptor.getNativeTransportAddress();
         nativePort = DatabaseDescriptor.getNativeTransportPort();
     }
 

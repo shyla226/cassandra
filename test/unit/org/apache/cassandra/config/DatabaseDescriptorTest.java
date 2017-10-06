@@ -36,6 +36,8 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -110,12 +112,38 @@ public class DatabaseDescriptorTest
     }
 
     @Test
+    public void testNativeTransportInterface() throws Exception
+    {
+        testNativeTransportInterface(false);
+    }
+
+    @Test
     public void testRpcInterface() throws Exception
     {
+        testNativeTransportInterface(true);
+    }
+
+    public void testNativeTransportInterface(boolean rpcInterface) throws Exception
+    {
         Config testConfig = DatabaseDescriptor.loadConfig();
-        testConfig.rpc_interface = suitableInterface.getName();
-        testConfig.rpc_address = null;
+        if (rpcInterface)
+        {
+            testConfig.rpc_interface = suitableInterface.getName();
+            testConfig.rpc_address = null;
+            assertNull(testConfig.native_transport_interface);
+        }
+        else
+        {
+            testConfig.native_transport_interface = suitableInterface.getName();
+            testConfig.native_transport_address = null;
+        }
+
         DatabaseDescriptor.applyAddressConfig(testConfig);
+
+        if (rpcInterface)
+        {
+            assertEquals(suitableInterface.getName(), testConfig.native_transport_interface);
+        }
 
         /*
          * Confirm ability to select between IPv4 and IPv6
@@ -123,27 +151,49 @@ public class DatabaseDescriptorTest
         if (hasIPv4andIPv6)
         {
             testConfig = DatabaseDescriptor.loadConfig();
-            testConfig.rpc_interface = suitableInterface.getName();
-            testConfig.rpc_address = null;
-            testConfig.rpc_interface_prefer_ipv6 = true;
+
+            if (rpcInterface)
+            {
+                testConfig.rpc_interface = suitableInterface.getName();
+                testConfig.rpc_address = null;
+                testConfig.rpc_interface_prefer_ipv6 = true;
+            }
+            else
+            {
+                testConfig.native_transport_interface = suitableInterface.getName();
+                testConfig.native_transport_address = null;
+                testConfig.native_transport_interface_prefer_ipv6 = true;
+            }
+
             DatabaseDescriptor.applyAddressConfig(testConfig);
 
-            assertEquals(DatabaseDescriptor.getRpcAddress().getClass(), Inet6Address.class);
+            assertEquals(DatabaseDescriptor.getNativeTransportAddress().getClass(), Inet6Address.class);
 
             testConfig = DatabaseDescriptor.loadConfig();
-            testConfig.rpc_interface = suitableInterface.getName();
-            testConfig.rpc_address = null;
-            testConfig.rpc_interface_prefer_ipv6 = false;
+
+            if (rpcInterface)
+            {
+                testConfig.rpc_interface = suitableInterface.getName();
+                testConfig.rpc_address = null;
+                testConfig.rpc_interface_prefer_ipv6 = false;
+            }
+            else
+            {
+                testConfig.native_transport_interface = suitableInterface.getName();
+                testConfig.native_transport_address = null;
+                testConfig.native_transport_interface_prefer_ipv6 = false;
+            }
+
             DatabaseDescriptor.applyAddressConfig(testConfig);
 
-            assertEquals(DatabaseDescriptor.getRpcAddress().getClass(), Inet4Address.class);
+            assertEquals(DatabaseDescriptor.getNativeTransportAddress().getClass(), Inet4Address.class);
         }
         else
         {
             /*
              * Confirm first address of interface is selected
              */
-            assertEquals(DatabaseDescriptor.getRpcAddress(), suitableInterface.getInetAddresses().nextElement());
+            assertEquals(DatabaseDescriptor.getNativeTransportAddress(), suitableInterface.getInetAddresses().nextElement());
         }
     }
 
@@ -181,7 +231,7 @@ public class DatabaseDescriptorTest
             /*
              * Confirm first address of interface is selected
              */
-            assertEquals(DatabaseDescriptor.getRpcAddress(), suitableInterface.getInetAddresses().nextElement());
+            assertEquals(DatabaseDescriptor.getNativeTransportAddress(), suitableInterface.getInetAddresses().nextElement());
         }
     }
 
@@ -195,15 +245,31 @@ public class DatabaseDescriptorTest
     }
 
     @Test
-    public void testRpcAddress() throws Exception
+    public void testNativeTransportAddress() throws Exception
+    {
+        Config testConfig = DatabaseDescriptor.loadConfig();
+        testConfig.native_transport_address = suitableInterface.getInterfaceAddresses().get(0).getAddress().getHostAddress();
+        testConfig.native_transport_interface = null;
+        DatabaseDescriptor.applyAddressConfig(testConfig);
+    }
+
+    @Test
+    public void testDeprecatedProperties() throws Exception
     {
         Config testConfig = DatabaseDescriptor.loadConfig();
         testConfig.rpc_address = suitableInterface.getInterfaceAddresses().get(0).getAddress().getHostAddress();
         testConfig.rpc_interface = null;
+        testConfig.native_transport_keepalive = false;
+        testConfig.rpc_keepalive = true;
+        assertNull(testConfig.native_transport_address);
+        assertNull(testConfig.native_transport_interface);
         DatabaseDescriptor.applyAddressConfig(testConfig);
-
+        assertEquals(suitableInterface.getInterfaceAddresses().get(0).getAddress().getHostAddress(), testConfig.native_transport_address);
+        assertNull(testConfig.native_transport_interface);
+        assertTrue(testConfig.native_transport_keepalive); //rpc_keepalive should override native_transport_keepalive if set
+        assertFalse(testConfig.native_transport_interface_prefer_ipv6); //test default
     }
-    
+
     @Test
     public void testTokensFromString()
     {

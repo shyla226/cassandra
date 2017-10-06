@@ -51,10 +51,10 @@ public class Ec2MultiRegionSnitch extends Ec2Snitch
         localPrivateAddress = awsApiCall(PRIVATE_IP_QUERY_URL);
         // use the Public IP to broadcast Address to other nodes.
         DatabaseDescriptor.setBroadcastAddress(localPublicAddress);
-        if (DatabaseDescriptor.getBroadcastRpcAddress() == null)
+        if (DatabaseDescriptor.getBroadcastNativeTransportAddress() == null)
         {
             logger.info("broadcast_rpc_address unset, broadcasting public IP as rpc_address: {}", localPublicAddress);
-            DatabaseDescriptor.setBroadcastRpcAddress(localPublicAddress);
+            DatabaseDescriptor.setBroadcastNativeTransportAddress(localPublicAddress);
         }
     }
 

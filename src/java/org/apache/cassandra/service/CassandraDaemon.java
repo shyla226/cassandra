@@ -54,7 +54,6 @@ import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.TPCUtils;
@@ -75,7 +74,6 @@ import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.schema.TriggerMetadata;
-import org.apache.cassandra.schema.Triggers;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.*;
@@ -527,7 +525,7 @@ public class CassandraDaemon
         if ((nativeFlag != null && Boolean.parseBoolean(nativeFlag)) || (nativeFlag == null && DatabaseDescriptor.startNativeTransport()))
         {
             startNativeTransport();
-            StorageService.instance.setRpcReady(true);
+            StorageService.instance.setNativeTransportReady(true);
         }
         else
             logger.info("Not starting native transport as requested. Use JMX (StorageService->startNativeTransport()) or nodetool (enablebinary) to start it");
@@ -558,7 +556,7 @@ public class CassandraDaemon
         if (nativeTransportService != null)
             nativeTransportService.destroy();
 
-        StorageService.instance.setRpcReady(false);
+        StorageService.instance.setNativeTransportReady(false);
 
         // On windows, we need to stop the entire system as prunsrv doesn't have the jsvc hooks
         // We rely on the shutdown hook to drain the node

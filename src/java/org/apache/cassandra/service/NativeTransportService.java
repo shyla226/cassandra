@@ -57,7 +57,7 @@ public class NativeTransportService
 
     public NativeTransportService()
     {
-        this.nativeAddr = DatabaseDescriptor.getRpcAddress();
+        this.nativeAddr = DatabaseDescriptor.getNativeTransportAddress();
         this.nativePort = DatabaseDescriptor.getNativeTransportPort();
     }
 

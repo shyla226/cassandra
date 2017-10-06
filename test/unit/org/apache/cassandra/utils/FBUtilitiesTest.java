@@ -158,24 +158,24 @@ public class FBUtilitiesTest
         //When both rpc_address and broadcast_rpc_address are null, it should return the local address (from DD.applyAddressConfig)
         FBUtilities.reset();
         Config testConfig = DatabaseDescriptor.loadConfig();
-        testConfig.rpc_address = null;
-        testConfig.broadcast_rpc_address = null;
+        testConfig.native_transport_address = null;
+        testConfig.native_transport_broadcast_address = null;
         DatabaseDescriptor.applyAddressConfig(testConfig);
-        assertEquals(FBUtilities.getLocalAddress(), FBUtilities.getBroadcastRpcAddress());
+        assertEquals(FBUtilities.getLocalAddress(), FBUtilities.getNativeTransportBroadcastAddress());
 
         //When rpc_address is defined and broadcast_rpc_address is null, it should return the rpc_address
         FBUtilities.reset();
-        testConfig.rpc_address = "127.0.0.2";
-        testConfig.broadcast_rpc_address = null;
+        testConfig.native_transport_address = "127.0.0.2";
+        testConfig.native_transport_broadcast_address = null;
         DatabaseDescriptor.applyAddressConfig(testConfig);
-        assertEquals(InetAddress.getByName("127.0.0.2"), FBUtilities.getBroadcastRpcAddress());
+        assertEquals(InetAddress.getByName("127.0.0.2"), FBUtilities.getNativeTransportBroadcastAddress());
 
         //When both rpc_address and broadcast_rpc_address are defined, it should return broadcast_rpc_address
         FBUtilities.reset();
-        testConfig.rpc_address = "127.0.0.2";
-        testConfig.broadcast_rpc_address = "127.0.0.3";
+        testConfig.native_transport_address = "127.0.0.2";
+        testConfig.native_transport_broadcast_address = "127.0.0.3";
         DatabaseDescriptor.applyAddressConfig(testConfig);
-        assertEquals(InetAddress.getByName("127.0.0.3"), FBUtilities.getBroadcastRpcAddress());
+        assertEquals(InetAddress.getByName("127.0.0.3"), FBUtilities.getNativeTransportBroadcastAddress());
 
         FBUtilities.reset();
     }

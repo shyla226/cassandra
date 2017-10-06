@@ -127,7 +127,7 @@ public class VersionedValue implements Comparable<VersionedValue>
         {
             this.partitioner = partitioner;
         }
-        
+
         public VersionedValue cloneWithHigherVersion(VersionedValue value)
         {
             return new VersionedValue(value.value);
@@ -223,7 +223,7 @@ public class VersionedValue implements Comparable<VersionedValue>
             return new VersionedValue(VersionedValue.HIBERNATE + VersionedValue.DELIMITER + value);
         }
 
-        public VersionedValue rpcReady(boolean value)
+        public VersionedValue nativeTransportReady(boolean value)
         {
             return new VersionedValue(String.valueOf(value));
         }

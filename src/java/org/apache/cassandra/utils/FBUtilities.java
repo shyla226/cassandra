@@ -148,12 +148,12 @@ public class FBUtilities
     }
 
 
-    public static InetAddress getBroadcastRpcAddress()
+    public static InetAddress getNativeTransportBroadcastAddress()
     {
         if (broadcastRpcAddress == null)
-            broadcastRpcAddress = DatabaseDescriptor.getBroadcastRpcAddress() == null
-                                   ? DatabaseDescriptor.getRpcAddress()
-                                   : DatabaseDescriptor.getBroadcastRpcAddress();
+            broadcastRpcAddress = DatabaseDescriptor.getBroadcastNativeTransportAddress() == null
+                                   ? DatabaseDescriptor.getNativeTransportAddress()
+                                   : DatabaseDescriptor.getBroadcastNativeTransportAddress();
         return broadcastRpcAddress;
     }
 

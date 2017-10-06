@@ -162,6 +162,7 @@ public final class SystemKeyspace
               + "schema_version uuid,"
               + "tokens set<varchar>,"
               + "truncated_at map<uuid, blob>,"
+              + "native_transport_address inet,"
               + "native_transport_port int,"
               + "native_transport_port_ssl int,"
               + "storage_port int,"
@@ -192,6 +193,7 @@ public final class SystemKeyspace
               + "rpc_address inet,"
               + "schema_version uuid,"
               + "tokens set<varchar>,"
+              + "native_transport_address inet,"
               + "native_transport_port int,"
               + "native_transport_port_ssl int,"
               + "storage_port int,"
@@ -564,12 +566,13 @@ public final class SystemKeyspace
                      "rpc_address," +
                      "broadcast_address," +
                      "listen_address," +
+                     "native_transport_address," +
                      "native_transport_port," +
                      "native_transport_port_ssl," +
                      "storage_port," +
                      "storage_port_ssl," +
                      "jmx_port" +
-                     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
         return TPCUtils.toFutureVoid(executeOnceInternal(format(req, LOCAL),
                                                          LOCAL,
@@ -580,9 +583,10 @@ public final class SystemKeyspace
                                                          snitch.getDatacenter(FBUtilities.getBroadcastAddress()),
                                                          snitch.getRack(FBUtilities.getBroadcastAddress()),
                                                          DatabaseDescriptor.getPartitioner().getClass().getName(),
-                                                         DatabaseDescriptor.getRpcAddress(),
+                                                         DatabaseDescriptor.getNativeTransportAddress(),
                                                          FBUtilities.getBroadcastAddress(),
                                                          FBUtilities.getLocalAddress(),
+                                                         DatabaseDescriptor.getNativeTransportAddress(),
                                                          DatabaseDescriptor.getNativeTransportPort(),
                                                          DatabaseDescriptor.getNativeTransportPortSSL(),
                                                          DatabaseDescriptor.getStoragePort(),

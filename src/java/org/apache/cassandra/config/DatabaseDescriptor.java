@@ -28,7 +28,6 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -65,7 +64,6 @@ import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.service.CacheService.CacheType;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.LineNumberInference;
-import sun.misc.VM;
 
 import static org.apache.cassandra.io.util.FileUtils.ONE_GB;
 
@@ -89,8 +87,8 @@ public class DatabaseDescriptor
     private static IEndpointSnitch snitch;
     private static InetAddress listenAddress; // leave null so we can fall through to getLocalHost
     private static InetAddress broadcastAddress;
-    private static InetAddress rpcAddress;
-    private static InetAddress broadcastRpcAddress;
+    private static InetAddress nativeTransportAddress;
+    private static InetAddress broadcastNativeTransportAddress;
     private static SeedProvider seedProvider;
     private static IInternodeAuthenticator internodeAuthenticator = new AllowAllInternodeAuthenticator();
 
@@ -778,9 +776,107 @@ public class DatabaseDescriptor
     public static void applyAddressConfig(Config config) throws ConfigurationException
     {
         listenAddress = null;
-        rpcAddress = null;
+        nativeTransportAddress = null;
         broadcastAddress = null;
-        broadcastRpcAddress = null;
+        broadcastNativeTransportAddress = null;
+
+        // Support to deprecated rpc_* properties
+        if (config.rpc_address != null)
+        {
+            if (config.native_transport_address == null)
+            {
+                logger.warn("The 'rpc_address' property is deprecated and will be removed on the next major release. Please update your yaml to " +
+                            "use 'native_transport_address' instead.");
+            }
+            else
+            {
+                //When both are specified, fallback to the old one but log a warning
+                logger.warn("Both 'rpc_address={}' and 'native_transport_address={}' are specified. Using deprecated property 'rpc_address={}'. " +
+                            "Please update your yaml to specify only 'native_transport_address'.", config.rpc_address, config.native_transport_address, config.rpc_address);
+            }
+            config.native_transport_address = config.rpc_address;
+        }
+
+        if (config.rpc_interface != null)
+        {
+            if (config.native_transport_interface == null)
+            {
+                logger.warn("The 'rpc_interface' property is deprecated and will be removed on the next major release. Please update your yaml to " +
+                            "use 'native_transport_interface' instead.");
+            }
+            else
+            {
+                //When both are specified, fallback to the old one but log a warning
+                logger.warn("Both 'rpc_interface={}' and 'native_transport_interface={}' are specified. Using deprecated property 'rpc_interface={}'. " +
+                            "Please update your yaml to specify only 'native_transport_interface'.", config.rpc_interface, config.native_transport_interface, config.rpc_interface);
+            }
+            config.native_transport_interface = config.rpc_interface;
+        }
+
+        if (config.rpc_interface_prefer_ipv6 != null)
+        {
+            if (config.native_transport_interface_prefer_ipv6 == null)
+            {
+                logger.warn("The 'rpc_interface_prefer_ipv6' property is deprecated and will be removed on the next major release. Please update your yaml to " +
+                            "use 'native_transport_interface_prefer_ipv6' instead.");
+            }
+            else
+            {
+                //When both are specified, fallback to the old one but log a warning
+                logger.warn("Both 'rpc_interface_prefer_ipv6={}' and 'rpc_interface_prefer_ipv6={}' are specified. Using deprecated property 'rpc_interface={}'. " +
+                            "Please update your yaml to specify only 'native_transport_interface_prefer_ipv6'.", config.rpc_interface_prefer_ipv6,
+                            config.native_transport_interface_prefer_ipv6, config.rpc_interface_prefer_ipv6);
+            }
+            config.native_transport_interface_prefer_ipv6 = config.rpc_interface_prefer_ipv6;
+        }
+
+        if (config.broadcast_rpc_address != null)
+        {
+            if (config.native_transport_broadcast_address == null)
+            {
+                logger.warn("The 'broadcast_rpc_address' property is deprecated and will be removed on the next major release. Please update your yaml to " +
+                            "use 'native_transport_broadcast_address' instead.");
+            }
+            else
+            {
+                //When both are specified, fallback to the old one but log a warning
+                logger.warn("Both 'broadcast_rpc_address={}' and 'native_transport_broadcast_address={}' are specified. Using deprecated property 'broadcast_rpc_address={}'. " +
+                            "Please update your yaml to specify only 'native_transport_broadcast_address'.", config.broadcast_rpc_address,
+                            config.native_transport_broadcast_address, config.broadcast_rpc_address);
+            }
+            config.native_transport_broadcast_address = config.broadcast_rpc_address;
+        }
+
+        if (config.rpc_keepalive != null)
+        {
+            if (config.native_transport_keepalive == null)
+            {
+                logger.warn("The 'rpc_keepalive' property is deprecated and will be removed on the next major release. Please update your yaml to " +
+                            "use 'native_transport_keepalive' instead.");
+            }
+            else
+            {
+                //When both are specified, fallback to the old one but log a warning
+                logger.warn("Both 'rpc_keepalive={}' and 'native_transport_keepalive={}' are specified. Using deprecated property 'rpc_keepalive={}'. " +
+                            "Please update your yaml to specify only 'native_transport_keepalive'.", config.rpc_keepalive, config.native_transport_keepalive,
+                            config.rpc_keepalive);
+            }
+            config.native_transport_keepalive = config.rpc_keepalive;
+        }
+
+        // Set default values for for 'native_transport_keepalive' and 'native_transport_interface_prefer_ipv6' if unset
+        // We cannot set them directly on Config because we need to differentiate between the default and when the user
+        // explicitly set them to print the warnings above.
+
+        if (config.native_transport_keepalive == null)
+        {
+            config.native_transport_keepalive = true;
+        }
+
+        if (config.native_transport_interface_prefer_ipv6 == null)
+        {
+            config.native_transport_interface_prefer_ipv6 = false;
+        }
 
         /* Local IP, hostname or interface to bind services to */
         if (config.listen_address != null && config.listen_interface != null)
@@ -823,50 +919,50 @@ public class DatabaseDescriptor
         }
 
         /* Local IP, hostname or interface to bind RPC server to */
-        if (config.rpc_address != null && config.rpc_interface != null)
+        if (config.native_transport_address != null && config.native_transport_interface != null)
         {
-            throw new ConfigurationException("Set rpc_address OR rpc_interface, not both", false);
+            throw new ConfigurationException("Set native_transport_address OR native_transport_interface, not both", false);
         }
-        else if (config.rpc_address != null)
+        else if (config.native_transport_address != null)
         {
             try
             {
-                rpcAddress = InetAddress.getByName(config.rpc_address);
+                nativeTransportAddress = InetAddress.getByName(config.native_transport_address);
             }
             catch (UnknownHostException e)
             {
-                throw new ConfigurationException("Unknown host in rpc_address " + config.rpc_address, false);
+                throw new ConfigurationException("Unknown host in native_transport_address " + config.native_transport_address, false);
             }
         }
-        else if (config.rpc_interface != null)
+        else if (config.native_transport_interface != null)
         {
-            rpcAddress = getNetworkInterfaceAddress(config.rpc_interface, "rpc_interface", config.rpc_interface_prefer_ipv6);
+            nativeTransportAddress = getNetworkInterfaceAddress(config.native_transport_interface, "native_transport_interface", config.native_transport_interface_prefer_ipv6);
         }
         else
         {
-            rpcAddress = FBUtilities.getLocalAddress();
+            nativeTransportAddress = FBUtilities.getLocalAddress();
         }
 
         /* RPC address to broadcast */
-        if (config.broadcast_rpc_address != null)
+        if (config.native_transport_broadcast_address != null)
         {
             try
             {
-                broadcastRpcAddress = InetAddress.getByName(config.broadcast_rpc_address);
+                broadcastNativeTransportAddress = InetAddress.getByName(config.native_transport_broadcast_address);
             }
             catch (UnknownHostException e)
             {
-                throw new ConfigurationException("Unknown broadcast_rpc_address '" + config.broadcast_rpc_address + "'", false);
+                throw new ConfigurationException("Unknown broadcast_native_transport_address '" + config.native_transport_broadcast_address + "'", false);
             }
 
-            if (broadcastRpcAddress.isAnyLocalAddress())
-                throw new ConfigurationException("broadcast_rpc_address cannot be a wildcard address (" + config.broadcast_rpc_address + ")!", false);
+            if (broadcastNativeTransportAddress.isAnyLocalAddress())
+                throw new ConfigurationException("broadcast_native_transport_address cannot be a wildcard address (" + config.native_transport_broadcast_address + ")!", false);
         }
         else
         {
-            if (rpcAddress.isAnyLocalAddress())
-                throw new ConfigurationException("If rpc_address is set to a wildcard address (" + config.rpc_address + "), then " +
-                                                 "you must set broadcast_rpc_address to a value other than " + config.rpc_address, false);
+            if (nativeTransportAddress.isAnyLocalAddress())
+                throw new ConfigurationException("If native_transport_address is set to a wildcard address (" + config.native_transport_address + "), then " +
+                                                 "you must set broadcast_native_transport_address to a value other than " + config.native_transport_address, false);
         }
 
         /* JMX port */
@@ -1783,27 +1879,27 @@ public class DatabaseDescriptor
         broadcastAddress = broadcastAdd;
     }
 
-    public static InetAddress getRpcAddress()
+    public static InetAddress getNativeTransportAddress()
     {
-        return rpcAddress;
+        return nativeTransportAddress;
     }
 
-    public static void setBroadcastRpcAddress(InetAddress broadcastRPCAddr)
+    public static void setBroadcastNativeTransportAddress(InetAddress broadcastRPCAddr)
     {
-        broadcastRpcAddress = broadcastRPCAddr;
+        broadcastNativeTransportAddress = broadcastRPCAddr;
     }
 
     /**
-     * May be null, please use {@link FBUtilities#getBroadcastRpcAddress()} instead.
+     * May be null, please use {@link FBUtilities#getNativeTransportBroadcastAddress()} instead.
      */
-    public static InetAddress getBroadcastRpcAddress()
+    public static InetAddress getBroadcastNativeTransportAddress()
     {
-        return broadcastRpcAddress;
+        return broadcastNativeTransportAddress;
     }
 
-    public static boolean getRpcKeepAlive()
+    public static boolean getNativeTransportKeepAlive()
     {
-        return conf.rpc_keepalive;
+        return conf.native_transport_keepalive;
     }
 
     public static int getInternodeSendBufferSize()

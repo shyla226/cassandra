@@ -368,7 +368,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         if (epState == null)
             return;
         epState.addApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.shutdown(true));
-        epState.addApplicationState(ApplicationState.RPC_READY, StorageService.instance.valueFactory.rpcReady(false));
+        epState.addApplicationState(ApplicationState.NATIVE_TRANSPORT_READY, StorageService.instance.valueFactory.nativeTransportReady(false));
         epState.getHeartBeatState().forceHighestPossibleVersionUnsafe();
         markDead(endpoint, epState);
         FailureDetector.instance.forceConviction(endpoint);

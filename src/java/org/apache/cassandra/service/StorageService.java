@@ -420,7 +420,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     }
 
     /**
-     * Set the Gossip flag RPC_READY to false and then
+     * Set the Gossip flag NATIVE_TRANSPORT_READY to false and then
      * shutdown the client services (thrift and CQL).
      *
      * Note that other nodes will do this for us when
@@ -431,7 +431,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      */
     private void shutdownClientServers()
     {
-        setRpcReady(false);
+        setNativeTransportReady(false);
         stopNativeTransport();
     }
 
@@ -791,7 +791,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             getTokenMetadata().updateHostId(localHostId, FBUtilities.getBroadcastAddress());
             appStates.put(ApplicationState.NET_VERSION, valueFactory.networkVersion());
             appStates.put(ApplicationState.HOST_ID, valueFactory.hostId(localHostId));
-            appStates.put(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(FBUtilities.getBroadcastRpcAddress()));
+            appStates.put(ApplicationState.NATIVE_TRANSPORT_ADDRESS, valueFactory.rpcaddress(FBUtilities.getNativeTransportBroadcastAddress()));
             appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
 
             appStates.put(ApplicationState.NATIVE_TRANSPORT_PORT, valueFactory.nativeTransportPort(DatabaseDescriptor.getNativeTransportPort()));
@@ -1743,35 +1743,61 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      *
      * @param endpoint The endpoint to get rpc address for
      * @return the rpc address
+     * @deprecated use {@link this#getNativeTransportcaddress(InetAddress)} instead
      */
+    @Deprecated
     public String getRpcaddress(InetAddress endpoint)
     {
+        return getNativeTransportcaddress(endpoint);
+    }
+
+    /**
+     * Return the native transport address associated with an endpoint as a string.
+     *
+     * @param endpoint The endpoint to get rpc address for
+     * @return the native transport addresss
+     */
+    public String getNativeTransportcaddress(InetAddress endpoint)
+    {
         if (endpoint.equals(FBUtilities.getBroadcastAddress()))
-            return FBUtilities.getBroadcastRpcAddress().getHostAddress();
-        else if (Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.RPC_ADDRESS) == null)
+            return FBUtilities.getNativeTransportBroadcastAddress().getHostAddress();
+        else if (Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.NATIVE_TRANSPORT_ADDRESS) == null)
             return endpoint.getHostAddress();
         else
-            return Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.RPC_ADDRESS).value;
+            return Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.NATIVE_TRANSPORT_ADDRESS).value;
     }
 
     /**
      * for a keyspace, return the ranges and corresponding RPC addresses for a given keyspace.
      *
+     * @deprecated use {@link this#getRangeToNativeTransportAddressMap(String)} instead.
+
      * @param keyspace
      * @return the endpoint map
      */
     public Map<List<String>, List<String>> getRangeToRpcaddressMap(String keyspace)
     {
+        return getRangeToNativeTransportAddressMap(keyspace);
+    }
+
+    /**
+     * for a keyspace, return the ranges and corresponding native transport addresses for a given keyspace.
+     *
+     * @param keyspace
+     * @return the endpoint map
+     */
+    public Map<List<String>, List<String>> getRangeToNativeTransportAddressMap(String keyspace)
+    {
         /* All the ranges for the tokens */
         Map<List<String>, List<String>> map = new HashMap<>();
         for (Map.Entry<Range<Token>, List<InetAddress>> entry : getRangeToAddressMap(keyspace).entrySet())
         {
-            List<String> rpcaddrs = new ArrayList<>(entry.getValue().size());
+            List<String> nativeTransportAddresses = new ArrayList<>(entry.getValue().size());
             for (InetAddress endpoint : entry.getValue())
             {
-                rpcaddrs.add(getRpcaddress(endpoint));
+                nativeTransportAddresses.add(getRpcaddress(endpoint));
             }
-            map.put(entry.getKey().asList(), rpcaddrs);
+            map.put(entry.getKey().asList(), nativeTransportAddresses);
         }
         return map;
     }
@@ -2077,10 +2103,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         updateTopology(endpoint);
                         updatePeerInfoBlocking(endpoint, "rack", value.value);
                         break;
-                    case RPC_ADDRESS:
+                    case NATIVE_TRANSPORT_ADDRESS:
                         try
                         {
                             updatePeerInfoBlocking(endpoint, "rpc_address", InetAddress.getByName(value.value));
+                        }
+                        catch (UnknownHostException e)
+                        {
+                            throw new RuntimeException(e);
+                        }
+                        try
+                        {
+                            updatePeerInfoBlocking(endpoint, "native_transport_address", InetAddress.getByName(value.value));
                         }
                         catch (UnknownHostException e)
                         {
@@ -2094,8 +2128,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     case HOST_ID:
                         updatePeerInfoBlocking(endpoint, "host_id", UUID.fromString(value.value));
                         break;
-                    case RPC_READY:
-                        notifyRpcChange(endpoint, epState.isRpcReady());
+                    case NATIVE_TRANSPORT_READY:
+                        notifyNativeTransportChange(endpoint, epState.isRpcReady());
                         break;
                     case NET_VERSION:
                         updateNetVersion(endpoint, value);
@@ -2172,10 +2206,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 case RACK:
                     updatePeerInfoBlocking(endpoint, "rack", entry.getValue().value);
                     break;
-                case RPC_ADDRESS:
+                case NATIVE_TRANSPORT_ADDRESS:
                     try
                     {
                         updatePeerInfoBlocking(endpoint, "rpc_address", InetAddress.getByName(entry.getValue().value));
+                    }
+                    catch (UnknownHostException e)
+                    {
+                        throw new RuntimeException(e);
+                    }
+                    try
+                    {
+                        updatePeerInfoBlocking(endpoint, "native_transport_address", InetAddress.getByName(entry.getValue().value));
                     }
                     catch (UnknownHostException e)
                     {
@@ -2207,7 +2249,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
-    private void notifyRpcChange(InetAddress endpoint, boolean ready)
+    private void notifyNativeTransportChange(InetAddress endpoint, boolean ready)
     {
         if (ready)
             notifyUp(endpoint);
@@ -2264,21 +2306,21 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     }
 
     /**
-     * Set the RPC status. Because when draining a node we need to set the RPC
+     * Set the Native Transport status. Because when draining a node we need to set the Native Transport
      * status to not ready, and drain is called by the shutdown hook, it may be that value is false
      * and there is no local endpoint state. In this case it's OK to just do nothing. Therefore,
      * we assert that the local endpoint state is not null only when value is true.
      *
-     * @param value - true indicates that RPC is ready, false indicates the opposite.
+     * @param value - true indicates that native transport is ready, false indicates the opposite.
      */
-    public void setRpcReady(boolean value)
+    public void setNativeTransportReady(boolean value)
     {
         EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(FBUtilities.getBroadcastAddress());
         // if value is false we're OK with a null state, if it is true we are not.
         assert !value || state != null;
 
         if (state != null)
-            Gossiper.instance.addLocalApplicationState(ApplicationState.RPC_READY, valueFactory.rpcReady(value));
+            Gossiper.instance.addLocalApplicationState(ApplicationState.NATIVE_TRANSPORT_READY, valueFactory.nativeTransportReady(value));
     }
 
     private Collection<Token> getTokensFor(InetAddress endpoint)

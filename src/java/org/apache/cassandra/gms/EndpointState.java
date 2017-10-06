@@ -140,7 +140,7 @@ public class EndpointState
 
     public boolean isRpcReady()
     {
-        VersionedValue rpcState = getApplicationState(ApplicationState.RPC_READY);
+        VersionedValue rpcState = getApplicationState(ApplicationState.NATIVE_TRANSPORT_READY);
         return rpcState != null && Boolean.parseBoolean(rpcState.value);
     }
 
