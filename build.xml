@@ -1336,8 +1336,8 @@
         <jvmarg value="-ea"/>
         <!--Disable ref count debugging as it is very slow (uses getStackTrace)-->
         <!--jvmarg value="-Dcassandra.debugrefcount=true"/-->
-        <!--Temporarily disable debugflow until stack overflow fixed, also I want to test ApplyOpSubscription on Jenkins-->
-        <!--jvmarg value="-Dcassandra.debugflow=true"/-->
+        <!--Temporarily disable debug_flow until stack overflow fixed, also I want to test ApplyOpSubscription on Jenkins-->
+        <!--jvmarg value="-Ddse.debug_flow=true"/-->
         <jvmarg value="-Xss256k"/>
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>
@@ -1471,8 +1471,8 @@
         <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
         <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
         <jvmarg value="-Dmigration-sstable-root=${test.data}/migration-sstables"/>
-        <jvmarg value="-Dcassandra.native.epoll.enabled=false"/>
-	<jvmarg value="-Dcassandra.config.loader=org.apache.cassandra.OffsetAwareConfigurationLoader"/>
+        <jvmarg value="-Ddse.io.epoll.enabled=false"/>
+        <jvmarg value="-Dcassandra.config.loader=org.apache.cassandra.OffsetAwareConfigurationLoader"/>
       </testmacrohelper>
     </sequential>
   </macrodef>

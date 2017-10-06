@@ -72,7 +72,7 @@ public class TPC
 
     private static final int NUM_CORES = DatabaseDescriptor.getTPCCores();
     private static final int NIO_IO_RATIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
-    public static final boolean USE_EPOLL = Boolean.parseBoolean(System.getProperty("dse.io.epoll.enabled", "true"))
+    public static final boolean USE_EPOLL = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"))
                                             && Epoll.isAvailable();
     public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("dse.io.aio.enabled", "true"))
                                           && Aio.isAvailable() && USE_EPOLL &&

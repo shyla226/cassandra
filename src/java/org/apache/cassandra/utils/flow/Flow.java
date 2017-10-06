@@ -110,7 +110,7 @@ public abstract class Flow<T>
 
     // Flow manipulation methods and implementations follow
 
-    private static final boolean DEBUG_ENABLED = Boolean.getBoolean("dse.tpc.debug_flow");
+    private static final boolean DEBUG_ENABLED = Boolean.getBoolean("dse.debug_flow");
 
     /**
      * Op for applying any other subsequent operations/transformations on a (potentially) different scheduler.
