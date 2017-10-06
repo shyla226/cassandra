@@ -1743,12 +1743,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      *
      * @param endpoint The endpoint to get rpc address for
      * @return the rpc address
-     * @deprecated use {@link this#getNativeTransportcaddress(InetAddress)} instead
+     * @deprecated use {@link this#getNativeTransportAddress(InetAddress)} instead
      */
     @Deprecated
     public String getRpcaddress(InetAddress endpoint)
     {
-        return getNativeTransportcaddress(endpoint);
+        return getNativeTransportAddress(endpoint);
     }
 
     /**
@@ -1757,7 +1757,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * @param endpoint The endpoint to get rpc address for
      * @return the native transport addresss
      */
-    public String getNativeTransportcaddress(InetAddress endpoint)
+    public String getNativeTransportAddress(InetAddress endpoint)
     {
         if (endpoint.equals(FBUtilities.getBroadcastAddress()))
             return FBUtilities.getNativeTransportBroadcastAddress().getHostAddress();
