@@ -220,6 +220,11 @@ public class TrieIndexFormat implements SSTableFormat
             return true;
         }
 
+        public boolean hasMetadataChecksum()
+        {
+            return true;
+        }
+
         @Override
         public EncodingVersion encodingVersion()
         {

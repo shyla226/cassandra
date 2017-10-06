@@ -152,7 +152,7 @@ public class BigFormat implements SSTableFormat
         // mb (3.0.7, 3.7): commit log lower bound included
         // mc (3.0.8, 3.9): commit log intervals included
 
-        // na (4.0.0): uncompressed chunks, pending repair session
+        // na (4.0.0): uncompressed chunks, pending repair session, checksummed sstable metadata file
         //
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
@@ -162,6 +162,7 @@ public class BigFormat implements SSTableFormat
         private final boolean hasCommitLogIntervals;
         public final boolean hasMaxCompressedLength;
         private final boolean hasPendingRepair;
+        private final boolean hasMetadataChecksum;
 
         BigVersion(String version)
         {
@@ -174,6 +175,7 @@ public class BigFormat implements SSTableFormat
             hasCommitLogIntervals = version.compareTo("mc") >= 0;
             hasMaxCompressedLength = version.compareTo("na") >= 0;
             hasPendingRepair = version.compareTo("na") >= 0;
+            hasMetadataChecksum = version.compareTo("na") >= 0;
         }
 
         @Override
@@ -206,6 +208,11 @@ public class BigFormat implements SSTableFormat
         }
 
         @Override
+        public boolean hasMetadataChecksum()
+        {
+            return hasMetadataChecksum;
+        }
+
         public boolean isCompatible()
         {
             return version.compareTo(earliest_supported_version) >= 0 && version.charAt(0) <= current_version.charAt(0);
