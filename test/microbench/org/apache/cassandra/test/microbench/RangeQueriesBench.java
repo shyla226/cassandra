@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.test.microbench;
 
-
 import java.io.IOException;
 import java.util.concurrent.*;
 
@@ -34,15 +33,19 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.LineNumberInference;
 import org.openjdk.jmh.annotations.*;
 
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 15, time = 2, timeUnit = TimeUnit.SECONDS)
-//@Fork(value = 1, jvmArgsPrepend = {"-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder",
+//@Fork(value = 1, jvmArgsPrepend = {"-Xmx4G", "-Xms4G", "-Xmn2G",
+//                                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder",
 //                                   "-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",
-//                                   "-XX:StartFlightRecording=name=auto,filename=RangeQueriesBench.jfr,dumponexit=true"})
+//                                   "-XX:StartFlightRecording=name=auto,filename=RangeQueriesBench.jfr,delay=30s," +
+//                                   "settings=/home/stefi/profiling-advanced.jfc,dumponexit=true"})
+//@Fork(value = 1, jvmArgsPrepend = {"-XX:+UnlockDiagnosticVMOptions", "-XX:+PrintAssembly", "-Xmx4G", "-Xms4G", "-Xmn2G"})
 @Fork(value = 1)
 @Threads(1)
 @State(Scope.Benchmark)
@@ -60,6 +63,7 @@ public class RangeQueriesBench extends CQLTester
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
+        LineNumberInference.init();
         DatabaseDescriptor.daemonInitialization();
 
         Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(IOScheduler.MAX_POOL_SIZE));
@@ -106,11 +110,20 @@ public class RangeQueriesBench extends CQLTester
             cfs.forceBlockingFlush();
         }
 
+        dumpMetrics(); // dump the metrics so we can compare before and after the benchmark, excluding write metrics
         System.err.println("Done. ");
     }
 
     @TearDown(Level.Trial)
     public void teardown() throws IOException, ExecutionException, InterruptedException
+    {
+        dumpMetrics();
+        JVMStabilityInspector.removeShutdownHooks();
+        CQLTester.tearDownClass();
+        CQLTester.cleanup();
+    }
+
+    private static void dumpMetrics()
     {
         for (TPCTaskType stage : TPCTaskType.values())
         {
@@ -124,10 +137,6 @@ public class RangeQueriesBench extends CQLTester
             if (!v.isEmpty())
                 System.out.println(stage + ":" + v);
         }
-
-        JVMStabilityInspector.removeShutdownHooks();
-        CQLTester.tearDownClass();
-        CQLTester.cleanup();
     }
 
     @Benchmark
@@ -154,4 +163,42 @@ public class RangeQueriesBench extends CQLTester
         execute(String.format(countStatement, tableWide));
     }
 
+//    @Override
+//    public UntypedResultSet execute(String query, Object... values) throws Throwable
+//    {
+//        Waiter waiter = new Waiter();
+//        executeAsync(query, values).subscribe(waiter);
+//        return waiter.get();
+//    }
+//
+//    static class Waiter implements SingleObserver<UntypedResultSet>
+//    {
+//        volatile UntypedResultSet value;
+//        Throwable error = null;
+//
+//        public UntypedResultSet get() throws Throwable
+//        {
+//            while (value == null && error == null)
+//                Thread.yield();
+//
+//            if (error != null)
+//                throw error;
+//
+//            return value;
+//        }
+//
+//        public void onSubscribe(Disposable disposable)
+//        {
+//        }
+//
+//        public void onSuccess(UntypedResultSet v)
+//        {
+//            value = v;
+//        }
+//
+//        public void onError(Throwable throwable)
+//        {
+//            error = throwable;
+//        }
+//    }
 }

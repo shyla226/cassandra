@@ -68,9 +68,9 @@ public interface Rebufferer extends ReaderFileProxy
 
         private final CompletableFuture<ChunkCache.Buffer> asyncBuffer;
 
-        public NotInCacheException(CompletableFuture<ChunkCache.Buffer> asyncBuffer)
+        public NotInCacheException(CompletableFuture<ChunkCache.Buffer> asyncBuffer, String path, long position)
         {
-            super("Requested data is not in cache. Retry with ReaderConstraint.NONE.");
+            super(String.format("Requested data (%s@%d) is not in cache.", path, position));
             this.asyncBuffer = asyncBuffer;
         }
 

@@ -171,7 +171,7 @@ public final class LineNumberInference
             Descriptor descriptor = mappings.get(klassName);
             if (descriptor == null)
             {
-                logger.info("Could not find line information for " + klass);
+                logger.trace("Could not find line information for " + klass);
                 return UNKNOWN_SOURCE;
             }
 

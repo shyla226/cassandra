@@ -57,13 +57,13 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
       (and this is done in PagerIterator). This can be null (when we start). */
     public DecoratedKey lastKey;
 
-    /** The total number of rows remaining to be fetched in the current partition: this is initialized with the limit 
+    /** The total number of rows remaining to be fetched in the current partition: this is initialized with the limit
      * partition count, and capped by it  */
     private int remainingInPartition;
 
     /** This is set to true once the iterator is closed, and only then, if we have run out of data */
     private boolean exhausted;
-    
+
     /** This is the last counter from the latest page iteration. */
     DataLimits.Counter lastCounter;
 
@@ -112,7 +112,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         internalPager = new RowPager(pageCommand.limits().duplicate(), command.nowInSec());
         return ((RowPager) internalPager).apply(dataSupplier.apply(pageCommand));
     }
-    
+
     private DataLimits nextPageLimits()
     {
         return limits().withCount(Math.min(limits().count(), remaining));
@@ -173,6 +173,13 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         Flow<FlowablePartition> apply(Flow<FlowablePartition> source)
         {
+//            return source.map(partition -> {
+//                if (internalPager.isFirstPartition)
+//                    internalPager.isFirstPartition = false;
+//
+//                return applyToPartition(partition);
+//            }).doOnClose(this::onClose);
+
             return source.flatMap(partition ->{
                 // If this is the first partition of this page, this could be the continuation of a partition we've started
                 // on the previous page. In which case, we could have the problem that the partition has no more "regular"
@@ -232,7 +239,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             counter.endOfIteration();
 
             recordLast(lastKey, lastRow);
-            
+
             remaining = getRemaining();
             remainingInPartition = getRemainingInPartition();
 
@@ -245,7 +252,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
             // remove the internal page so that we know that the iteration is finished
             internalPager = null;
-            
+
             lastCounter = counter;
         }
 
@@ -345,8 +352,8 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     {
         return internalPager == null ? remainingInPartition : internalPager.getRemainingInPartition();
     }
-    
-    DataLimits limits() 
+
+    DataLimits limits()
     {
         return command.limits();
     }

@@ -119,7 +119,7 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         // This method must be async-read-safe. Every read from new buffering position (the go() calls) can
         // trigger NotInCacheException, and iteration must be able to redo the work that was interrupted during the next
         // call. Hence the mutable state must be fully ready before all go() calls
-        // (i.e. they must either be the last step in the loop or the state must be unchaged until that call has succeeded).
+        // (i.e. they must either be the last step in the loop or the state must be unchanged until that call has succeeded).
         go(stack.node);
         while (true)
         {

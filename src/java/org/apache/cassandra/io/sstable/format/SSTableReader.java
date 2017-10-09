@@ -1038,33 +1038,74 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return AsyncPartitionReader.create(this, listener, key, slices, selectedColumns, reversed);
     }
 
+    public Flow<FlowableUnfilteredPartition> flow(IndexFileEntry indexEntry, FileDataInput dfile, SSTableReadsListener listener)
+    {
+        return AsyncPartitionReader.create(this, dfile, listener, indexEntry);
+    }
 
-    /**
-     * @param bounds. Must not be wrapped around ranges
+    public Flow<FlowableUnfilteredPartition> flow(IndexFileEntry indexEntry, FileDataInput dfile, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
+    {
+        return AsyncPartitionReader.create(this, dfile, listener, indexEntry, slices, selectedColumns, reversed);
+    }
+
+    public abstract Flow<IndexFileEntry> coveredKeysFlow(RandomAccessReader dfile,
+                                                         PartitionPosition left,
+                                                         boolean inclusiveLeft,
+                                                         PartitionPosition right,
+                                                         boolean inclusiveRight);
+
+    private final class KeysRange
+    {
+        PartitionPosition left;
+        boolean inclusiveLeft;
+        PartitionPosition right;
+        boolean inclusiveRight;
+
+        KeysRange(AbstractBounds<PartitionPosition> bounds)
+        {
+            assert !AbstractBounds.strictlyWrapsAround(bounds.left, bounds.right) : "[" + bounds.left + "," + bounds.right + "]";
+
+            left = bounds.left;
+            inclusiveLeft = bounds.inclusiveLeft();
+            if (filterFirst() && first.compareTo(left) > 0)
+            {
+                left = first;
+                inclusiveLeft = true;
+            }
+
+            right = bounds.right;
+            inclusiveRight = bounds.inclusiveRight();
+            if (filterLast() && last.compareTo(right) < 0)
+            {
+                right = last;
+                inclusiveRight = true;
+            }
+        }
+
+        PartitionIndexIterator iterator() throws IOException
+        {
+            return coveredKeysIterator(left, inclusiveLeft, right, inclusiveRight);
+        }
+
+        public Flow<IndexFileEntry> flow(RandomAccessReader dataFileReader)
+        {
+            return coveredKeysFlow(dataFileReader, left, inclusiveLeft, right, inclusiveRight);
+        }
+    }
+
+   /**
+     * @param bounds Must not be wrapped around ranges
      * @return PartitionIndexIterator within the given bounds
      * @throws IOException
      */
     public PartitionIndexIterator coveredKeysIterator(AbstractBounds<PartitionPosition> bounds) throws IOException
     {
-        assert !AbstractBounds.strictlyWrapsAround(bounds.left, bounds.right) : "[" + bounds.left + "," + bounds.right + "]";
-        
-        PartitionPosition left = bounds.left;
-        boolean inclusiveLeft = bounds.inclusiveLeft();
-        if (filterFirst() && first.compareTo(left) > 0)
-        {
-            left = first;
-            inclusiveLeft = true;
-        }
+        return new KeysRange(bounds).iterator();
+    }
 
-        PartitionPosition right = bounds.right;
-        boolean inclusiveRight = bounds.inclusiveRight();
-        if (filterLast() && last.compareTo(right) < 0)
-        {
-            right = last;
-            inclusiveRight = true;
-        }
-
-        return coveredKeysIterator(left, inclusiveLeft, right, inclusiveRight);
+    public Flow<IndexFileEntry> coveredKeysFlow(RandomAccessReader dataFileReader, AbstractBounds<PartitionPosition> bounds)
+    {
+        return new KeysRange(bounds).flow(dataFileReader);
     }
 
     /**
@@ -1076,6 +1117,23 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
     {
         return SSTableScanner.getScanner(this, columns, dataRange, listener);
+    }
+
+    /**
+     * Return an asynchronous table scanner, retrieving the selected rows in the selected
+     * partitions as a flow of {@link FlowableUnfilteredPartition}.
+     *
+     * @param columns the columns to return.
+     * @param dataRange filter to use when reading the columns
+     * @param listener a listener used to handle internal read events
+     *
+     * @return An asynchronous flow of partitions for seeking over the rows of the SSTable.
+     */
+    public Flow<FlowableUnfilteredPartition> getAsyncScanner(ColumnFilter columns,
+                                                             DataRange dataRange,
+                                                             SSTableReadsListener listener)
+    {
+        return AsyncSSTableScanner.getScanner(this, columns, dataRange, listener);
     }
 
     /**
@@ -1097,6 +1155,31 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public ISSTableScanner getScanner()
     {
         return SSTableScanner.getScanner(this);
+    }
+
+    /**
+     * Return an asynchronous table scanner, retrieving the full sstable
+     * as a flow of {@link FlowableUnfilteredPartition}.
+     *
+     * @return An asynchronous flow of partitions for seeking over the rows of the SSTable.
+     */
+    public Flow<FlowableUnfilteredPartition> getAsyncScanner()
+    {
+        return AsyncSSTableScanner.getScanner(this);
+    }
+
+    /**
+     * Direct I/O SSTableScanner over a defined collection of ranges of tokens.
+     *
+     * @param ranges the range of keys to cover
+     * @return A Scanner for seeking over the rows of the SSTable.
+     */
+    public Flow<FlowableUnfilteredPartition> getAsyncScanner(Collection<Range<Token>> ranges)
+    {
+        if (ranges != null)
+            return AsyncSSTableScanner.getScanner(this, ranges);
+        else
+            return getAsyncScanner();
     }
 
     /**
@@ -1471,11 +1554,16 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return dataFile.createReader();
     }
 
+    public RandomAccessReader openDataReader(Rebufferer.ReaderConstraint rc)
+    {
+        return dataFile.createReader(rc);
+    }
+
     public AsynchronousChannelProxy getDataChannel()
     {
         return dataFile.channel;
     }
-    
+
     /**
      * @param component component to get timestamp.
      * @return last modified time for given component. 0 if given component does not exist or IO error occurs.

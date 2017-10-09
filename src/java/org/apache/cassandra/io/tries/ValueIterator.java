@@ -25,9 +25,9 @@ import org.apache.cassandra.utils.ByteSource;
  */
 public class ValueIterator<Concrete extends ValueIterator<Concrete>> extends Walker<Concrete>
 {
-    final ByteSource limit;
-    IterationPosition stack;
-    long next;
+    private final ByteSource limit;
+    private IterationPosition stack;
+    private long next;
 
     static class IterationPosition
     {
@@ -36,13 +36,19 @@ public class ValueIterator<Concrete extends ValueIterator<Concrete>> extends Wal
         int limit;
         IterationPosition prev;
 
-        public IterationPosition(long node, int childIndex, int limit, IterationPosition prev)
+        IterationPosition(long node, int childIndex, int limit, IterationPosition prev)
         {
             super();
             this.node = node;
             this.childIndex = childIndex;
             this.limit = limit;
             this.prev = prev;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("[Node %d, child %d, limit %d]", node, childIndex, limit);
         }
     }
 
@@ -51,11 +57,20 @@ public class ValueIterator<Concrete extends ValueIterator<Concrete>> extends Wal
         super(source, root, rc);
         stack = new IterationPosition(root, -1, 256, null);
         limit = null;
-        go(root);
-        if (payloadFlags() != 0)
-            next = root;
-        else
-            next = advanceNode();
+
+        try
+        {
+            go(root);
+            if (payloadFlags() != 0)
+                next = root;
+            else
+                next = advanceNode();
+        }
+        catch (Throwable t)
+        {
+            super.close();
+            throw t;
+        }
     }
 
     protected ValueIterator(Rebufferer source, long root, ByteSource start, ByteSource end, boolean admitPrefix, Rebufferer.ReaderConstraint rc)
@@ -68,50 +83,63 @@ public class ValueIterator<Concrete extends ValueIterator<Concrete>> extends Wal
         int limitByte;
         long payloadedNode = -1;
 
-        // Follow start position while we still have a prefix, stacking path and saving prefixes.
-        start.reset();
-        end.reset();
-        go(root);
-        while (true)
+        try
         {
-            int s = start.next();
-            childIndex = search(s);
-
-            // For a separator trie the latest payload met along the prefix is a potential match for start
-            if (admitPrefix)
-                if (childIndex == 0 || childIndex == -1)
-                {
-                    if (payloadFlags() != 0)
-                        payloadedNode = position;
-                }
-                else
-                    payloadedNode = -1;
-
-            limitByte = 256;
-            if (atLimit)
+            // Follow start position while we still have a prefix, stacking path and saving prefixes.
+            start.reset();
+            end.reset();
+            go(root);
+            while (true)
             {
-                limitByte = end.next();
-                if (s < limitByte)
-                    atLimit = false;
+                int s = start.next();
+                childIndex = search(s);
+
+                // For a separator trie the latest payload met along the prefix is a potential match for start
+                if (admitPrefix)
+                    if (childIndex == 0 || childIndex == -1)
+                    {
+                        if (payloadFlags() != 0)
+                            payloadedNode = position;
+                    }
+                    else
+                        payloadedNode = -1;
+
+                limitByte = 256;
+                if (atLimit)
+                {
+                    limitByte = end.next();
+                    if (s < limitByte)
+                        atLimit = false;
+                }
+                if (childIndex < 0)
+                    break;
+
+                prev = new IterationPosition(position, childIndex, limitByte, prev);
+                go(transition(childIndex));
             }
-            if (childIndex < 0)
-                break;
 
-            prev = new IterationPosition(position, childIndex, limitByte, prev);
-            go(transition(childIndex));
+            childIndex = -1 - childIndex - 1;
+            stack = new IterationPosition(position, childIndex, limitByte, prev);
+
+            // Advancing now gives us first match if we didn't find one already.
+            if (payloadedNode != -1)
+                next = payloadedNode;
+            else
+                next = advanceNode();
         }
-
-        childIndex = -1 - childIndex - 1;
-        stack = new IterationPosition(position, childIndex, limitByte, prev);
-
-        // Advancing now gives us first match if we didn't find one already.
-        if (payloadedNode != -1)
-            next = payloadedNode;
-        else
-            next = advanceNode();
+        catch (Throwable t)
+        {
+            super.close();
+            throw t;
+        }
     }
 
-    protected long nextPayloadedNode()     // returns payloaded node position
+    /**
+     * Returns the payload node position.
+     *
+     * This method must be async-read-safe, see {@link #advanceNode()}.
+     */
+    protected long nextPayloadedNode()
     {
         long toReturn = next;
         if (next != -1)
@@ -119,38 +147,56 @@ public class ValueIterator<Concrete extends ValueIterator<Concrete>> extends Wal
         return toReturn;
     }
 
-    long advanceNode()
+    /**
+     * This method must be async-read-safe. Every read from new buffering position (the go() calls) can
+     * trigger NotInCacheException, and iteration must be able to redo the work that was interrupted during the next
+     * call. Hence the mutable state must be fully ready before all go() calls (i.e. they must either be the
+     * last step in the loop or the state must be unchanged until that call has succeeded).
+     */
+    private long advanceNode()
     {
         long child;
         int transitionByte;
 
-        go(stack.node);
+        go(stack.node); // can throw NotInCacheException, OK no state modified yet
         while (true)
         {
-            // advance position in node
-            ++stack.childIndex;
-            transitionByte = transitionByte(stack.childIndex);
+            // advance position in node but don't change the stack just yet due to NotInCacheExceptions
+            int childIndex = stack.childIndex + 1;
+            transitionByte = transitionByte(childIndex);
+
             if (transitionByte > stack.limit)
             {
                 // ascend
                 stack = stack.prev;
                 if (stack == null)        // exhausted whole trie
                     return -1;
-                go(stack.node);
+                go(stack.node); // can throw NotInCacheException, OK - stack ready to re-enter loop with parent
                 continue;
             }
-            child = transition(stack.childIndex);
+
+            child = transition(childIndex);
 
             if (child != -1)
             {
+                assert child >= 0 : String.format("Expected value >= 0 but got %d - %s", child, this);
+
                 // descend
+                go(child); // can throw NotInCacheException, OK - stack not yet changed, limit not yet incremented
+
                 int l = 256;
                 if (transitionByte == stack.limit)
                     l = limit.next();
+
+                stack.childIndex = childIndex;
                 stack = new IterationPosition(child, -1, l, stack);
-                go(child);
+
                 if (payloadFlags() != 0)
                     return child;
+            }
+            else
+            {
+                stack.childIndex = childIndex;
             }
         }
 

@@ -55,7 +55,7 @@ public interface SSTableFormat
      */
     public boolean validateVersion(String ver);
 
-    public static enum Type
+    public enum Type
     {
         //The original sstable format
         BIG("big", BigFormat.instance),
@@ -71,7 +71,7 @@ public interface SSTableFormat
             return TRIE_INDEX;
         }
 
-        private Type(String name, SSTableFormat info)
+        Type(String name, SSTableFormat info)
         {
             //Since format comes right after generation
             //we disallow formats with numeric names

@@ -132,8 +132,10 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         if (currentKey != null)
         {
             readNext();
+            // if nextKey is null, then currentKey is the last key to be published, therefore check against any limit
+            // and suppress the partition if it is beyond the limit
             if (nextKey == null && limit != null && currentKey.compareTo(limit) > exclusiveLimit)
-            {
+            { // exclude last partition outside range
                 currentKey = null;
                 currentEntry = null;
             }

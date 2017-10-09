@@ -1927,8 +1927,8 @@
               </fileset>
           </classpath>
           <!--<arg value="-lprof"/>-->
-          <arg value="-prof"/>
-          <arg value="gc"/>
+          <!--<arg value="-prof"/>-->
+          <!--<arg value="gc"/>-->
           <!--<arg value="-prof"/>-->
           <!--<arg value="hs_gc"/>-->
           <!--<arg value="-prof"/>-->

@@ -51,6 +51,11 @@ public class EmptyRebufferer implements Rebufferer, RebuffererFactory
         return EMPTY;
     }
 
+    public BufferHolder rebuffer(long position, ReaderConstraint constraint)
+    {
+        return EMPTY;
+    }
+
     public void close()
     {
         // nothing to do

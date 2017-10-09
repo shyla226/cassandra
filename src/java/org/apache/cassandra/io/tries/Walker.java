@@ -57,8 +57,16 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
         this.source = source;
         this.root = root;
         this.rc = rc;
-        bh = source.rebuffer(PageAware.pageStart(root), rc);
-        buf = bh.buffer();
+        try
+        {
+            bh = source.rebuffer(PageAware.pageStart(root), rc); // can throw NotInCacheException
+            buf = bh.buffer();
+        }
+        catch (Throwable t)
+        {
+            source.closeReader();
+            throw t;
+        }
     }
 
     public void close()
@@ -327,5 +335,12 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
             dumpTrie(out, payloadReader, child, indent + "  ");
             go(node);
         }
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("[Trie Walker - NodeType: %s, buffer: %s, file offset: %d, Buffer offset: %d, position: %d]",
+                             nodeType, buf, bh.offset(), offset ,position);
     }
 }

@@ -332,7 +332,7 @@ public class ChunkCache
              * Notify the caller this page isn't ready
              * but give them the Buffer container so they can register a callback
              */
-            throw new NotInCacheException(asyncBuffer);
+            throw new NotInCacheException(asyncBuffer, key.path, key.position);
         }
 
         public void invalidate(long position)

@@ -26,7 +26,6 @@ import java.nio.ByteBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
@@ -318,32 +317,48 @@ public class PartitionIndex implements Closeable
      */
     public static class IndexPosIterator extends ValueIterator<IndexPosIterator>
     {
+        static final long INVALID = -1;
+        long pos = INVALID;
+
         /**
          * @param index PartitionIndex to use for the iteration.
          *
          * Note: For performance reasons this class does not keep a reference of the index. Caller must ensure a
          * reference is held for the lifetime of this object.
          */
-        protected IndexPosIterator(PartitionIndex index, Rebufferer.ReaderConstraint rc)
+        public IndexPosIterator(PartitionIndex index, Rebufferer.ReaderConstraint rc)
         {
             super(index.instantiateRebufferer(), index.root, rc);
         }
 
-        protected IndexPosIterator(PartitionIndex summary, PartitionPosition start, PartitionPosition end, Rebufferer.ReaderConstraint rc)
+        public IndexPosIterator(PartitionIndex summary, PartitionPosition start, PartitionPosition end, Rebufferer.ReaderConstraint rc)
         {
             super(summary.instantiateRebufferer(), summary.root,
                   source(start), source(end),
                   true, rc);
         }
 
+        /**
+         * Returns the position in the row index or data file.
+         *
+         * This method must be async-read-safe, {@link #go(long)} may throw
+         * {@link org.apache.cassandra.io.util.Rebufferer.NotInCacheException}.
+         */
         protected long nextIndexPos() throws IOException
         {
-            long pos = nextPayloadedNode();
-            if (pos == -1)
-                return NOT_FOUND;
+            // The IndexInfo read below may trigger a NotInCacheException. To be able to resume from that
+            // without missing positions, we save and reuse the unreturned position.
+            if (pos == INVALID)
+            {
+                pos = nextPayloadedNode();
+                if (pos == INVALID)
+                    return NOT_FOUND;
+            }
 
-            go(pos);
-            return getIndexPos(buf, payloadPosition(), payloadFlags());
+            go(pos); // can throw NotInCacheException, if it does next time we re-use the same pos
+
+            pos = INVALID; // make sure next time we call nextPayloadedNode() again
+            return getIndexPos(buf, payloadPosition(), payloadFlags()); // this should not throw
         }
     }
 
