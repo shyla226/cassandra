@@ -26,12 +26,15 @@ import java.util.stream.StreamSupport;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.btree.BTree;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Base abstract class for {@code Row} implementations.
@@ -49,11 +52,27 @@ public abstract class AbstractRow extends AbstractCollection<ColumnData> impleme
     @Override
     public boolean hasLiveData(int nowInSec, boolean enforceStrictLiveness)
     {
+        /**
+         * This logic is duplicated in {@link ReadCommand#withMetricsRecording(Flow, TableMetrics, long)},
+         * see the countRow method. If you make a change here then remember to update that code too.
+         */
         if (primaryKeyLivenessInfo().isLive(nowInSec))
             return true;
         else if (enforceStrictLiveness)
             return false;
-        return Iterables.any(cells(), cell -> cell.isLive(nowInSec));
+
+        return reduceCells(false, new BTree.ReduceFunction<Boolean, Cell>() {
+            public Boolean apply(Boolean ret, Cell cell)
+            {
+                return ret || cell.isLive(nowInSec);
+            }
+
+            @Override
+            public boolean stop(Boolean ret)
+            {
+                return ret; // if we find a cell that is live, then we can stop
+            }
+        });
     }
 
     public boolean isStatic()

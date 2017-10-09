@@ -19,6 +19,7 @@ package org.apache.cassandra.db.rows;
 
 import java.util.*;
 import java.security.MessageDigest;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 import com.google.common.base.Predicate;
@@ -111,7 +112,8 @@ public interface Row extends Unfiltered, Collection<ColumnData>
      * 
      * @param nowInSec the current time to decide what is deleted and what isn't
      * @param enforceStrictLiveness whether the row should be purged if there is no PK liveness info,
-     *                              normally retrieved from {@link CFMetaData#enforceStrictLiveness()}
+     *                              normally retrieved from {@link TableMetadata#enforceStrictLiveness()}
+     *
      * @return true if there is some live information
      */
     public boolean hasLiveData(int nowInSec, boolean enforceStrictLiveness);
@@ -277,6 +279,17 @@ public interface Row extends Unfiltered, Collection<ColumnData>
      * Apply a funtion to every column in a row until a stop condition is reached
      */
     public void apply(Consumer<ColumnData> function, Predicate<ColumnData> stopCondition, boolean reverse);
+
+    /**
+     * Apply a reducer to every column in this row.
+     */
+    public <R> R reduce(R seed, BTree.ReduceFunction<R, ColumnData> reducer);
+
+    /**
+     * Apply a reducer to every cell in this row, that is complex columns iterate cells and pass
+     * each cell to the reduer, unlike {@link #reduce(Object, BTree.ReduceFunction)}.
+     */
+    public <R> R reduceCells(R seed, BTree.ReduceFunction<R, Cell> reducer);
 
     /**
      * A row deletion/tombstone.
