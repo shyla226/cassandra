@@ -482,8 +482,8 @@ public class StartupChecks
         // is the event loop we've spend time optimizing/perf testing.
         if (!TPC.USE_EPOLL)
         {
-            if (!Boolean.parseBoolean(System.getProperty("dse.io.epoll.enabled", "true")))
-                logger.warn("EPoll has been manually disabled (through the 'dse.io.epoll.enabled' system property). "
+            if (!Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true")))
+                logger.warn("EPoll has been manually disabled (through the 'cassandra.native.epoll.enabled' system property). "
                             + "This may result in subpar performance.");
             else
                 logger.warn("EPoll doesn't seem to be available: this may result in subpar performance.");
