@@ -139,7 +139,7 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
                             .handler(WRITE_HANDLER);
         BATCH_STORE = helper.ackedRequest("BATCH_STORE", Batch.class)
                             .timeout(DatabaseDescriptor::getWriteRpcTimeout)
-                            .droppedGroup(DroppedMessages.Group.MUTATION)
+                            .droppedGroup(DroppedMessages.Group.BATCH_STORE)
                             .withBackPressure()
                             .handler(BATCH_WRITE_HANDLER);
         BATCH_REMOVE = helper.oneWay("BATCH_REMOVE", BatchRemove.class)

@@ -56,6 +56,7 @@ public class DroppedMessages
         MUTATION,
         COUNTER_MUTATION,
         VIEW_MUTATION,
+        BATCH_STORE,
         READ,
         RANGE_SLICE,
         READ_REPAIR,
