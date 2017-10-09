@@ -35,7 +35,7 @@ public class AuditTrigger implements ITrigger
 {
     private Properties properties = loadProperties();
 
-    public Collection<Mutation> augment(Partition update)
+    public Collection<Mutation> augmentNonBlocking(Partition update)
     {
         String auditKeyspace = properties.getProperty("keyspace");
         String auditTable = properties.getProperty("table");
