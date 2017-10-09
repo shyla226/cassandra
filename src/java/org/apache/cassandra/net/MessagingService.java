@@ -43,8 +43,12 @@ import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ExecutorLocal;
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.db.*;
@@ -63,6 +67,7 @@ import org.apache.cassandra.net.interceptors.Interceptors;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.*;
+import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
@@ -231,8 +236,9 @@ public final class MessagingService implements MessagingServiceMBean
 
     private <P, Q> void deliverLocally(Request<P, Q> request, MessageCallback<Q> callback)
     {
-        Consumer<Response<Q>> handleResponse = response -> request.executor()
-                                                                  .execute(response, () -> deliverLocalResponse(request, response, callback));
+        Consumer<Response<Q>> handleResponse = response ->
+                                               request.responseExecutor().execute(() -> deliverLocalResponse(request, response, callback),
+                                                                                  ExecutorLocals.create());
 
         Consumer<Response<Q>> onResponse = messageInterceptors.isEmpty()
                                            ? handleResponse
@@ -266,7 +272,7 @@ public final class MessagingService implements MessagingServiceMBean
     {
         long startTime = request.operationStartMillis();
         long timeout = request.timeoutMillis();
-        MessageExecutor executor = request.executor();
+        TracingAwareExecutor executor = request.responseExecutor();
 
         for (Request.Forward forward : request.forwards())
             registerCallback(forward.id, forward.to, request.verb(), callback, startTime, timeout, executor);
@@ -280,9 +286,9 @@ public final class MessagingService implements MessagingServiceMBean
                                       MessageCallback<Q> callback,
                                       long startTimeMillis,
                                       long timeout,
-                                      MessageExecutor executors)
+                                      TracingAwareExecutor executor)
     {
-        CallbackInfo previous = callbacks.put(id, new CallbackInfo<>(to, callback, type, executors, startTimeMillis), timeout);
+        CallbackInfo previous = callbacks.put(id, new CallbackInfo<>(to, callback, type, executor, startTimeMillis), timeout);
         assert previous == null : String.format("Callback already exists for id %d! (%s)", id, previous);
     }
 
@@ -384,7 +390,9 @@ public final class MessagingService implements MessagingServiceMBean
                                                                         Consumer<M> consumer,
                                                                         MessageCallback<Q> callback)
     {
-        messageInterceptors.interceptRequest(request, rq -> request.executor().execute(rq, () -> consumer.accept(rq)), callback);
+        messageInterceptors.interceptRequest(request,
+                                             rq -> rq.requestExecutor().execute(() -> consumer.accept(rq), ExecutorLocals.create()),
+                                             callback);
     }
 
     /**
@@ -726,25 +734,28 @@ public final class MessagingService implements MessagingServiceMBean
 
     private void receiveInternal(Message<?> message)
     {
+        TraceState state = Tracing.instance.initializeFromMessage(message);
+        if (state != null)
+            state.trace("{} message received from {}", message.verb(), message.from());
+
+        ExecutorLocals locals = ExecutorLocals.create(state, ClientWarn.instance.getForMessage(message.id()));
         if (message.isRequest())
-            receiveRequestInternal((Request<?, ?>) message);
+            receiveRequestInternal((Request<?, ?>) message, locals);
         else
-            receiveResponseInternal((Response<?>) message);
+            receiveResponseInternal((Response<?>) message, locals);
     }
 
-    private <P, Q> void receiveRequestInternal(Request<P, Q> request)
+    private <P, Q> void receiveRequestInternal(Request<P, Q> request, ExecutorLocals locals)
     {
-        request.executor().execute(request,  MessageDeliveryTask.forRequest(request));
+        request.requestExecutor().execute(MessageDeliveryTask.forRequest(request), locals);
     }
 
-    private <Q> void receiveResponseInternal(Response<Q> response)
+    private <Q> void receiveResponseInternal(Response<Q> response, ExecutorLocals locals)
     {
         CallbackInfo<Q> info = getRegisteredCallback(response, false);
         // Ignore expired callback info (we already logged in getRegisteredCallback)
         if (info != null)
-        {
-            info.executors.execute(response, MessageDeliveryTask.forResponse(response));
-        }
+            info.responseExecutor.execute(MessageDeliveryTask.forResponse(response), locals);
     }
 
     // Only required by legacy serialization. Can inline in following metho when we get rid of that.

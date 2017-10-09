@@ -19,6 +19,8 @@ package org.apache.cassandra.net;
 
 import java.net.InetAddress;
 
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
+
 /**
  * Groups a callback and a target node for the sake of MessagingService expiring
  * map.
@@ -28,19 +30,19 @@ class CallbackInfo<Q>
     final InetAddress target;
     final MessageCallback<Q> callback;
     final Verb<?, Q> verb;
-    final MessageExecutor executors;
+    final TracingAwareExecutor responseExecutor;
     final long requestStartMillis;
 
     CallbackInfo(InetAddress target,
                  MessageCallback<Q> callback,
                  Verb<?, Q> verb,
-                 MessageExecutor executors,
+                 TracingAwareExecutor responseExecutor,
                  long requestStartMillis)
     {
         this.target = target;
         this.callback = callback;
         this.verb = verb;
-        this.executors = executors;
+        this.responseExecutor = responseExecutor;
         this.requestStartMillis = requestStartMillis;
     }
 

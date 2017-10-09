@@ -28,6 +28,7 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.db.monitoring.AbortedOperationException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.utils.FBUtilities;
@@ -69,8 +70,6 @@ public class Request<P, Q> extends Message<P>
     protected final Verb<P, Q> verb;
     private final List<Forward> forwards;
 
-    private final MessageExecutor executor;
-
     /**
      * Package-protected because request are not meant to be created manually outside of the 'net' package. Instead,
      * one should use the {@link Verb#newRequest} methods.
@@ -96,28 +95,9 @@ public class Request<P, Q> extends Message<P>
             Message.Data<P> data,
             List<Forward> forwards)
     {
-        this(from,
-             to,
-             id,
-             verb,
-             data,
-             forwards,
-             to.equals(from) ? verb.localExecutorSupplier().apply(data.payload)
-                             : verb.remoteExecutorSupplier().apply(data.payload));
-    }
-
-    Request(InetAddress from,
-            InetAddress to,
-            int id,
-            Verb<P, Q> verb,
-            Message.Data<P> data,
-            List<Forward> forwards,
-            MessageExecutor executor)
-    {
         super(from, to, id, data);
         this.verb = verb;
         this.forwards = forwards;
-        this.executor = executor;
     }
 
     @VisibleForTesting
@@ -141,11 +121,7 @@ public class Request<P, Q> extends Message<P>
                              new Data<>(payload,
                                         -1,
                                         createAtMillis,
-                                        verb.isOneWay() ? Long.MAX_VALUE : verb.timeoutSupplier().get(payload)),
-                             Collections.emptyList(),
-                             // Fake requests are fake. And we sometimes build them with null payload, which breaks
-                             // our executor retrieval.
-                             null);
+                                        verb.isOneWay() ? Long.MAX_VALUE : verb.timeoutSupplier().get(payload)));
     }
 
     public Type type()
@@ -219,11 +195,19 @@ public class Request<P, Q> extends Message<P>
     }
 
     /**
-     * Executor to use to handle this request and its response.
+     * The executor to use for handling this request.
      */
-    MessageExecutor executor()
+    TracingAwareExecutor requestExecutor()
     {
-        return executor;
+        return verb().requestExecutor().get(payload());
+    }
+
+    /**
+     * The executor to use for handling responses to this request.
+     */
+    TracingAwareExecutor responseExecutor()
+    {
+        return verb().responseExecutor().get(payload());
     }
 
     /**

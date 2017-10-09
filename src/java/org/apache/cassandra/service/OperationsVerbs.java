@@ -68,7 +68,7 @@ public class OperationsVerbs extends VerbGroup<OperationsVerbs.OperationsVersion
         RegistrationHelper helper = helper();
 
         TRUNCATE = helper.requestResponse("TRUNCATE", Truncation.class, TruncateResponse.class)
-                         .onStage(Stage.MISC)
+                         .requestStage(Stage.MISC)
                          .droppedGroup(DroppedMessages.Group.TRUNCATE)
                          .timeout(DatabaseDescriptor::getTruncateRpcTimeout)
                          .syncHandler((from, t) ->
@@ -89,7 +89,7 @@ public class OperationsVerbs extends VerbGroup<OperationsVerbs.OperationsVersion
                                       });
 
         SNAPSHOT = helper.ackedRequest("SNAPSHOT", SnapshotCommand.class)
-                         .onStage(Stage.MISC)
+                         .requestStage(Stage.MISC)
                          .droppedGroup(DroppedMessages.Group.SNAPSHOT)
                          .timeout(DatabaseDescriptor::getRpcTimeout)
                          .syncHandler((from, command) ->
@@ -101,7 +101,7 @@ public class OperationsVerbs extends VerbGroup<OperationsVerbs.OperationsVersion
                                       });
 
         REPLICATION_FINISHED = helper.ackedRequest("REPLICATION_FINISHED", EmptyPayload.class)
-                                     .onStage(Stage.MISC)
+                                     .requestStage(Stage.MISC)
                                      .droppedGroup(DroppedMessages.Group.OTHER)
                                      .timeout(DatabaseDescriptor::getRpcTimeout)
                                      .syncHandler((from, x) -> StorageService.instance.confirmReplication(from));

@@ -21,8 +21,8 @@ import java.net.InetAddress;
 import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
+import org.apache.cassandra.concurrent.ExecutorSupplier;
 import org.apache.cassandra.utils.TimeoutSupplier;
 import org.apache.cassandra.utils.versioning.Version;
 
@@ -61,25 +61,25 @@ public abstract class Verb<P, Q>
         private final VerbGroup<?> group;
         private final int groupIdx;
         private final String name;
-        private final Function<P, MessageExecutor.Local> localExecutorSupplier;
-        private final Function<P, MessageExecutor.Remote> remoteExecutorSupplier;
+        private final ExecutorSupplier<P> requestExecutor;
+        private final ExecutorSupplier<P> responseExecutor;
         private final boolean supportsBackPressure;
         private final DroppedMessages.Group droppedGroup;
 
         Info(VerbGroup<?> group,
              int groupIdx,
              String name,
-             Function<P, MessageExecutor.Local> localExecutorSupplier,
-             Function<P, MessageExecutor.Remote> remoteExecutorSupplier,
+             ExecutorSupplier<P> requestExecutor,
+             ExecutorSupplier<P> responseExecutor,
              boolean supportsBackPressure,
              DroppedMessages.Group droppedGroup)
         {
-            assert group != null && name != null && localExecutorSupplier != null && remoteExecutorSupplier != null;
+            assert group != null && name != null && requestExecutor != null;
             this.group = group;
             this.groupIdx = groupIdx;
             this.name = name;
-            this.localExecutorSupplier = localExecutorSupplier;
-            this.remoteExecutorSupplier = remoteExecutorSupplier;
+            this.requestExecutor = requestExecutor;
+            this.responseExecutor = responseExecutor;
             this.supportsBackPressure = supportsBackPressure;
             this.droppedGroup = droppedGroup;
         }
@@ -154,19 +154,19 @@ public abstract class Verb<P, Q>
     }
 
     /**
-     * The executor to use for locally-delivered requests and responses.
+     * The factory method to return the executor that will execute the request.
      */
-    Function<P, MessageExecutor.Local> localExecutorSupplier()
+    ExecutorSupplier<P> requestExecutor()
     {
-        return info.localExecutorSupplier;
+        return info.requestExecutor;
     }
 
     /**
-     * The executor to use to execute remote requests and deliver remote responses.
+     * The factory method to return the executor that will execute responses.
      */
-    Function<P, MessageExecutor.Remote> remoteExecutorSupplier()
+    ExecutorSupplier<P> responseExecutor()
     {
-        return info.remoteExecutorSupplier;
+        return info.responseExecutor;
     }
 
     /**

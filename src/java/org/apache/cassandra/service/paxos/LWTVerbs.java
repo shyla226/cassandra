@@ -58,20 +58,21 @@ public class LWTVerbs extends VerbGroup<LWTVerbs.LWTVersion>
     {
         super(id, false, LWTVersion.class);
 
-        RegistrationHelper helper = helper().droppedGroup(DroppedMessages.Group.LWT);
+        RegistrationHelper helper = helper().executeOnIOScheduler()
+                                            .droppedGroup(DroppedMessages.Group.LWT);
 
         PREPARE = helper.requestResponse("PREPARE", Commit.class, PrepareResponse.class)
                         .timeout(DatabaseDescriptor::getWriteRpcTimeout)
-                        .onExecutor(TPC.ioScheduler().forTaskType(TPCTaskType.LWT_PREPARE))
+                        .requestExecutor(TPC.ioScheduler().forTaskType(TPCTaskType.LWT_PREPARE))
                         .syncHandler((from, commit) -> PaxosState.prepare(commit));
         PROPOSE = helper.requestResponse("PROPOSE", Commit.class, Boolean.class)
                         .timeout(DatabaseDescriptor::getWriteRpcTimeout)
-                        .onExecutor(TPC.ioScheduler().forTaskType(TPCTaskType.LWT_PROPOSE))
+                        .requestExecutor(TPC.ioScheduler().forTaskType(TPCTaskType.LWT_PROPOSE))
                         .withResponseSerializer(BooleanSerializer.serializer)
                         .syncHandler((from, commit) -> PaxosState.propose(commit));
         COMMIT = helper.ackedRequest("COMMIT", Commit.class)
                        .timeout(DatabaseDescriptor::getWriteRpcTimeout)
-                       .onExecutor(TPC.ioScheduler().forTaskType(TPCTaskType.LWT_COMMIT))
+                       .requestExecutor(TPC.ioScheduler().forTaskType(TPCTaskType.LWT_COMMIT))
                        .syncHandler((from, commit) -> PaxosState.commit(commit));
     }
 }

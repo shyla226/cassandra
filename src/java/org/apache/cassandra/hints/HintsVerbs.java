@@ -25,6 +25,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.EncodingVersion;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -132,7 +134,7 @@ public class HintsVerbs extends VerbGroup<HintsVerbs.HintsVersion>
         RegistrationHelper helper = helper().droppedGroup(DroppedMessages.Group.HINT);
 
         HINT = helper.ackedRequest("HINT", HintMessage.class)
-                     .onStage(Stage.HINTS)
+                     .requestStage(Stage.HINTS)
                      .timeout(DatabaseDescriptor::getWriteRpcTimeout)
                      .withBackPressure()
                      .handler(HINT_HANDLER);
