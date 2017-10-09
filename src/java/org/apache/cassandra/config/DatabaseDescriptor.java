@@ -485,6 +485,12 @@ public class DatabaseDescriptor
             }
         };
 
+        if (config.cross_dc_rtt_in_ms < 0)
+        {
+            throw new ConfigurationException("cross_dc_rtt_in_ms must be non-negative, use 0 to disable or positive value to enable.",
+                                             false);
+        }
+
         /* Request Scheduler setup */
         requestSchedulerOptions = conf.request_scheduler_options;
         if (conf.request_scheduler != null)
@@ -1137,6 +1143,16 @@ public class DatabaseDescriptor
     public static void setWriteRpcTimeout(Long timeOutInMillis)
     {
         conf.write_request_timeout_in_ms = timeOutInMillis;
+    }
+
+    public static long getCrossDCRttLatency()
+    {
+        return conf.cross_dc_rtt_in_ms;
+    }
+
+    public static void setCrossDCRttLatency(long timeOutInMillis)
+    {
+        conf.cross_dc_rtt_in_ms = timeOutInMillis;
     }
 
     public static long getCounterWriteRpcTimeout()

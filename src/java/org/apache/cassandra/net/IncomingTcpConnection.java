@@ -195,7 +195,7 @@ public class IncomingTcpConnection extends Thread implements Closeable
         {
             long crossNodeTimestamp = (timestamp & 0xFFFFFFFF00000000L) | (((partial & 0xFFFFFFFFL) << 2) >> 2);
             isCrossNodeTimestamp = (timestamp != crossNodeTimestamp);
-            timestamp = crossNodeTimestamp;
+            timestamp = crossNodeTimestamp + DatabaseDescriptor.getEndpointSnitch().getCrossDcRttLatency(from) / 2;
         }
 
         MessageIn message = MessageIn.read(input, version, id);
