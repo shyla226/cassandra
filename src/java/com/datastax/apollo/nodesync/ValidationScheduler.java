@@ -325,6 +325,10 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
             if (isShutdown)
                 return;
 
+            proposers.forEach(ValidationProposer::cancel);
+            proposers.clear();
+            proposalQueue.clear();
+
             isShutdown = true;
             hasProposals.signalAll();
         }

@@ -146,11 +146,12 @@ abstract class Segments
      * segments generated.
      *
      * @param depth the depth we'll use to split ranges.
-     * @param localRanges the ranges to validate.
+     * @param localRanges the ranges to validate. It must not be empty.
      * @return an estimate of the number of segments obtained when splitting {@code localRanges} at depth {@code depth}.
      */
     static int estimateSegments(Collection<Range<Token>> localRanges, int depth)
     {
+        assert !localRanges.isEmpty();
         // In general, for every depth, we split each range in half...
         int segments = localRanges.size();
         for (int i = 0; i < depth; i++)

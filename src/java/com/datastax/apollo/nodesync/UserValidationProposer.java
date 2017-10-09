@@ -135,6 +135,8 @@ public class UserValidationProposer extends AbstractValidationProposer
             return; // Already initialized. Shouldn't happen but not much harm in being resilient to it.
 
         Collection<Range<Token>> localRanges = localRanges();
+        if (localRanges.isEmpty())
+            return;
         generateSegments(localRanges);
         // We've validated all requested ranges are local and we have at least 1 (or we request all local ranges), so we
         // should have something to validate.

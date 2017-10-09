@@ -308,7 +308,6 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
         {
             if (!reloadTriggered.compareAndSet(false, true))
                 return;
-
             doReload();
         }
 
@@ -318,7 +317,11 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
             reloadExecutor.submit(() -> {
                 try
                 {
+                    if (isCancelled())
+                        return;
                     PriorityQueue<Proposal> nextProposals = loadProposals();
+                    if (nextProposals == null)
+                        return;
                     ReloadableProposals newReloadableProposals = new ReloadableProposals(nextProposals);
                     reloadFuture.complete(newReloadableProposals);
                     ContinuousTableValidationProposer.this.proposals = newReloadableProposals;
@@ -347,6 +350,10 @@ class ContinuousTableValidationProposer extends AbstractValidationProposer
         private PriorityQueue<Proposal> loadProposals()
         {
             Collection<Range<Token>> localRanges = localRanges();
+            // When local dc replication is set to 0, localRanges can be empty.
+            // The proposer could be reloaded before {@link ValidationScheduler#onAlterKeyspace} cancels it.
+            if (localRanges.isEmpty())
+                return null;
             PriorityQueue<Proposal> nextProposals = new PriorityQueue<>(Segments.estimateSegments(localRanges, depth));
             Iterator<Segment> segments = Segments.generateSegments(table, localRanges, depth);
             while (segments.hasNext())

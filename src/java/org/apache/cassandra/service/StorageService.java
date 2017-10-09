@@ -44,7 +44,6 @@ import com.google.common.util.concurrent.*;
 
 import com.datastax.apollo.utils.concurrent.CompletableFutures;
 import io.reactivex.Completable;
-
 import org.apache.commons.lang3.StringUtils;
 
 import org.slf4j.Logger;
@@ -4001,6 +4000,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         try
         {
+            CompletableFuture<Void> nodeSyncStopFuture = nodeSyncService.disable(false);
+            waitForNodeSyncShutdown(nodeSyncStopFuture);
+
             PendingRangeCalculatorService.instance.blockUntilFinished();
 
             String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
@@ -4074,6 +4076,22 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         finally
         {
             isDecommissioning.set(false);
+        }
+    }
+
+    private static void waitForNodeSyncShutdown(CompletableFuture<Void> nodeSyncStopFuture) throws InterruptedException, ExecutionException
+    {
+        // As NodeSync may write into it's own nodesync_status table, wait on it to finish now before flushing
+        // tables since the goal of flushing is to ensure we have nothing to replay.
+        try
+        {
+            nodeSyncStopFuture.get(2, TimeUnit.MINUTES);
+        }
+        catch (TimeoutException e)
+        {
+            logger.warn("Wasn't able to stop NodeSync service within 2 minutes during drain. "
+                    + "While this generally shouldn't happen (and should be reported if it happens constantly), "
+                    + "it should be harmless.");
         }
     }
 
@@ -4603,19 +4621,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "flushing column families", false);
 
-
-            // As NodeSync may write into it's own nodesync_status table, wait on it to finish now before flushing
-            // tables since the goal of flushing is to ensure we have nothing to replay.
-            try
-            {
-                nodeSyncStopFuture.get(2, TimeUnit.MINUTES);
-            }
-            catch (TimeoutException e)
-            {
-                logger.warn("Wasn't able to stop NodeSync service within 2 minutes during drain. "
-                            + "While this generally shouldn't happen (and should be reported if it happens constantly), "
-                            + "it should be harmless.");
-            }
+            waitForNodeSyncShutdown(nodeSyncStopFuture);
 
             // disable autocompaction - we don't want to start any new compactions while we are draining
             for (Keyspace keyspace : Keyspace.all())
