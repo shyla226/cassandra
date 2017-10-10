@@ -326,9 +326,8 @@ public class PartitionIndexTest
             int parts = 15;
             try (FileHandle.Builder fhBuilder = new FileHandle.Builder(file.getPath())
                                                 .bufferSize(PageAware.PAGE_SIZE)
-                                                .withChunkCache(ChunkCache.instance)
-                                                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap);
-                 PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder);
+                                                .withChunkCache(ChunkCache.instance);
+                 PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder)
             )
             {
                 writer.setFileSyncListener(() -> builder.markPartitionIndexSynced(writer.getLastFlushOffset()));
@@ -407,7 +406,7 @@ public class PartitionIndexTest
         long[] cutoffs;
         long[] offsets;
 
-        public JumpingRebufferer(Rebufferer source, long... cutoffsAndOffsets)
+        JumpingRebufferer(Rebufferer source, long... cutoffsAndOffsets)
         {
             super(source);
             assert (cutoffsAndOffsets.length & 1) == 0;
@@ -418,12 +417,6 @@ public class PartitionIndexTest
                 cutoffs[i] = cutoffsAndOffsets[i * 2];
                 offsets[i] = cutoffsAndOffsets[i * 2 + 1];
             }
-        }
-
-        @Override
-        public BufferHolder rebuffer(long position)
-        {
-            return rebuffer(position, ReaderConstraint.NONE);
         }
 
         @Override
@@ -438,12 +431,16 @@ public class PartitionIndexTest
             if (idx >= 0)
                 pos = pos - offsets[idx] + cutoffs[idx];
 
-            super.rebuffer(pos, rc);
-            if (idx < cutoffs.length - 1 && buffer.limit() + offset > cutoffs[idx + 1])
-                buffer.limit((int) (cutoffs[idx + 1] - offset));
+            WrappingBufferHolder ret = (WrappingBufferHolder)super.rebuffer(pos, rc);
+            long offset = ret.offset();
+
+            if (idx < cutoffs.length - 1 && ret.limit() + offset > cutoffs[idx + 1])
+                ret.limit((int) (cutoffs[idx + 1] - offset));
+
             if (idx >= 0)
-                offset = offset - cutoffs[idx] + offsets[idx];
-            return this;
+                ret.offset(offset - cutoffs[idx] + offsets[idx]);
+
+            return ret;
         }
 
         @Override
@@ -507,8 +504,7 @@ public class PartitionIndexTest
         List<DecoratedKey> list = Lists.newArrayList();
         try (FileHandle.Builder fhBuilder = new FileHandle.Builder(file.getPath())
                 .bufferSize(PageAware.PAGE_SIZE)
-                .withChunkCache(ChunkCache.instance)
-                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap);
+                .withChunkCache(ChunkCache.instance);
              PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder);
             )
         {
@@ -601,8 +597,7 @@ public class PartitionIndexTest
         List<DecoratedKey> list = Lists.newArrayList();
         try (FileHandle.Builder fhBuilder = new FileHandle.Builder(file.getPath())
                                             .bufferSize(PageAware.PAGE_SIZE)
-                                            .withChunkCache(ChunkCache.instance)
-                                            .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap);
+                                            .withChunkCache(ChunkCache.instance);
              PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder);
         )
         {

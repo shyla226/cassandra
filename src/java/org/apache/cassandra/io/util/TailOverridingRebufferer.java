@@ -25,8 +25,8 @@ import java.nio.ByteBuffer;
  */
 public class TailOverridingRebufferer extends WrappingRebufferer
 {
-    final long cutoff;
-    final ByteBuffer tail;
+    private final long cutoff;
+    private final ByteBuffer tail;
 
     public TailOverridingRebufferer(Rebufferer source, long cutoff, ByteBuffer tail)
     {
@@ -36,45 +36,25 @@ public class TailOverridingRebufferer extends WrappingRebufferer
     }
 
     @Override
-    public BufferHolder rebuffer(long position)
-    {
-        return rebuffer(position, ReaderConstraint.NONE);
-    }
-
-    @Override
     public BufferHolder rebuffer(long position, ReaderConstraint constraint)
     {
-        assert bufferHolder == null;
         if (position < cutoff)
         {
-            super.rebuffer(position, constraint);
-            if (offset + buffer.limit() > cutoff)
-                buffer.limit((int) (cutoff - offset));
+            WrappingBufferHolder ret = (WrappingBufferHolder)super.rebuffer(position, constraint);
+            if (ret.offset() + ret.limit() > cutoff)
+                ret.limit((int) (cutoff - ret.offset()));
+            return ret;
         }
         else
         {
-            buffer = tail.duplicate();
-            offset = cutoff;
+            return newBufferHolder().initialize(null, tail.duplicate(), cutoff);
         }
-
-        return this;
     }
-
 
     @Override
     public long fileLength()
     {
         return cutoff + tail.limit();
-    }
-
-    @Override
-    public void release()
-    {
-        if (bufferHolder != null)
-        {
-            bufferHolder.release();
-            bufferHolder = null;
-        }
     }
 
     @Override

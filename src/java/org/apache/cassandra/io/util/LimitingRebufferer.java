@@ -31,10 +31,10 @@ import com.google.common.util.concurrent.RateLimiter;
  */
 public class LimitingRebufferer extends WrappingRebufferer
 {
-    final RateLimiter limiter;
-    final private int limitQuant;
+    private final RateLimiter limiter;
+    private final int limitQuant;
 
-    public LimitingRebufferer(Rebufferer wrapped, RateLimiter limiter, int limitQuant)
+    LimitingRebufferer(Rebufferer wrapped, RateLimiter limiter, int limitQuant)
     {
         super(wrapped);
         this.limiter = limiter;
@@ -44,19 +44,20 @@ public class LimitingRebufferer extends WrappingRebufferer
     @Override
     public BufferHolder rebuffer(long position, ReaderConstraint rc)
     {
-        super.rebuffer(position, rc);
-        int posInBuffer = Ints.checkedCast(position - offset);
-        int remaining = buffer.limit() - posInBuffer;
+        WrappingBufferHolder ret = (WrappingBufferHolder)super.rebuffer(position, rc);
+
+        int posInBuffer = Ints.checkedCast(position - ret.offset());
+        int remaining = ret.limit() - posInBuffer;
         if (remaining == 0)
-            return this;
+            return ret;
 
         if (remaining > limitQuant)
         {
-            buffer.limit(posInBuffer + limitQuant); // certainly below current limit
+            ret.limit(posInBuffer + limitQuant); // certainly below current limit
             remaining = limitQuant;
         }
         limiter.acquire(remaining);
-        return this;
+        return ret;
     }
 
     @Override

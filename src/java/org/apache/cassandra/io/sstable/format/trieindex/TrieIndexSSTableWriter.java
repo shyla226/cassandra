@@ -281,6 +281,9 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         return iwriter.buildPartial(dataLength, partitionIndex ->
         {
+            // useful for debugging problems with the trie index
+            //partitionIndex.dumpTrie(descriptor.filenameFor(Component.PARTITION_INDEX) + ".txt");
+
             StatsMetadata stats = statsMetadata();
             FileHandle ifile = iwriter.rowIndexFHBuilder.complete();        // not necessary to limit size
             if (compression)

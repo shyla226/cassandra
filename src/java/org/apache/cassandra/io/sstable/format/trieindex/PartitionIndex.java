@@ -19,6 +19,7 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.Closeable;
 import java.io.DataOutput;
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
@@ -359,6 +360,18 @@ public class PartitionIndex implements Closeable
 
             pos = INVALID; // make sure next time we call nextPayloadedNode() again
             return getIndexPos(buf, payloadPosition(), payloadFlags()); // this should not throw
+        }
+    }
+
+    public void dumpTrie(String fileName)
+    {
+        try(PrintStream ps = new PrintStream(new File(fileName)))
+        {
+            dumpTrie(ps);
+        }
+        catch (Throwable t)
+        {
+            logger.warn("Failed to dump trie to {} due to exception {}", fileName, t);
         }
     }
 

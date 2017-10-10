@@ -85,7 +85,7 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
             currentBh.release();
             buf = bh.buffer();
             offset = position - bh.offset();
-            assert offset >= 0 && offset < buf.limit();
+            assert offset >= 0 && offset < buf.limit() : String.format("Invalid offset: %d, buf: %s, bh: %s", offset, buf, bh);
         }
         this.offset = (int) offset;
         this.position = position;

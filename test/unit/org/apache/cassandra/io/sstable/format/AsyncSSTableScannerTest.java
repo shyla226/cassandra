@@ -26,7 +26,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
