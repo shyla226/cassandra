@@ -83,7 +83,8 @@ public class PartitionRangeReadCommand extends ReadCommand
     private final transient TPCScheduler scheduler;
     private final transient TracingAwareExecutor operationExecutor;
 
-    private PartitionRangeReadCommand(DigestVersion digestVersion,
+    // Note: non static methods of this class should not use this ctor directly, but use the copy() method instead.
+    protected PartitionRangeReadCommand(DigestVersion digestVersion,
                                       TableMetadata metadata,
                                       int nowInSec,
                                       ColumnFilter columnFilter,
@@ -99,15 +100,21 @@ public class PartitionRangeReadCommand extends ReadCommand
         this.operationExecutor = scheduler.forTaskType(TPCTaskType.READ_RANGE);
     }
 
-    protected PartitionRangeReadCommand(TableMetadata metadata,
-                                        int nowInSec,
-                                        ColumnFilter columnFilter,
-                                        RowFilter rowFilter,
-                                        DataLimits limits,
-                                        DataRange dataRange,
-                                        IndexMetadata index)
+    /**
+     * Should be used by any methods that needs to generate a new command derived from this one. This allows
+     * inheriting class (typically {@link NodeSyncReadCommand}) to override this, making it a lot easier than to
+     * override all other methods.
+     */
+    protected PartitionRangeReadCommand copy(DigestVersion digestVersion,
+                                             TableMetadata metadata,
+                                             int nowInSec,
+                                             ColumnFilter columnFilter,
+                                             RowFilter rowFilter,
+                                             DataLimits limits,
+                                             DataRange dataRange,
+                                             IndexMetadata index)
     {
-        this(null, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index);
+        return new PartitionRangeReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index);
     }
 
     public static PartitionRangeReadCommand create(TableMetadata metadata,
@@ -117,7 +124,8 @@ public class PartitionRangeReadCommand extends ReadCommand
                                                    DataLimits limits,
                                                    DataRange dataRange)
     {
-        return new PartitionRangeReadCommand(metadata,
+        return new PartitionRangeReadCommand(null,
+                                             metadata,
                                              nowInSec,
                                              columnFilter,
                                              rowFilter,
@@ -136,7 +144,8 @@ public class PartitionRangeReadCommand extends ReadCommand
      */
     public static PartitionRangeReadCommand allDataRead(TableMetadata metadata, int nowInSec)
     {
-        return new PartitionRangeReadCommand(metadata,
+        return new PartitionRangeReadCommand(null,
+                                             metadata,
                                              nowInSec,
                                              ColumnFilter.all(metadata),
                                              RowFilter.NONE,
@@ -147,7 +156,8 @@ public class PartitionRangeReadCommand extends ReadCommand
 
     public static PartitionRangeReadCommand fullRangeRead(TableMetadata metadata, DataRange range, int nowInSec)
     {
-        return new PartitionRangeReadCommand(metadata,
+        return new PartitionRangeReadCommand(null,
+                                             metadata,
                                              nowInSec,
                                              ColumnFilter.all(metadata),
                                              RowFilter.NONE,
@@ -199,48 +209,50 @@ public class PartitionRangeReadCommand extends ReadCommand
         // DataLimits.CQLGroupByLimits.GroupByAwareCounter assumes that if GroupingState.hasClustering(), then we're in
         // the middle of a group, but we can't make that assumption if we query and range "in advance" of where we are
         // on the ring.
-        return new PartitionRangeReadCommand(digestVersion(),
-                                             metadata(),
-                                             nowInSec(),
-                                             columnFilter(),
-                                             rowFilter(),
-                                             isRangeContinuation ? limits() : limits().withoutState(),
-                                             newRange,
-                                             indexMetadata());
+        return copy(digestVersion(),
+                    metadata(),
+                    nowInSec(),
+                    columnFilter(),
+                    rowFilter(),
+                    isRangeContinuation ? limits() : limits().withoutState(),
+                    newRange,
+                    indexMetadata());
     }
 
     public PartitionRangeReadCommand createDigestCommand(DigestVersion digestVersion)
     {
-        return new PartitionRangeReadCommand(digestVersion,
-                                             metadata(),
-                                             nowInSec(),
-                                             columnFilter(),
-                                             rowFilter(),
-                                             limits(),
-                                             dataRange(),
-                                             indexMetadata());
+        return copy(digestVersion,
+                    metadata(),
+                    nowInSec(),
+                    columnFilter(),
+                    rowFilter(),
+                    limits(),
+                    dataRange(),
+                    indexMetadata());
     }
 
     public PartitionRangeReadCommand withUpdatedLimit(DataLimits newLimits)
     {
-        return new PartitionRangeReadCommand(metadata(),
-                                             nowInSec(),
-                                             columnFilter(),
-                                             rowFilter(),
-                                             newLimits,
-                                             dataRange(),
-                                             indexMetadata());
+        return copy(digestVersion(),
+                    metadata(),
+                    nowInSec(),
+                    columnFilter(),
+                    rowFilter(),
+                    newLimits,
+                    dataRange(),
+                    indexMetadata());
     }
 
     public PartitionRangeReadCommand withUpdatedLimitsAndDataRange(DataLimits newLimits, DataRange newDataRange)
     {
-        return new PartitionRangeReadCommand(metadata(),
-                                             nowInSec(),
-                                             columnFilter(),
-                                             rowFilter(),
-                                             newLimits,
-                                             newDataRange,
-                                             indexMetadata());
+        return copy(digestVersion(),
+                    metadata(),
+                    nowInSec(),
+                    columnFilter(),
+                    rowFilter(),
+                    newLimits,
+                    newDataRange,
+                    indexMetadata());
     }
 
     public long getTimeout()
