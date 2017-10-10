@@ -22,7 +22,7 @@ import org.apache.cassandra.net.Message;
 /**
  * Interface for message "interceptor" that intercept inter-node messages for testing purposes.
  * <p>
- * Interceptors can set through the {@code -Ddatastax.net.interceptors} system property at startup.
+ * Interceptors can set through the {@code -Ddse.net.interceptors} system property at startup.
  * When set this way, all message received or sent by the node will pass through the interceptor methods and the
  * interceptor may or may not do something with.
  * <p>
@@ -30,7 +30,7 @@ import org.apache.cassandra.net.Message;
  * temporarily, delaying message delivery by some amount to simulate latency, ....
  * <p>
  * It is possible to set more than one interceptor at a time, for instance by passing:
- * {@code -Ddatastax.net.interceptors='DelayingInterceptor, DroppingInterceptor'}. In that case,
+ * {@code -Ddse.net.interceptors='DelayingInterceptor, DroppingInterceptor'}. In that case,
  * message will go through interceptors in the order the interceptors are defined.
  * <p>
  * Note that most interceptor have a number of additional options to control their behavior, some of them inherited from

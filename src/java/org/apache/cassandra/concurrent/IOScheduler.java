@@ -67,13 +67,13 @@ import io.reactivex.internal.disposables.EmptyDisposable;
 public class IOScheduler extends StagedScheduler
 {
     @VisibleForTesting
-    static final int MIN_POOL_SIZE = Integer.valueOf(System.getProperty("cassandra.io.sched.min_pool_size", "8"));
+    static final int MIN_POOL_SIZE = Integer.valueOf(System.getProperty("dse.io.sched.min_pool_size", "8"));
 
     @VisibleForTesting
-    public static final int MAX_POOL_SIZE = Integer.valueOf(System.getProperty("cassandra.io.sched.max_pool_size", "256"));
+    public static final int MAX_POOL_SIZE = Integer.valueOf(System.getProperty("dse.io.sched.max_pool_size", "256"));
 
     @VisibleForTesting
-    static final int KEEP_ALIVE_TIME_SECS = Integer.valueOf(System.getProperty("cassandra.io.sched.keep_alive_secs", "5"));
+    static final int KEEP_ALIVE_TIME_SECS = Integer.valueOf(System.getProperty("dse.io.sched.keep_alive_secs", "5"));
 
     private final Function<ThreadFactory, ExecutorBasedWorker> workerSupplier;
     private final AtomicReference<WorkersPool> pool;

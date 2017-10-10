@@ -64,19 +64,19 @@ public class TPC
     /**
      * Set this to true in order to log the caller's thread stack trace in case of exception when running a task on an Rx scheduler.
      */
-    private static final boolean LOG_CALLER_STACK_ON_EXCEPTION = System.getProperty("cassandra.log_caller_stack_on_tpc_exception", "false")
+    private static final boolean LOG_CALLER_STACK_ON_EXCEPTION = System.getProperty("dse.tpc.log_caller_stack_on_exception", "false")
                                                                        .equalsIgnoreCase("true");
 
-    private static final boolean ENABLE_RX_SUBSCRIPTION_DEBUG = System.getProperty("cassandra.enable_rx_subscription_debug", "false")
+    private static final boolean ENABLE_RX_SUBSCRIPTION_DEBUG = System.getProperty("dse.tpc.enable_rx_subscription_debug", "false")
                                                                        .equalsIgnoreCase("true");
 
     private static final int NUM_CORES = DatabaseDescriptor.getTPCCores();
     private static final int NIO_IO_RATIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     public static final boolean USE_EPOLL = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"))
                                             && Epoll.isAvailable();
-    public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "true"))
+    public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("dse.io.aio.enabled", "true"))
                                           && Aio.isAvailable() && USE_EPOLL &&
-                                          (Boolean.parseBoolean(System.getProperty("cassandra.native.aio.force", "false")) || DatabaseDescriptor.isSSD());
+                                          (Boolean.parseBoolean(System.getProperty("dse.io.aio.force", "false")) || DatabaseDescriptor.isSSD());
     public static final int AIO_BLOCK_SIZE = 512;
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task

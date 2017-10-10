@@ -53,27 +53,27 @@ import org.apache.cassandra.net.Verbs;
  *
  * <h3>Configuring intercepted messages</h3>
  *
- * Which messages are intercepted can be configured through the {@code -Ddatastax.net.interceptors.intercepted} option.
+ * Which messages are intercepted can be configured through the {@code -Ddse.net.interceptors.intercepted} option.
  * That option takes a comma separated list of the verb groups to intercept, i.e a name corresponding to one of
  * {@link Verbs.Group} value. It is also possible to pass a single {@link Verb} by adding the verb name after the group
  * separated by a '.' (so "GOSSIP.SYN" refers to {@link GossipVerbs#SYN} for instance).
  * <p>
  * Examples:
  * <pre>
- *   -Ddatastax.net.interceptors.intercepted="WRITES,READS" // intercept all non-LWT writes and reads
- *   -Ddatastax.net.interceptors.intercepted="GOSSIP,OPERATIONS.TRUNCATE" // intercept all gossip messages and the truncate one
+ *   -Ddse.net.interceptors.intercepted="WRITES,READS" // intercept all non-LWT writes and reads
+ *   -Ddse.net.interceptors.intercepted="GOSSIP,OPERATIONS.TRUNCATE" // intercept all gossip messages and the truncate one
  * </pre>
  * <p>
  * On top of the group/verb, users can configure 3 others criteria to select which messages are interpreted:
  * <ul>
- *     <li>The "type" of message, request or response. This is controller by {@code -Ddatastax.net.interceptors.intercepted_types}
+ *     <li>The "type" of message, request or response. This is controller by {@code -Ddse.net.interceptors.intercepted_types}
  *     and can be one or both of {@code REQUEST} and {@code RESPONSE}.</li>
  *     <li>The "direction" of message, sent or received, to control if the node should intercept message it sends, message
- *     it receive, or both. This is controller by {@code -Ddatastax.net.interceptors.intercepted_directions} and can be one
+ *     it receive, or both. This is controller by {@code -Ddse.net.interceptors.intercepted_directions} and can be one
  *     or both of {@code SENDING} and {@code RECEIVING}.</li>
  *     <li>The "locality" of the message, local or remote, to control if we intercept only locally delivered message, only
  *     ones sent to/received from remote nodes, or both. This is controller by
- *     {@code -Ddatastax.net.interceptors.intercepted_localities} and can be one or both of {@code LOCAL} and {@code REMOTE}.</li>
+ *     {@code -Ddse.net.interceptors.intercepted_localities} and can be one or both of {@code LOCAL} and {@code REMOTE}.</li>
  * </ul>
  * Note that for all of those 3 criteria, most interceptors will use decent default and those are often unnecessary to
  * configure.
@@ -81,23 +81,23 @@ import org.apache.cassandra.net.Verbs;
  * <h3>Disabling on startup</h3>
  *
  * By default, interceptors from this class are enabled on startup. If you want them disabled instead (to enable them
- * manually later through JMX, see below), you can use {@code -Ddatastax.net.interceptors.disable_on_startup="true"}.
+ * manually later through JMX, see below), you can use {@code -Ddse.net.interceptors.disable_on_startup="true"}.
  *
  * <h3>Random interception</h3>
  *
  * By default, all messages configured to be intercepted are intercepted. It is however possible to configure "random
  * interception" so that only a configured ratio of messages are intercepted (this is a ratio of the message configured
- * with {@code -Ddatastax.net.interceptors.intercepted}).
+ * with {@code -Ddse.net.interceptors.intercepted}).
  *
- * This can be enabled with {@code -Ddatastax.net.interceptors.interception_chance} which then configure the ratio
+ * This can be enabled with {@code -Ddse.net.interceptors.interception_chance} which then configure the ratio
  * of messages that are actually intercepted over all the message it is configured to intercept.
  *
  * Examples:
  * <pre>
- *   -Ddatastax.net.interceptors.interception_chance=0.5 // intercepts half of the messages
- *   -Ddatastax.net.interceptors.interception_chance=0.9 // intercepts 90% of the messages
- *   -Ddatastax.net.interceptors.interception_chance=0   // intercepts no message (effectively disabling the interceptor)
- *   -Ddatastax.net.interceptors.interception_chance=1   // intercepts all messages (disabling random interception)
+ *   -Ddse.net.interceptors.interception_chance=0.5 // intercepts half of the messages
+ *   -Ddse.net.interceptors.interception_chance=0.9 // intercepts 90% of the messages
+ *   -Ddse.net.interceptors.interception_chance=0   // intercepts no message (effectively disabling the interceptor)
+ *   -Ddse.net.interceptors.interception_chance=1   // intercepts all messages (disabling random interception)
  * </pre>
  * Note that random interception can be disabled by setting the ratio to 1.
  *

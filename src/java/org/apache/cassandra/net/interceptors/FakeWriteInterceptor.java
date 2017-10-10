@@ -39,7 +39,7 @@ import org.apache.cassandra.net.Verbs;
  * <p>
  * Note that this interceptor is limited to (non-LWT) writes as "faking" acknowledgement makes less sense/is less useful
  * for other message types. This does mean that while it extends {@link AbstractInterceptor}, this interceptor ignores
- * the {@code -Ddatastax.net.interceptors.intercepted*} properties.
+ * the {@code -Ddse.net.interceptors.intercepted*} properties.
  *
  * @see AbstractInterceptor for details on the options supported by this interceptor
  */

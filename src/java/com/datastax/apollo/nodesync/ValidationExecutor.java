@@ -60,7 +60,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
 {
     private static final Logger logger = LoggerFactory.getLogger(ValidationExecutor.class);
 
-    private static final long CONTROLLER_INTERVAL_SEC = Long.getLong("datastax.nodesync.controller_update_interval_sec",
+    private static final long CONTROLLER_INTERVAL_SEC = Long.getLong("dse.nodesync.controller_update_interval_sec",
                                                                      TimeUnit.MINUTES.toSeconds(5));
 
     private static final long CONTROLLER_INTERVAL_MS = TimeUnit.SECONDS.toMillis(CONTROLLER_INTERVAL_SEC);

@@ -85,7 +85,7 @@ class Validator
      * on the maximum time for validating a segment as the lock is refreshed if necessary, it's only here to have the
      * lock automatically release on failure.
      */
-    private static final long LOCK_TIMEOUT_MS = Long.getLong("datastax.nodesync.segment_lock_timeout_ms", TimeUnit.MINUTES.toMillis(10));
+    private static final long LOCK_TIMEOUT_MS = Long.getLong("dse.nodesync.segment_lock_timeout_ms", TimeUnit.MINUTES.toMillis(10));
 
     /**
      * The possible states of a validator.

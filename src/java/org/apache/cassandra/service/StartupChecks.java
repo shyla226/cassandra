@@ -500,8 +500,8 @@ public class StartupChecks
             }
             else
             {
-                if (!Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "true")))
-                    logger.warn("Asynchronous I/O has been manually disabled (through the 'cassandra.native.aio.enabled' system property). "
+                if (!Boolean.parseBoolean(System.getProperty("dse.io.aio.enabled", "true")))
+                    logger.warn("Asynchronous I/O has been manually disabled (through the 'dse.io.aio.enabled' system property). "
                                 + "This may result in subpar performance.");
                 else // Means !Aio.isAvailable()
                     logger.warn("Asynchronous I/O doesn't seem to be available: this may result in subpar performance.");
@@ -513,7 +513,7 @@ public class StartupChecks
             // I/O queue if not throttled properly. Also note that since AIO is disabled on HDD by default (see TPC.USE_AIO
             // definition), having it enabled means the user forced it.
             if (TPC.USE_AIO)
-                logger.warn("Forcing Asynchronous I/O as requested with the 'cassandra.native.aio.enabled' system property "
+                logger.warn("Forcing Asynchronous I/O as requested with the 'dse.io.aio.enabled' system property "
                             + " despite not using SSDs; please note that this is not the recommended configuration.");
         }
     };
