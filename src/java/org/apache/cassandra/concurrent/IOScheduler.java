@@ -19,6 +19,7 @@ package org.apache.cassandra.concurrent;
 
 import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -192,7 +193,7 @@ public class IOScheduler extends StagedScheduler
         {
             this.threadFactory = new IOThread.Factory();
             this.workerSupplier = workerSupplier;
-            this.workersQueue = new ArrayBlockingQueue<>(MAX_POOL_SIZE);
+            this.workersQueue = new LinkedBlockingQueue<>(MAX_POOL_SIZE);
             this.allWorkers = new CompositeDisposable();
             this.shutdown = new AtomicBoolean(false);
         }

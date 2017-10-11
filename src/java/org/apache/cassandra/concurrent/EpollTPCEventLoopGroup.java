@@ -19,6 +19,7 @@
 package org.apache.cassandra.concurrent;
 
 
+import java.util.ArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -34,14 +35,11 @@ import org.slf4j.LoggerFactory;
 import io.netty.channel.DefaultSelectStrategyFactory;
 import io.netty.channel.EventLoop;
 import io.netty.channel.MultithreadEventLoopGroup;
-import io.netty.channel.SelectStrategy;
 import io.netty.channel.epoll.EpollEventLoop;
-import io.netty.channel.epoll.Native;
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
 import io.netty.util.concurrent.RejectedExecutionHandlers;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
-import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.jctools.queues.MpscArrayQueue;
@@ -55,13 +53,15 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
     private static final String DEBUG_RUNNING_TIME_NAME = "dse.tpc.debug_task_running_time_seconds";
     private static final long DEBUG_RUNNING_TIME_NANOS = TimeUnit.NANOSECONDS.convert(Integer.parseInt(System.getProperty(DEBUG_RUNNING_TIME_NAME, "0")),
                                                                                       TimeUnit.SECONDS);
-
     private static final Logger logger = LoggerFactory.getLogger(EpollTPCEventLoopGroup.class);
+
+    private static final long EPOLL_CHECK_INTERVAL_NANOS = Long.parseLong(System.getProperty("netty.epoll_check_interval_nanos", "10000"));
+    private static final int BUSY_EXTRA_SPINS = Integer.parseInt(System.getProperty("netty.eventloop.busy_extra_spins", "32"));
+    private static final int YIELD_EXTRA_SPINS = Integer.parseInt(System.getProperty("netty.eventloop.yield_extra_spins", "32"));
+    private static final int PARK_EXTRA_SPINS = Integer.parseInt(System.getProperty("netty.eventloop.park_extra_spins", "32")); // Hint: 1024 is ~50ms
 
     @Contended
     private final ImmutableList<SingleCoreEventLoop> eventLoops;
-
-    private final Thread monitorThread;
 
     private volatile boolean shutdown;
 
@@ -88,25 +88,8 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
         this.eventLoops = ImmutableList.copyOf(Iterables.transform(this, e -> (SingleCoreEventLoop) e));
 
-        monitorThread = new Thread(() -> {
-            while (!shutdown)
-            {
-                long nanoTime = SingleCoreEventLoop.nanoTime();
-                for (SingleCoreEventLoop loop : eventLoops)
-                    loop.checkQueues(nanoTime);
-
-                LockSupport.parkNanos(1);
-                ApproximateTime.tick();
-            }
-
-            for (SingleCoreEventLoop loop : eventLoops)
-                loop.unpark();
-        });
-
-        monitorThread.setName("CoreThreadMonitor");
-        monitorThread.setPriority(Thread.MAX_PRIORITY);
-        monitorThread.setDaemon(true);
-        monitorThread.start();
+        //Register these loop threads with the Watcher
+        WatcherThread.instance.get().addThreadsToMonitor(new ArrayList<>(eventLoops));
     }
 
     public ImmutableList<? extends TPCEventLoop> eventLoops()
@@ -118,21 +101,9 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
     public void shutdown()
     {
         super.shutdown();
+
+        WatcherThread.instance.get().removeThreadsToMonitor(new ArrayList<>(eventLoops));
         shutdown = true;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException
-    {
-        long start = System.nanoTime();
-        if (!super.awaitTermination(timeout, unit))
-            return false;
-
-        long elapsedNanos = System.nanoTime() - start;
-        long timeLeftNanos = TimeUnit.NANOSECONDS.convert(timeout, unit) - elapsedNanos;
-
-        monitorThread.join(timeLeftNanos / 1_000_000L, (int)(timeLeftNanos % 1_000_000L));
-        return !monitorThread.isAlive();
     }
 
     protected EventLoop newChild(Executor executor, Object... args) throws Exception
@@ -141,27 +112,22 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         return new SingleCoreEventLoop(this, (TPCThread.TPCThreadsCreator)executor);
     }
 
-    private static class SingleCoreEventLoop extends EpollEventLoop implements TPCEventLoop
+    public static class SingleCoreEventLoop extends EpollEventLoop implements TPCEventLoop, WatcherThread.MonitorableThread
     {
-        private enum CoreState
-        {
-            PARKED,
-            WORKING
-        }
-
         private final EpollTPCEventLoopGroup parent;
         private final TPCThread thread;
         private final TPCMetrics metrics;
-
-        private static final int busyExtraSpins =  1024 * 128;
-        private static final int yieldExtraSpins = 1024 * 8;
-        private static final int parkExtraSpins = 1024; // 1024 is ~50ms
+        private final TPCMetricsAndLimits.TaskStats busySpinStats;
+        private final TPCMetricsAndLimits.TaskStats yieldStats;
+        private final TPCMetricsAndLimits.TaskStats parkStats;
+        private final int maxQueueSize;
 
         private volatile int pendingEpollEvents = 0;
         private volatile long delayedNanosDeadline = -1;
+        private long lastEpollCheckTime = -1;
 
         @Contended
-        private volatile CoreState state;
+        private volatile ThreadState state;
 
         private final MpscArrayQueue<Runnable> queue;
         private final MpscArrayQueue<TPCRunnable> pendingQueue;
@@ -176,7 +142,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             this.parent = parent;
             this.queue = new MpscArrayQueue<>(1 << 16);
 
-            this.state = CoreState.WORKING;
+            this.state = ThreadState.WORKING;
             this.lastDrainTime = -1;
 
             // Start the loop, which forces the creation of the Thread using 'executor' so we can get a reference to it
@@ -185,15 +151,24 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
             this.thread = executor.lastCreatedThread();
             assert this.thread != null;
-            TPCMetrics metrics = this.thread.metrics();
+            TPCMetricsAndLimits metrics = (TPCMetricsAndLimits) this.thread.metrics();
 
             this.pendingQueue = new MpscArrayQueue<>(metrics.maxPendingQueueSize());
             this.metrics = metrics;
+            this.busySpinStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_SPIN);
+            this.yieldStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_YIELD);
+            this.parkStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_PARK);
+            this.maxQueueSize = metrics.maxQueueSize();
         }
 
         public TPCThread thread()
         {
             return thread;
+        }
+
+        public ThreadState getThreadState()
+        {
+            return state;
         }
 
         @Override
@@ -214,7 +189,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             while (!parent.shutdown)
             {
                 //deal with spurious wake-ups
-                if (state == CoreState.WORKING)
+                if (state == ThreadState.WORKING)
                 {
                     int spins = 0;
                     while (!parent.shutdown)
@@ -227,12 +202,32 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
                         else
                         {
                             ++spins;
-                            if (spins < busyExtraSpins)
-                                continue;
-                            else if (spins < busyExtraSpins + yieldExtraSpins)
+                            if (spins < BUSY_EXTRA_SPINS)
+                            {
+                                if (busySpinStats != null)
+                                {
+                                    busySpinStats.scheduledTasks.add(1);
+                                    busySpinStats.completedTasks.add(1);
+                                }
+                            }
+                            else if (spins < BUSY_EXTRA_SPINS + YIELD_EXTRA_SPINS)
+                            {
+                                if (yieldStats != null)
+                                {
+                                    yieldStats.scheduledTasks.add(1);
+                                    yieldStats.completedTasks.add(1);
+                                }
                                 Thread.yield();
-                            else if (spins < busyExtraSpins + yieldExtraSpins + parkExtraSpins)
+                            }
+                            else if (spins < BUSY_EXTRA_SPINS + YIELD_EXTRA_SPINS + PARK_EXTRA_SPINS)
+                            {
+                                if (parkStats != null)
+                                {
+                                    parkStats.scheduledTasks.add(1);
+                                    parkStats.completedTasks.add(1);
+                                }
                                 LockSupport.parkNanos(1);
+                            }
                             else
                                 break;
                         }
@@ -251,15 +246,15 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             }
         }
 
-        private void park()
+        public void park()
         {
-            state = CoreState.PARKED;
+            state = ThreadState.PARKED;
             LockSupport.park();
         }
 
-        private void unpark()
+        public void unpark()
         {
-            state = CoreState.WORKING;
+            state = ThreadState.WORKING;
             LockSupport.unpark(thread);
         }
 
@@ -275,15 +270,16 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             }
         }
 
-        private void checkQueues(long nanoTime)
+        public boolean shouldUnpark(long nanoTimeSinceStartup)
         {
-            delayedNanosDeadline = nanoTime;
+            delayedNanosDeadline = nanoTimeSinceStartup;
 
-            if (DEBUG_RUNNING_TIME_NANOS > 0 && state == CoreState.WORKING)
-                checkLongRunningTasks(nanoTime);
+            if (DEBUG_RUNNING_TIME_NANOS > 0 && state == ThreadState.WORKING)
+                checkLongRunningTasks(nanoTimeSinceStartup);
 
-            if (state == CoreState.PARKED && !isEmpty())
-                unpark();
+            checkEpoll(nanoTimeSinceStartup);
+
+            return state == ThreadState.PARKED && !isEmpty();
         }
 
         @Override
@@ -309,7 +305,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
                 if (tpc.isPendable())
                 {
                     // If we already have something in the pending queue, this task should not jump it.
-                    if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(task, metrics.maxQueueSize()))
+                    if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(task, maxQueueSize))
                         return;
 
                     if (pendingQueue.relaxedOffer(tpc))
@@ -342,31 +338,15 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         {
             try
             {
-                int t;
+                int t = 0;
 
                 if (this.pendingEpollEvents > 0)
-                {
                     t = pendingEpollEvents;
-                    pendingEpollEvents = 0;
-                }
-                else
-                {
-                    t = this.selectStrategy.calculateStrategy(this.selectNowSupplier, hasTasks());
-                    switch (t)
-                    {
-                        case SelectStrategy.CONTINUE:
-                            return 0;
-                        case SelectStrategy.SELECT:
-                            t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
-                            if (this.wakenUp == 1)
-                                Native.eventFdWrite(this.eventFd.intValue(), 1L);
-                        default:
-                    }
-                }
 
                 if (t > 0)
                 {
                     this.processReady(this.events, t);
+                    pendingEpollEvents = 0;
                 }
 
                 if (this.allowGrowing && t == this.events.length())
@@ -392,8 +372,6 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         private int drainTasks()
         {
             int processed = 0;
-            movePending();
-
             try
             {
                 if (delayedNanosDeadline > 0)
@@ -403,13 +381,13 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
                 }
 
                 Runnable r;
-
                 while (processed < Short.MAX_VALUE && (r = queue.relaxedPoll()) != null)
                 {
                     r.run();
                     ++processed;
-                    movePending();
                 }
+
+                movePending();
             }
             catch (Throwable t)
             {
@@ -431,13 +409,20 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
         private void movePending()
         {
-            if (metrics != null && queue.size() < metrics.maxQueueSize())
+            if (metrics != null)
             {
-                TPCRunnable tpc = pendingQueue.relaxedPoll();
-                if (tpc != null)
+                TPCRunnable tpc;
+                while (queue.size() < maxQueueSize && (tpc = pendingQueue.relaxedPeek()) != null)
                 {
-                    queue.relaxedOffer(tpc);
-                    tpc.unsetPending();
+                    if (queue.relaxedOffer(tpc))
+                    {
+                        pendingQueue.relaxedPoll();
+                        tpc.unsetPending();
+                    }
+                    else
+                    {
+                        break;
+                    }
                 }
             }
         }
@@ -446,7 +431,8 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         @Inline
         protected boolean hasTasks()
         {
-            boolean hasTasks = queue.relaxedPeek() != null;
+            boolean hasTasks = queue.relaxedPeek() != null ||
+                               (pendingQueue != null && pendingQueue.relaxedPeek() != null);
 
             if (!hasTasks && delayedNanosDeadline > 0)
                 hasTasks = hasScheduledTasks(delayedNanosDeadline);
@@ -454,33 +440,37 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             return hasTasks;
         }
 
-        @Inline
-        boolean isEmpty()
+        void checkEpoll(long nanoTime)
         {
-            if (hasTasks())
-                return false;
-            if (pendingQueue != null && !pendingQueue.isEmpty())
-                return false;
+            if (pendingEpollEvents > 0)
+                return;
 
+            if (nanoTime - lastEpollCheckTime < EPOLL_CHECK_INTERVAL_NANOS)
+                return;
+
+            lastEpollCheckTime = nanoTime;
+            
             try
             {
-                int t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
+                int t = selectNowSupplier.get();
+                assert t >= 0;
 
                 if (t > 0)
                     pendingEpollEvents = t;
-                else
-                    Native.eventFdWrite(this.eventFd.intValue(), 1L);
-
-                return t <= 0;
             }
             catch (Exception e)
             {
                 logger.error("Error selecting socket ", e);
-                return true;
             }
         }
 
-        protected static long nanoTime()
+        @Inline
+        boolean isEmpty()
+        {
+            return pendingEpollEvents == 0 && !hasTasks();
+        }
+
+        public static long nanoTime()
         {
             return AbstractScheduledEventExecutor.nanoTime();
         }
@@ -496,5 +486,17 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             }
         }
 
+
+        /**
+         * We want to make sure netty doesn't wake up epoll when we
+         * add a task.
+         * @param task
+         * @return
+         */
+        @Override
+        public boolean wakesUpForTask(Runnable task)
+        {
+            return false;
+        }
     }
 }

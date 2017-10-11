@@ -22,6 +22,9 @@ import org.apache.cassandra.utils.CoalescingStrategies.Clock;
 import org.apache.cassandra.utils.CoalescingStrategies.Coalescable;
 import org.apache.cassandra.utils.CoalescingStrategies.CoalescingStrategy;
 import org.apache.cassandra.utils.CoalescingStrategies.Parker;
+import org.jctools.queues.MessagePassingQueue;
+import org.jctools.queues.MpscGrowableArrayQueue;
+
 import org.junit.BeforeClass;
 import org.junit.Before;
 import org.junit.Test;
@@ -95,7 +98,7 @@ public class CoalescingStrategiesTest
 
     MockParker parker;
 
-    BlockingQueue<SimpleCoalescable> input;
+    MessagePassingQueue<SimpleCoalescable> input;
     List<SimpleCoalescable> output;
 
     CoalescingStrategy cs;
@@ -124,16 +127,7 @@ public class CoalescingStrategiesTest
         };
 
         parker = new MockParker();
-        input = new LinkedBlockingQueue<SimpleCoalescable>()
-                {
-            @Override
-            public SimpleCoalescable take() throws InterruptedException
-            {
-                queueParked.release();
-                queueRelease.acquire();
-                return super.take();
-            }
-        };
+        input = new MpscGrowableArrayQueue<>(4096, 1 << 16);
         output = new ArrayList<>(128);
 
         clear();
@@ -141,7 +135,17 @@ public class CoalescingStrategiesTest
 
     CoalescingStrategy newStrategy(String name, int window)
     {
-        return CoalescingStrategies.newCoalescingStrategy(name, window, parker, logger, "Stupendopotamus");
+        return CoalescingStrategies.newCoalescingStrategy(name, window, null, parker, logger, "Stupendopotamus", () -> {
+            try
+            {
+                queueParked.release();
+                queueRelease.acquire();
+            }
+            catch (InterruptedException e)
+            {
+                throw new RuntimeException(e);
+            }
+        });
     }
 
     void add(long whenMicros)

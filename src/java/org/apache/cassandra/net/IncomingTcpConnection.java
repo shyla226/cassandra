@@ -46,7 +46,7 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
 {
     private static final Logger logger = LoggerFactory.getLogger(IncomingTcpConnection.class);
 
-    private static final int BUFFER_SIZE = Integer.getInteger(Config.PROPERTY_PREFIX + ".itc_buffer_size", 1024 * 4);
+    private static final int BUFFER_SIZE = Integer.getInteger(Config.PROPERTY_PREFIX + ".itc_buffer_size", 1024 * 64);
 
     private final ProtocolVersion protocolVersion;
     private final boolean compressed;

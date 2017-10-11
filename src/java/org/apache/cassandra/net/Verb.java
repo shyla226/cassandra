@@ -87,7 +87,7 @@ public abstract class Verb<P, Q>
         @Override
         public String toString()
         {
-            return String.format("%s.%s", group, name);
+            return  group.toString() + '.' + name;
         }
     }
 

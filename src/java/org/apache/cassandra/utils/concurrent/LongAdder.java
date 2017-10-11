@@ -127,7 +127,12 @@ public class LongAdder
 
     public long sum()
     {
-        return Arrays.stream(values).filter(cell -> cell != null).map(cell -> cell.get()).reduce(0L, Long::sum);
+        long sum = 0;
+        for (Cell c : values)
+            if (c != null)
+                sum += c.get();
+
+        return sum;
     }
 
     public void reset()

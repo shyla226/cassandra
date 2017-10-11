@@ -18,10 +18,10 @@
 package org.apache.cassandra.concurrent;
 
 import java.util.EnumMap;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.concurrent.LongAdder;
 
 
 /**
@@ -32,11 +32,11 @@ public class TPCMetricsAndLimits implements TPCMetrics
 {
     static class TaskStats
     {
-        AtomicLong scheduledTasks = new AtomicLong(0);
-        AtomicLong completedTasks = new AtomicLong(0);
-        AtomicLong failedTasks = new AtomicLong(0);
-        AtomicLong blockedTasks = new AtomicLong(0);
-        AtomicLong pendingTasks = new AtomicLong(0);
+        LongAdder scheduledTasks = new LongAdder();
+        LongAdder completedTasks = new LongAdder();
+        LongAdder failedTasks = new LongAdder();
+        LongAdder blockedTasks = new LongAdder();
+        LongAdder pendingTasks = new LongAdder();
     }
     final EnumMap<TPCTaskType, TaskStats> stats;
 
@@ -52,14 +52,18 @@ public class TPCMetricsAndLimits implements TPCMetrics
             stats.put(s, new TaskStats());
     }
 
+    public TaskStats getTaskStats(TPCTaskType stage)
+    {
+        return stats.get(stage);
+    }
+
     public void scheduled(TPCTaskType stage)
     {
         TaskStats stat = stats.get(stage);
-        stat.scheduledTasks.incrementAndGet();
+        stat.scheduledTasks.add(1);
         if (stage.counted)
             activeCountedTasks.incrementAndGet();
     }
-
 
     public void starting(TPCTaskType stage)
     {
@@ -69,7 +73,7 @@ public class TPCMetricsAndLimits implements TPCMetrics
     public void failed(TPCTaskType stage, Throwable t)
     {
         TaskStats stat = stats.get(stage);
-        stat.failedTasks.incrementAndGet();
+        stat.failedTasks.add(1);
         if (stage.counted)
             activeCountedTasks.decrementAndGet();
     }
@@ -77,7 +81,7 @@ public class TPCMetricsAndLimits implements TPCMetrics
     public void completed(TPCTaskType stage)
     {
         TaskStats stat = stats.get(stage);
-        stat.completedTasks.incrementAndGet();
+        stat.completedTasks.add(1);
         if (stage.counted)
             activeCountedTasks.decrementAndGet();
     }
@@ -91,43 +95,43 @@ public class TPCMetricsAndLimits implements TPCMetrics
     public void pending(TPCTaskType stage, int adjustment)
     {
         TaskStats stat = stats.get(stage);
-        stat.pendingTasks.addAndGet(adjustment);
+        stat.pendingTasks.add(adjustment);
     }
 
     public void blocked(TPCTaskType stage)
     {
         TaskStats stat = stats.get(stage);
-        stat.blockedTasks.incrementAndGet();
+        stat.blockedTasks.add(1);
     }
 
     public long scheduledTaskCount(TPCTaskType stage)
     {
         TaskStats stat = stats.get(stage);
-        return stat.scheduledTasks.get();
+        return stat.scheduledTasks.longValue();
     }
 
     public long completedTaskCount(TPCTaskType stage)
     {
         TaskStats stat = stats.get(stage);
-        return stat.completedTasks.get();
+        return stat.completedTasks.longValue();
     }
 
     public long activeTaskCount(TPCTaskType stage)
     {
         TaskStats stat = stats.get(stage);
-        return stat.scheduledTasks.get() - stat.completedTasks.get() - stat.pendingTasks.get();
+        return stat.scheduledTasks.longValue() - stat.completedTasks.longValue() - stat.pendingTasks.longValue();
     }
 
     public long pendingTaskCount(TPCTaskType stage)
     {
         TaskStats stat = stats.get(stage);
-        return stat.pendingTasks.get();
+        return stat.pendingTasks.longValue();
     }
 
     public long blockedTaskCount(TPCTaskType stage)
     {
         TaskStats stat = stats.get(stage);
-        return stat.blockedTasks.get();
+        return stat.blockedTasks.longValue();
     }
 
     public int maxQueueSize()

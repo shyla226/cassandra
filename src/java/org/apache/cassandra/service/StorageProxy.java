@@ -532,7 +532,7 @@ public class StorageProxy implements StorageProxyMBean
             return Single.error(ex);
         }
 
-        Completable ret = Completable.concat(responseHandlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
+        Completable ret = Completable.concat(Lists.transform(responseHandlers, WriteHandler::toObservable));
         return ret.onErrorResumeNext(ex -> {
             if (logger.isTraceEnabled())
                 logger.trace("Failed to wait for handlers", ex);

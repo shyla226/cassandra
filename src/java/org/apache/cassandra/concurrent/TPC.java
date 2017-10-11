@@ -26,6 +26,8 @@ import org.slf4j.LoggerFactory;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.Aio;
 import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollEventLoop;
+import io.netty.util.concurrent.AbstractScheduledEventExecutor;
 import io.reactivex.Scheduler;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
@@ -123,7 +125,6 @@ public class TPC
         {
             NioTPCEventLoopGroup group = new NioTPCEventLoopGroup(NUM_CORES);
             group.setIoRatio(NIO_IO_RATIO);
-            ApproximateTime.schedule(group.next());
             eventLoopGroup = group;
             logger.info("Created {} NIO event loops (with I/O ratio set to {}).", NUM_CORES, NIO_IO_RATIO);
         }
@@ -499,5 +500,23 @@ public class TPC
     public static long roundDownToBlockSize(long size)
     {
         return size & -AIO_BLOCK_SIZE;
+    }
+
+    /**
+     * In order to acces the netty nanotime we need to make a silly extension class.
+     *
+     * We need this specific call because the {@link EpollEventLoop#fetchFromScheduledTaskQueue()}
+     * uses it internally
+     */
+    private static abstract class NettyTime extends AbstractScheduledEventExecutor
+    {
+        public static long nanoSinceStartup() {
+            return AbstractScheduledEventExecutor.nanoTime();
+        }
+    }
+
+    public static long nanoTimeSinceStartup()
+    {
+        return NettyTime.nanoSinceStartup();
     }
 }

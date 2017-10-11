@@ -69,7 +69,7 @@ public class EventLoopBench {
     @State(Scope.Thread)
     public static class NettyExecutorState {
 
-        @Param({"10000000"})
+        @Param({"10"})
         public int count;
 
         private MultithreadEventExecutorGroup loops;
@@ -93,7 +93,6 @@ public class EventLoopBench {
             EventLoopBasedScheduler<?> scheduler1 = new EventLoopBasedScheduler<>((EventLoop)loops.next());
             EventLoopBasedScheduler<?> scheduler2 = new EventLoopBasedScheduler<>((EventLoop)loops.next());
 
-            //rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
             rx2 = Observable.fromArray(arr).subscribeOn(scheduler1).observeOn(scheduler2);
         }
 
@@ -106,7 +105,7 @@ public class EventLoopBench {
     @State(Scope.Thread)
     public static class ExecutorState {
 
-        @Param({"10000000"})
+        @Param({"10"})
         public int count;
 
         private TPCEventLoopGroup loops;
@@ -132,7 +131,6 @@ public class EventLoopBench {
             TPCScheduler scheduler1 = new TPCScheduler(loops.eventLoops().get(0));
             TPCScheduler scheduler2 = new TPCScheduler(loops.eventLoops().get(1));
 
-            //rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
             rx2 = Observable.fromArray(arr).subscribeOn(scheduler1).observeOn(scheduler2);
         }
 

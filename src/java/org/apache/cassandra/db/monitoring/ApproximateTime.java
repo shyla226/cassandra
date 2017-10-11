@@ -22,18 +22,16 @@ import java.util.concurrent.TimeUnit;
 
 import io.netty.channel.EventLoop;
 import org.apache.cassandra.concurrent.EpollTPCEventLoopGroup;
+import org.apache.cassandra.concurrent.WatcherThread;
 
 /**
  * This is an approximation of System.currentTimeInMillis() and System.nanoTime(),
  * to be used as a faster alternative when we can sacrifice precision.
  *
- * The current nanoTime is updated by the monitoring thread of {@link EpollTPCEventLoopGroup},
+ * The current nanoTime is updated by the Watcher thread of {@link org.apache.cassandra.concurrent.WatcherThread},
  * which calls {@link java.util.concurrent.locks.LockSupport#parkNanos(long)} with a parameter of 1
  * nanoSecond, and then checks the queues of the single-threaded executors, so the precision should be
  * of approximately 50 to 100 microseconds. To be on the safe side, we set the precision to 200 microseconds.
- *
- * For platforms without epoll support, then {@link EpollTPCEventLoopGroup} is not available and
- * {@link ApproximateTime#schedule(EventLoop)} must be called when the alternative event loop group is initialized.
  */
 public class ApproximateTime
 {
@@ -41,34 +39,19 @@ public class ApproximateTime
     private static final long initialNanoTime = System.nanoTime();
     private static volatile long currentNanoTime = initialNanoTime;
 
-    /** The precision in micros when we have to schedule events on the nio loops */
-    private static final long precisionWithSchedulingMicros = 1000;
-
-    /** The precision when epoll is available and hence {@link ApproximateTime#tick} gets called automatically
-     * by {@link EpollTPCEventLoopGroup}.
+    /** register class with the {@link WatcherThread}
      */
-    private static final long precisionWithEpollMicros = 200; // see comment in class description
-
-    /** The precision in microseconds, we start assuming epoll is available but if {@link ApproximateTime#schedule(EventLoop)}
-     * is called, we switch to a lower precision, {@link ApproximateTime#precisionWithSchedulingMicros}.
-     */
-    private static long precisionMicros = precisionWithEpollMicros;
-
-    /**
-     * For platforms without epoll support, then {@link EpollTPCEventLoopGroup} is not available and
-     * hence we need to schedule time updates manually.
-     *
-     * @param eventLoop - the event loop that will periodically set the current time.
-     */
-    public static void schedule(EventLoop eventLoop)
+    static
     {
-        precisionMicros = precisionWithSchedulingMicros;
-        eventLoop.scheduleAtFixedRate(ApproximateTime::tick, 0, precisionMicros, TimeUnit.MICROSECONDS);
+        WatcherThread.instance.get().addAction(ApproximateTime::tick);
     }
 
+    /** The precision when called by the {@link WatcherThread}
+     */
+    private static final long precisionMicros = 200; // see comment in class description
+
     /**
-     * Update the current time. This must be called by the same thread,
-     * see {@link EpollTPCEventLoopGroup#EpollTPCEventLoopGroup(int)}
+     * Update the current time. This must be called by the same thread
      */
     public static void tick()
     {

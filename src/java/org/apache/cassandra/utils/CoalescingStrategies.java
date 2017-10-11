@@ -21,6 +21,8 @@ import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.net.OutboundTcpConnection;
+import org.jctools.queues.MessagePassingQueue;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +35,6 @@ import java.nio.channels.FileChannel.MapMode;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.Locale;
@@ -132,12 +133,17 @@ public class CoalescingStrategies
         protected final ByteBuffer logBuffer;
         private RandomAccessFile ras;
         private final String displayName;
+        protected boolean doneWaiting = false;
+        private final Runnable runBeforeBlocking;
+        private final OutboundTcpConnection owner;
 
-        protected CoalescingStrategy(Parker parker, Logger logger, String displayName)
+        protected CoalescingStrategy(OutboundTcpConnection owner, Parker parker, Logger logger, String displayName, Runnable runBeforeBlocking)
         {
+            this.owner = owner;
             this.parker = parker;
             this.logger = logger;
             this.displayName = displayName;
+            this.runBeforeBlocking = runBeforeBlocking;
             if (DEBUG_COALESCING)
             {
                 NamedThreadFactory.createThread(() ->
@@ -175,6 +181,30 @@ public class CoalescingStrategies
             ras = rasTemp;
             logBuffer = logBufferTemp;
         }
+
+        protected <C> void blockingDrain(MessagePassingQueue<C> input, List<C> out, int maxItems)
+        {
+            doneWaiting = false;
+
+            if (runBeforeBlocking != null)
+                runBeforeBlocking.run();
+
+            input.drain(entry -> {
+                            out.add(entry);
+                            doneWaiting = true;
+                        },
+                        i -> {
+                            if (owner != null)
+                                owner.park();
+                            else
+                                LockSupport.parkNanos(10000);
+                            return i + 1;
+                        },
+                        () -> !doneWaiting);
+
+            input.drain(out::add, maxItems - out.size());
+        }
+
 
         /*
          * If debugging is enabled log to the logger the current average gap calculation result.
@@ -225,13 +255,13 @@ public class CoalescingStrategies
          * @param out Output list to place retrieved elements in. Must be empty.
          * @param maxItems Maximum number of elements to place in the output list
          */
-        public <C extends Coalescable> void coalesce(BlockingQueue<C> input, List<C> out, int maxItems) throws InterruptedException
+        public <C extends Coalescable> void coalesce(MessagePassingQueue<C> input, List<C> out, int maxItems) throws InterruptedException
         {
             Preconditions.checkArgument(out.isEmpty(), "out list should be empty");
             coalesceInternal(input, out, maxItems);
         }
 
-        protected abstract <C extends Coalescable> void coalesceInternal(BlockingQueue<C> input, List<C> out, int maxItems) throws InterruptedException;
+        protected abstract <C extends Coalescable> void coalesceInternal(MessagePassingQueue<C> input, List<C> out, int maxItems) throws InterruptedException;
 
     }
 
@@ -269,9 +299,9 @@ public class CoalescingStrategies
         private long sum = 0;
         private final long maxCoalesceWindow;
 
-        public TimeHorizonMovingAverageCoalescingStrategy(int maxCoalesceWindow, Parker parker, Logger logger, String displayName)
+        public TimeHorizonMovingAverageCoalescingStrategy(int maxCoalesceWindow, OutboundTcpConnection owner, Parker parker, Logger logger, String displayName, Runnable runBeforeBlocking)
         {
-            super(parker, logger, displayName);
+            super(owner, parker, logger, displayName, runBeforeBlocking);
             this.maxCoalesceWindow = TimeUnit.MICROSECONDS.toNanos(maxCoalesceWindow);
             sum = 0;
         }
@@ -342,13 +372,12 @@ public class CoalescingStrategies
         }
 
         @Override
-        protected <C extends Coalescable> void coalesceInternal(BlockingQueue<C> input, List<C> out,  int maxItems) throws InterruptedException
+        protected <C extends Coalescable> void coalesceInternal(MessagePassingQueue<C> input, List<C> out, int maxItems) throws InterruptedException
         {
-            if (input.drainTo(out, maxItems) == 0)
-            {
-                out.add(input.take());
-                input.drainTo(out, maxItems - out.size());
-            }
+            if (input.drain(out::add, maxItems) == 0)
+                blockingDrain(input, out, maxItems);
+
+            int count = out.size();
 
             for (Coalescable qm : out)
                 logSample(qm.timestampNanos());
@@ -356,12 +385,10 @@ public class CoalescingStrategies
             long averageGap = averageGap();
             debugGap(averageGap);
 
-            int count = out.size();
             if (maybeSleep(count, averageGap, maxCoalesceWindow, parker))
             {
-                input.drainTo(out, maxItems - out.size());
                 int prevCount = count;
-                count = out.size();
+                count += input.drain(out::add, maxItems - count);
                 for (int  i = prevCount; i < count; i++)
                     logSample(out.get(i).timestampNanos());
             }
@@ -387,12 +414,12 @@ public class CoalescingStrategies
         private long lastSample = 0;
         private int index = 0;
         private long sum = 0;
-
+        private boolean doneWaiting = false;
         private final long maxCoalesceWindow;
 
-        public MovingAverageCoalescingStrategy(int maxCoalesceWindow, Parker parker, Logger logger, String displayName)
+        public MovingAverageCoalescingStrategy(int maxCoalesceWindow, OutboundTcpConnection owner, Parker parker, Logger logger, String displayName, Runnable runBeforeBlocking)
         {
-            super(parker, logger, displayName);
+            super(owner, parker, logger, displayName, runBeforeBlocking);
             this.maxCoalesceWindow = TimeUnit.MICROSECONDS.toNanos(maxCoalesceWindow);
             for (int ii = 0; ii < samples.length; ii++)
                 samples[ii] = Integer.MAX_VALUE;
@@ -425,19 +452,16 @@ public class CoalescingStrategies
         }
 
         @Override
-        protected <C extends Coalescable> void coalesceInternal(BlockingQueue<C> input, List<C> out,  int maxItems) throws InterruptedException
+        protected <C extends Coalescable> void coalesceInternal(MessagePassingQueue<C> input, List<C> out,  int maxItems) throws InterruptedException
         {
-            if (input.drainTo(out, maxItems) == 0)
-            {
-                out.add(input.take());
-                input.drainTo(out, maxItems - out.size());
-            }
+            if (input.drain(out::add, maxItems) == 0)
+                blockingDrain(input, out, maxItems);
 
             long average = notifyOfSample(out.get(0).timestampNanos());
             debugGap(average);
 
             if (maybeSleep(out.size(), average, maxCoalesceWindow, parker)) {
-                input.drainTo(out, maxItems - out.size());
+                input.drain(out::add, maxItems - out.size());
             }
 
             for (int ii = 1; ii < out.size(); ii++)
@@ -458,25 +482,25 @@ public class CoalescingStrategies
     static class FixedCoalescingStrategy extends CoalescingStrategy
     {
         private final long coalesceWindow;
+        private boolean doneWaiting = false;
 
-        public FixedCoalescingStrategy(int coalesceWindowMicros, Parker parker, Logger logger, String displayName)
+        public FixedCoalescingStrategy(int coalesceWindowMicros, OutboundTcpConnection owner, Parker parker, Logger logger, String displayName, Runnable runBeforeBlocking)
         {
-            super(parker, logger, displayName);
+            super(owner, parker, logger, displayName, runBeforeBlocking);
             coalesceWindow = TimeUnit.MICROSECONDS.toNanos(coalesceWindowMicros);
         }
 
         @Override
-        protected <C extends Coalescable> void coalesceInternal(BlockingQueue<C> input, List<C> out,  int maxItems) throws InterruptedException
+        protected <C extends Coalescable> void coalesceInternal(MessagePassingQueue<C> input, List<C> out,  int maxItems) throws InterruptedException
         {
             int enough = DatabaseDescriptor.getOtcCoalescingEnoughCoalescedMessages();
 
-            if (input.drainTo(out, maxItems) == 0)
+            if (input.drain(out::add, maxItems) == 0)
             {
-                out.add(input.take());
-                input.drainTo(out, maxItems - out.size());
+                blockingDrain(input, out, maxItems);
                 if (out.size() < enough) {
                     parker.park(coalesceWindow);
-                    input.drainTo(out, maxItems - out.size());
+                    input.drain(out::add, maxItems - out.size());
                 }
             }
             debugTimestamps(out);
@@ -495,20 +519,17 @@ public class CoalescingStrategies
     @VisibleForTesting
     static class DisabledCoalescingStrategy extends CoalescingStrategy
     {
-
-        public DisabledCoalescingStrategy(int coalesceWindowMicros, Parker parker, Logger logger, String displayName)
+        public DisabledCoalescingStrategy(int coalesceWindowMicros, OutboundTcpConnection owner, Parker parker, Logger logger, String displayName, Runnable runBeforeBlocking)
         {
-            super(parker, logger, displayName);
+            super(owner, parker, logger, displayName, runBeforeBlocking);
         }
 
         @Override
-        protected <C extends Coalescable> void coalesceInternal(BlockingQueue<C> input, List<C> out,  int maxItems) throws InterruptedException
+        protected <C extends Coalescable> void coalesceInternal(MessagePassingQueue<C> input, List<C> out,  int maxItems) throws InterruptedException
         {
-            if (input.drainTo(out, maxItems) == 0)
-            {
-                out.add(input.take());
-                input.drainTo(out, maxItems - 1);
-            }
+            if (input.drain(out::add, maxItems) == 0)
+                blockingDrain(input, out, maxItems);
+
             debugTimestamps(out);
         }
 
@@ -522,9 +543,11 @@ public class CoalescingStrategies
     @VisibleForTesting
     static CoalescingStrategy newCoalescingStrategy(String strategy,
                                                     int coalesceWindow,
+                                                    OutboundTcpConnection owner,
                                                     Parker parker,
                                                     Logger logger,
-                                                    String displayName)
+                                                    String displayName,
+                                                    Runnable runBeforeBlocking)
     {
         String classname = null;
         String strategyCleaned = strategy.trim().toUpperCase(Locale.ENGLISH);
@@ -555,9 +578,9 @@ public class CoalescingStrategies
                 throw new RuntimeException(classname + " is not an instance of CoalescingStrategy");
             }
 
-            Constructor<?> constructor = clazz.getConstructor(int.class, Parker.class, Logger.class, String.class);
+            Constructor<?> constructor = clazz.getConstructor(int.class, OutboundTcpConnection.class, Parker.class, Logger.class, String.class, Runnable.class);
 
-            return (CoalescingStrategy)constructor.newInstance(coalesceWindow, parker, logger, displayName);
+            return (CoalescingStrategy)constructor.newInstance(coalesceWindow, owner, parker, logger, displayName, runBeforeBlocking);
         }
         catch (Exception e)
         {
@@ -565,8 +588,14 @@ public class CoalescingStrategies
         }
     }
 
-    public static CoalescingStrategy newCoalescingStrategy(String strategy, int coalesceWindow, Logger logger, String displayName)
+    public static CoalescingStrategy newCoalescingStrategy(String strategy, int coalesceWindow, OutboundTcpConnection owner, Logger logger, String displayName)
     {
-        return newCoalescingStrategy(strategy, coalesceWindow, PARKER, logger, displayName);
+        return newCoalescingStrategy(strategy, coalesceWindow, owner, PARKER, logger, displayName, null);
+    }
+
+    @VisibleForTesting
+    public static CoalescingStrategy newCoalescingStrategy(String strategy, int coalesceWindow, OutboundTcpConnection owner, Logger logger, String displayName, Runnable runBeforeBlocking)
+    {
+        return newCoalescingStrategy(strategy, coalesceWindow, owner, PARKER, logger, displayName, runBeforeBlocking);
     }
 }

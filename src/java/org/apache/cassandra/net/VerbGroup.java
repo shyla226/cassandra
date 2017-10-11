@@ -31,6 +31,7 @@ import org.apache.cassandra.concurrent.ExecutorSupplier;
 import org.apache.cassandra.concurrent.Schedulable;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.db.WriteVerbs;
 import org.apache.cassandra.db.monitoring.Monitor;

@@ -142,7 +142,6 @@ public class SlabAllocator extends MemtableBufferAllocator
                 if (!allocateOnHeapOnly)
                     offHeapRegions.add(region);
                 regionCount.incrementAndGet();
-                logger.trace("{} regions now allocated in {}", regionCount, this);
                 return region;
             }
 

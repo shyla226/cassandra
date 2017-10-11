@@ -749,12 +749,13 @@ public final class MessagingService implements MessagingServiceMBean
 
     private <P, Q> void receiveRequestInternal(Request<P, Q> request, ExecutorLocals locals)
     {
-        request.requestExecutor().execute(MessageDeliveryTask.forRequest(request), locals);
+        request.requestExecutor().execute(  MessageDeliveryTask.forRequest(request), locals);
     }
 
     private <Q> void receiveResponseInternal(Response<Q> response, ExecutorLocals locals)
     {
         CallbackInfo<Q> info = getRegisteredCallback(response, false);
+
         // Ignore expired callback info (we already logged in getRegisteredCallback)
         if (info != null)
             info.responseExecutor.execute(MessageDeliveryTask.forResponse(response), locals);

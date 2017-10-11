@@ -31,6 +31,8 @@ public enum EncodingVersion implements Version<EncodingVersion>
 
     public final ClusteringVersion clusteringVersion;
 
+    private static EncodingVersion last = null;
+
     EncodingVersion(ClusteringVersion clusteringVersion)
     {
         this.clusteringVersion = clusteringVersion;
@@ -38,7 +40,10 @@ public enum EncodingVersion implements Version<EncodingVersion>
 
     public static EncodingVersion last()
     {
-        return values()[values().length - 1];
+        if (last == null)
+            last = values()[values().length - 1];
+
+        return last;
     }
 
     public static <T> Versioned<EncodingVersion, T> versioned(Function<EncodingVersion, ? extends T> function)

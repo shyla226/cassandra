@@ -316,6 +316,7 @@ public class Server implements CassandraDaemon.Server
         {
             ChannelPipeline pipeline = channel.pipeline();
 
+
             // Add the ConnectionLimitHandler to the pipeline if configured to do so.
             if (DatabaseDescriptor.getNativeTransportMaxConcurrentConnections() > 0
                     || DatabaseDescriptor.getNativeTransportMaxConcurrentConnectionsPerIp() > 0)

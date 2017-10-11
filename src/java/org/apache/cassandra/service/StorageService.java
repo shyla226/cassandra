@@ -63,6 +63,7 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TPCUtils;
+import org.apache.cassandra.concurrent.WatcherThread;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -4720,6 +4721,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 logger.warn("Failed to wait for non periodic tasks to shutdown");
 
             ColumnFamilyStore.shutdownPostFlushExecutor();
+
+            WatcherThread.instance.get().awaitTermination(1, TimeUnit.MINUTES);
+
             setMode(Mode.DRAINED, !isFinalShutdown);
         }
         catch (Throwable t)

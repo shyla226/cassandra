@@ -114,7 +114,6 @@ public class Mutation implements IMutation, Schedulable
             cdcEnabled |= pu.metadata().params.cdc;
 
         this.scheduler = createScheduler(keyspaceName, key);
-        // See createScheduler() for why scheduler can be null and why we're happy basically ignoring that case.
         this.operationExecutor = scheduler == null ? null : scheduler.forTaskType(TPCTaskType.WRITE);
     }
 

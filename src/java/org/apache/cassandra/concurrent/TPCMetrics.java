@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.concurrent;
 
-import java.util.Map;
-
 /**
  * Interface for recoding TPC thread metrics.
  */

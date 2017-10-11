@@ -61,7 +61,10 @@ public enum TPCTaskType
     HINT_RECEIVE,
     HINT_SUBMIT,
     ROW_CACHE_LOAD,
-    COUNTER_CACHE_LOAD;
+    COUNTER_CACHE_LOAD,
+    EVENTLOOP_SPIN,
+    EVENTLOOP_YIELD,
+    EVENTLOOP_PARK;
 
     public final boolean pendable;
     public final boolean counted;

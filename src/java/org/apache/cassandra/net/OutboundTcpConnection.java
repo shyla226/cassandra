@@ -26,13 +26,12 @@ import java.net.SocketException;
 import java.nio.channels.Channels;
 import java.nio.channels.WritableByteChannel;
 import java.util.*;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 import java.util.zip.Checksum;
 
 import javax.net.ssl.SSLHandshakeException;
@@ -47,6 +46,7 @@ import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
 
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.concurrent.WatcherThread;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
@@ -60,11 +60,14 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.WrappedBoolean;
+import org.jctools.queues.MessagePassingQueue;
+import org.jctools.queues.MpscGrowableArrayQueue;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-public class OutboundTcpConnection extends FastThreadLocalThread
+public class OutboundTcpConnection extends FastThreadLocalThread implements WatcherThread.MonitorableThread
 {
     private static final Logger logger = LoggerFactory.getLogger(OutboundTcpConnection.class);
     private static final NoSpamLogger nospamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
@@ -85,10 +88,11 @@ public class OutboundTcpConnection extends FastThreadLocalThread
 
     public static final int MAX_COALESCED_MESSAGES = 128;
 
-    private static CoalescingStrategy newCoalescingStrategy(String displayName)
+    private static CoalescingStrategy newCoalescingStrategy(String displayName, OutboundTcpConnection owner)
     {
         return CoalescingStrategies.newCoalescingStrategy(DatabaseDescriptor.getOtcCoalescingStrategy(),
                                                           DatabaseDescriptor.getOtcCoalescingWindow(),
+                                                          owner,
                                                           logger,
                                                           displayName);
     }
@@ -107,7 +111,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
             break;
             default:
                 //Check that it can be loaded
-                newCoalescingStrategy("dummy");
+                newCoalescingStrategy("dummy", null);
         }
 
         int coalescingWindow = DatabaseDescriptor.getOtcCoalescingWindow();
@@ -124,13 +128,15 @@ public class OutboundTcpConnection extends FastThreadLocalThread
     }
 
     private volatile boolean isStopped = false;
+    private volatile ThreadState state = ThreadState.WORKING;
+    private Thread thread;
 
     private static final int OPEN_RETRY_DELAY = 100; // ms between retries
     public static final int WAIT_FOR_VERSION_MAX_TIME = 5000;
 
     static final int LZ4_HASH_SEED = 0x9747b28c;
 
-    private final BlockingQueue<QueuedMessage> backlog = new LinkedBlockingQueue<>();
+    private final MessagePassingQueue<QueuedMessage> backlog = new MpscGrowableArrayQueue<>(4096, 1 << 30);
     private static final String BACKLOG_PURGE_SIZE_PROPERTY = PREFIX + "otc_backlog_purge_size";
     @VisibleForTesting
     static final int BACKLOG_PURGE_SIZE = Integer.getInteger(BACKLOG_PURGE_SIZE_PROPERTY, 1024);
@@ -153,7 +159,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
     {
         super("MessagingService-Outgoing-" + pool.endPoint() + "-" + name);
         this.poolReference = pool;
-        cs = newCoalescingStrategy(pool.endPoint().getHostAddress());
+        cs = newCoalescingStrategy(pool.endPoint().getHostAddress(), this);
 
         // We want to use the most precise version we know because while there is version detection on connect(),
         // the target version might be accessed by the pool (in getConnection()) before we actually connect (as we
@@ -174,15 +180,8 @@ public class OutboundTcpConnection extends FastThreadLocalThread
 
     public void enqueue(Message message)
     {
-        expireMessages(ApproximateTime.currentTimeMillis());
-        try
-        {
-            backlog.put(new QueuedMessage(message));
-        }
-        catch (InterruptedException e)
-        {
-            throw new AssertionError(e);
-        }
+        boolean success = backlog.relaxedOffer(new QueuedMessage(message));
+        assert success;
     }
 
     /**
@@ -194,7 +193,15 @@ public class OutboundTcpConnection extends FastThreadLocalThread
     @VisibleForTesting // (otherwise = VisibleForTesting.NONE)
     boolean backlogContainsExpiredMessages(long currentTimeMillis)
     {
-        return backlog.stream().anyMatch(entry -> entry.message.isTimedOut(currentTimeMillis));
+        WrappedBoolean hasExpired = new WrappedBoolean(false);
+        backlog.drain(entry -> {
+            if (entry.message.isTimedOut(currentTimeMillis))
+                hasExpired.set(true);
+
+            backlog.offer(entry);
+        }, backlog.size());
+
+        return hasExpired.get();
     }
 
     void closeSocket(boolean destroyThread)
@@ -213,8 +220,38 @@ public class OutboundTcpConnection extends FastThreadLocalThread
         enqueue(Message.CLOSE_SENTINEL);
     }
 
+
+    public ThreadState getThreadState()
+    {
+        return state;
+    }
+
+    public void park()
+    {
+        state = ThreadState.PARKED;
+        LockSupport.park();
+    }
+
+    public void unpark()
+    {
+        assert thread != null;
+        state = ThreadState.WORKING;
+        LockSupport.unpark(thread);
+    }
+
+    public boolean shouldUnpark(long now)
+    {
+        return state == ThreadState.PARKED && !backlog.isEmpty();
+    }
+
     public void run()
     {
+        if (thread == null)
+            thread = Thread.currentThread();
+
+        //Register self with Monitor
+        WatcherThread.instance.get().addThreadToMonitor(this);
+
         final int drainedMessageSize = MAX_COALESCED_MESSAGES;
         // keeping list (batch) size small for now; that way we don't have an unbounded array (that we never resize)
         final List<QueuedMessage> drainedMessages = new ArrayList<>(drainedMessageSize);
@@ -282,6 +319,9 @@ public class OutboundTcpConnection extends FastThreadLocalThread
             dropped.addAndGet(currentMsgBufferCount);
             drainedMessages.clear();
         }
+
+        //Register self with Monitor
+        WatcherThread.instance.get().removeThreadToMonitor(this);
     }
 
     public int getPendingMessages()
@@ -335,14 +375,8 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                 // See CASSANDRA-5393 and CASSANDRA-12192.
                 if (qm.shouldRetry())
                 {
-                    try
-                    {
-                        backlog.put(new RetriedQueuedMessage(qm));
-                    }
-                    catch (InterruptedException e1)
-                    {
-                        throw new AssertionError(e1);
-                    }
+                    boolean accepted = backlog.relaxedOffer(new RetriedQueuedMessage(qm));
+                    assert accepted;
                 }
             }
             else
@@ -581,15 +615,12 @@ public class OutboundTcpConnection extends FastThreadLocalThread
         {
             try
             {
-                Iterator<QueuedMessage> iter = backlog.iterator();
-                while (iter.hasNext())
-                {
-                    if (iter.next().message.isTimedOut(currentTimeMillis))
-                    {
-                        iter.remove();
+                backlog.drain(entry -> {
+                    if (!entry.message.isTimedOut(currentTimeMillis))
+                        backlog.relaxedOffer(entry);
+                    else
                         dropped.incrementAndGet();
-                    }
-                }
+                }, backlog.size());
             }
             finally
             {
@@ -609,7 +640,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
         QueuedMessage(Message message)
         {
             this.message = message;
-            this.timestampNanos = System.nanoTime();
+            this.timestampNanos = ApproximateTime.nanoTime();
         }
 
         boolean shouldRetry()
