@@ -749,13 +749,6 @@ public final class MessagingService implements MessagingServiceMBean
 
     private <P, Q> void receiveRequestInternal(Request<P, Q> request, ExecutorLocals locals)
     {
-        // Note: theoretically, we could optimize the case where the current thread is already on the request executor
-        // like we do on the sending side/for local delivery (see deliverLocallyInternal for instance), but it's a tiny
-        // bit more complex here because even if we skip the executor, we still need to set the ExecutorLocals as they
-        // come from the remote message (and unset them after execution). Further, we know this optimization would be
-        // useless in the current code as receiveInternal() is always called from the IncomingTcpConnection thread,
-        // which will never be "on the request executor". We can revisit this once MS has been switched to Netty as
-        // this may provide some benefits sometimes, but for now, we keep it simple.
         request.requestExecutor().execute(MessageDeliveryTask.forRequest(request), locals);
     }
 
@@ -764,7 +757,6 @@ public final class MessagingService implements MessagingServiceMBean
         CallbackInfo<Q> info = getRegisteredCallback(response, false);
         // Ignore expired callback info (we already logged in getRegisteredCallback)
         if (info != null)
-            // Same remark than in receiveRequestInternal regarding optimizing for when we're already on the executor
             info.responseExecutor.execute(MessageDeliveryTask.forResponse(response), locals);
     }
 
