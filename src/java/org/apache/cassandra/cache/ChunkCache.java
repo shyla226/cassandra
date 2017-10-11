@@ -227,6 +227,13 @@ public class ChunkCache
         ((CachingRebufferer) dfile.rebuffererFactory()).invalidate(position);
     }
 
+    /**
+     * Remove any buffers from this file from the chunk cache. Note, this is a very expensive operation, O(N) on
+     * the cache size, and should only be used for testing purposes.
+     *
+     * @param fileName - the name of the file whose buffers we want to remove from the cache
+     */
+    @VisibleForTesting
     public void invalidateFile(String fileName)
     {
         cache.synchronous().invalidateAll(Iterables.filter(cache.synchronous().asMap().keySet(), x -> x.path.equals(fileName)));

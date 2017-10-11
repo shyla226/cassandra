@@ -269,8 +269,15 @@ public class FileHandle extends SharedCloseableImpl
 
         public void tidy()
         {
-            Throwables.perform(()-> chunkCache.ifPresent(cache -> cache.invalidateFile(name())),
-                               () -> { if (compressionMetadata != null) compressionMetadata.close();},
+            // APOLLO-1233: we used to invalidate the file cache:
+            //  ()-> chunkCache.ifPresent(cache -> cache.invalidateFile(name()))
+            // However, because it is not necessary for correct operation
+            // and may not be helpful we no longer do this. It may even cause problems with some delayed reads.
+            // It is also very expensive, I caught the Non-Periodic-Tasks thread spending 12% of CPU here for a
+            // read benchmark with ongoing compactions. The reason is that it is O(N) on all the futures in the cache,
+            // and in order to get the keys it checks if each future has completed successfully.
+
+            Throwables.perform(() -> { if (compressionMetadata != null) compressionMetadata.close();},
                                () -> channel.close(),
                                () -> rebufferer.close(),
                                () -> { if (regions != null) regions.close();});

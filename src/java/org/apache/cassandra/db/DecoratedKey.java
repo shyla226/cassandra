@@ -143,4 +143,9 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         ByteBuffer key = getKey();
         MurmurHash.hash3_x64_128(key, key.position(), key.remaining(), 0, dest);
     }
+
+    public Token getTokenForPartitioner(IPartitioner partitioner)
+    {
+        return partitioner.getToken(getKey());
+    }
 }

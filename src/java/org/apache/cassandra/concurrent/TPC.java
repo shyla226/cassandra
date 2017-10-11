@@ -33,14 +33,12 @@ import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.monitoring.ApproximateTime;
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.metrics.TPCAggregatedStageMetrics;
 import org.apache.cassandra.rx.RxSubscriptionDebugger;
 import org.apache.cassandra.metrics.TPCTotalMetrics;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -380,33 +378,33 @@ public class TPC
     }
 
     /**
-     * Return the id of the core that is assigned to run operations on the specified keyspace and partition key.
+     * Return the id of the core that is assigned to run operations on the specified keyspace and partition position.
      * <p>
      * Core zero is returned if {@link StorageService} is not yet initialized, since in this case we cannot assign an
-     * partition key to any core, or for system keyspaces ({@link SchemaConstants#SYSTEM_KEYSPACE_NAMES}).
+     * partition key to any core.
      *
      * @param keyspace - the keyspace
-     * @param key - the partition key
+     * @param key - the partition position, normally the key but we may receive the MIN or MAX bounds for range queries.
      *
      * @return the core id for this partition
      */
     @Inline
-    public static int getCoreForKey(Keyspace keyspace, DecoratedKey key)
+    public static int getCoreForKey(Keyspace keyspace, PartitionPosition key)
     {
         return getCoreForKey(keyspace.getTPCBoundaries(), key);
     }
 
     /**
-     * Return the id of the core that is assigned to run operations on the specified keyspace boundaries and partition key.
+     * Return the id of the core that is assigned to run operations on the specified keyspace boundaries and partition.
      * <p>
      * Core zero is returned if no boundaries are available.
      *
      * @param boundaries - the keyspace boundaries
-     * @param key - the partition key
+     * @param key - the partition position, normally the key but we may receive the MIN or MAX bounds for range queries.
      *
      * @return the core id for this partition
      */
-    public static int getCoreForKey(TPCBoundaries boundaries, DecoratedKey key)
+    public static int getCoreForKey(TPCBoundaries boundaries, PartitionPosition key)
     {
         // Handles both the system keyspace (but cheaper that comparing strings) and if the node is not sufficiently
         // initialized yet than we can compute its boundaries
@@ -414,28 +412,28 @@ public class TPC
             return 0;
 
         Token keyToken = key.getToken();
+
         // Convert to top level partitioner for secondary indexes
         if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
-            keyToken = DatabaseDescriptor.getPartitioner().getToken(key.getKey());
+            keyToken = key.getTokenForPartitioner(DatabaseDescriptor.getPartitioner());
 
         return boundaries.getCoreFor(keyToken);
     }
 
     /**
      * Return the TPC scheduler of the core that is assigned to run operations on the specified keyspace
-     * and partition key, see {@link TPC#perCoreSchedulers}.
+     * and partition, see {@link TPC#perCoreSchedulers}.
      * <p>
      * The scheduler for core zero is returned if {@link StorageService} is not yet initialized,
-     * since in this case we cannot assign any partition key to any core, or for system keyspaces
-     * ({@link SchemaConstants#SYSTEM_KEYSPACE_NAMES}).
+     * since in this case we cannot assign any partition to any core.
      *
      * @param keyspace - the keyspace
-     * @param key - the partition key
+     * @param key - the partition position, normally the key but we may receive the MIN or MAX bounds for range queries.
      *
      * @return the TPC scheduler
      */
     @Inline
-    public static TPCScheduler getForKey(Keyspace keyspace, DecoratedKey key)
+    public static TPCScheduler getForKey(Keyspace keyspace, PartitionPosition key)
     {
         return getForCore(getCoreForKey(keyspace, key));
     }

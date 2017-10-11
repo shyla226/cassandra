@@ -85,6 +85,8 @@ public final class TableMetadata
     private final ImmutableList<ColumnMetadata> clusteringColumns;
     private final RegularAndStaticColumns regularAndStaticColumns;
 
+    private final ClusteringComparator partitionKeyClusteringComparator;
+
     public final Indexes indexes;
     public final Triggers triggers;
 
@@ -125,6 +127,9 @@ public final class TableMetadata
         clusteringColumns = ImmutableList.copyOf(builder.clusteringColumns);
         regularAndStaticColumns = RegularAndStaticColumns.builder().addAll(builder.regularAndStaticColumns).build();
         columns = ImmutableMap.copyOf(builder.columns);
+
+        // we memoize this because it is used for the range queries performed by the spark collector via the token function
+        partitionKeyClusteringComparator = new ClusteringComparator(partitionKeyColumns.stream().map(c -> c.type).collect(toList()));
 
         indexes = builder.indexes;
         triggers = builder.triggers;
@@ -422,7 +427,7 @@ public final class TableMetadata
 
     public ClusteringComparator partitionKeyAsClusteringComparator()
     {
-        return new ClusteringComparator(partitionKeyColumns.stream().map(c -> c.type).collect(toList()));
+        return partitionKeyClusteringComparator;
     }
 
     /**

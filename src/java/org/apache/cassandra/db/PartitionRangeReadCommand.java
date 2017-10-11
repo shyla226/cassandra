@@ -97,7 +97,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         this.dataRange = dataRange;
 
-        this.scheduler = TPC.bestTPCScheduler();
+        this.scheduler = TPC.getForKey(Keyspace.open(metadata().keyspace), dataRange.startKey());
         this.operationExecutor = scheduler.forTaskType(TPCTaskType.READ_RANGE);
     }
 
@@ -309,7 +309,7 @@ public class PartitionRangeReadCommand extends ReadCommand
 
         for (Memtable memtable : view.memtables)
         {
-            Flow<FlowableUnfilteredPartition> iter = memtable.makePartitionIterator(columnFilter(), dataRange());
+            Flow<FlowableUnfilteredPartition> iter = memtable.makePartitionFlow(columnFilter(), dataRange());
             oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, memtable.getMinLocalDeletionTime());
             iterators.add(iter);
         }

@@ -18,7 +18,12 @@
 
 package org.apache.cassandra.db;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -27,20 +32,26 @@ import java.util.stream.Collectors;
 
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.TPCBoundaries;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.flow.Flow;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
+import static org.junit.Assert.*;
 
 public class MemtableTest extends CQLTester
 {
@@ -111,5 +122,77 @@ public class MemtableTest extends CQLTester
             for (Memtable.FlushRunnable flushRunnable : flushRunnables)
                 assertEquals(Memtable.FlushRunnableWriterState.ABORTED, flushRunnable.state());
         }
+    }
+
+    @Test
+    public void testMakePartitionFlow() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, value int)");
+
+        for (int i = 0; i < 100; i++) // with Murmur3 hashing, these are sufficient to populate all sub-ranges on an 8 core machine
+            execute("INSERT INTO %s (pk, value) VALUES (?, ?)", i, i);
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
+        TPCBoundaries boundaries = memtable.getBoundaries();
+        assertTrue("Expected boundaries for more than 1 core", boundaries.supportedCores() > 1);
+
+        final ColumnFilter columnFilter = ColumnFilter.all(cfs.metadata());
+        Flow<FlowableUnfilteredPartition> partitions;
+        IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
+
+        Map<Range<Token>, List<FlowableUnfilteredPartition>> partitionsByRange = new HashMap<>();
+        List<Range<Token>> ranges = boundaries.asRanges();
+        for (Range<Token> range : ranges)
+        {
+            final DataRange dataRange = DataRange.forTokenRange(range);
+            partitions = memtable.makePartitionFlow(columnFilter, dataRange);
+            assertNotNull(partitions);
+            partitionsByRange.put(range, partitions.toList().blockingSingle());
+        }
+
+        assertEquals(boundaries.supportedCores(), partitionsByRange.size());
+        assertEquals(100, (int)partitionsByRange.values().stream().map(list -> list.size()).reduce(0, Integer::sum));
+
+        // query all data in memtable
+        checkPartitions(partitionsByRange, ranges, memtable.makePartitionFlow(columnFilter, DataRange.allData(partitioner)).toList().blockingSingle());
+
+        // aggregate ranges
+        for (int i = 1; i < boundaries.supportedCores(); i++)
+        {
+            partitions = memtable.makePartitionFlow(columnFilter, DataRange.forKeyRange(Range.makeRowRange(partitioner.getMinimumToken(),
+                                                                                                           ranges.get(i).right.getToken())));
+
+            checkPartitions(partitionsByRange, ranges.subList(0, i + 1), partitions.toList().blockingSingle());
+        }
+
+        // split ranges
+        for (Range<Token> range : ranges)
+        {
+            Pair<AbstractBounds<Token>, AbstractBounds<Token>> splitRanges = range.split(partitioner.midpoint(range.left, range.right));
+            partitions = Flow.concat(memtable.makePartitionFlow(columnFilter, DataRange.forKeyRange(Range.makeRowRange(splitRanges.left.left,
+                                                                                                                       splitRanges.left.right))),
+                                     memtable.makePartitionFlow(columnFilter, DataRange.forKeyRange(Range.makeRowRange(splitRanges.right.left,
+                                                                                                                       splitRanges.right.right))));
+
+            checkPartitions(partitionsByRange, Collections.singletonList(range), partitions.toList().blockingSingle());
+
+        }
+
+    }
+
+    void checkPartitions(Map<Range<Token>, List<FlowableUnfilteredPartition>> partitionsByRange, List<Range<Token>> ranges, List<FlowableUnfilteredPartition> partitions)
+    {
+        List<FlowableUnfilteredPartition> expectedPartitions = new ArrayList<>();
+        for (Range<Token> range : ranges)
+            expectedPartitions.addAll(partitionsByRange.get(range));
+
+        assertEquals(expectedPartitions.size(), partitions.size());
+
+        expectedPartitions.sort(Comparator.comparing(fup -> fup.partitionKey()));
+        partitions.sort(Comparator.comparing(fup -> fup.partitionKey()));
+
+        for (int i = 0; i < expectedPartitions.size(); i++)
+            assertEquals(expectedPartitions.get(i).partitionKey(), partitions.get(i).partitionKey());
     }
 }

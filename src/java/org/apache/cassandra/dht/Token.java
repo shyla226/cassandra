@@ -200,6 +200,11 @@ public abstract class Token implements RingPosition<Token>, Serializable
             return isMinimumBound ? PartitionPosition.Kind.MIN_BOUND : PartitionPosition.Kind.MAX_BOUND;
         }
 
+        public Token getTokenForPartitioner(IPartitioner partitioner)
+        {
+            return isMinimumBound ? partitioner.getMinimumToken() : partitioner.getMaximumToken();
+        }
+
         @Override
         public boolean equals(Object obj)
         {
