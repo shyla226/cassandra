@@ -237,7 +237,7 @@ public class UnfilteredSerializer extends VersionDependent<EncodingVersion>
         if ((flags & HAS_ALL_COLUMNS) == 0)
             Columns.serializer.serializeSubset(Collections2.transform(row, ColumnData::column), headerColumns, out);
 
-        SearchIterator<ColumnMetadata, ColumnMetadata> si = headerColumns.iterator();
+        SearchIterator<ColumnMetadata, ColumnMetadata> si = header.columnsIterator(isStatic);
 
         try
         {

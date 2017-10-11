@@ -35,7 +35,7 @@ public class WrappedLong
         return value;
     }
 
-    public void set(int value)
+    public void set(long value)
     {
         this.value = value;
     }
@@ -48,6 +48,11 @@ public class WrappedLong
     public void decrement()
     {
         --value;
+    }
+
+    public void add(long value)
+    {
+        this.value += value;
     }
 
     public void min(long l)

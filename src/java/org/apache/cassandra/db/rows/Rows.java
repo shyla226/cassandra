@@ -29,7 +29,6 @@ import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.NumberUtil;
 import org.apache.cassandra.utils.Reducer;
-import org.apache.cassandra.utils.WrappedInt;
 
 /**
  * Static utilities to work on Row objects.
@@ -45,8 +44,7 @@ public abstract class Rows
         builder.newRow(row.clustering());
         builder.addPrimaryKeyLivenessInfo(row.primaryKeyLivenessInfo());
         builder.addRowDeletion(row.deletion());
-        for (ColumnData cd : row)
-        {
+        row.apply(cd -> {
             if (cd.column().isSimple())
             {
                 builder.addCell((Cell)cd);
@@ -58,7 +56,8 @@ public abstract class Rows
                 for (Cell cell : complexData)
                     builder.addCell(cell);
             }
-        }
+        }, false);
+
         return builder;
     }
 
@@ -84,22 +83,17 @@ public abstract class Rows
      * @param collector the stats collector.
      * @return the total number of cells in {@code row}.
      */
-    public static int collectStats(Row row, PartitionStatisticsCollector collector)
+    public static void collectStats(Row row, PartitionStatisticsCollector collector)
     {
         assert !row.isEmpty();
 
         collector.update(row.primaryKeyLivenessInfo());
         collector.update(row.deletion().time());
 
-        //we have to wrap these for the lambda
-        final WrappedInt columnCount = new WrappedInt(0);
-        final WrappedInt cellCount = new WrappedInt(0);
-
         row.apply(cd -> {
             if (cd.column().isSimple())
             {
-                columnCount.increment();
-                cellCount.increment();
+                collector.update(cd);
                 Cells.collectStats((Cell) cd, collector);
             }
             else
@@ -108,18 +102,13 @@ public abstract class Rows
                 collector.update(complexData.complexDeletion());
                 if (complexData.hasCells())
                 {
-                    columnCount.increment();
-                    for (Cell cell : complexData)
-                    {
-                        cellCount.increment();
-                        Cells.collectStats(cell, collector);
-                    }
+                    collector.update(cd);
+                    complexData.applyForwards(cell -> Cells.collectStats(cell, collector));
                 }
             }
         }, false);
 
-        collector.updateColumnSetPerRow(columnCount.get());
-        return cellCount.get();
+        collector.updateRowStats();
     }
 
     /**

@@ -19,12 +19,18 @@ package org.apache.cassandra.db.partitions;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.ColumnData;
 
 public interface PartitionStatisticsCollector
 {
     public void update(LivenessInfo info);
     public void update(DeletionTime deletionTime);
     public void update(Cell cell);
-    public void updateColumnSetPerRow(long columnSetInRow);
+    public void update(ColumnData columnData);
     public void updateHasLegacyCounterShards(boolean hasLegacyCounterShards);
+
+    /**
+     * Called when a row has been processed, allows resetting any counter specific to the row.
+     */
+    public void updateRowStats();
 }

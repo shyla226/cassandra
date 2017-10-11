@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.Consumer;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -37,6 +38,8 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.WrappedInt;
+import org.apache.cassandra.utils.WrappedLong;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
 import org.apache.cassandra.utils.versioning.VersionDependent;
@@ -376,14 +379,13 @@ public class PartitionUpdate extends AbstractBTreePartition
      */
     public int dataSize()
     {
-        int size = 0;
-        for (Row row : this)
-        {
-            size += row.clustering().dataSize();
-            for (ColumnData cd : row)
-                size += cd.dataSize();
-        }
-        return size;
+        WrappedInt size = new WrappedInt(0);
+        BTree.<Row>apply(holder().tree, (row) -> {
+            size.add(row.clustering().dataSize());
+            row.apply(cd -> size.add(cd.dataSize()), false);
+        }, false);
+
+        return size.get();
     }
 
     public TableMetadata metadata()
@@ -462,12 +464,10 @@ public class PartitionUpdate extends AbstractBTreePartition
      */
     public void validate()
     {
-        for (Row row : this)
-        {
+        BTree.<Row>apply(holder().tree, row -> {
             metadata().comparator.validate(row.clustering());
-            for (ColumnData cd : row)
-                cd.validate();
-        }
+            row.apply(cd -> cd.validate(), false);
+        }, false);
     }
 
     /**
@@ -479,26 +479,31 @@ public class PartitionUpdate extends AbstractBTreePartition
     {
         maybeBuild();
 
-        long maxTimestamp = deletionInfo.maxTimestamp();
-        for (Row row : this)
-        {
-            maxTimestamp = Math.max(maxTimestamp, row.primaryKeyLivenessInfo().timestamp());
-            for (ColumnData cd : row)
-            {
+        WrappedLong maxTimestamp = new WrappedLong(deletionInfo.maxTimestamp());
+
+        applyForwards(row -> {
+            maxTimestamp.max(row.primaryKeyLivenessInfo().timestamp());
+
+            row.apply(cd -> {
                 if (cd.column().isSimple())
                 {
-                    maxTimestamp = Math.max(maxTimestamp, ((Cell)cd).timestamp());
+                    maxTimestamp.max(((Cell)cd).timestamp());
                 }
                 else
                 {
                     ComplexColumnData complexData = (ComplexColumnData)cd;
-                    maxTimestamp = Math.max(maxTimestamp, complexData.complexDeletion().markedForDeleteAt());
-                    for (Cell cell : complexData)
-                        maxTimestamp = Math.max(maxTimestamp, cell.timestamp());
+                    maxTimestamp.max(complexData.complexDeletion().markedForDeleteAt());
+                    complexData.applyForwards(cell -> maxTimestamp.max(cell.timestamp()));
                 }
-            }
-        }
-        return maxTimestamp;
+            }, false);
+        });
+
+        return maxTimestamp.get();
+    }
+
+    private void applyForwards(Consumer<Row> function)
+    {
+        BTree.apply(holder().tree, function, false);
     }
 
     /**

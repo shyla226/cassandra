@@ -884,18 +884,14 @@ public class Memtable implements Comparable<Memtable>
 
         ColumnsCollector(RegularAndStaticColumns columns)
         {
-            for (ColumnMetadata def : columns.statics)
-                this.columns.add(def);
-            for (ColumnMetadata def : columns.regulars)
-                this.columns.add(def);
+            columns.statics.apply(def -> this.columns.add(def), false);
+            columns.regulars.apply(def -> this.columns.add(def), false);
         }
 
         public void update(RegularAndStaticColumns columns)
         {
-            for (ColumnMetadata def : columns.statics)
-                this.columns.add(def);
-            for (ColumnMetadata def : columns.regulars)
-                this.columns.add(def);
+            columns.statics.apply(def -> this.columns.add(def), false);
+            columns.regulars.apply(def -> this.columns.add(def), false);
         }
 
         public RegularAndStaticColumns get()

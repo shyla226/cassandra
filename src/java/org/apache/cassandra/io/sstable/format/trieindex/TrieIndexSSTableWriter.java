@@ -216,7 +216,6 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     private static class StatsCollector extends Transformation
     {
         private final MetadataCollector collector;
-        private int cellCount;
 
         StatsCollector(MetadataCollector collector)
         {
@@ -227,7 +226,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         public Row applyToStatic(Row row)
         {
             if (!row.isEmpty())
-                cellCount += Rows.collectStats(row, collector);
+                Rows.collectStats(row, collector);
             return row;
         }
 
@@ -235,7 +234,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         public Row applyToRow(Row row)
         {
             collector.updateClusteringValues(row.clustering());
-            cellCount += Rows.collectStats(row, collector);
+            Rows.collectStats(row, collector);
             return row;
         }
 
@@ -259,7 +258,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         @Override
         public void onPartitionClose()
         {
-            collector.addCellPerPartitionCount(cellCount);
+            collector.addCellPerPartitionCount();
         }
 
         @Override

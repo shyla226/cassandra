@@ -169,11 +169,15 @@ public class RowsTest
         }
     }
 
-    public static class StatsCollector implements PartitionStatisticsCollector
+    private static class StatsCollector implements PartitionStatisticsCollector
     {
+        long cellCount = 0;
+        long columnCount = 0;
+
         List<Cell> cells = new LinkedList<>();
         public void update(Cell cell)
         {
+            ++cellCount;
             cells.add(cell);
         }
 
@@ -189,11 +193,13 @@ public class RowsTest
             deletions.add(deletion);
         }
 
-        long columnCount = -1;
-        public void updateColumnSetPerRow(long columnSetInRow)
+        public void update(ColumnData columnData)
         {
-            assert columnCount < 0;
-            this.columnCount = columnSetInRow;
+            ++columnCount;
+        }
+
+        public void updateRowStats()
+        {
         }
 
         boolean hasLegacyCounterShards = false;

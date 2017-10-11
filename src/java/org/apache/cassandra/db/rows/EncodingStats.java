@@ -192,6 +192,10 @@ public class EncodingStats
             }
         }
 
+        public void update(ColumnData columnData)
+        {
+        }
+
         public void update(Cell cell)
         {
             updateTimestamp(cell.timestamp());
@@ -233,7 +237,7 @@ public class EncodingStats
             minTTL = Math.min(minTTL, ttl);
         }
 
-        public void updateColumnSetPerRow(long columnSetInRow)
+        public void updateRowStats()
         {
         }
 

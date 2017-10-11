@@ -120,8 +120,8 @@ abstract class AbstractWriteHandler extends WriteHandler
                 subscriber.onError(error);
             else
                 subscriber.onComplete();
-        })).timeout(currentTimeout(), TimeUnit.NANOSECONDS)
-           .onErrorResumeNext(exc -> {
+            })).timeout(currentTimeout(), TimeUnit.NANOSECONDS)
+               .onErrorResumeNext(exc -> {
                if (exc instanceof TimeoutException)
                {
                    int acks = ackCount();

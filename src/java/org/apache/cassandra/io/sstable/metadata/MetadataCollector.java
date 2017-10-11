@@ -33,6 +33,7 @@ import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -101,6 +102,7 @@ public class MetadataCollector implements PartitionStatisticsCollector
     protected boolean hasLegacyCounterShards = false;
     protected long totalColumnsSet;
     protected long totalRows;
+    private long currentPartitionCells = 0;
 
     /**
      * Default cardinality estimation method is to use HyperLogLog++.
@@ -151,9 +153,10 @@ public class MetadataCollector implements PartitionStatisticsCollector
         return this;
     }
 
-    public MetadataCollector addCellPerPartitionCount(long cellCount)
+    public MetadataCollector addCellPerPartitionCount()
     {
-        estimatedCellPerPartitionCount.add(cellCount);
+        estimatedCellPerPartitionCount.add(currentPartitionCells);
+        currentPartitionCells = 0;
         return this;
     }
 
@@ -179,9 +182,15 @@ public class MetadataCollector implements PartitionStatisticsCollector
 
     public void update(Cell cell)
     {
+        ++currentPartitionCells;
         updateTimestamp(cell.timestamp());
         updateTTL(cell.ttl());
         updateLocalDeletionTime(cell.localDeletionTime());
+    }
+
+    public void update(ColumnData cd)
+    {
+        ++totalColumnsSet;
     }
 
     public void update(DeletionTime dt)
@@ -193,9 +202,8 @@ public class MetadataCollector implements PartitionStatisticsCollector
         }
     }
 
-    public void updateColumnSetPerRow(long columnSetInRow)
+    public void updateRowStats()
     {
-        totalColumnsSet += columnSetInRow;
         ++totalRows;
     }
 

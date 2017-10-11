@@ -461,18 +461,20 @@ public class BTreeRow extends AbstractRow
                                              + primaryKeyLivenessInfo.dataSize()
                                              + deletion.dataSize());
 
-        return reduce(dataSize, (ret, cd) -> { ret.add(cd.dataSize()); return ret; }).get();
+        apply(cd -> dataSize.add(cd.dataSize()), false);
+
+        return dataSize.get();
     }
 
     public long unsharedHeapSizeExcludingData()
     {
-        long heapSize = EMPTY_SIZE
+        WrappedLong heapSize = new WrappedLong(EMPTY_SIZE
                       + clustering.unsharedHeapSizeExcludingData()
-                      + BTree.sizeOfStructureOnHeap(btree);
+                      + BTree.sizeOfStructureOnHeap(btree));
 
-        for (ColumnData cd : this)
-            heapSize += cd.unsharedHeapSizeExcludingData();
-        return heapSize;
+        apply(cd -> heapSize.add(cd.unsharedHeapSizeExcludingData()), false);
+
+        return heapSize.get();
     }
 
     public static Row.Builder sortedBuilder()

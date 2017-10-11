@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.Iterator;
 import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.stream.StreamSupport;
 
 import com.google.common.base.Function;
@@ -108,15 +109,14 @@ public class ComplexColumnData extends ColumnData implements Iterable<Cell>
         return BTree.iterator(cells);
     }
 
-    public Iterator<Single<Cell>> rxiterator()
-    {
-        return StreamSupport.stream(BTree.<Cell>iterable(cells).spliterator(), false)
-                            .map(c -> Single.just(c)).iterator();
-    }
-
     public Iterator<Cell> reverseIterator()
     {
         return BTree.iterator(cells, BTree.Dir.DESC);
+    }
+
+    public void applyForwards(Consumer<Cell> function)
+    {
+        BTree.apply(cells, function, false);
     }
 
     public int dataSize()
