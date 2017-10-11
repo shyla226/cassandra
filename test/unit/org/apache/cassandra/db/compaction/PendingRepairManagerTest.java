@@ -42,7 +42,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     {
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID);
@@ -60,7 +60,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     {
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID);
@@ -79,7 +79,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     {
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID);
@@ -103,7 +103,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     {
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID);
@@ -119,7 +119,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     {
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID);
@@ -137,13 +137,13 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     {
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID);
         prm.addSSTable(sstable);
 
-        repairID = registerSession(cfs, true, true);
+        repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID);
@@ -180,7 +180,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     public void getNextBackgroundTaskAllCleanup() throws Exception
     {
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         SSTableReader sstable = makeSSTable(true);
@@ -199,7 +199,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     {
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID);
@@ -223,7 +223,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     public void userDefinedTaskTest()
     {
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
-        UUID repairId = registerSession(cfs, true, true);
+        UUID repairId = registerSession(cfs, true);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairId);
         prm.addSSTable(sstable);
@@ -242,8 +242,8 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     public void mixedPendingSessionsTest()
     {
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
-        UUID repairId = registerSession(cfs, true, true);
-        UUID repairId2 = registerSession(cfs, true, true);
+        UUID repairId = registerSession(cfs, true);
+        UUID repairId2 = registerSession(cfs, true);
         SSTableReader sstable = makeSSTable(true);
         SSTableReader sstable2 = makeSSTable(true);
 
@@ -291,7 +291,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     {
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         Assert.assertFalse(prm.hasDataForSession(repairID));
@@ -308,13 +308,13 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
 
         // create 2 sessions:
 
-        UUID repairID1 = registerSession(cfs, true, true);
+        UUID repairID1 = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID1, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID1);
         prm.addSSTable(sstable);
 
-        UUID repairID2 = registerSession(cfs, true, true);
+        UUID repairID2 = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID2, COORDINATOR, PARTICIPANTS);
         sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID2);

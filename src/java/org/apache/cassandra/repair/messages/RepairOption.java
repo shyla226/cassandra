@@ -163,10 +163,6 @@ public class RepairOption
         Set<Range<Token>> ranges = new HashSet<>();
         if (rangesStr != null)
         {
-            if (incremental)
-                logger.warn("Incremental repair can't be requested with subrange repair " +
-                            "because each subrange repair would generate an anti-compacted table. " +
-                            "The repair will occur but without anti-compaction.");
             StringTokenizer tokenizer = new StringTokenizer(rangesStr, ",");
             while (tokenizer.hasMoreTokens())
             {
@@ -186,7 +182,7 @@ public class RepairOption
         }
 
         RepairOption option = new RepairOption(parallelism, primaryRange, incremental, trace, jobThreads, ranges,
-                                               !ranges.isEmpty(), pullRepair, force, previewKind);
+                                               pullRepair, force, previewKind);
 
         // data centers
         String dataCentersStr = options.get(DATACENTERS_KEY);
@@ -252,16 +248,6 @@ public class RepairOption
             }
         }
 
-        if (option.isIncremental() && !option.isPreview() && !option.isGlobal())
-        {
-            throw new IllegalArgumentException("Incremental repairs cannot be run against a subset of tokens or ranges");
-        }
-
-        if (option.isIncremental() && option.isForcedRepair())
-        {
-            throw new IllegalArgumentException("Cannot force incremental repair");
-        }
-
         return option;
     }
 
@@ -270,7 +256,6 @@ public class RepairOption
     private final boolean incremental;
     private final boolean trace;
     private final int jobThreads;
-    private final boolean isSubrangeRepair;
     private final boolean pullRepair;
     private final boolean forceRepair;
     private final PreviewKind previewKind;
@@ -281,8 +266,7 @@ public class RepairOption
     private final Collection<Range<Token>> ranges = new HashSet<>();
 
     public RepairOption(RepairParallelism parallelism, boolean primaryRange, boolean incremental, boolean trace, int jobThreads,
-                        Collection<Range<Token>> ranges, boolean isSubrangeRepair, boolean pullRepair, boolean forceRepair,
-                        PreviewKind previewKind)
+                        Collection<Range<Token>> ranges, boolean pullRepair, boolean forceRepair, PreviewKind previewKind)
     {
         if (FBUtilities.isWindows &&
             (DatabaseDescriptor.getDiskAccessMode() != Config.DiskAccessMode.standard || DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard) &&
@@ -299,7 +283,6 @@ public class RepairOption
         this.trace = trace;
         this.jobThreads = jobThreads;
         this.ranges.addAll(ranges);
-        this.isSubrangeRepair = isSubrangeRepair;
         this.pullRepair = pullRepair;
         this.forceRepair = forceRepair;
         this.previewKind = previewKind;
@@ -360,16 +343,6 @@ public class RepairOption
         return hosts;
     }
 
-    public boolean isGlobal()
-    {
-        return dataCenters.isEmpty() && hosts.isEmpty() && !isSubrangeRepair() && isIncremental();
-    }
-
-    public boolean isSubrangeRepair()
-    {
-        return isSubrangeRepair;
-    }
-
     public PreviewKind getPreviewKind()
     {
         return previewKind;
@@ -412,7 +385,6 @@ public class RepairOption
         options.put(COLUMNFAMILIES_KEY, Joiner.on(",").join(columnFamilies));
         options.put(DATACENTERS_KEY, Joiner.on(",").join(dataCenters));
         options.put(HOSTS_KEY, Joiner.on(",").join(hosts));
-        options.put(SUB_RANGE_REPAIR_KEY, Boolean.toString(isSubrangeRepair));
         options.put(TRACE_KEY, Boolean.toString(trace));
         options.put(RANGES_KEY, Joiner.on(",").join(ranges));
         options.put(PULL_REPAIR_KEY, Boolean.toString(pullRepair));

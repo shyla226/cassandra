@@ -173,8 +173,7 @@ public class RepairMessageSerializationsTest
     public void prepareMessage() throws IOException
     {
         PrepareMessage msg = new PrepareMessage(UUID.randomUUID(), new ArrayList<TableId>() {{add(TableId.generate());}},
-                                                buildTokenRanges(), true, 100000L, false,
-                                                PreviewKind.NONE);
+                                                buildTokenRanges(), true, 100000L, PreviewKind.NONE);
         serializeRoundTrip(msg, PrepareMessage.serializers.get(RepairVersion.OSS_40));
     }
 

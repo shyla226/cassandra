@@ -46,6 +46,7 @@ public abstract class AbstractRepairTest
     protected static final InetAddress PARTICIPANT1;
     protected static final InetAddress PARTICIPANT2;
     protected static final InetAddress PARTICIPANT3;
+    protected static final InetAddress PARTICIPANT4;
 
     static
     {
@@ -55,6 +56,7 @@ public abstract class AbstractRepairTest
             PARTICIPANT1 = InetAddress.getByName("10.0.0.1");
             PARTICIPANT2 = InetAddress.getByName("10.0.0.2");
             PARTICIPANT3 = InetAddress.getByName("10.0.0.3");
+            PARTICIPANT4 = InetAddress.getByName("10.0.0.4");
         }
         catch (UnknownHostException e)
         {
@@ -76,8 +78,9 @@ public abstract class AbstractRepairTest
     protected static final Range<Token> RANGE1 = new Range<>(t(1), t(2));
     protected static final Range<Token> RANGE2 = new Range<>(t(2), t(3));
     protected static final Range<Token> RANGE3 = new Range<>(t(4), t(5));
+    protected static final Range<Token> RANGE4 = new Range<>(t(5), t(6));
 
-    protected static UUID registerSession(ColumnFamilyStore cfs, boolean isIncremental, boolean isGlobal)
+    protected static UUID registerSession(ColumnFamilyStore cfs, boolean isIncremental)
     {
         UUID sessionId = UUIDGen.getTimeUUID();
 
@@ -88,7 +91,6 @@ public abstract class AbstractRepairTest
                                                                  Sets.newHashSet(RANGE1, RANGE2, RANGE3),
                                                                  isIncremental,
                                                                  repairedAt,
-                                                                 isGlobal,
                                                                  PreviewKind.NONE);
         return sessionId;
     }

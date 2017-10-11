@@ -78,7 +78,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void sstableAdded()
     {
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         Assert.assertTrue(csm.pendingRepairs().isEmpty());
 
@@ -102,7 +102,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void sstableListChangedAddAndRemove()
     {
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         SSTableReader sstable1 = makeSSTable(true);
@@ -149,7 +149,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void sstableRepairStatusChanged()
     {
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         // add as unrepaired
@@ -181,7 +181,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void sstableDeleted()
     {
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         SSTableReader sstable = makeSSTable(true);
@@ -204,7 +204,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void getStrategies()
     {
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         List<List<AbstractCompactionStrategy>> strategies;
@@ -229,7 +229,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void cleanupCompactionFinalized()
     {
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID);
@@ -253,7 +253,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         csm.getForPendingRepair(repairID).forEach(Assert::assertNull);
 
         // sstable should have pendingRepair cleared, and repairedAt set correctly
-        long expectedRepairedAt = ActiveRepairService.instance.getParentRepairSession(repairID).getRepairedAt();
+        long expectedRepairedAt = ActiveRepairService.instance.getParentRepairSession(repairID).repairedAt;
         Assert.assertFalse(sstable.isPendingRepair());
         Assert.assertTrue(sstable.isRepaired());
         Assert.assertEquals(expectedRepairedAt, sstable.getSSTableMetadata().repairedAt);
@@ -266,7 +266,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void cleanupCompactionFailed()
     {
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID);
@@ -299,7 +299,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void sessionCompleted()
     {
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         // add as unrepaired
@@ -330,7 +330,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void sessionCompletedWithCompactingPendingSSTable() throws Exception
     {
-        UUID repairID = registerSession(cfs, true, true);
+        UUID repairID = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         // add sstables
@@ -368,8 +368,8 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void sessionCompletedWithDifferentSSTables()
     {
-        UUID repairID1 = registerSession(cfs, true, true);
-        UUID repairID2 = registerSession(cfs, true, true);
+        UUID repairID1 = registerSession(cfs, true);
+        UUID repairID2 = registerSession(cfs, true);
         LocalSessionAccessor.prepareUnsafe(repairID1, COORDINATOR, PARTICIPANTS);
         LocalSessionAccessor.prepareUnsafe(repairID2, COORDINATOR, PARTICIPANTS);
 

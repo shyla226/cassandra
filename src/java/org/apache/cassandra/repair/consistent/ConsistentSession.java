@@ -55,7 +55,7 @@ import org.apache.cassandra.tools.nodetool.RepairAdmin;
  *
  * <h1>Repair prepare</h1>
  *
- *  First, the normal {@link ActiveRepairService#prepareForRepair(UUID, InetAddress, Set, RepairOption, List)} stuff
+ *  First, the normal {@link ActiveRepairService#prepareForRepair(UUID, InetAddress, Set, RepairOption, List, boolean)} stuff
  *  happens, which sends out {@link PrepareMessage} and creates a {@link ActiveRepairService.ParentRepairSession}
  *  on the coordinator and each of the neighbors.
  *
@@ -342,7 +342,8 @@ public abstract class ConsistentSession
             Preconditions.checkArgument(coordinator != null);
             Preconditions.checkArgument(ids != null);
             Preconditions.checkArgument(!ids.isEmpty());
-            Preconditions.checkArgument(repairedAt > 0);
+            Preconditions.checkArgument(repairedAt > 0
+                                        || repairedAt == ActiveRepairService.UNREPAIRED_SSTABLE);
             Preconditions.checkArgument(ranges != null);
             Preconditions.checkArgument(!ranges.isEmpty());
             Preconditions.checkArgument(participants != null);

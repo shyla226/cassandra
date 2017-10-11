@@ -150,7 +150,7 @@ public class PendingAntiCompactionTest
 
         // create a session so the anti compaction can fine it
         UUID sessionID = UUIDGen.getTimeUUID();
-        ActiveRepairService.instance.registerParentRepairSession(sessionID, InetAddress.getLocalHost(), Lists.newArrayList(cfs), ranges, true, 1, true, PreviewKind.NONE);
+        ActiveRepairService.instance.registerParentRepairSession(sessionID, InetAddress.getLocalHost(), Lists.newArrayList(cfs), ranges, true, 1, PreviewKind.NONE);
 
         PendingAntiCompaction pac;
         ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -358,7 +358,6 @@ public class PendingAntiCompactionTest
                                                                  Lists.newArrayList(cfs),
                                                                  FULL_RANGE,
                                                                  true,0,
-                                                                 true,
                                                                  PreviewKind.NONE);
         CompactionManager.instance.performAnticompaction(result.cfs, FULL_RANGE, result.refs, result.txn,
                                                          ActiveRepairService.UNREPAIRED_SSTABLE, sessionID, sessionID);

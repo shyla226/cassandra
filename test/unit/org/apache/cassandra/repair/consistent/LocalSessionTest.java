@@ -241,7 +241,7 @@ public class LocalSessionTest extends AbstractRepairTest
 
     private static UUID registerSession()
     {
-        return registerSession(cfs, true, true);
+        return registerSession(cfs, true);
     }
 
     @Test
@@ -252,7 +252,6 @@ public class LocalSessionTest extends AbstractRepairTest
         assertValidationFailure(b -> b.withCoordinator(null));
         assertValidationFailure(b -> b.withTableIds(null));
         assertValidationFailure(b -> b.withTableIds(new HashSet<>()));
-        assertValidationFailure(b -> b.withRepairedAt(0));
         assertValidationFailure(b -> b.withRepairedAt(-1));
         assertValidationFailure(b -> b.withRanges(null));
         assertValidationFailure(b -> b.withRanges(new HashSet<>()));

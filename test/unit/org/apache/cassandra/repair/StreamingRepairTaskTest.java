@@ -62,7 +62,7 @@ public class StreamingRepairTaskTest extends AbstractRepairTest
     @Test
     public void incrementalStreamPlan() throws Exception
     {
-        UUID sessionID = registerSession(cfs, true, true);
+        UUID sessionID = registerSession(cfs, true);
         ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(sessionID);
         RepairJobDesc desc = new RepairJobDesc(sessionID, UUIDGen.getTimeUUID(), ks, tbl, prs.getRanges());
         SyncRequest request = new SyncRequest(desc, PARTICIPANT1, PARTICIPANT2, PARTICIPANT3, prs.getRanges(), PreviewKind.NONE);
@@ -75,7 +75,7 @@ public class StreamingRepairTaskTest extends AbstractRepairTest
     @Test
     public void fullStreamPlan() throws Exception
     {
-        UUID sessionID = registerSession(cfs, false, true);
+        UUID sessionID = registerSession(cfs, false);
         ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(sessionID);
         RepairJobDesc desc = new RepairJobDesc(sessionID, UUIDGen.getTimeUUID(), ks, tbl, prs.getRanges());
         SyncRequest request = new SyncRequest(desc, PARTICIPANT1, PARTICIPANT2, PARTICIPANT3, prs.getRanges(), PreviewKind.NONE);

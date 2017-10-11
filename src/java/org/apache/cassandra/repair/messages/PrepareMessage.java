@@ -57,7 +57,6 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
             }
             out.writeBoolean(message.isIncremental);
             out.writeLong(message.timestamp);
-            out.writeBoolean(message.isGlobal);
             out.writeInt(message.previewKind.getSerializationVal());
         }
 
@@ -74,9 +73,8 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
                 ranges.add((Range<Token>) Range.tokenSerializer.deserialize(in, MessagingService.globalPartitioner(), version.boundsVersion));
             boolean isIncremental = in.readBoolean();
             long timestamp = in.readLong();
-            boolean isGlobal = in.readBoolean();
             PreviewKind previewKind = PreviewKind.deserialize(in.readInt());
-            return new PrepareMessage(parentRepairSession, tableIds, ranges, isIncremental, timestamp, isGlobal, previewKind);
+            return new PrepareMessage(parentRepairSession, tableIds, ranges, isIncremental, timestamp, previewKind);
         }
 
         public long serializedSize(PrepareMessage message)
@@ -90,7 +88,6 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
                 size += Range.tokenSerializer.serializedSize(r, version.boundsVersion);
             size += TypeSizes.sizeof(message.isIncremental);
             size += TypeSizes.sizeof(message.timestamp);
-            size += TypeSizes.sizeof(message.isGlobal);
             size += TypeSizes.sizeof(message.previewKind.getSerializationVal());
             return size;
         }
@@ -102,10 +99,9 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
     public final UUID parentRepairSession;
     public final boolean isIncremental;
     public final long timestamp;
-    public final boolean isGlobal;
     public final PreviewKind previewKind;
 
-    public PrepareMessage(UUID parentRepairSession, List<TableId> tableIds, Collection<Range<Token>> ranges, boolean isIncremental, long timestamp, boolean isGlobal,
+    public PrepareMessage(UUID parentRepairSession, List<TableId> tableIds, Collection<Range<Token>> ranges, boolean isIncremental, long timestamp,
                           PreviewKind previewKind)
     {
         super(null);
@@ -114,7 +110,6 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
         this.ranges = ranges;
         this.isIncremental = isIncremental;
         this.timestamp = timestamp;
-        this.isGlobal = isGlobal;
         this.previewKind = previewKind;
     }
 
@@ -126,7 +121,6 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
         PrepareMessage other = (PrepareMessage) o;
         return parentRepairSession.equals(other.parentRepairSession) &&
                isIncremental == other.isIncremental &&
-               isGlobal == other.isGlobal &&
                timestamp == other.timestamp &&
                tableIds.equals(other.tableIds) &&
                ranges.equals(other.ranges);
@@ -135,7 +129,7 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
     @Override
     public int hashCode()
     {
-        return Objects.hash(parentRepairSession, isGlobal, isIncremental, timestamp, tableIds, ranges);
+        return Objects.hash(parentRepairSession, isIncremental, timestamp, tableIds, ranges);
     }
 
     public MessageSerializer<PrepareMessage> serializer(RepairVersion version)
@@ -157,7 +151,6 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
                ", parentRepairSession=" + parentRepairSession +
                ", isIncremental=" + isIncremental +
                ", timestamp=" + timestamp +
-               ", isGlobal=" + isGlobal +
                '}';
     }
 }

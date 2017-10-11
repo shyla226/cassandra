@@ -171,7 +171,7 @@ public class LocalSyncTaskTest extends AbstractRepairTest
 
         ActiveRepairService.instance.registerParentRepairSession(parentRepairSession,  FBUtilities.getBroadcastAddress(),
                                                                  Arrays.asList(cfs), Arrays.asList(range), false,
-                                                                 ActiveRepairService.UNREPAIRED_SSTABLE, false, PreviewKind.NONE);
+                                                                 ActiveRepairService.UNREPAIRED_SSTABLE, PreviewKind.NONE);
 
         RepairJobDesc desc = new RepairJobDesc(parentRepairSession, UUID.randomUUID(), KEYSPACE1, "Standard1", Arrays.asList(range));
 
@@ -202,7 +202,7 @@ public class LocalSyncTaskTest extends AbstractRepairTest
     @Test
     public void fullRepairStreamPlan() throws Exception
     {
-        UUID sessionID = registerSession(cfs, true, true);
+        UUID sessionID = registerSession(cfs, true);
         ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(sessionID);
         RepairJobDesc desc = new RepairJobDesc(sessionID, UUIDGen.getTimeUUID(), KEYSPACE1, CF_STANDARD, prs.getRanges());
 
@@ -219,7 +219,7 @@ public class LocalSyncTaskTest extends AbstractRepairTest
     @Test
     public void incrementalRepairStreamPlan() throws Exception
     {
-        UUID sessionID = registerSession(cfs, true, true);
+        UUID sessionID = registerSession(cfs, true);
         ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(sessionID);
         RepairJobDesc desc = new RepairJobDesc(sessionID, UUIDGen.getTimeUUID(), KEYSPACE1, CF_STANDARD, prs.getRanges());
 

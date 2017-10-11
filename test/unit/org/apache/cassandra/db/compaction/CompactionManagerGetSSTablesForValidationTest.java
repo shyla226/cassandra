@@ -107,7 +107,6 @@ public class CompactionManagerGetSSTablesForValidationTest
                                                                  Sets.newHashSet(range),
                                                                  incremental,
                                                                  incremental ? System.currentTimeMillis() : ActiveRepairService.UNREPAIRED_SSTABLE,
-                                                                 true,
                                                                  PreviewKind.NONE);
         desc = new RepairJobDesc(sessionID, UUIDGen.getTimeUUID(), ks, tbl, Collections.singleton(range));
     }

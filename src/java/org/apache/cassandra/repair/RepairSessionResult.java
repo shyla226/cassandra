@@ -30,17 +30,13 @@ public class RepairSessionResult
 {
     public final UUID sessionId;
     public final String keyspace;
-    public final Collection<Range<Token>> ranges;
     public final Collection<RepairResult> repairJobResults;
-    public final boolean skippedReplicas;
 
-    public RepairSessionResult(UUID sessionId, String keyspace, Collection<Range<Token>> ranges, Collection<RepairResult> repairJobResults, boolean skippedReplicas)
+    public RepairSessionResult(UUID sessionId, String keyspace, Collection<RepairResult> repairJobResults)
     {
         this.sessionId = sessionId;
         this.keyspace = keyspace;
-        this.ranges = ranges;
         this.repairJobResults = repairJobResults;
-        this.skippedReplicas = skippedReplicas;
     }
 
     public String toString()
@@ -48,9 +44,7 @@ public class RepairSessionResult
         return "RepairSessionResult{" +
                "sessionId=" + sessionId +
                ", keyspace='" + keyspace + '\'' +
-               ", ranges=" + ranges +
                ", repairJobResults=" + repairJobResults +
-               ", skippedReplicas=" + skippedReplicas +
                '}';
     }
 }

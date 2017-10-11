@@ -82,7 +82,7 @@ public class CoordinatorSessionTest extends AbstractRepairTest
 
     private static RepairSessionResult createResult(CoordinatorSession coordinator)
     {
-        return new RepairSessionResult(coordinator.sessionID, "ks", coordinator.ranges, null, false);
+        return new RepairSessionResult(coordinator.sessionID, "ks", null);
     }
 
     private static void assertMessageSent(InstrumentedCoordinatorSession coordinator, InetAddress participant, RepairMessage expected)

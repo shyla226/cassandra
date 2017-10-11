@@ -36,7 +36,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.streaming.SessionSummary;
-import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTrees;
@@ -91,13 +90,10 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
     public final RepairParallelism parallelismDegree;
     public final boolean pullRepair;
 
-    // indicates some replicas were not included in the repair. Only relevant for --force option
-    public final boolean skippedReplicas;
-
     /** Range to repair */
     public final Collection<Range<Token>> ranges;
     public final Set<InetAddress> endpoints;
-    public final boolean isConsistent;
+    public final boolean isIncremental;
     public final PreviewKind previewKind;
 
     // Each validation task waits response from replica in validating ConcurrentMap (keyed by CF name and endpoint address)
@@ -120,7 +116,6 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
      * @param parallelismDegree specifies the degree of parallelism when calculating the merkle trees
      * @param endpoints the data centers that should be part of the repair; null for all DCs
      * @param pullRepair true if the repair should be one way (from remote host to this host and only applicable between two hosts--see RepairOption)
-     * @param force true if the repair should ignore dead endpoints (instead of failing)
      * @param cfnames names of columnfamilies
      */
     public RepairSession(UUID parentRepairSession,
@@ -129,9 +124,8 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
                          String keyspace,
                          RepairParallelism parallelismDegree,
                          Set<InetAddress> endpoints,
-                         boolean isConsistent,
+                         boolean isIncremental,
                          boolean pullRepair,
-                         boolean force,
                          PreviewKind previewKind,
                          String... cfnames)
     {
@@ -143,35 +137,10 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         this.keyspace = keyspace;
         this.cfnames = cfnames;
         this.ranges = ranges;
-
-        //If force then filter out dead endpoints
-        boolean forceSkippedReplicas = false;
-        if (force)
-        {
-            logger.debug("force flag set, removing dead endpoints");
-            final Set<InetAddress> removeCandidates = new HashSet<>();
-            for (final InetAddress endpoint : endpoints)
-            {
-                if (!FailureDetector.instance.isAlive(endpoint))
-                {
-                    logger.info("Removing a dead node from Repair due to -force {}", endpoint);
-                    removeCandidates.add(endpoint);
-                }
-            }
-            if (!removeCandidates.isEmpty())
-            {
-                // we shouldn't be promoting sstables to repaired if any replicas are excluded from the repair
-                forceSkippedReplicas = true;
-                endpoints = new HashSet<>(endpoints);
-                endpoints.removeAll(removeCandidates);
-            }
-        }
-
         this.endpoints = endpoints;
-        this.isConsistent = isConsistent;
+        this.isIncremental = isIncremental;
         this.previewKind = previewKind;
         this.pullRepair = pullRepair;
-        this.skippedReplicas = forceSkippedReplicas;
     }
 
     public UUID getId()
@@ -270,7 +239,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         {
             logger.info("{} {}", previewKind.logPrefix(getId()), message = String.format("No neighbors to repair with on range %s: session completed", ranges));
             Tracing.traceRepair(message);
-            set(new RepairSessionResult(id, keyspace, ranges, Lists.<RepairResult>newArrayList(), skippedReplicas));
+            set(new RepairSessionResult(id, keyspace, Lists.<RepairResult>newArrayList()));
             if (!previewKind.isPreview())
             {
                 SystemDistributedKeyspace.failRepairs(getId(), keyspace, cfnames, new RuntimeException(message));
@@ -281,7 +250,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         // Checking all nodes are live
         for (InetAddress endpoint : endpoints)
         {
-            if (!FailureDetector.instance.isAlive(endpoint) && !skippedReplicas)
+            if (!FailureDetector.instance.isAlive(endpoint))
             {
                 message = String.format("Cannot proceed on repair because a neighbor (%s) is dead: session failed", endpoint);
                 logger.error("{} {}", previewKind.logPrefix(getId()), message);
@@ -299,7 +268,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         List<ListenableFuture<RepairResult>> jobs = new ArrayList<>(cfnames.length);
         for (String cfname : cfnames)
         {
-            RepairJob job = new RepairJob(this, cfname, isConsistent, previewKind);
+            RepairJob job = new RepairJob(this, cfname, isIncremental, previewKind);
             executor.submit(job);
             jobs.add(job);
         }
@@ -312,7 +281,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
                 // this repair session is completed
                 logger.info("{} {}", previewKind.logPrefix(getId()), "Session completed successfully");
                 Tracing.traceRepair("Completed sync of range {}", ranges);
-                set(new RepairSessionResult(id, keyspace, ranges, results, skippedReplicas));
+                set(new RepairSessionResult(id, keyspace, results));
                 // only shutdown task executor after setting the callback future
                 taskExecutor.shutdown();
                 // mark this session as terminated

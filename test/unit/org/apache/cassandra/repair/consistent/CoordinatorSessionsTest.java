@@ -93,7 +93,7 @@ public class CoordinatorSessionsTest extends AbstractRepairTest
 
     private static UUID registerSession()
     {
-        return registerSession(cfs, true, true);
+        return registerSession(cfs, true);
     }
 
     @Test

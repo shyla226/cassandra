@@ -48,7 +48,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
     private final RepairJobDesc desc;
     private final RepairParallelism parallelismDegree;
     private final ListeningExecutorService taskExecutor;
-    private final boolean isConsistent;
+    private final boolean isIncremental;
     private final PreviewKind previewKind;
 
     private int MAX_WAIT_FOR_REMAINING_TASKS_IN_HOURS = 3;
@@ -59,13 +59,13 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
      * @param session RepairSession that this RepairJob belongs
      * @param columnFamily name of the ColumnFamily to repair
      */
-    public RepairJob(RepairSession session, String columnFamily, boolean isConsistent, PreviewKind previewKind)
+    public RepairJob(RepairSession session, String columnFamily, boolean isIncremental, PreviewKind previewKind)
     {
         this.session = session;
         this.desc = new RepairJobDesc(session.parentRepairSession, session.getId(), session.keyspace, columnFamily, session.getRanges());
         this.taskExecutor = session.taskExecutor;
         this.parallelismDegree = session.parallelismDegree;
-        this.isConsistent = isConsistent;
+        this.isIncremental = isIncremental;
         this.previewKind = previewKind;
     }
 
@@ -89,7 +89,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
         {
             ListenableFuture<List<InetAddress>> snapshotResult;
             List<ListenableFuture<InetAddress>> snapshotTasks = new ArrayList<>(allEndpoints.size());
-            if (isConsistent)
+            if (isIncremental)
             {
                 // consistent repair does it's own "snapshotting"
                 snapshotResult = Futures.immediateFuture(allEndpoints);
@@ -222,7 +222,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
         SyncTask task;
         if (r1.endpoint.equals(local) || r2.endpoint.equals(local))
         {
-            task = new LocalSyncTask(desc, r1, r2, isConsistent ? desc.parentSessionId : null, session.pullRepair, taskExecutor, previous, receivedRangeCache, previewKind);
+            task = new LocalSyncTask(desc, r1, r2, isIncremental ? desc.parentSessionId : null, session.pullRepair, taskExecutor, previous, receivedRangeCache, previewKind);
         }
         else
         {
