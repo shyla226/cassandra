@@ -25,6 +25,9 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.Iterables;
 
 import io.reactivex.Completable;
+import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.ExcludingBounds;
+import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
@@ -519,18 +522,25 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
         return shortReadProtection.apply(data);
     }
 
+    /*
+     * We have a potential short read if the result from a given node contains the requested number of rows
+     * (i.e. it has stopped returning results due to the limit), but some of them haven't
+     * made it into the final post-reconciliation result due to other nodes' row, range, and/or partition tombstones.
+     *
+     * If that is the case, then that node may have more rows that we should fetch, as otherwise we could
+     * ultimately return fewer rows than required. Also, those additional rows may contain tombstones which
+     * which we also need to fetch as they may shadow rows or partitions from other replicas' results, which we would
+     * otherwise return incorrectly.
+     */
     private class ShortReadResponseProtection
     {
         private final InetAddress source;
-        private final DataLimits.Counter singleResultCounter;
-        private final DataLimits.Counter mergedResultCounter;
+        private final DataLimits.Counter singleResultCounter; // unmerged per-source counter
+        private final DataLimits.Counter mergedResultCounter; // merged end-result counter
 
-        private volatile DecoratedKey lastPartitionKey;
-        private volatile Clustering lastClustering;
+        private volatile DecoratedKey lastPartitionKey; // key of the last observed partition
 
-        private volatile int lastCounted = 0; // last seen recorded # before attempting to fetch more rows
-        private volatile int lastFetched = 0; // # rows returned by last attempt to get more (or by the original read command)
-        private volatile int lastQueried = 0; // # extra rows requested from the replica last time
+        private volatile boolean partitionsFetched; // whether we've seen any new partitions since iteration start or last moreContents() call
 
         private ShortReadResponseProtection(InetAddress source, DataLimits.Counter mergedResultCounter)
         {
@@ -541,170 +551,255 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
 
         private Flow<FlowableUnfilteredPartition> apply(Flow<FlowableUnfilteredPartition> data)
         {
-            return DataLimits.countUnfilteredPartitions(data, singleResultCounter)
-                .map(this::applyPartition)
-                .doOnClose(singleResultCounter::endOfIteration);
+            Flow<FlowableUnfilteredPartition> flow = DataLimits.countUnfilteredPartitions(data, singleResultCounter);
+
+            // extend with moreContents() only if it's a range read command with no partition key specified
+            if (!command.isLimitedToOnePartition())
+                flow = flow.concatWith(this::moreContents);
+
+            return flow.map(this::applyPartition).doOnClose(singleResultCounter::endOfIteration);
         }
 
-        private FlowableUnfilteredPartition applyPartition(FlowablePartitionBase<? extends Unfiltered> p)
+        private FlowableUnfilteredPartition applyPartition(FlowableUnfilteredPartition partition)
         {
-            FlowableUnfilteredPartition partition = (FlowableUnfilteredPartition)p;
+            partitionsFetched = true;
             lastPartitionKey = partition.header.partitionKey;
-            lastClustering = null;
-            lastCounted = 0;
-
-            return partition.withContent(
-                partition.content
-                    .concatWith(this::moreContents)
-                    .map(this::applyUnfiltered)
-                    .doOnClose(singleResultCounter::endOfPartition));
-        }
-
-        private Unfiltered applyUnfiltered(Unfiltered unfiltered)
-        {
-            if (unfiltered instanceof Row)
-                lastClustering = ((Row)unfiltered).clustering();
-
-            return unfiltered;
+            return new ShortReadRowsProtection().applyPartition(partition);
         }
 
         /*
-         * We have a potential short read if the result from a given node contains the requested number of rows
-         * for that partition (i.e. it has stopped returning results due to the limit), but some of them haven't
-         * made it into the final post-reconciliation result due to other nodes' tombstones.
-         *
-         * If that is the case, then that node may have more rows that we should fetch, as otherwise we could
-         * ultimately return fewer rows than required. Also, those additional rows may contain tombstones which
-         * which we also need to fetch as they may shadow rows from other replicas' results, which we would
-         * otherwise return incorrectly.
-         *
-         * Also note that we only get here once all the rows for this partition have been iterated over, and so
+         * We only get here once all the rows and partitions in this iterator have been iterated over, and so
          * if the node had returned the requested number of rows but we still get here, then some results were
          * skipped during reconciliation.
          */
-        private Flow<Unfiltered> moreContents()
+        public Flow<FlowableUnfilteredPartition> moreContents()
         {
-            // never try to request additional rows from replicas if our reconciled partition is already filled to the limit
-            assert !mergedResultCounter.isDoneForPartition();
+            // never try to request additional partitions from replicas if our reconciled partitions are already filled to the limit
+            assert !mergedResultCounter.isDone();
 
             // we do not apply short read protection when we have no limits at all
             assert !command.limits().isUnlimited();
 
-            // if the returned partition doesn't have enough rows to satisfy even the original limit, don't ask for more
-            if (!singleResultCounter.isDoneForPartition())
+            /*
+             * If this is a single partition read command or an (indexed) partition range read command with
+             * a partition key specified, then we can't and shouldn't try fetch more partitions.
+             */
+            assert !command.isLimitedToOnePartition();
+
+            /*
+             * If the returned result doesn't have enough rows/partitions to satisfy even the original limit, don't ask for more.
+             *
+             * Can only take the short cut if there is no per partition limit set. Otherwise it's possible to hit false
+             * positives due to some rows being uncounted for in certain scenarios (see CASSANDRA-13911).
+             */
+            if (!singleResultCounter.isDone() && command.limits().perPartitionCount() == DataLimits.NO_ROWS_LIMIT)
                 return null;
 
             /*
-             * If the replica has no live rows in the partition, don't try to fetch more.
-             *
-             * Note that the previous branch [if (!singleResultCounter.isDoneForPartition()) return null] doesn't
-             * always cover this scenario:
-             * isDoneForPartition() is defined as [isDone() || rowInCurrentPartition >= perPartitionLimit],
-             * and will return true if isDone() returns true, even if there are 0 rows counted in the current partition.
-             *
-             * This can happen with a range read if after 1+ rounds of short read protection requests we managed to fetch
-             * enough extra rows for other partitions to satisfy the singleResultCounter's total row limit, but only
-             * have tombstones in the current partition.
-             *
-             * One other way we can hit this condition is when the partition only has a live static row and no regular
-             * rows. In that scenario the counter will remain at 0 until the partition is closed - which happens after
-             * the moreContents() call.
+             * Either we had an empty iterator as the initial response, or our moreContents() call got us an empty iterator.
+             * There is no point to ask the replica for more rows - it has no more in the requested range.
              */
-            if (countedInCurrentPartition(singleResultCounter) == 0)
+            if (!partitionsFetched)
                 return null;
+            partitionsFetched = false;
 
             /*
-             * This is a table with no clustering columns, and has at most one row per partition - with EMPTY clustering.
-             * We already have the row, so there is no point in asking for more from the partition.
+             * We are going to fetch one partition at a time for thrift and potentially more for CQL.
+             * The row limit will either be set to the per partition limit - if the command has no total row limit set, or
+             * the total # of rows remaining - if it has some. If we don't grab enough rows in some of the partitions,
+             * then future ShortReadRowsProtection.moreContents() calls will fetch the missing ones.
              */
-            if (Clustering.EMPTY == lastClustering)
-                return null;
-
-            lastFetched = countedInCurrentPartition(singleResultCounter) - lastCounted;
-            lastCounted = countedInCurrentPartition(singleResultCounter);
-
-            // getting back fewer rows than we asked for means the partition on the replica has been fully consumed
-            if (lastQueried > 0 && lastFetched < lastQueried)
-                return null;
-
-            /*
-             * At this point we know that:
-             *     1. the replica returned [repeatedly?] as many rows as we asked for and potentially has more
-             *        rows in the partition
-             *     2. at least one of those returned rows was shadowed by a tombstone returned from another
-             *        replica
-             *     3. we haven't satisfied the client's limits yet, and should attempt to query for more rows to
-             *        avoid a short read
-             *
-             * In the ideal scenario, we would get exactly min(a, b) or fewer rows from the next request, where a and b
-             * are defined as follows:
-             *     [a] limits.count() - mergedResultCounter.counted()
-             *     [b] limits.perPartitionCount() - mergedResultCounter.countedInCurrentPartition()
-             *
-             * It would be naive to query for exactly that many rows, as it's possible and not unlikely
-             * that some of the returned rows would also be shadowed by tombstones from other hosts.
-             *
-             * Note: we don't know, nor do we care, how many rows from the replica made it into the reconciled result;
-             * we can only tell how many in total we queried for, and that [0, mrc.countedInCurrentPartition()) made it.
-             *
-             * In general, our goal should be to minimise the number of extra requests - *not* to minimise the number
-             * of rows fetched: there is a high transactional cost for every individual request, but a relatively low
-             * marginal cost for each extra row requested.
-             *
-             * As such it's better to overfetch than to underfetch extra rows from a host; but at the same
-             * time we want to respect paging limits and not blow up spectacularly.
-             *
-             * Note: it's ok to retrieve more rows that necessary since singleResultCounter is not stopping and only
-             * counts.
-             *
-             * With that in mind, we'll just request the minimum of (count(), perPartitionCount()) limits,
-             * but no fewer than 8 rows (an arbitrary round lower bound), to ensure that we won't fetch row by row
-             * for SELECT DISTINCT queries (that set per partition limit to 1).
-             *
-             * See CASSANDRA-13794 for more details.
-             */
-            lastQueried = Math.max(Math.min(command.limits().count(), command.limits().perPartitionCount()), 8);
+            int toQuery = command.limits().count() != DataLimits.NO_ROWS_LIMIT
+                          ? command.limits().count() - counted(mergedResultCounter)
+                          : command.limits().perPartitionCount();
 
             ColumnFamilyStore.metricsFor(command.metadata().id).shortReadProtectionRequests.mark();
-            Tracing.trace("Requesting {} extra rows from {} for short read protection", lastQueried, source);
+            Tracing.trace("Requesting {} extra rows from {} for short read protection", toQuery, source);
 
-            Flow<FlowableUnfilteredPartition> rows = executeReadCommand(makeFetchAdditionalRowsReadCommand(lastQueried));
-
-            return DataLimits.countUnfilteredRows(rows.flatMap(fup -> fup.content), singleResultCounter);
+            PartitionRangeReadCommand cmd = makeFetchAdditionalPartitionReadCommand(toQuery);
+            return DataLimits.countUnfilteredPartitions(executeReadCommand(cmd), singleResultCounter);
         }
 
-        private SinglePartitionReadCommand makeFetchAdditionalRowsReadCommand(int toQuery)
+        // Counts the number of rows for regular queries and the number of groups for GROUP BY queries
+        private int counted(Counter counter)
         {
-            ClusteringIndexFilter filter = command.clusteringIndexFilter(lastPartitionKey);
-            if (null != lastClustering)
-                filter = filter.forPaging(command.metadata().comparator, lastClustering, false);
-
-            return SinglePartitionReadCommand.create(command.metadata(),
-                                                     command.nowInSec(),
-                                                     command.columnFilter(),
-                                                     command.rowFilter(),
-                                                     command.limits().forShortReadRetry(toQuery),
-                                                     lastPartitionKey,
-                                                     filter);
+            return command.limits().isGroupByLimit()
+                   ? counter.rowCounted()
+                   : counter.counted();
         }
 
-        /**
-         * Returns the number of results counted in the partition by the counter.
-         *
-         * @param counter the counter.
-         * @return the number of results counted in the partition by the counter
-         */
-        private int countedInCurrentPartition(Counter counter)
+        private PartitionRangeReadCommand makeFetchAdditionalPartitionReadCommand(int toQuery)
         {
-            // We are interested by the number of rows but for GROUP BY queries 'countedInCurrentPartition' returns
-            // the number of groups in the current partition.
-            if (command.limits().isGroupByLimit())
-                return counter.rowCountedInCurrentPartition();
+            PartitionRangeReadCommand cmd = (PartitionRangeReadCommand) command;
 
-            return counter.countedInCurrentPartition();
+            DataLimits newLimits = cmd.limits().forShortReadRetry(toQuery);
+
+            AbstractBounds<PartitionPosition> bounds = cmd.dataRange().keyRange();
+            AbstractBounds<PartitionPosition> newBounds = bounds.inclusiveRight()
+                                                          ? new Range<>(lastPartitionKey, bounds.right)
+                                                          : new ExcludingBounds<>(lastPartitionKey, bounds.right);
+            DataRange newDataRange = cmd.dataRange().forSubRange(newBounds);
+
+            return cmd.withUpdatedLimitsAndDataRange(newLimits, newDataRange);
         }
 
-        private Flow<FlowableUnfilteredPartition> executeReadCommand(SinglePartitionReadCommand cmd)
+        private class ShortReadRowsProtection
+        {
+            private volatile Clustering lastClustering;
+
+            private volatile int lastCounted = 0; // last seen recorded # before attempting to fetch more rows
+            private volatile int lastFetched = 0; // # rows returned by last attempt to get more (or by the original read command)
+            private volatile int lastQueried = 0; // # extra rows requested from the replica last time
+
+            private FlowableUnfilteredPartition applyPartition(FlowableUnfilteredPartition partition)
+            {
+                return partition.withContent(partition.content
+                                             .concatWith(this::moreContents)
+                                             .map(this::applyUnfiltered)
+                                             .doOnClose(singleResultCounter::endOfPartition));
+            }
+
+            private Unfiltered applyUnfiltered(Unfiltered unfiltered)
+            {
+                if (unfiltered instanceof Row)
+                    lastClustering = ((Row) unfiltered).clustering();
+
+                return unfiltered;
+            }
+
+            /*
+             * We only get here once all the rows in this iterator have been iterated over, and so if the node
+             * had returned the requested number of rows but we still get here, then some results were skipped
+             * during reconciliation.
+             */
+            private Flow<Unfiltered> moreContents()
+            {
+                // never try to request additional rows from replicas if our reconciled partition is already filled to the limit
+                assert !mergedResultCounter.isDoneForPartition();
+
+                // we do not apply short read protection when we have no limits at all
+                assert !command.limits().isUnlimited();
+
+                /*
+                 * If the returned partition doesn't have enough rows to satisfy even the original limit, don't ask for more.
+                 *
+                 * Can only take the short cut if there is no per partition limit set. Otherwise it's possible to hit false
+                 * positives due to some rows being uncounted for in certain scenarios (see CASSANDRA-13911).
+                 */
+                if (!singleResultCounter.isDoneForPartition() && command.limits().perPartitionCount() == DataLimits.NO_ROWS_LIMIT)
+                    return null;
+
+                /*
+                 * If the replica has no live rows in the partition, don't try to fetch more.
+                 *
+                 * Note that the previous branch [if (!singleResultCounter.isDoneForPartition()) return null] doesn't
+                 * always cover this scenario:
+                 * isDoneForPartition() is defined as [isDone() || rowInCurrentPartition >= perPartitionLimit],
+                 * and will return true if isDone() returns true, even if there are 0 rows counted in the current partition.
+                 *
+                 * This can happen with a range read if after 1+ rounds of short read protection requests we managed to fetch
+                 * enough extra rows for other partitions to satisfy the singleResultCounter's total row limit, but only
+                 * have tombstones in the current partition.
+                 *
+                 * One other way we can hit this condition is when the partition only has a live static row and no regular
+                 * rows. In that scenario the counter will remain at 0 until the partition is closed - which happens after
+                 * the moreContents() call.
+                 */
+                if (countedInCurrentPartition(singleResultCounter) == 0)
+                    return null;
+
+                /*
+                 * This is a table with no clustering columns, and has at most one row per partition - with EMPTY clustering.
+                 * We already have the row, so there is no point in asking for more from the partition.
+                 */
+                if (Clustering.EMPTY == lastClustering || command.metadata().clusteringColumns().isEmpty())
+                    return null;
+
+                lastFetched = countedInCurrentPartition(singleResultCounter) - lastCounted;
+                lastCounted = countedInCurrentPartition(singleResultCounter);
+
+                // getting back fewer rows than we asked for means the partition on the replica has been fully consumed
+                if (lastQueried > 0 && lastFetched < lastQueried)
+                    return null;
+
+                /*
+                 * At this point we know that:
+                 *     1. the replica returned [repeatedly?] as many rows as we asked for and potentially has more
+                 *        rows in the partition
+                 *     2. at least one of those returned rows was shadowed by a tombstone returned from another
+                 *        replica
+                 *     3. we haven't satisfied the client's limits yet, and should attempt to query for more rows to
+                 *        avoid a short read
+                 *
+                 * In the ideal scenario, we would get exactly min(a, b) or fewer rows from the next request, where a and b
+                 * are defined as follows:
+                 *     [a] limits.count() - mergedResultCounter.counted()
+                 *     [b] limits.perPartitionCount() - mergedResultCounter.countedInCurrentPartition()
+                 *
+                 * It would be naive to query for exactly that many rows, as it's possible and not unlikely
+                 * that some of the returned rows would also be shadowed by tombstones from other hosts.
+                 *
+                 * Note: we don't know, nor do we care, how many rows from the replica made it into the reconciled result;
+                 * we can only tell how many in total we queried for, and that [0, mrc.countedInCurrentPartition()) made it.
+                 *
+                 * In general, our goal should be to minimise the number of extra requests - *not* to minimise the number
+                 * of rows fetched: there is a high transactional cost for every individual request, but a relatively low
+                 * marginal cost for each extra row requested.
+                 *
+                 * As such it's better to overfetch than to underfetch extra rows from a host; but at the same
+                 * time we want to respect paging limits and not blow up spectacularly.
+                 *
+                 * Note: it's ok to retrieve more rows that necessary since singleResultCounter is not stopping and only
+                 * counts.
+                 *
+                 * With that in mind, we'll just request the minimum of (count(), perPartitionCount()) limits.
+                 *
+                 * See CASSANDRA-13794 for more details.
+                 */
+                lastQueried = Math.min(command.limits().count(), command.limits().perPartitionCount());
+
+                ColumnFamilyStore.metricsFor(command.metadata().id).shortReadProtectionRequests.mark();
+                Tracing.trace("Requesting {} extra rows from {} for short read protection", lastQueried, source);
+
+                SinglePartitionReadCommand cmd = makeFetchAdditionalRowsReadCommand(lastQueried);
+                Flow<FlowableUnfilteredPartition> rows = executeReadCommand(cmd);
+                return DataLimits.countUnfilteredRows(rows.flatMap(fup -> fup.content), singleResultCounter);
+            }
+
+            private SinglePartitionReadCommand makeFetchAdditionalRowsReadCommand(int toQuery)
+            {
+                ClusteringIndexFilter filter = command.clusteringIndexFilter(lastPartitionKey);
+                if (null != lastClustering)
+                    filter = filter.forPaging(command.metadata().comparator, lastClustering, false);
+
+                return SinglePartitionReadCommand.create(command.metadata(),
+                                                         command.nowInSec(),
+                                                         command.columnFilter(),
+                                                         command.rowFilter(),
+                                                         command.limits().forShortReadRetry(toQuery),
+                                                         lastPartitionKey,
+                                                         filter,
+                                                         command.indexMetadata());
+            }
+
+            /**
+             * Returns the number of results counted in the partition by the counter.
+             *
+             * @param counter the counter.
+             * @return the number of results counted in the partition by the counter
+             */
+            private int countedInCurrentPartition(Counter counter)
+            {
+                // We are interested by the number of rows but for GROUP BY queries 'countedInCurrentPartition' returns
+                // the number of groups in the current partition.
+                if (command.limits().isGroupByLimit())
+                    return counter.rowCountedInCurrentPartition();
+
+                return counter.countedInCurrentPartition();
+            }
+        }
+
+        private Flow<FlowableUnfilteredPartition> executeReadCommand(ReadCommand cmd)
         {
             RetryResolver resolver = new RetryResolver(cmd, ctx.withConsistency(ConsistencyLevel.ONE));
             ReadCallback<FlowableUnfilteredPartition> handler = ReadCallback.forResolver(resolver, Collections.singletonList(source));

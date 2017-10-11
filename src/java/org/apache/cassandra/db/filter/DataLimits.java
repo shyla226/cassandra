@@ -483,10 +483,7 @@ public abstract class DataLimits
 
         public DataLimits forShortReadRetry(int toFetch)
         {
-            // When we do a short read retry, we're only ever querying the single partition on which we have a short read. So
-            // we use toFetch as the row limit and use no perPartitionLimit (it would be equivalent in practice to use toFetch
-            // for both argument or just for perPartitionLimit with no limit on rowLimit).
-            return new CQLLimits(bytesLimit, toFetch, NO_ROWS_LIMIT, isDistinct);
+            return new CQLLimits(bytesLimit, toFetch, perPartitionLimit, isDistinct);
         }
 
         public boolean hasEnoughLiveData(CachedPartition cached, int nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)

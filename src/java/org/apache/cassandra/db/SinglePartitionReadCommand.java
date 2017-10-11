@@ -1094,6 +1094,11 @@ public class SinglePartitionReadCommand extends ReadCommand
              + ClusteringIndexFilter.serializers.get(version).serializedSize(clusteringIndexFilter());
     }
 
+    public boolean isLimitedToOnePartition()
+    {
+        return true;
+    }
+
     public StagedScheduler getScheduler()
     {
         return scheduler;

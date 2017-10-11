@@ -117,6 +117,8 @@ public abstract class ReadCommand implements ReadQuery, Schedulable
     protected abstract void serializeSelection(DataOutputPlus out, ReadVersion version) throws IOException;
     protected abstract long selectionSerializedSize(ReadVersion version);
 
+    public abstract boolean isLimitedToOnePartition();
+
     public abstract Request.Dispatcher<? extends ReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints);
     public abstract Request<? extends ReadCommand, ReadResponse> requestTo(InetAddress endpoint);
 
