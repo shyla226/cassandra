@@ -918,6 +918,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         synchronized (data)
         {
+
             logFlush();
             Flush flush = new Flush(false);
             flushExecutor.execute(flush);
@@ -1167,7 +1168,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         public Collection<SSTableReader> flushMemtable(Memtable memtable, boolean flushNonCf2i)
         {
             long start = System.currentTimeMillis();
-            if (memtable.isClean() || truncate)
+            if (memtable.isEmpty() || truncate)
             {
                 memtable.cfs.replaceFlushed(memtable, Collections.emptyList());
                 reclaim(memtable);
@@ -2315,7 +2316,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     @Deprecated
     public <V> V runWithCompactionsDisabled(Callable<V> callable, boolean interruptValidation, boolean interruptViews)
     {
-        return runWithCompactionsDisabled(callable, 
+        return runWithCompactionsDisabled(callable,
                                           interruptValidation ? Predicates.<OperationType>alwaysTrue() : OperationType.EXCEPT_VALIDATIONS,
                                           Predicates.<SSTableReader>alwaysTrue(),
                                           interruptViews);

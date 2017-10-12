@@ -18,6 +18,7 @@
 package org.apache.cassandra.concurrent;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -99,7 +100,7 @@ public class TPCBoundaries
     {
         return boundaries.length + 1;
     }
-    
+
     public List<Range<Token>> asRanges()
     {
         IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
@@ -126,5 +127,20 @@ public class TPCBoundaries
             sb.append("core ").append(i+1).append(": (").append(boundaries[i]).append(", ").append(boundaries[i+1]).append("] ");
         sb.append("core ").append(boundaries.length + 1).append(": (").append(boundaries[boundaries.length-1]).append(", max)");
         return sb.toString();
+    }
+
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        TPCBoundaries that = (TPCBoundaries) o;
+
+        return Arrays.equals(boundaries, that.boundaries);
+    }
+
+    public int hashCode()
+    {
+        return Arrays.hashCode(boundaries);
     }
 }
