@@ -85,7 +85,7 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
             currentBh.release();
             buf = bh.buffer();
             offset = position - bh.offset();
-            assert offset >= 0 && offset < buf.limit();
+            assert offset >= 0 && offset < buf.limit() : String.format("Invalid offset: %d, buf: %s, bh: %s", offset, buf, bh);
         }
         this.offset = (int) offset;
         this.position = position;
@@ -340,7 +340,7 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
     @Override
     public String toString()
     {
-        return String.format("[Trie Walker - NodeType: %s, buffer: %s, file offset: %d, Buffer offset: %d, position: %d]",
-                             nodeType, buf, bh.offset(), offset ,position);
+        return String.format("[Trie Walker - NodeType: %s, source: %s, buffer: %s, buffer file offset: %d, Node buffer offset: %d, Node file position: %d]",
+                             nodeType, source, buf, bh.offset(), offset ,position);
     }
 }

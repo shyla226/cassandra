@@ -18,37 +18,41 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import javax.annotation.Nullable;
 
-public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.BufferHolder
+public class WrappingRebufferer implements Rebufferer
 {
     protected final Rebufferer source;
-    protected BufferHolder bufferHolder;
-    protected ByteBuffer buffer;
-    protected long offset;
+    private final Deque<WrappingBufferHolder> buffers;
 
     public WrappingRebufferer(Rebufferer source)
     {
         this.source = source;
+        this.buffers = new ArrayDeque<>(2);
     }
 
     @Override
     public BufferHolder rebuffer(long position)
     {
-        bufferHolder = rebuffer(position, ReaderConstraint.NONE);
-        buffer = bufferHolder.buffer();
-        offset = bufferHolder.offset();
-
-        return this;
+        return rebuffer(position, ReaderConstraint.NONE);
     }
 
     @Override
     public BufferHolder rebuffer(long position, ReaderConstraint constraint)
     {
-        bufferHolder = source.rebuffer(position, constraint);
-        buffer = bufferHolder.buffer();
-        offset = bufferHolder.offset();
+        BufferHolder bufferHolder = source.rebuffer(position, constraint);
+        return newBufferHolder().initialize(bufferHolder, bufferHolder.buffer(), bufferHolder.offset());
+    }
 
-        return this;
+    protected WrappingBufferHolder newBufferHolder()
+    {
+        WrappingBufferHolder ret = buffers.pollFirst();
+        if (ret == null)
+            ret = new WrappingBufferHolder();
+
+        return ret;
     }
 
     @Override
@@ -89,27 +93,67 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     @Override
     public String toString()
     {
-        return getClass().getSimpleName() + "[" + paramsToString() + "]:" + source.toString();
+        return getClass().getSimpleName() + '[' + paramsToString() + "]:" + source.toString();
     }
 
-    // BufferHolder methods
-
-    @Override
-    public ByteBuffer buffer()
+    protected final class WrappingBufferHolder implements Rebufferer.BufferHolder
     {
-        return buffer;
-    }
+        @Nullable
+        private BufferHolder bufferHolder;
 
-    @Override
-    public long offset()
-    {
-        return offset;
-    }
+        private ByteBuffer buffer;
+        private long offset;
 
-    @Override
-    public void release()
-    {
-        bufferHolder.release();
-    }
+        protected WrappingBufferHolder initialize(@Nullable BufferHolder bufferHolder, ByteBuffer buffer, long offset)
+        {
+            assert this.bufferHolder == null && this.buffer == null && this.offset == 0L : "initialized before release";
 
+            this.bufferHolder = bufferHolder;
+            this.buffer = buffer;
+            this.offset = offset;
+
+            return this;
+        }
+
+        public ByteBuffer buffer()
+        {
+            return buffer;
+        }
+
+        public long offset()
+        {
+            return offset;
+        }
+
+        public void offset(long offet)
+        {
+            this.offset = offet;
+        }
+
+        public int limit()
+        {
+            return buffer.limit();
+        }
+
+        public void limit(int limit)
+        {
+            this.buffer.limit(limit);
+        }
+
+        public void release()
+        {
+            assert buffer != null : "released twice";
+
+            if (bufferHolder != null)
+            {
+                bufferHolder.release();
+                bufferHolder = null;
+            }
+
+            buffer = null;
+            offset = 0L;
+
+            buffers.offerFirst(this);
+        }
+    }
 }

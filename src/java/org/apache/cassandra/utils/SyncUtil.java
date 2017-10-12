@@ -159,6 +159,16 @@ public class SyncUtil
         }
     }
 
+    /**
+     * There are cases when we want to sync even during tests and therefore we bypass {@link #SKIP_SYNC},
+     * for example building partial indexes during early open relies on disk sync.
+     * */
+    public static void forceAlways(FileChannel fc, boolean metaData) throws IOException
+    {
+        Preconditions.checkNotNull(fc);
+        fc.force(metaData);
+    }
+
     public static void sync(RandomAccessFile ras) throws IOException
     {
         Preconditions.checkNotNull(ras);

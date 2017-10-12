@@ -50,7 +50,8 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
 
     protected long lastFlushOffset;
 
-    protected Runnable runPostFlush;
+    protected Runnable runOnFileSync;
+    private boolean requestSyncOnNextFlush;
 
     private final TransactionalProxy txnProxy = txnProxy();
 
@@ -166,7 +167,9 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     {
         try
         {
-            SyncUtil.force(fchannel, false);
+            SyncUtil.forceAlways(fchannel, false);
+            if (runOnFileSync != null)
+                runOnFileSync.run();
         }
         catch (IOException e)
         {
@@ -184,10 +187,29 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         doFlush(true);
     }
 
+    /**
+     * Sets a flag that will cause the next flush point to be synced to disk.
+     * This is required to build partial indexes correctly, given that we read
+     * disk content with O_DIRECT, we need to ensure the data is synced to the
+     * device, a flush is not sufficient because O_DIRECT bypasses the OS page cache.
+     */
+    public void requestSyncOnNextFlush()
+    {
+        requestSyncOnNextFlush = true;
+    }
+
     @Override
     protected void doFlush(int count)
     {
-        doFlush(false);
+        if (requestSyncOnNextFlush)
+        {
+            doFlush(true);
+            requestSyncOnNextFlush = false;
+        }
+        else
+        {
+            doFlush(false);
+        }
     }
 
     private void doFlush(boolean forceSync)
@@ -212,10 +234,13 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         resetBuffer();
     }
 
-    public void setPostFlushListener(Runnable runPostFlush)
+    /**
+     * Sets a callback that will be invoked every time data is synced to file.
+     */
+    public void setFileSyncListener(Runnable runOnFileSync)
     {
-        assert this.runPostFlush == null;
-        this.runPostFlush = runPostFlush;
+        assert this.runOnFileSync == null;
+        this.runOnFileSync = runOnFileSync;
     }
 
     /**
@@ -234,8 +259,6 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         {
             throw new FSWriteError(e, getPath());
         }
-        if (runPostFlush != null)
-            runPostFlush.run();
     }
 
     public boolean hasPosition()
