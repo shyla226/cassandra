@@ -27,6 +27,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.stress.Operation;
 import org.apache.cassandra.stress.StressProfile;
@@ -73,11 +74,13 @@ public class SettingsCommandUser extends SettingsCommand
     public OpDistributionFactory getFactory(final StressSettings settings)
     {
         final SeedManager seeds = new SeedManager(settings);
-        final TokenRangeIterator tokenRangeIterator = profile.tokenRangeQueries.isEmpty()
-                                                      ? null
-                                                      : new TokenRangeIterator(settings,
-                                                                               profile.maybeLoadTokenRanges(settings));
 
+        final Map<String, TokenRangeIterator> tokenRangeIterators = profile.tokenRangeQueries.entrySet()
+                                                                                             .stream()
+                                                                                             .collect(Collectors.toMap(entry -> entry.getKey(),
+                                                                                                                       entry -> new TokenRangeIterator(settings,
+                                                                                                                                                       profile.maybeLoadTokenRanges(settings),
+                                                                                                                                                       entry.getValue())));
         return new SampledOpDistributionFactory<String>(ratios, clustering)
         {
             protected List<? extends Operation> get(Timer timer, PartitionGenerator generator, String key, boolean isWarmup)
@@ -88,7 +91,7 @@ public class SettingsCommandUser extends SettingsCommand
                     return profile.getValidate(timer, generator, seeds, settings);
 
                 if (profile.tokenRangeQueries.containsKey(key))
-                    return Collections.singletonList(profile.getBulkReadQueries(key, timer, settings, tokenRangeIterator, isWarmup));
+                    return Collections.singletonList(profile.getBulkReadQueries(key, timer, settings, tokenRangeIterators.get(key), isWarmup));
 
                 return Collections.singletonList(profile.getQuery(key, timer, generator, seeds, settings, isWarmup));
             }
