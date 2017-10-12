@@ -369,14 +369,6 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
      * Additionally, the controller runs a few checks that allow to warn the user if either we don't seem to be able
      * to achieve the requested rate, or if that rate is simply set too low to meet all tables validation targets (given
      * the current size of the data each table currently hold).
-     *
-     * TODO(Sylvain): we should detect when we're at max allowed capacity but still can't achieve our rate and log a
-     * warning in the log. The one issue is that on tiny clusters where we have almost to validate, we're likely going
-     * to not achieve our rate, but only because we throttle ourselves from repairing the same segment too often. Plus,
-     * with almost empty ranges, our time may be dominated by the reads to the system table, which we don't really
-     * account for properly. For the first issue, we should add tracking of the time the executor spends blocking on
-     * {@link ValidationScheduler#getNextValidation} and not warn (nor raises capacity like crazy) when that's too
-     * big. Less clear how to deal efficiently with the 2nd problem.
      */
     private class Controller implements Runnable
     {

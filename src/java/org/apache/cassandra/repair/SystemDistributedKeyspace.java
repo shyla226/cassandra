@@ -162,6 +162,8 @@ public final class SystemDistributedKeyspace
     // We want to be able to query the following NodeSync table for a given sub-range, so we use the token as
     // clustering but we also should ensure we use the proper sorting, so we're extracting the type of tokens for this
     // cluster (which depends on the partitioner, but is global and immutable for the cluster lifetime).
+    // Further, the number of segments for a single table could grow somewhat large so we want to spread them on
+    // multiple nodes, which is why we include the "range_group" below in the partition key.
     private static final String tokenType = DatabaseDescriptor.getPartitioner().getTokenValidator().asCQL3Type().toString();
     private static final TableMetadata NodeSyncStatus =
         parse(NODESYNC_STATUS,
@@ -170,20 +172,6 @@ public final class SystemDistributedKeyspace
               + "keyspace_name text,"
               + "table_name text,"
               + "range_group blob,"  // first byte of start_token, used to distribute segments more evenly on the cluster.
-              // TODO(Sylvain): I dislike this, this is ugly and inefficient. In a perfect world,
-              // we'd want to use start_token as the token of the row, as this would 1) remove that
-              // column, 2) ensure a replica stores locally the range it is a replica for,
-              // 3) make reading the table much easier and 4) distribute things better on large
-              // cluster (we're currently splitting in 256 buckets "only"; we could have more
-              // buckets but that would be annoying/less efficient to read).
-              // Making start_token the partition key doesn't work though obviously since it'll
-              // get re-hashed. My preferred solution would be to allow configurable (probably
-              // only internally initially) per-table tokenizing functions (something I've been
-              // advocating for more than once in the past) so this table can just use start_token
-              // as its token directly as we want. While simple on principle, this means passing
-              // TableMetadata everywhere we call decorateKey basically so it's a bit involved in
-              // terms of code-line changes. Anyway, if I can get that in for 6.0, I'll try it,
-              // but for now we'll stick to the lame-but-probably-not-horrible solution.
               + "start_token " + tokenType + ','
               + "end_token " + tokenType + ','
               + "last_successful_validation frozen<" + NODESYNC_VALIDATION + ">,"
@@ -533,7 +521,7 @@ public final class SystemDistributedKeyspace
                                              "reading NodeSync records");
     }
 
-    // See the table definition for why we have this and more comments on it that you really want
+    // See the table definition for why we have this
     private static int rangeGroupFor(Token token)
     {
         int val = token.asByteComparableSource().next();
