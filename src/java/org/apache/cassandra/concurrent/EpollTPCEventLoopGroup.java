@@ -120,7 +120,6 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         private final TPCMetricsAndLimits.TaskStats busySpinStats;
         private final TPCMetricsAndLimits.TaskStats yieldStats;
         private final TPCMetricsAndLimits.TaskStats parkStats;
-        private final int maxQueueSize;
 
         private volatile int pendingEpollEvents = 0;
         private volatile long delayedNanosDeadline = -1;
@@ -158,7 +157,6 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             this.busySpinStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_SPIN);
             this.yieldStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_YIELD);
             this.parkStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_PARK);
-            this.maxQueueSize = metrics.maxQueueSize();
         }
 
         public TPCThread thread()
@@ -305,7 +303,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
                 if (tpc.isPendable())
                 {
                     // If we already have something in the pending queue, this task should not jump it.
-                    if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(task, maxQueueSize))
+                    if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(task, metrics.maxQueueSize()))
                         return;
 
                     if (pendingQueue.relaxedOffer(tpc))
@@ -412,6 +410,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             if (metrics != null)
             {
                 TPCRunnable tpc;
+                int maxQueueSize = metrics.maxQueueSize();
                 while (queue.size() < maxQueueSize && (tpc = pendingQueue.relaxedPeek()) != null)
                 {
                     if (queue.relaxedOffer(tpc))

@@ -26,7 +26,11 @@ import java.util.concurrent.locks.LockSupport;
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
  * This class is responsible for keeping tabs on threads that register as a {@link MonitorableThread}.
@@ -44,6 +48,7 @@ public class WatcherThread
 {
     public static final Supplier<WatcherThread> instance = Suppliers.memoize(WatcherThread::new);
 
+    private static final Logger logger = LoggerFactory.getLogger(WatcherThread.class);
     private final Thread watcherThread;
     private volatile boolean shutdown;
     private final CopyOnWriteArrayList<MonitorableThread> monitoredThreads;
@@ -58,14 +63,21 @@ public class WatcherThread
         watcherThread = new Thread(() -> {
             while (!shutdown)
             {
-                long nanoTime = TPC.nanoTimeSinceStartup();
-                for (MonitorableThread thread : monitoredThreads)
-                    if (thread.shouldUnpark(nanoTime))
-                        thread.unpark();
+                try
+                {
+                    long nanoTime = TPC.nanoTimeSinceStartup();
+                    for (MonitorableThread thread : monitoredThreads)
+                        if (thread.shouldUnpark(nanoTime))
+                            thread.unpark();
 
-                for (Runnable action : loopActions)
-                    action.run();
-
+                    for (Runnable action : loopActions)
+                        action.run();
+                }
+                catch (Throwable t)
+                {
+                    JVMStabilityInspector.inspectThrowable(t);
+                    logger.error("WatcherThread exception: ");
+                }
                 LockSupport.parkNanos(1);
             }
 
