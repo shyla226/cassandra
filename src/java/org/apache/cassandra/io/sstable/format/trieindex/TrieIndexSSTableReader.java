@@ -19,8 +19,10 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.Set;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,20 +32,24 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
-import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
 import org.apache.cassandra.io.sstable.format.IndexFileEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
+import org.apache.cassandra.io.sstable.format.big.Downsampling;
+import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosIterator;
+import org.apache.cassandra.io.sstable.format.SSTableScanner;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileDataInput;
@@ -51,8 +57,10 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.MmapRebufferer;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.concurrent.Ref;
@@ -413,5 +421,111 @@ class TrieIndexSSTableReader extends SSTableReader
                                                 boolean inclusiveRight)
     {
         return new TrieIndexFileFlow(dataFileReader, this, left, inclusiveLeft ? -1 : 0, right, inclusiveRight ? 0 : -1);
+    }
+
+    @Override
+    public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
+        {
+        Iterator<IndexPosIterator> partitionKeyIterators = SSTableScanner.makeBounds(this,
+                                                                                     Collections.singleton(range))
+                                                                         .stream()
+                                                                         .map(bound -> indexPosIteratorForRange(bound))
+                                                                         .iterator();
+        
+        if (!partitionKeyIterators.hasNext())
+            return Collections.emptyList();
+
+        return new Iterable<DecoratedKey>()
+        {
+            @Override
+            public Iterator<DecoratedKey> iterator()
+            {
+                return new AbstractIterator<DecoratedKey>()
+                {
+                    IndexPosIterator currentItr = partitionKeyIterators.next();
+                    long count = -1;
+
+                    private long getNextPos() throws IOException
+                    {
+                        long pos = PartitionIndex.NOT_FOUND;
+                        while ((pos = currentItr.nextIndexPos()) == PartitionIndex.NOT_FOUND
+                                && partitionKeyIterators.hasNext())
+                            currentItr = partitionKeyIterators.next();
+                        return pos;
+                    }
+
+                    @Override
+                    protected DecoratedKey computeNext()
+                    {
+                        try
+                        {
+                            while (true)
+                            {
+                                long pos = getNextPos();
+                                count++;
+                                if (pos == PartitionIndex.NOT_FOUND)
+                                    break;
+                                if (count % Downsampling.BASE_SAMPLING_LEVEL == 0)
+                                {
+                                    // handle exclusive start and exclusive end
+                                    DecoratedKey key = getKeyByPos(pos);
+                                    if (range.contains(key.getToken()))
+                                        return key;
+                                    count--;
+                                }
+                            }
+                            return endOfData();
+                        }
+                        catch (IOException e)
+                        {
+                            markSuspect();
+                            throw new CorruptSSTableException(e, dataFile.path());
+                        }
+                    }
+                };
+            }
+        };
+    }
+
+    private DecoratedKey getKeyByPos(long pos) throws IOException
+    {
+        assert pos != PartitionIndex.NOT_FOUND;
+
+        if (pos >= 0)
+            try (FileDataInput in = rowIndexFile.createReader(pos, ReaderConstraint.NONE))
+            {
+                return metadata().partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
+            }
+        else
+            try (FileDataInput in = dataFile.createReader(~pos, ReaderConstraint.NONE))
+            {
+                return metadata().partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
+            }
+    }
+
+    private IndexPosIterator indexPosIteratorForRange(AbstractBounds<PartitionPosition> bound)
+    {
+        return new IndexPosIterator(partitionIndex, bound.left, bound.right, ReaderConstraint.NONE);
+    }
+
+    @Override
+    public long estimatedKeysForRanges(Collection<Range<Token>> ranges)
+    {
+        long estimatedKeyCounts = 0;
+        for (AbstractBounds<PartitionPosition> bound : SSTableScanner.makeBounds(this, ranges))
+        {
+            try (IndexPosIterator iterator = indexPosIteratorForRange(bound))
+            {
+                long pos = PartitionIndex.NOT_FOUND;
+                while ((pos = iterator.nextIndexPos()) != PartitionIndex.NOT_FOUND)
+                    estimatedKeyCounts++;
+            }
+            catch (IOException e)
+            {
+                markSuspect();
+                throw new CorruptSSTableException(e, dataFile.path());
+            }
+        }
+        return estimatedKeyCounts;
     }
 }

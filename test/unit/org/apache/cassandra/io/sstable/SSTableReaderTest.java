@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 
 import org.junit.After;
@@ -139,29 +140,34 @@ public class SSTableReaderTest
     {
         // prepare data
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard2");
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_STANDARD2);
         partitioner = store.getPartitioner();
 
-        for (int j = 0; j < 100; j++)
+        Random random = new Random();
+        List<Token> tokens = new ArrayList<>();
+        tokens.add(partitioner.getMinimumToken());
+        tokens.add(partitioner.getMaximumToken());
+
+        for (int j = 0; j < 300; j++)
         {
-            new RowUpdateBuilder(store.metadata(), j, String.valueOf(j)).clustering("0")
-                                                                        .add("val", ByteBufferUtil.EMPTY_BYTE_BUFFER)
-                                                                        .build()
-                                                                        .applyUnsafe();
+            Mutation mutation = new RowUpdateBuilder(store.metadata(), j, String.valueOf(random.nextInt())).clustering("0")
+                                                                                            .add("val",
+                                                                                                 ByteBufferUtil.EMPTY_BYTE_BUFFER)
+                                                                                            .build();
+            if (j % 4 != 0) // skip some keys
+                mutation.applyUnsafe();
+            tokens.add(mutation.key().getToken());
         }
+
         store.forceBlockingFlush();
         assertEquals(1, store.getLiveSSTables().size());
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
 
-        // check non wrapped around
-        Range<Token> nonWrappedAroundRange = new Range<>(t(10), t(1));
-        assertTrue(!nonWrappedAroundRange.isWrapAround());
-        verifyEstimatedKeysAndKeySamples(sstable, nonWrappedAroundRange);
-
-        // check wrapped around
-        Range<Token> wrappedAroundRange = new Range<>(t(10), partitioner.getMinimumToken());
-        assertTrue(wrappedAroundRange.isWrapAround());
-        verifyEstimatedKeysAndKeySamples(sstable, nonWrappedAroundRange);
+        for (int i = 0; i < tokens.size(); i++)
+            for (int j = 0; j < tokens.size(); j++)
+            {
+                verifyEstimatedKeysAndKeySamples(sstable, new Range<Token>(tokens.get(i), tokens.get(j)));
+            }
     }
 
     private void verifyEstimatedKeysAndKeySamples(SSTableReader sstable, Range<Token> range)
@@ -178,19 +184,27 @@ public class SSTableReaderTest
                 }
             }
         }
-        assertTrue(expectedKeys.size() >= 1);
 
         // check estimated key
         long estimated = sstable.estimatedKeysForRanges(Collections.singleton(range));
         assertTrue("Range: " + range + " having " + expectedKeys.size() + " partitions, but estimated "
-                + estimated, estimated == expectedKeys.size());
+                + estimated, closeEstimation(expectedKeys.size(), estimated));
 
         // check key samples
         List<DecoratedKey> sampledKeys = new ArrayList<>();
         sstable.getKeySamples(range).forEach(sampledKeys::add);
 
         assertTrue("Range: " + range + " having " + expectedKeys + " keys, but keys sampled: "
-                + sampledKeys, sampledKeys.equals(expectedKeys));
+                + sampledKeys, expectedKeys.containsAll(sampledKeys));
+        assertEquals(expectedKeys.isEmpty(), sampledKeys.isEmpty());
+        // no duplicate
+        assertEquals(expectedKeys.size(), expectedKeys.stream().distinct().count());
+        assertEquals(sampledKeys.size(), sampledKeys.stream().distinct().count());
+    }
+
+    private boolean closeEstimation(long expected, long estimated)
+    {
+        return expected <= estimated && expected >= estimated - 2; // left and right boundary
     }
 
     @Test

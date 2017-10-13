@@ -151,9 +151,10 @@ public class ValidatorTest
     }
 
     @Test
-    public void simpleValidationTest128() throws Exception
+    public void simpleValidationTest125() throws Exception
     {
-        simpleValidationTest(128);
+        // using 128 may generate estimated key count of 129 which cause merkle tree size * 2.
+        simpleValidationTest(125);
     }
 
     @Test

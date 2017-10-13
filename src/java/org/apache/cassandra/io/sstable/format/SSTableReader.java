@@ -925,40 +925,13 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param ranges
      * @return An estimate of the number of keys for given ranges in this SSTable.
      */
-    public long estimatedKeysForRanges(Collection<Range<Token>> ranges)
-    {
-        return getKeySamplesInternal(ranges).size();
-    }
+    public abstract long estimatedKeysForRanges(Collection<Range<Token>> ranges);
 
-    public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
-    {
-        return getKeySamplesInternal(Collections.singleton(range));
-    }
-
-    private Collection<DecoratedKey> getKeySamplesInternal(final Collection<Range<Token>> ranges)
-    {
-        try
-        {
-            ArrayList<DecoratedKey> keys = new ArrayList<>();
-            for (AbstractBounds<PartitionPosition> bound : SSTableScanner.makeBounds(this, ranges))
-            {
-                try (PartitionIndexIterator iter = coveredKeysIterator(bound))
-                {
-                    while (iter.key() != null)
-                    {
-                        keys.add(iter.key());
-                        iter.advance();
-                    }
-                }
-            }
-            return keys;
-        }
-        catch (IOException e)
-        {
-            markSuspect();
-            throw new CorruptSSTableException(e, dataFile.path());
-        }
-    }
+    /**
+     * @param range
+     * @return An estimate of keys for given ranges in this SSTable.
+     */
+    public abstract Iterable<DecoratedKey> getKeySamples(final Range<Token> range);
 
     /**
      * Determine the minimal set of sections that can be extracted from this SSTable to cover the given ranges.

@@ -22,6 +22,11 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -43,6 +48,8 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -66,6 +73,7 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.IFilter;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.flow.Flow;
 
@@ -599,6 +607,111 @@ public class BigTableReader extends SSTableReader
         return indexSummary.getEstimatedKeyCount();
     }
 
+    @Override
+    public long estimatedKeysForRanges(Collection<Range<Token>> ranges)
+    {
+        long sampleKeyCount = 0;
+        List<Pair<Integer, Integer>> sampleIndexes = getSampleIndexesForRanges(indexSummary, ranges);
+        for (Pair<Integer, Integer> sampleIndexRange : sampleIndexes)
+            sampleKeyCount += (sampleIndexRange.right - sampleIndexRange.left + 1);
+
+        // adjust for the current sampling level: (BSL / SL) * index_interval_at_full_sampling
+        long estimatedKeys = sampleKeyCount * ((long) Downsampling.BASE_SAMPLING_LEVEL * indexSummary.getMinIndexInterval()) / indexSummary.getSamplingLevel();
+        return Math.max(1, estimatedKeys);
+    }
+
+    private static List<Pair<Integer,Integer>> getSampleIndexesForRanges(IndexSummary summary, Collection<Range<Token>> ranges)
+    {
+        // use the index to determine a minimal section for each range
+        List<Pair<Integer,Integer>> positions = new ArrayList<>();
+
+        for (Range<Token> range : Range.normalize(ranges))
+        {
+            PartitionPosition leftPosition = range.left.maxKeyBound();
+            PartitionPosition rightPosition = range.right.maxKeyBound();
+
+            int left = summary.binarySearch(leftPosition);
+            if (left < 0)
+                left = (left + 1) * -1;
+            else
+                // left range are start exclusive
+                left = left + 1;
+            if (left == summary.size())
+                // left is past the end of the sampling
+                continue;
+
+            int right = range.isWrapAround()
+                    ? summary.size() - 1
+                    : summary.binarySearch(rightPosition);
+            if (right < 0)
+            {
+                // range are end inclusive so we use the previous index from what binarySearch give us
+                // since that will be the last index we will return
+                right = (right + 1) * -1;
+                if (right == 0)
+                    // Means the first key is already stricly greater that the right bound
+                    continue;
+                right--;
+            }
+
+            if (left > right)
+                // empty range
+                continue;
+            positions.add(Pair.create(left, right));
+        }
+        return positions;
+    }
+
+    @Override
+    public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
+    {
+        final List<Pair<Integer, Integer>> indexRanges = getSampleIndexesForRanges(indexSummary,
+                                                                                   Collections.singletonList(range));
+
+        if (indexRanges.isEmpty())
+            return Collections.emptyList();
+
+        return new Iterable<DecoratedKey>()
+        {
+            public Iterator<DecoratedKey> iterator()
+            {
+                return new Iterator<DecoratedKey>()
+                {
+                    private Iterator<Pair<Integer, Integer>> rangeIter = indexRanges.iterator();
+                    private Pair<Integer, Integer> current;
+                    private int idx;
+
+                    public boolean hasNext()
+                    {
+                        if (current == null || idx > current.right)
+                        {
+                            if (rangeIter.hasNext())
+                            {
+                                current = rangeIter.next();
+                                idx = current.left;
+                                return true;
+                            }
+                            return false;
+                        }
+
+                        return true;
+                    }
+
+                    public DecoratedKey next()
+                    {
+                        byte[] bytes = indexSummary.getKey(idx++);
+                        return decorateKey(ByteBuffer.wrap(bytes));
+                    }
+
+                    public void remove()
+                    {
+                        throw new UnsupportedOperationException();
+                    }
+                };
+            }
+        };
+    }
+    
     @Override
     public RowIndexEntry getExactPosition(DecoratedKey key, Rebufferer.ReaderConstraint rc)
     {

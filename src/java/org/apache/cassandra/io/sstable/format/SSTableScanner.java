@@ -47,7 +47,7 @@ import static org.apache.cassandra.dht.AbstractBounds.isEmpty;
 import static org.apache.cassandra.dht.AbstractBounds.maxLeft;
 import static org.apache.cassandra.dht.AbstractBounds.minRight;
 
-class SSTableScanner implements ISSTableScanner
+public class SSTableScanner implements ISSTableScanner
 {
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
     protected final RandomAccessReader dfile;
