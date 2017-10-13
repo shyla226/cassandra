@@ -8,6 +8,8 @@ package com.datastax.bdp.db.nodesync;
 import java.util.Collection;
 import java.util.concurrent.ExecutionException;
 
+import javax.annotation.Nullable;
+
 import com.google.common.base.Throwables;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -73,6 +75,7 @@ class NodeSyncState
      * @param table the table for which to get the state.
      * @return the state for {@code table} or {@code null} if that state is not in memory.
      */
+    @Nullable
     public TableState get(TableMetadata table)
     {
         return tableStates.getIfPresent(table.id);

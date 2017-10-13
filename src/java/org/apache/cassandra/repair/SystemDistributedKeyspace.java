@@ -63,7 +63,6 @@ import org.apache.cassandra.schema.Functions;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.SpeculativeRetryParam;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Tables;
@@ -431,21 +430,22 @@ public final class SystemDistributedKeyspace
         {
             return callable.call();
         }
-        catch (UnavailableException e)
-        {
-            noSpamLogger.warn("No replica available for {}: {}", operationDescription, NODESYNC_ERROR_IMPACT_MSG);
-            return defaultOnError;
-        }
-        catch (RequestTimeoutException e)
-        {
-            noSpamLogger.warn("Timeout while {}: {}", operationDescription, NODESYNC_ERROR_IMPACT_MSG);
-            return defaultOnError;
-        }
         catch (Throwable t)
         {
-            logger.error(String.format("Unexpected error while %s: %s", operationDescription, NODESYNC_ERROR_IMPACT_MSG), t);
+            logForNodeSyncOnError(t, operationDescription);
             return defaultOnError;
         }
+    }
+
+    private static void logForNodeSyncOnError(Throwable error, String operationDescription)
+    {
+        Throwable cleaned = Throwables.unwrapped(error);
+        if (cleaned instanceof UnavailableException)
+            noSpamLogger.warn("No replica available for {}: {}", operationDescription, NODESYNC_ERROR_IMPACT_MSG);
+        else if (cleaned instanceof RequestTimeoutException)
+            noSpamLogger.warn("Timeout while {}: {}", operationDescription, NODESYNC_ERROR_IMPACT_MSG);
+        else
+            logger.error(String.format("Unexpected error while %s: %s", operationDescription, NODESYNC_ERROR_IMPACT_MSG), error);
     }
 
     public static CompletableFuture<List<NodeSyncRecord>> nodeSyncRecords(Segment segment)
@@ -513,9 +513,10 @@ public final class SystemDistributedKeyspace
                 }
             }
             return records;
-        }).exceptionally(err -> withNodeSyncExceptionHandling(() -> { throw Throwables.cleaned(err); },
-                                                              Collections.emptyList(),
-                                                              "reading NodeSync records"));
+        }).exceptionally(err -> {
+            logForNodeSyncOnError(err, "reading NodeSync records");
+            return Collections.emptyList();
+        });
         return withNodeSyncExceptionHandling(callable,
                                              CompletableFuture.completedFuture(Collections.emptyList()),
                                              "reading NodeSync records");

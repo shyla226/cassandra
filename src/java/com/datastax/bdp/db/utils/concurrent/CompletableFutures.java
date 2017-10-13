@@ -21,6 +21,13 @@ public abstract class CompletableFutures
     private CompletableFutures()
     {}
 
+    public static <T> CompletableFuture<T> exceptionallyCompletedFuture(Throwable t)
+    {
+        CompletableFuture<T> future = new CompletableFuture<>();
+        future.completeExceptionally(t);
+        return future;
+    }
+
     /**
      * Returns a new {@link CompletableFuture} that is completed when all of the given CompletableFutures complete.
      * <p>

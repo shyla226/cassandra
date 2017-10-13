@@ -245,15 +245,16 @@ public final class Throwables
      */
     public static Throwable unwrapped(Throwable t)
     {
-        if (t instanceof CompletionException || t instanceof ExecutionException)
-        {
-            Throwable cause = t.getCause();
-            // I don't think it make sense for those 2 exception classes to ever be used with null causes, but no point
-            // in failing here if this happen. We still wrap the original exception if that happen so we get a sign
-            // that the assumption of this method is wrong.
-            return cause == null ? new RuntimeException("Got wrapping exception not wrapping anything", t) : t;
-        }
-        return t;
+        Throwable unwrapped = t;
+        while (unwrapped != null && (unwrapped instanceof CompletionException || unwrapped instanceof ExecutionException))
+            unwrapped = unwrapped.getCause();
+
+        // I don't think it make sense for those 2 exception classes to ever be used with null causes, but no point
+        // in failing here if this happen. We still wrap the original exception if that happen so we get a sign
+        // that the assumption of this method is wrong.
+        return unwrapped == null
+               ? new RuntimeException("Got wrapping exception not wrapping anything", t)
+               : unwrapped;
     }
 
     /**

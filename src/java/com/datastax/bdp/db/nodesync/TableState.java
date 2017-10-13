@@ -185,16 +185,31 @@ public class TableState
     /**
      * The table this is the state of.
      */
-    public TableMetadata table()
+    TableMetadata table()
     {
         return table;
+    }
+
+    /**
+     * The depth currently used for segments of this state.
+     */
+    int depth()
+    {
+        return stateHolder.segments.depth();
+    }
+
+    /**
+     * The local ranges currently used for segments of this state.
+     */
+    Collection<Range<Token>> localRanges()
+    {
+        return stateHolder.segments.localRanges();
     }
 
     /**
      * Updates the state so that it uses the provided depth for its segments. If the state already uses this depth, this
      * is a no-op.
      */
-    // Review note: this is currently unused but will be used after DB-1258.
     void update(int depth)
     {
         // Cheap check outside the lock; we'll check again inside it.

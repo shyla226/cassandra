@@ -130,7 +130,7 @@ class Validator
     {
         this.lifecycle = lifecycle;
 
-        NodeSyncConfig config = lifecycle.service().config;
+        NodeSyncConfig config = lifecycle.service().config();
         this.limiter = config.rateLimiter;
         this.pageSize = new PageSize(Ints.checkedCast(config.getPageSize(SizeUnit.BYTES)), PageSize.PageUnit.BYTES);
 

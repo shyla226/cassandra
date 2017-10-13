@@ -59,7 +59,7 @@ import org.apache.cassandra.utils.Throwables;
  * <p>
  * For the second kind, user validations, those are manually submitted by users through JMX. User validations always
  * take precedence over continuous ones, so continuous validations will basically "pause" as soon as a user validation
- * comes in. The scheduler will then schedule all the validation of that user validation and only resume continous
+ * comes in. The scheduler will then schedule all the validation of that user validation and only resume continuous
  * validations once the user validation is finished. If a new user validation comes while another one is running, it
  * will queue up behind that running validation (and any previously queued user validations).
  * <p>
