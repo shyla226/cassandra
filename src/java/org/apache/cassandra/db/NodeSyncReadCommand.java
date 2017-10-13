@@ -53,18 +53,24 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
     @Nullable
     private final transient TracingAwareExecutor nodeSyncExecutor;
 
-    private NodeSyncReadCommand(TableMetadata table,
+    private NodeSyncReadCommand(DigestVersion digestVersion,
+                                TableMetadata table,
                                 int nowInSec,
+                                ColumnFilter columnFilter,
+                                RowFilter rowFilter,
+                                DataLimits limits,
                                 DataRange range,
+                                IndexMetadata index,
                                 TracingAwareExecutor nodeSyncExecutor)
     {
-        super(table,
+        super(digestVersion,
+              table,
               nowInSec,
-              ColumnFilter.all(table),
-              RowFilter.NONE,
-              DataLimits.NONE,
+              columnFilter,
+              rowFilter,
+              limits,
               range,
-              null);
+              index);
         this.nodeSyncExecutor = nodeSyncExecutor;
     }
 
@@ -72,7 +78,27 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
                                int nowInSec,
                                TracingAwareExecutor nodeSyncExecutor)
     {
-        this(segment.table, nowInSec, DataRange.forTokenRange(segment.range), nodeSyncExecutor);
+        this(null,
+             segment.table,
+             nowInSec,
+             ColumnFilter.all(segment.table),
+             RowFilter.NONE,
+             DataLimits.NONE,
+             DataRange.forTokenRange(segment.range),
+             null,
+             nodeSyncExecutor);
+    }
+
+    protected PartitionRangeReadCommand copy(DigestVersion digestVersion,
+                                             TableMetadata metadata,
+                                             int nowInSec,
+                                             ColumnFilter columnFilter,
+                                             RowFilter rowFilter,
+                                             DataLimits limits,
+                                             DataRange dataRange,
+                                             IndexMetadata index)
+    {
+        return new NodeSyncReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index, nodeSyncExecutor);
     }
 
     /**
@@ -88,11 +114,13 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
         return nodeSyncExecutor;
     }
 
+    @Override
     public Request.Dispatcher<NodeSyncReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints)
     {
         return Verbs.READS.NODESYNC.newDispatcher(endpoints, this);
     }
 
+    @Override
     public Request<NodeSyncReadCommand, ReadResponse> requestTo(InetAddress endpoint)
     {
         return Verbs.READS.NODESYNC.newRequest(endpoint, this);
@@ -111,13 +139,8 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
                                                IndexMetadata index)
         throws IOException
         {
-            // Sanity checks: there is currently no way to create a NodeSyncReadCommand that don't respect this, but
-            // make sure to catch the problem if this even changes and we forget to update this.
-            assert columnFilter.fetchesAllColumns(false) && columnFilter.fetchesAllColumns(true);
-            assert rowFilter.isEmpty();
-            assert limits.isUnlimited();
             DataRange range = DataRange.serializers.get(version).deserialize(in, metadata);
-            return new NodeSyncReadCommand(metadata, nowInSec, range, null);
+            return new NodeSyncReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, range, null, null);
         }
     }
 }
