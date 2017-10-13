@@ -98,7 +98,7 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
      * @throws CDCSegmentFullException If segment disallows CDC mutations because it is full
      */
     @Override
-    public Single<CommitLogSegment.Allocation> allocate(Mutation mutation, int size) throws CDCSegmentFullException
+    public Single<CommitLogSegment.Allocation> allocate(Mutation mutation, int size)
     {
         return new Single<CommitLogSegment.Allocation>()
         {
@@ -113,33 +113,41 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
                         if (isDisposed())
                             return;
 
-                        CommitLogSegment segment = allocatingFrom();
-                        throwIfForbidden(mutation, segment);
-                        if (logger.isTraceEnabled())
-                            logger.trace("Allocating mutation of size {} on segment {} with space {}", size, segment.id, segment.availableSize());
-
-                        CommitLogSegment.Allocation alloc = segment.allocate(mutation, size);
-                        if (alloc != null)
+                        try
                         {
-                            if (mutation.trackedByCDC())
-                                segment.setCDCState(CDCState.CONTAINS);
-
-                            observer.onSuccess(alloc);
-                        }
-                        else
-                        {
+                            CommitLogSegment segment = allocatingFrom();
+                            throwIfForbidden(mutation, segment);
                             if (logger.isTraceEnabled())
-                                logger.trace("Waiting for segment allocation...");
+                                logger.trace("Allocating mutation of size {} on segment {} with space {}", size, segment.id, segment.availableSize());
 
-                            // No room in current segment. Reschedule for after segment is switched.
-                            StagedScheduler scheduler = mutation.getScheduler();
-                            // Get the locals and create TPCRunnable now: locals will be lost when the future is called,
-                            // and we want to still track the task as active.
-                            TPCRunnable us = TPCRunnable.wrap(this,
-                                                              ExecutorLocals.create(),
-                                                              TPCTaskType.WRITE_POST_COMMIT_LOG_SEGMENT,
-                                                              scheduler);
-                            advanceAllocatingFrom(segment).thenRun(() -> scheduler.execute(us));
+                            CommitLogSegment.Allocation alloc = segment.allocate(mutation, size);
+                            if (alloc != null)
+                            {
+                                if (mutation.trackedByCDC())
+                                    segment.setCDCState(CDCState.CONTAINS);
+
+                                observer.onSuccess(alloc);
+                            }
+                            else
+                            {
+                                if (logger.isTraceEnabled())
+                                    logger.trace("Waiting for segment allocation...");
+
+                                // No room in current segment. Reschedule for after segment is switched.
+                                StagedScheduler scheduler = mutation.getScheduler();
+                                // Get the locals and create TPCRunnable now: locals will be lost when the future is called,
+                                // and we want to still track the task as active.
+                                TPCRunnable us = TPCRunnable.wrap(this,
+                                                                  ExecutorLocals.create(),
+                                                                  TPCTaskType.WRITE_POST_COMMIT_LOG_SEGMENT,
+                                                                  scheduler);
+                                advanceAllocatingFrom(segment).thenRun(() -> scheduler.execute(us));
+                            }
+                        }
+                        catch (Throwable t)
+                        {
+                            logger.debug("Got exception whilst allocating CL segment: {}", t.getMessage());
+                            observer.onError(t);
                         }
                     }
 
