@@ -13,6 +13,19 @@ restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
 
+DSE 5.0.11
+==========
+
+Operations
+----------
+    - Added "-Dcassandra.replace_consistency" to support streaming each range from more than one source.
+      By default, node replacement only streams one copy of data which may be stale wrt to QUORUM/LOCAL_QUORUM.
+      After replacing a down node with "-Dcassandra.replace_consistency=LOCAL_DC_QUORUM", replacement node will be up
+      with consistent data assuming data is inserted with LOCAL_QUORUM. Note that streaming multiple copies causes more
+      IO and compactions. Alternatively, operators can run repair before bootstrapping the replacement with the
+      default replace_consistency=ONE.
+      Available options: "ONE"(default), "LOCAL_DC_QUORUM", "GLOBAL_QUORUM".
+
 DSE 5.0.10
 ==========
 
