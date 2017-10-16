@@ -247,9 +247,14 @@ public class SSTableScanner implements ISSTableScanner
         private DecoratedKey currentKey;
         private RowIndexEntry currentEntry;
         private PartitionIndexIterator iterator;
+        private LazilyInitializedUnfilteredRowIterator currentRowIterator;
 
         protected UnfilteredRowIterator computeNext()
         {
+            if (currentRowIterator != null && currentRowIterator.initialized() && currentRowIterator.hasNext())
+                throw new IllegalStateException("The UnfilteredRowIterator returned by the last call to next() was initialized: " +
+                                                "it should be either exhausted or closed before calling hasNext() or next() again.");
+
             try
             {
                 while (true)
@@ -281,7 +286,7 @@ public class SSTableScanner implements ISSTableScanner
                  * file unless we're explicitely asked to. This is important
                  * for PartitionRangeReadCommand#checkCacheFilter.
                  */
-                return new LazilyInitializedUnfilteredRowIterator(currentKey)
+                currentRowIterator = new LazilyInitializedUnfilteredRowIterator(currentKey)
                 {
                     protected UnfilteredRowIterator initializeIterator()
                     {
@@ -307,7 +312,14 @@ public class SSTableScanner implements ISSTableScanner
                             throw new CorruptSSTableException(e, sstable.getFilename());
                         }
                     }
+
+                    public void close()
+                    {
+                        super.close();
+                        currentRowIterator = null;
+                    }
                 };
+                return currentRowIterator;
             }
             catch (CorruptSSTableException | IOException e)
             {

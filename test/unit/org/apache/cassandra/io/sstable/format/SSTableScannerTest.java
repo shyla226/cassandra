@@ -20,12 +20,14 @@ package org.apache.cassandra.io.sstable.format;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.function.Consumer;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
@@ -336,5 +338,50 @@ public class SSTableScannerTest
 
         // this will currently fail
         assertScanContainsRanges(scanner, 205, 205);
+    }
+
+    private static void testRequestNextRowIteratorWithoutConsumingPrevious(Consumer<ISSTableScanner> consumer)
+    {
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore(TABLE);
+        store.clearUnsafe();
+
+        // disable compaction while flushing
+        store.disableAutoCompaction();
+
+        insertRowWithKey(store.metadata(), 0);
+        store.forceBlockingFlush();
+
+        assertEquals(1, store.getLiveSSTables().size());
+        SSTableReader sstable = store.getLiveSSTables().iterator().next();
+
+        try (ISSTableScanner scanner = sstable.getScanner();
+             UnfilteredRowIterator currentRowIterator = scanner.next())
+        {
+            assertTrue(currentRowIterator.hasNext());
+            try
+            {
+                consumer.accept(scanner);
+                fail("Should have thrown IllegalStateException");
+            }
+            catch (IllegalStateException e)
+            {
+                assertEquals("The UnfilteredRowIterator returned by the last call to next() was initialized: " +
+                             "it should be either exhausted or closed before calling hasNext() or next() again.",
+                             e.getMessage());
+            }
+        }
+    }
+
+    @Test
+    public void testHasNextRowIteratorWithoutConsumingPrevious()
+    {
+        testRequestNextRowIteratorWithoutConsumingPrevious(ISSTableScanner::hasNext);
+    }
+
+    @Test
+    public void testNextRowIteratorWithoutConsumingPrevious()
+    {
+        testRequestNextRowIteratorWithoutConsumingPrevious(ISSTableScanner::next);
     }
 }

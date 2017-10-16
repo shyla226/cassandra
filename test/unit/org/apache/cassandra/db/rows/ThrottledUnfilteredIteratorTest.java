@@ -141,11 +141,10 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
 
         try (ISSTableScanner scanner = reader.getScanner())
         {
+            assertTrue(scanner.hasNext());
             try (UnfilteredRowIterator rowIterator = scanner.next())
             {
                 // only 1 partition data
-                // commenting out due to NPE in scanner, see APOLLO-1199
-                // assertFalse(scanner.hasNext());
                 List<Unfiltered> expectedUnfiltereds = new ArrayList<>();
                 System.out.println("will add");
                 while (rowIterator.hasNext())
@@ -154,22 +153,21 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
                     System.out.println("Adding " + next);
                     expectedUnfiltereds.add(next);
                 }
+                assertFalse(scanner.hasNext());
 
                 // test different throttle
                 for (Integer throttle : Arrays.asList(2, 3, 4, 5, 11, 41, 99, 1000, 10001))
                 {
                     try (ISSTableScanner scannerForThrottle = reader.getScanner())
                     {
-                        // commenting out due to NPE in scanner, see APOLLO-1199
-                        // assertTrue(scannerForThrottle.hasNext());
+                        assertTrue(scannerForThrottle.hasNext());
                         try (UnfilteredRowIterator rowIteratorForThrottle = scannerForThrottle.next())
                         {
-                            // commenting out due to NPE in scanner, see APOLLO-1199
-                            // assertFalse(scannerForThrottle.hasNext());
                             verifyThrottleIterator(expectedUnfiltereds,
                                                    rowIteratorForThrottle,
                                                    new ThrottledUnfilteredIterator(rowIteratorForThrottle, throttle),
                                                    throttle);
+                            assertFalse(scannerForThrottle.hasNext());
                         }
                     }
                 }
