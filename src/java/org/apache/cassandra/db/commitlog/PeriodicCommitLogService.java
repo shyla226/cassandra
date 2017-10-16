@@ -23,29 +23,30 @@ import io.reactivex.Completable;
 import io.reactivex.Scheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.TimeSource;
 import org.apache.cassandra.utils.flow.RxThreads;
 
 class PeriodicCommitLogService extends AbstractCommitLogService
 {
     private static final long blockWhenSyncLagsNanos = (long) (DatabaseDescriptor.getCommitLogSyncPeriod() * 1.5e6);
 
-    public PeriodicCommitLogService(final CommitLog commitLog)
+    public PeriodicCommitLogService(final CommitLog commitLog, TimeSource timeSource)
     {
-        super(commitLog, "PERIODIC-COMMIT-LOG-SYNCER", DatabaseDescriptor.getCommitLogSyncPeriod());
+        super(commitLog, "PERIODIC-COMMIT-LOG-SYNCER", DatabaseDescriptor.getCommitLogSyncPeriod(), timeSource);
     }
 
     protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc, Scheduler observeOn)
     {
-        long expectedSyncTime = System.nanoTime() - blockWhenSyncLagsNanos;
+        long expectedSyncTime = timeSource.nanoTime() - blockWhenSyncLagsNanos;
         if (lastSyncedAt < expectedSyncTime)
         {
             pending.incrementAndGet();
-            long startTime = System.nanoTime();
+            long startTime = timeSource.nanoTime();
 
             Completable sync = awaitSyncAt(expectedSyncTime)
                                .doOnComplete(() ->
                                              {
-                                                 commitLog.metrics.waitingOnCommit.update(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+                                                 commitLog.metrics.waitingOnCommit.update(timeSource.nanoTime() - startTime, TimeUnit.NANOSECONDS);
                                                  pending.decrementAndGet();
                                              });
             return RxThreads.observeOn(sync, observeOn, TPCTaskType.WRITE_POST_COMMIT_LOG_SYNC);

@@ -22,12 +22,16 @@ import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.zip.CRC32;
+
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 import com.google.common.annotations.VisibleForTesting;
+
 import io.reactivex.Single;
+
 import org.apache.commons.lang3.StringUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,6 +52,8 @@ import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.SystemTimeSource;
+import org.apache.cassandra.utils.TimeSource;
 
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.CommitLogSegmentFileComparator;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.ENTRY_OVERHEAD_SIZE;
@@ -76,6 +82,9 @@ public class CommitLog implements CommitLogMBean
 
     volatile Configuration configuration;
 
+    @VisibleForTesting
+    final TimeSource timeSource;
+
     private static CommitLog construct()
     {
         CommitLog log = new CommitLog(CommitLogArchiver.construct());
@@ -95,23 +104,33 @@ public class CommitLog implements CommitLogMBean
     @VisibleForTesting
     CommitLog(CommitLogArchiver archiver)
     {
-        this.configuration = new Configuration(DatabaseDescriptor.getCommitLogCompression(),
-                                               DatabaseDescriptor.getEncryptionContext());
-        DatabaseDescriptor.createAllDirectories();
+        try
+        {
+            this.timeSource = (TimeSource) Class
+                .forName(System.getProperty("dse.commitlog.timesource", SystemTimeSource.class.getCanonicalName()))
+                .newInstance();
+            
+            this.configuration = new Configuration(DatabaseDescriptor.getCommitLogCompression(), DatabaseDescriptor.getEncryptionContext());
+            DatabaseDescriptor.createAllDirectories();
 
-        this.archiver = archiver;
-        metrics = new CommitLogMetrics();
+            this.archiver = archiver;
+            metrics = new CommitLogMetrics();
 
-        executor = DatabaseDescriptor.getCommitLogSync() == Config.CommitLogSync.batch
-                ? new BatchCommitLogService(this)
-                : new PeriodicCommitLogService(this);
+            executor = DatabaseDescriptor.getCommitLogSync() == Config.CommitLogSync.batch
+                   ? new BatchCommitLogService(this, timeSource)
+                   : new PeriodicCommitLogService(this, timeSource);
 
-        segmentManager = DatabaseDescriptor.isCDCEnabled()
+            segmentManager = DatabaseDescriptor.isCDCEnabled()
                          ? new CommitLogSegmentManagerCDC(this, DatabaseDescriptor.getCommitLogLocation())
                          : new CommitLogSegmentManagerStandard(this, DatabaseDescriptor.getCommitLogLocation());
 
-        // register metrics
-        metrics.attach(executor, segmentManager);
+            // register metrics
+            metrics.attach(executor, segmentManager);
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     CommitLog start()

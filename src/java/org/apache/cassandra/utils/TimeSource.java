@@ -37,7 +37,7 @@ public interface TimeSource
     long nanoTime();
     
     /**
-     * Automatically advance by the given time unit at the nth "time" call.
+     * Automatically advance by the given time unit every nth "time" calls.
      */
     void autoAdvance(int calls, long time, TimeUnit unit);
 

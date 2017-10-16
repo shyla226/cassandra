@@ -23,9 +23,16 @@ import java.util.concurrent.atomic.AtomicLong;
 public class TestTimeSource implements TimeSource
 {
     private final AtomicLong timeInMillis = new AtomicLong(System.currentTimeMillis());
+    private final AtomicLong timeInNanos = new AtomicLong(System.nanoTime());
     private volatile int advanceCounter;
     private volatile int advanceCalls;
     private volatile long advanceTime;
+
+    public void reset(long timeInMillis, long timeInNanos)
+    {
+        this.timeInMillis.set(timeInMillis);
+        this.timeInNanos.set(timeInNanos);
+    }
 
     @Override
     public long currentTimeMillis()
@@ -38,7 +45,7 @@ public class TestTimeSource implements TimeSource
     public long nanoTime()
     {
         maybeAdvance();
-        return timeInMillis.get() * 1_000_000;
+        return timeInNanos.get();
     }
     
     @Override
@@ -52,29 +59,37 @@ public class TestTimeSource implements TimeSource
     @Override
     public TimeSource sleep(long sleepFor, TimeUnit unit)
     {
-        long current = timeInMillis.get();
+        long currentMillis = timeInMillis.get();
+        long currentNanos = timeInNanos.get();
         long sleepInMillis = TimeUnit.MILLISECONDS.convert(sleepFor, unit);
+        long sleepInNanos = TimeUnit.NANOSECONDS.convert(sleepFor, unit);
+        doSleep(currentMillis, sleepInMillis, timeInMillis);
+        doSleep(currentNanos, sleepInNanos, timeInNanos);
+        return this;
+    }
+
+    private void doSleep(long current, long sleep, AtomicLong time)
+    {
         boolean elapsed;
         do
         {
-            long newTime = current + sleepInMillis;
-            elapsed = timeInMillis.compareAndSet(current, newTime);
+            long newTime = current + sleep;
+            elapsed = time.compareAndSet(current, newTime);
             if (!elapsed)
             {
-                long updated = timeInMillis.get();
-                if (updated - current >= sleepInMillis)
+                long updated = time.get();
+                if (updated - current >= sleep)
                 {
                     elapsed = true;
                 }
                 else
                 {
-                    sleepInMillis -= updated - current;
+                    sleep -= updated - current;
                     current = updated;
                 }
             }
         }
         while (!elapsed);
-        return this;
     }
 
     @Override
@@ -89,7 +104,6 @@ public class TestTimeSource implements TimeSource
         {
             sleepUninterruptibly(advanceTime, TimeUnit.NANOSECONDS);
             advanceCounter = 0;
-            advanceCalls = 0;
         }
     }
 }

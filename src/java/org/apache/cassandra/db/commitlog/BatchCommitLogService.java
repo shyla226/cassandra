@@ -23,26 +23,27 @@ import io.reactivex.Completable;
 import io.reactivex.Scheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.TimeSource;
 import org.apache.cassandra.utils.flow.RxThreads;
 
 class BatchCommitLogService extends AbstractCommitLogService
 {
-    public BatchCommitLogService(CommitLog commitLog)
+    public BatchCommitLogService(CommitLog commitLog, TimeSource timeSource)
     {
-        super(commitLog, "COMMIT-LOG-WRITER", (int) DatabaseDescriptor.getCommitLogSyncBatchWindow());
+        super(commitLog, "COMMIT-LOG-WRITER", (int) DatabaseDescriptor.getCommitLogSyncBatchWindow(), timeSource);
     }
 
     protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc, Scheduler observeOn)
     {
         // wait until record has been safely persisted to disk
         pending.incrementAndGet();
-        long startTime = System.nanoTime();
+        long startTime = timeSource.nanoTime();
         requestExtraSync();
 
         Completable sync = awaitSyncAt(startTime)
                            .doOnComplete(() ->
                                          {
-                                             commitLog.metrics.waitingOnCommit.update(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+                                             commitLog.metrics.waitingOnCommit.update(timeSource.nanoTime() - startTime, TimeUnit.NANOSECONDS);
                                              pending.decrementAndGet();
                                          });
         return RxThreads.observeOn(sync, observeOn, TPCTaskType.WRITE_POST_COMMIT_LOG_SYNC);
