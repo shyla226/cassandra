@@ -29,7 +29,6 @@ import com.google.common.base.Suppliers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.util.concurrent.AbstractScheduledEventExecutor;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
@@ -76,7 +75,7 @@ public class WatcherThread
                 catch (Throwable t)
                 {
                     JVMStabilityInspector.inspectThrowable(t);
-                    logger.error("WatcherThread exception: ");
+                    logger.error("WatcherThread exception: ", t);
                 }
                 LockSupport.parkNanos(1);
             }
