@@ -46,6 +46,7 @@ dse 6.0.0s
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from dse5.1:
+ * Ensure that the list and set selectors elements are all of the same type (APOLLO-905)
  * Always define execution_profiles in cqlsh.py (APOLLO-1150)
  * Fix stress-tool not outputting row/s (APOLLO-1123)
  * Make o.a.c.metrics extend org.codahale.metrics to fix Metrics Reporter (APOLLO-811)

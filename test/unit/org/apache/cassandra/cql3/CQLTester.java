@@ -65,6 +65,7 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.NativeTransportService;
@@ -1247,21 +1248,25 @@ public abstract class CQLTester
         int i = 0;
         while (iter.hasNext() && i < rows.length)
         {
+            if (rows[i] == null)
+                throw new IllegalArgumentException(String.format("Invalid expected value for row: %d. A row cannot be null.", i));
+
             Object[] expected = rows[i];
             UntypedResultSet.Row actual = iter.next();
 
-            Assert.assertEquals(String.format("Invalid number of (expected) values provided for row %d", i), expected == null ? 1 : expected.length, meta.size());
+            Assert.assertEquals(String.format("Invalid number of (expected) values provided for row %d", i), expected.length, meta.size());
 
             for (int j = 0; j < meta.size(); j++)
             {
                 ColumnSpecification column = meta.get(j);
-                ByteBuffer expectedByteValue = makeByteBuffer(expected == null ? null : expected[j], column.type);
-                ByteBuffer actualValue = actual.getBytes(column.name.toString());
 
-                if (!Objects.equal(expectedByteValue, actualValue))
+                ByteBuffer actualValue = actual.getBytes(column.name.toString());
+                Object actualValueDecoded = decodeValue(column, actualValue);
+                if (!Objects.equal(expected[j], actualValueDecoded))
                 {
-                    Object actualValueDecoded = actualValue == null ? null : column.type.getSerializer().deserialize(actualValue);
-                    if (!Objects.equal(expected[j], actualValueDecoded))
+                    ByteBuffer expectedByteValue = makeByteBuffer(expected[j], column.type);
+                    if (!Objects.equal(expectedByteValue, actualValue))
+                    {
                         fail(String.format("Invalid value for row %d column %d (%s of type %s), expected <%s> but got <%s>",
                                                   i,
                                                   j,
@@ -1269,6 +1274,7 @@ public abstract class CQLTester
                                                   column.type.asCQL3Type(),
                                                   formatValue(expectedByteValue, column.type),
                                                   formatValue(actualValue, column.type)));
+                    }
                 }
             }
             i++;
@@ -1294,6 +1300,19 @@ public abstract class CQLTester
         }
 
         assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", rows.length>i ? "less" : "more", rows.length, i), i == rows.length);
+    }
+
+    private static Object decodeValue(ColumnSpecification column, ByteBuffer actualValue)
+    {
+        try
+        {
+            Object actualValueDecoded = actualValue == null ? null : column.type.getSerializer().deserialize(actualValue);
+            return actualValueDecoded;
+        }
+        catch (MarshalException e)
+        {
+            throw new AssertionError("Cannot deserialize the value for column " + column.name, e);
+        }
     }
 
     /**
