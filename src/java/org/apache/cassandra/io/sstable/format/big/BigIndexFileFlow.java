@@ -64,9 +64,7 @@ public class BigIndexFileFlow extends FlowSource<IndexFileEntry>
     {
         this.sstable = sstable;
         this.ifile = sstable.ifile.sharedCopy();
-        this.reader = ifile.createReader(ifile.mmapped()
-                                         ? Rebufferer.ReaderConstraint.NONE
-                                         : Rebufferer.ReaderConstraint.IN_CACHE_ONLY);
+        this.reader = ifile.createReader(Rebufferer.ReaderConstraint.ASYNC);
         this.rowIndexEntrySerializer = sstable.rowIndexEntrySerializer;
         this.partitioner = sstable.getPartitioner();
         this.version = sstable.descriptor.version;

@@ -99,6 +99,18 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
         return this;
     }
 
+    public BufferHolder rebuffer(long position, ReaderConstraint constraint)
+    {
+        if (constraint == ReaderConstraint.ASYNC)
+        {
+            // There is no point to try to support this as all async operations require a minimum of cached data where
+            // multiple reads are re-done on a cache failure (e.g. when initializing a partition iterator).
+            throw new UnsupportedOperationException("Async read is not supported without caching.");
+        }
+
+        return rebuffer(position);
+    }
+
     @Override
     public double getCrcCheckChance()
     {

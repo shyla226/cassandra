@@ -253,8 +253,8 @@ public class StartupChecks
             if (!FBUtilities.isLinux)
                 return;
 
-            if (DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.standard &&
-                DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.standard)
+            if (DatabaseDescriptor.getDiskAccessMode() == Config.AccessMode.standard &&
+                DatabaseDescriptor.getIndexAccessMode() == Config.AccessMode.standard)
                 return; // no need to check if disk access mode is only standard and not mmap
 
             //TPC: We only care about mmap when used with the MemoryOnlyStrategy

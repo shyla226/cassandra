@@ -36,16 +36,16 @@ public class MemoryOnlyStrategyDiskAccessModeTest extends CQLTester
     public void testDiskAccessModeStandard() throws Throwable
     {
         // DiskAccessMode.standard = mmapping is turned off
-        DatabaseDescriptor.setDiskAccessMode(Config.DiskAccessMode.standard);
-        DatabaseDescriptor.setIndexAccessMode(Config.DiskAccessMode.standard);
+        DatabaseDescriptor.setDiskAccessMode(Config.AccessMode.standard);
+        DatabaseDescriptor.setIndexAccessMode(Config.AccessMode.standard);
         insertSomeDataAndVerifyLockedStatus(false);
     }
 
     @Test
     public void testDiskAccessModeMmapIndexOnly() throws Throwable
     {
-        DatabaseDescriptor.setDiskAccessMode(Config.DiskAccessMode.standard);
-        DatabaseDescriptor.setIndexAccessMode(Config.DiskAccessMode.mmap);
+        DatabaseDescriptor.setDiskAccessMode(Config.AccessMode.standard);
+        DatabaseDescriptor.setIndexAccessMode(Config.AccessMode.mmap);
         // we can't really distinguish here between data & index files, so mmapping will work
         insertSomeDataAndVerifyLockedStatus(true);
     }
@@ -53,8 +53,8 @@ public class MemoryOnlyStrategyDiskAccessModeTest extends CQLTester
     @Test
     public void testDiskAccessModeMmap() throws Throwable
     {
-        DatabaseDescriptor.setDiskAccessMode(Config.DiskAccessMode.mmap);
-        DatabaseDescriptor.setIndexAccessMode(Config.DiskAccessMode.mmap);
+        DatabaseDescriptor.setDiskAccessMode(Config.AccessMode.mmap);
+        DatabaseDescriptor.setIndexAccessMode(Config.AccessMode.mmap);
         insertSomeDataAndVerifyLockedStatus(true);
     }
 

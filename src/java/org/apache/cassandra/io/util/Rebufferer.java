@@ -39,7 +39,10 @@ public interface Rebufferer extends ReaderFileProxy
      * the buffer will not be empty and will contain the requested position, i.e.
      * {@code offset <= position < offset + bh.buffer().limit()}, but the buffer will not be positioned there.
      */
-    BufferHolder rebuffer(long position);
+    default BufferHolder rebuffer(long position)
+    {
+        return rebuffer(position, ReaderConstraint.NONE);
+    }
 
     /**
      * Called when a reader is closed. Should clean up reader-specific data.
@@ -48,18 +51,24 @@ public interface Rebufferer extends ReaderFileProxy
 
     // Extensions for TPC/optimistic read below.
 
-    default BufferHolder rebuffer(long position, ReaderConstraint constraint)
-    {
-        if (constraint == ReaderConstraint.IN_CACHE_ONLY)
-            throw new IllegalStateException("In cache only constraint requires the cache rebufferer");
-
-        return rebuffer(position);
-    }
+    /**
+     * Rebuffer to the given position, applying any long-running operation according to the specified reader
+     * constrained:
+     * - if NONE, long-running reads will block and return when the data is received
+     * - if ASYNC, the call should return successfully only if the data is already present in memory (e.g. in cache),
+     *   otherwise a NotInCacheException should be thrown, letting the caller attach to the async completion of the read.
+     *
+     * Note: Memory-mapped rebufferers ignore the ASYNC flag, assuming that either:
+     * - the data is in locked memory map
+     * - the data is on a non-volatile memory drive
+     * and thus page faults and the resulting blocking should not occur.
+     */
+    BufferHolder rebuffer(long position, ReaderConstraint constraint);
 
     public enum ReaderConstraint
     {
         NONE,
-        IN_CACHE_ONLY
+        ASYNC
     }
 
     public static class NotInCacheException extends RuntimeException

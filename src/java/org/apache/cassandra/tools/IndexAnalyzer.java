@@ -93,7 +93,7 @@ public class IndexAnalyzer
         Descriptor desc = Descriptor.fromFilename(ssTableFileName);
         String fname = ssTableFileName.contains("Partitions") ? ssTableFileName : desc.filenameFor(Component.PARTITION_INDEX);
         try (FileHandle.Builder fhBuilder = new FileHandle.Builder(fname).bufferSize(PageAware.PAGE_SIZE);
-             PartitionIndex index = PartitionIndex.load(fhBuilder, null, false, Rebufferer.ReaderConstraint.NONE);
+             PartitionIndex index = PartitionIndex.load(fhBuilder, null, false);
              Analyzer analyzer = new Analyzer(index, Rebufferer.ReaderConstraint.NONE))
         {
             analyzer.run();

@@ -34,12 +34,6 @@ public class WrappingRebufferer implements Rebufferer
     }
 
     @Override
-    public BufferHolder rebuffer(long position)
-    {
-        return rebuffer(position, ReaderConstraint.NONE);
-    }
-
-    @Override
     public BufferHolder rebuffer(long position, ReaderConstraint constraint)
     {
         BufferHolder bufferHolder = source.rebuffer(position, constraint);

@@ -61,6 +61,15 @@ public class LegacyMemoryOnlyStrategyDiskAccessModeTest extends DseTestRunner
     }
 
     @Test
+    public void testDiskAccessModeMmapReads() throws Exception
+    {
+        startNode(1, CassandraYamlBuilder.newInstance().withDiskAccessMode(Config.DiskAccessMode.mmap_reads.name()), false);
+        LegacyMemoryOnlyStrategyTestUtil.maybeCreateKeyspace(KEYSPACE);
+        // we can't really distinguish here between data & index files, so mmapping will work
+        insertSomeDataAndVerifyLockedStatus(true);
+    }
+
+    @Test
     public void testDiskAccessModeMmap() throws Exception
     {
         startNode(1, CassandraYamlBuilder.newInstance().withDiskAccessMode(Config.DiskAccessMode.mmap.name()), false);
@@ -73,7 +82,7 @@ public class LegacyMemoryOnlyStrategyDiskAccessModeTest extends DseTestRunner
     {
         startNode(1, CassandraYamlBuilder.newInstance().withDiskAccessMode(Config.DiskAccessMode.auto.name()), false);
         LegacyMemoryOnlyStrategyTestUtil.maybeCreateKeyspace(KEYSPACE);
-        insertSomeDataAndVerifyLockedStatus(true);
+        insertSomeDataAndVerifyLockedStatus(false);
     }
 
     private void insertSomeDataAndVerifyLockedStatus(boolean mmappingShouldWork) throws Exception

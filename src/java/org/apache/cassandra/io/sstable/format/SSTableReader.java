@@ -49,7 +49,6 @@ import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.compaction.MemoryOnlyStrategy;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.mos.MemoryLockedBuffer;
 import org.apache.cassandra.db.mos.MemoryOnlyStatus;
@@ -716,30 +715,30 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     protected Builder indexFileHandleBuilder(Component component)
     {
-        return indexFileHandleBuilder(descriptor, metadata(), component);
+        return indexFileHandleBuilder(descriptor, component);
     }
 
-    public static Builder indexFileHandleBuilder(Descriptor descriptor, TableMetadata metadata, Component component)
+    public static Builder indexFileHandleBuilder(Descriptor descriptor, Component component)
     {
         return new FileHandle.Builder(descriptor.filenameFor(component))
                    .withChunkCache(ChunkCache.instance)
-                   .mmapped(DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard && metadata.params.compaction.klass().equals(MemoryOnlyStrategy.class))
+                   .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.AccessMode.mmap)
                    .bufferSize(PageAware.PAGE_SIZE)
                    .withChunkCache(ChunkCache.instance);
     }
 
-    public static Builder dataFileHandleBuilder(Descriptor descriptor, TableMetadata metadata, boolean compression)
+    public static Builder dataFileHandleBuilder(Descriptor descriptor, boolean compression)
     {
         return new FileHandle.Builder(descriptor.filenameFor(Component.DATA))
                    .compressed(compression)
-                   .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap && metadata.params.compaction.klass().equals(MemoryOnlyStrategy.class))
+                   .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.AccessMode.mmap)
                    .withChunkCache(ChunkCache.instance);
     }
 
     Builder dataFileHandleBuilder()
     {
         int dataBufferSize = optimizationStrategy.bufferSize(sstableMetadata.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-        return dataFileHandleBuilder(descriptor, metadata(), compression)
+        return dataFileHandleBuilder(descriptor, compression)
                    .bufferSize(dataBufferSize);
     }
 

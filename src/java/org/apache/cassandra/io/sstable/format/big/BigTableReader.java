@@ -43,7 +43,6 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
-import org.apache.cassandra.db.compaction.MemoryOnlyStrategy;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -113,7 +112,7 @@ public class BigTableReader extends SSTableReader
         }
 
         try(FileHandle.Builder ibuilder = new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX))
-                .mmapped(DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard && metadata().params.compaction.klass().equals(MemoryOnlyStrategy.class))
+                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.AccessMode.mmap)
                 .withChunkCache(ChunkCache.instance))
         {
             loadSummary();

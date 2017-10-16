@@ -122,7 +122,7 @@ public class ChunkCacheMocks
 
         public BufferHolder rebuffer(long position, ReaderConstraint constraint)
         {
-            if (constraint == ReaderConstraint.IN_CACHE_ONLY && rand.nextDouble() < 0.25)
+            if (constraint == ReaderConstraint.ASYNC && rand.nextDouble() < 0.25)
             {
                 CompletableFuture<ChunkCache.Buffer> buf = new CompletableFuture<>();
 

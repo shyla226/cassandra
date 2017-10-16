@@ -148,7 +148,7 @@ public class TrieIndexFileFlow extends FlowSource<IndexFileEntry>
      */
     private void lateInitialization()
     {
-        Rebufferer.ReaderConstraint rc = Rebufferer.ReaderConstraint.IN_CACHE_ONLY;
+        Rebufferer.ReaderConstraint rc = Rebufferer.ReaderConstraint.ASYNC;
 
         if (rowIndexFileReader == null)
             rowIndexFileReader = rowIndexFile.createReader(rc);

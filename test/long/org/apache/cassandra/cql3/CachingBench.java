@@ -34,6 +34,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import junit.framework.Assert;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.Config.CommitLogSync;
 import org.apache.cassandra.config.Config.DiskAccessMode;
 import org.apache.cassandra.cache.ChunkCache;
@@ -191,7 +192,7 @@ public class CachingBench extends CQLTester
         }
     }
 
-    public void testSetup(String compactionClass, String compressorClass, DiskAccessMode mode, boolean cacheEnabled) throws Throwable
+    public void testSetup(String compactionClass, String compressorClass, Config.AccessMode mode, boolean cacheEnabled) throws Throwable
     {
         id.set(0);
         compactionTimeNanos = 0;
@@ -284,49 +285,49 @@ public class CachingBench extends CQLTester
     @Test
     public void testWarmup() throws Throwable
     {
-        testSetup(STRATEGY, "LZ4Compressor", DiskAccessMode.mmap, false);
+        testSetup(STRATEGY, "LZ4Compressor", Config.AccessMode.mmap, false);
     }
 
     @Test
     public void testLZ4CachedMmap() throws Throwable
     {
-        testSetup(STRATEGY, "LZ4Compressor", DiskAccessMode.mmap, true);
+        testSetup(STRATEGY, "LZ4Compressor", Config.AccessMode.mmap, true);
     }
 
     @Test
     public void testLZ4CachedStandard() throws Throwable
     {
-        testSetup(STRATEGY, "LZ4Compressor", DiskAccessMode.standard, true);
+        testSetup(STRATEGY, "LZ4Compressor", Config.AccessMode.standard, true);
     }
 
     @Test
     public void testLZ4UncachedMmap() throws Throwable
     {
-        testSetup(STRATEGY, "LZ4Compressor", DiskAccessMode.mmap, false);
+        testSetup(STRATEGY, "LZ4Compressor", Config.AccessMode.mmap, false);
     }
 
     @Test
     public void testLZ4UncachedStandard() throws Throwable
     {
-        testSetup(STRATEGY, "LZ4Compressor", DiskAccessMode.standard, false);
+        testSetup(STRATEGY, "LZ4Compressor", Config.AccessMode.standard, false);
     }
 
     @Test
     public void testCachedStandard() throws Throwable
     {
-        testSetup(STRATEGY, "", DiskAccessMode.standard, true);
+        testSetup(STRATEGY, "", Config.AccessMode.standard, true);
     }
 
     @Test
     public void testUncachedStandard() throws Throwable
     {
-        testSetup(STRATEGY, "", DiskAccessMode.standard, false);
+        testSetup(STRATEGY, "", Config.AccessMode.standard, false);
     }
 
     @Test
     public void testMmapped() throws Throwable
     {
-        testSetup(STRATEGY, "", DiskAccessMode.mmap, false /* doesn't matter */);
+        testSetup(STRATEGY, "", Config.AccessMode.mmap, false /* doesn't matter */);
     }
 
     int countTombstoneMarkers(ColumnFamilyStore cfs)

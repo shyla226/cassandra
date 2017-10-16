@@ -82,7 +82,7 @@ class TrieIndexSSTableReader extends SSTableReader
         super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header);
     }
 
-    protected void loadIndex(boolean preloadIfMemmapped) throws IOException
+    protected void loadIndex(boolean preload) throws IOException
     {
         if (components.contains(Component.PARTITION_INDEX))
             try (
@@ -92,8 +92,7 @@ class TrieIndexSSTableReader extends SSTableReader
             {
                 rowIndexFile = rowIndexBuilder.complete();
                 // only preload if memmapped
-                boolean preload = preloadIfMemmapped && rowIndexFile.rebuffererFactory() instanceof MmapRebufferer;
-                partitionIndex = PartitionIndex.load(partitionIndexBuilder, metadata().partitioner, preload, Rebufferer.ReaderConstraint.NONE);
+                partitionIndex = PartitionIndex.load(partitionIndexBuilder, metadata().partitioner, preload);
                 first = partitionIndex.firstKey();
                 last = partitionIndex.lastKey();
             }

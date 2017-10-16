@@ -150,10 +150,12 @@ public class PartitionIndex implements Closeable
         fh.addTo(identities);
     }
 
-    public static PartitionIndex load(FileHandle.Builder fhBuilder, IPartitioner partitioner, boolean preload, Rebufferer.ReaderConstraint rc) throws IOException
+    public static PartitionIndex load(FileHandle.Builder fhBuilder,
+                                      IPartitioner partitioner,
+                                      boolean preload) throws IOException
     {
         try (FileHandle fh = fhBuilder.complete();
-             FileDataInput rdr = fh.createReader(fh.dataLength() - 3 * 8, rc))
+             FileDataInput rdr = fh.createReader(fh.dataLength() - 3 * 8, Rebufferer.ReaderConstraint.NONE))
         {
             long firstPos = rdr.readLong();
             long keyCount = rdr.readLong();
@@ -163,7 +165,6 @@ public class PartitionIndex implements Closeable
             DecoratedKey last = partitioner != null ? partitioner.decorateKey(ByteBufferUtil.readWithShortLength(rdr)) : null;
             if (preload)
             {
-                assert rc != Rebufferer.ReaderConstraint.IN_CACHE_ONLY;
                 int csum = 0;
                 // force a read of all the pages of the index
                 for (long pos = 0; pos < fh.dataLength(); pos += PageAware.PAGE_SIZE)

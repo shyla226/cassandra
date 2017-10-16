@@ -128,10 +128,10 @@ public class TrieIndexFormat implements SSTableFormat
         {
             IPartitioner partitioner = metadata.partitioner;
             boolean compressedData = new File(desc.filenameFor(Component.COMPRESSION_INFO)).exists();
-            try (FileHandle.Builder piBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.PARTITION_INDEX);
-                 FileHandle.Builder riBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.ROW_INDEX);
-                 FileHandle.Builder dBuilder = SSTableReader.dataFileHandleBuilder(desc, metadata, compressedData);
-                 PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE);
+            try (FileHandle.Builder piBuilder = SSTableReader.indexFileHandleBuilder(desc, Component.PARTITION_INDEX);
+                 FileHandle.Builder riBuilder = SSTableReader.indexFileHandleBuilder(desc, Component.ROW_INDEX);
+                 FileHandle.Builder dBuilder = SSTableReader.dataFileHandleBuilder(desc, compressedData);
+                 PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false);
                  FileHandle dFile = dBuilder.complete();
                  FileHandle riFile = riBuilder.complete())
             {
@@ -155,8 +155,8 @@ public class TrieIndexFormat implements SSTableFormat
             if (!indexFile.exists())
                 return null;
 
-            try (FileHandle.Builder fhBuilder = SSTableReader.indexFileHandleBuilder(descriptor, TableMetadata.minimal(descriptor.ksname, descriptor.cfname), Component.PARTITION_INDEX);
-                 PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE))
+            try (FileHandle.Builder fhBuilder = SSTableReader.indexFileHandleBuilder(descriptor, Component.PARTITION_INDEX);
+                 PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, false))
             {
                 return Pair.create(pIndex.firstKey(), pIndex.lastKey());
             }

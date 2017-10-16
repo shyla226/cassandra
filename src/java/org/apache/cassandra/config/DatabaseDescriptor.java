@@ -99,7 +99,9 @@ public class DatabaseDescriptor
     private static IPartitioner partitioner;
     private static String paritionerName;
 
-    private static Config.DiskAccessMode indexAccessMode;
+    private static Config.AccessMode diskAccessMode;
+    private static Config.AccessMode indexAccessMode;
+    private static Config.AccessMode commitlogAccessMode;
 
     private static IAuthenticator authenticator;
     private static IAuthorizer authorizer;
@@ -366,22 +368,15 @@ public class DatabaseDescriptor
         }
 
         /* evaluate the DiskAccessMode Config directive, which also affects indexAccessMode selection */
-        if (conf.disk_access_mode == Config.DiskAccessMode.auto)
+        diskAccessMode = conf.disk_access_mode.data;
+        indexAccessMode = conf.disk_access_mode.index;
+        commitlogAccessMode = conf.disk_access_mode.commitlog;
+        logger.info("DiskAccessMode is {}, indexAccessMode is {}, commitlogAccessMode is {}", diskAccessMode, indexAccessMode, commitlogAccessMode);
+        if (diskAccessMode == Config.AccessMode.mmap || indexAccessMode == Config.AccessMode.mmap || commitlogAccessMode == Config.AccessMode.mmap)
         {
-            conf.disk_access_mode = hasLargeAddressSpace() ? Config.DiskAccessMode.mmap : Config.DiskAccessMode.standard;
-            indexAccessMode = conf.disk_access_mode;
-            logger.info("DiskAccessMode 'auto' determined to be {}, indexAccessMode is {}", conf.disk_access_mode, indexAccessMode);
-        }
-        else if (conf.disk_access_mode == Config.DiskAccessMode.mmap_index_only)
-        {
-            conf.disk_access_mode = Config.DiskAccessMode.standard;
-            indexAccessMode = Config.DiskAccessMode.mmap;
-            logger.info("DiskAccessMode is {}, indexAccessMode is {}", conf.disk_access_mode, indexAccessMode);
-        }
-        else
-        {
-            indexAccessMode = conf.disk_access_mode;
-            logger.info("DiskAccessMode is {}, indexAccessMode is {}", conf.disk_access_mode, indexAccessMode);
+            logger.info("Memory-mapped access mode is selected. Because page faults block and thus cause thread-per-core " +
+                        "architectures to be inefficient, this should only be used if all data is either locked to memory " +
+                        "or if the underlying storage is non-volatile memory.");
         }
 
         if (conf.gc_warn_threshold_in_ms < 0)
@@ -2019,26 +2014,38 @@ public class DatabaseDescriptor
         conf.commitlog_sync = sync;
     }
 
-    public static Config.DiskAccessMode getDiskAccessMode()
+    public static Config.AccessMode getDiskAccessMode()
     {
-        return conf.disk_access_mode;
+        return diskAccessMode;
     }
 
     // Do not use outside unit tests.
     @VisibleForTesting
-    public static void setDiskAccessMode(Config.DiskAccessMode mode)
+    public static void setDiskAccessMode(Config.AccessMode mode)
     {
-        conf.disk_access_mode = mode;
+        diskAccessMode = mode;
     }
 
-    public static Config.DiskAccessMode getIndexAccessMode()
+    public static Config.AccessMode getCommitlogAccessMode()
+    {
+        return commitlogAccessMode;
+    }
+
+    // Do not use outside unit tests.
+    @VisibleForTesting
+    public static void setCommitlogAccessMode(Config.AccessMode mode)
+    {
+        commitlogAccessMode = mode;
+    }
+
+    public static Config.AccessMode getIndexAccessMode()
     {
         return indexAccessMode;
     }
 
     // Do not use outside unit tests.
     @VisibleForTesting
-    public static void setIndexAccessMode(Config.DiskAccessMode mode)
+    public static void setIndexAccessMode(Config.AccessMode mode)
     {
         indexAccessMode = mode;
     }

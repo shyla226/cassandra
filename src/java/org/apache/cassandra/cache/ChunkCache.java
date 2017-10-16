@@ -309,7 +309,7 @@ public class ChunkCache
         @Override
         public Buffer rebuffer(long position, ReaderConstraint rc)
         {
-            if (rc != ReaderConstraint.IN_CACHE_ONLY)
+            if (rc != ReaderConstraint.ASYNC)
                 return rebuffer(position);
 
             metrics.requests.mark();

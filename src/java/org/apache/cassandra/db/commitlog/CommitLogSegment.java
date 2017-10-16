@@ -31,6 +31,7 @@ import java.util.zip.CRC32;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.CommitLog.Configuration;
@@ -124,9 +125,13 @@ public abstract class CommitLogSegment
     static CommitLogSegment createSegment(CommitLog commitLog, AbstractCommitLogSegmentManager manager)
     {
         Configuration config = commitLog.configuration;
-        CommitLogSegment segment = config.useEncryption() ? new EncryptedSegment(commitLog, manager)
-                                                          : config.useCompression() ? new CompressedSegment(commitLog, manager)
-                                                                                    : new UncompressedSegment(commitLog, manager);
+        CommitLogSegment segment = config.useEncryption()
+                                   ? new EncryptedSegment(commitLog, manager)
+                                   : config.useCompression()
+                                     ? new CompressedSegment(commitLog, manager)
+                                     : DatabaseDescriptor.getCommitlogAccessMode() == Config.AccessMode.standard
+                                       ? new UncompressedSegment(commitLog, manager)
+                                       : new MemoryMappedSegment(commitLog, manager);
         segment.writeLogHeader();
         return segment;
     }

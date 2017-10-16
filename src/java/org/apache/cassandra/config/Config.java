@@ -397,12 +397,33 @@ public class Config
         all, none, dc
     }
 
+    public enum AccessMode
+    {
+        standard,
+        mmap;
+    }
+
     public enum DiskAccessMode
     {
-        auto,
-        mmap,
-        mmap_index_only,
-        standard,
+        auto(AccessMode.standard, AccessMode.standard, AccessMode.standard),
+        mmap(AccessMode.mmap, AccessMode.mmap, AccessMode.mmap),
+        mmap_reads(AccessMode.mmap, AccessMode.mmap, AccessMode.standard),
+        mmap_index_only(AccessMode.standard, AccessMode.mmap, AccessMode.standard),
+        mmap_commitlog_only(AccessMode.standard, AccessMode.standard, AccessMode.mmap),
+        standard(AccessMode.standard, AccessMode.standard, AccessMode.standard);
+
+        final AccessMode data;
+        final AccessMode index;
+        final AccessMode commitlog;
+
+        DiskAccessMode(AccessMode data,
+                       AccessMode index,
+                       AccessMode commitlog)
+        {
+            this.data = data;
+            this.index = index;
+            this.commitlog = commitlog;
+        }
     }
 
     public enum MemtableAllocationType

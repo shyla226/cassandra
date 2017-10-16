@@ -200,14 +200,14 @@ public class PartitionIndexTest
         try (FileHandle.Builder fhBuilder = new FileHandle.Builder(file.getPath())
                                                 .bufferSize(PageAware.PAGE_SIZE)
                                                 .withChunkCache(ChunkCache.instance)
-                                                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap);
+                                                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.AccessMode.mmap);
              PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder);
             )
         {
             DecoratedKey key = p.decorateKey(ByteBufferUtil.EMPTY_BYTE_BUFFER);
             builder.addEntry(key, 42);
             builder.complete();
-            try (PartitionIndex summary = PartitionIndex.load(fhBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE);
+            try (PartitionIndex summary = PartitionIndex.load(fhBuilder, partitioner, false);
                  PartitionIndex.Reader reader = summary.openReader(Rebufferer.ReaderConstraint.NONE))
             {
                 assertEquals(1, summary.size());
@@ -362,7 +362,7 @@ public class PartitionIndexTest
                 for (; i < COUNT; ++i)
                     builder.addEntry(list.get(i), i);
                 builder.complete();
-                try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE))
+                try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, false))
                 {
                     checkIteration(list, list.size(), index);
                 }
@@ -610,7 +610,7 @@ public class PartitionIndexTest
             for (int i = 0; i < size; i++)
                 builder.addEntry(list.get(i), i);
             builder.complete();
-            PartitionIndex summary = PartitionIndex.load(fhBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE);
+            PartitionIndex summary = PartitionIndex.load(fhBuilder, partitioner, false);
             return Pair.create(list, summary);
         }
         catch (IOException e)

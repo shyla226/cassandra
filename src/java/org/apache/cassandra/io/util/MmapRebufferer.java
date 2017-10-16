@@ -42,7 +42,9 @@ public class MmapRebufferer extends AbstractReaderFileProxy implements Rebuffere
 
     @Override
     public BufferHolder rebuffer(long position, ReaderConstraint constraint)
-    {   // Ignore the reader constraint for mmap since mmapped files cannot be in cache
+    {
+        // Ignore the reader constraint for mmap since mmapped files cannot be read async.
+        // This assumes data is locked to memory or in a medium with RAM-like access times (and no page faults).
         return rebuffer(position);
     }
 

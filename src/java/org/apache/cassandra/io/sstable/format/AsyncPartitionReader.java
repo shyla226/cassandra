@@ -69,7 +69,6 @@ class AsyncPartitionReader
     final ColumnFilter selectedColumns;
     final SSTableReader table;
     final boolean reverse;
-    final ReaderConstraint rc;
     final SerializationHelper helper;
     final boolean closeDataFile;
     Slices slices;
@@ -98,7 +97,6 @@ class AsyncPartitionReader
         this.reverse = reverse;
         this.helper = new SerializationHelper(table.metadata(), table.descriptor.version.encodingVersion(), SerializationHelper.Flag.LOCAL, selectedColumns);
         this.closeDataFile = (dfile == null);
-        this.rc = table.dataFile.mmapped() ? ReaderConstraint.NONE : ReaderConstraint.IN_CACHE_ONLY;
     }
 
     /**
@@ -194,7 +192,7 @@ class AsyncPartitionReader
             // If this is a retry the indexEntry may be already read.
             if (indexEntry == null)
             {
-                indexEntry = table.getPosition(key, SSTableReader.Operator.EQ, listener, rc);
+                indexEntry = table.getPosition(key, SSTableReader.Operator.EQ, listener, ReaderConstraint.ASYNC);
 
                 if (indexEntry == null)
                 {
@@ -204,7 +202,7 @@ class AsyncPartitionReader
             }
 
             if (dfile == null)
-                dfile = table.getFileDataInput(indexEntry.position, rc);
+                dfile = table.getFileDataInput(indexEntry.position, ReaderConstraint.ASYNC);
             else
                 dfile.seek(indexEntry.position);
 
@@ -214,7 +212,7 @@ class AsyncPartitionReader
             if (slices == null && selectedColumns == null)
                 ssTableIterator = table.simpleIterator(dfile, key, indexEntry, false);
             else
-                ssTableIterator = table.iterator(dfile, key, indexEntry, slices, selectedColumns, reverse, rc);
+                ssTableIterator = table.iterator(dfile, key, indexEntry, slices, selectedColumns, reverse, ReaderConstraint.ASYNC);
 
             filePos = dfile.getFilePointer();
 

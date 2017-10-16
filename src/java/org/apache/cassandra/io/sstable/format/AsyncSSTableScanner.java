@@ -63,7 +63,7 @@ public class AsyncSSTableScanner extends FlowSource<FlowableUnfilteredPartition>
         assert sstable != null;
 
         this.sstable = sstable;
-        this.dfile = sstable.openDataReader(Rebufferer.ReaderConstraint.IN_CACHE_ONLY);
+        this.dfile = sstable.openDataReader(Rebufferer.ReaderConstraint.ASYNC);
         this.columns = columns;
         this.dataRange = dataRange;
         this.ranges = ranges;

@@ -56,8 +56,8 @@ public class SSTableWriterTestBase extends SchemaLoader
     protected static final String CF = "Standard1";
     protected static final String CF_SMALL_MAX_VALUE = "Standard_SmallMaxValue";
 
-    private static Config.DiskAccessMode standardMode;
-    private static Config.DiskAccessMode indexMode;
+    private static Config.AccessMode standardMode;
+    private static Config.AccessMode indexMode;
 
     private static int maxValueSize;
 
@@ -71,8 +71,8 @@ public class SSTableWriterTestBase extends SchemaLoader
             standardMode = DatabaseDescriptor.getDiskAccessMode();
             indexMode = DatabaseDescriptor.getIndexAccessMode();
 
-            DatabaseDescriptor.setDiskAccessMode(Config.DiskAccessMode.standard);
-            DatabaseDescriptor.setIndexAccessMode(Config.DiskAccessMode.standard);
+            DatabaseDescriptor.setDiskAccessMode(Config.AccessMode.standard);
+            DatabaseDescriptor.setIndexAccessMode(Config.AccessMode.standard);
         }
 
         SchemaLoader.prepareServer();

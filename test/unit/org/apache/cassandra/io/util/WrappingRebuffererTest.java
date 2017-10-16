@@ -102,7 +102,7 @@ public class WrappingRebuffererTest
             return 0;
         }
 
-        public BufferHolder rebuffer(long position)
+        public BufferHolder rebuffer(long position, ReaderConstraint constraint)
         {
             offset = position;
             return this;

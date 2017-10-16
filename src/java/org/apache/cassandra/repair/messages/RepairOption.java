@@ -269,7 +269,7 @@ public class RepairOption
                         Collection<Range<Token>> ranges, boolean pullRepair, boolean forceRepair, PreviewKind previewKind)
     {
         if (FBUtilities.isWindows &&
-            (DatabaseDescriptor.getDiskAccessMode() != Config.DiskAccessMode.standard || DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard) &&
+            (DatabaseDescriptor.getDiskAccessMode() != Config.AccessMode.standard || DatabaseDescriptor.getIndexAccessMode() != Config.AccessMode.standard) &&
             parallelism == RepairParallelism.SEQUENTIAL)
         {
             logger.warn("Sequential repair disabled when memory-mapped I/O is configured on Windows. Reverting to parallel.");
