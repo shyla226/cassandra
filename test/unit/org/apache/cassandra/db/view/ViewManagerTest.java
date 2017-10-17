@@ -49,6 +49,7 @@ public class ViewManagerTest extends CQLTester
     public static void beforeClass()
     {
         DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setWriteRpcTimeout(10000);
     }
 
     @Test
