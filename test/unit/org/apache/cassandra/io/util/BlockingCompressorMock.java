@@ -73,8 +73,15 @@ public class BlockingCompressorMock implements ICompressor
 
     public int initialCompressedBufferLength(int chunkLength)
     {
-        maybeThrow();
-        return realCompressor.initialCompressedBufferLength(chunkLength);
+        try
+        {
+            maybeThrow();
+            return realCompressor.initialCompressedBufferLength(chunkLength);
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e); // DSE Encryptor does this, we are emulating it here
+        }
     }
 
     public int uncompress(byte[] input, int inputOffset, int inputLength, byte[] output, int outputOffset) throws IOException
