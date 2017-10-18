@@ -225,8 +225,11 @@ public class QueryProcessor implements QueryHandler
                 statement.validate(clientState);
                 return statement.execute(queryState, options, queryStartNanoTime);
             }
-            catch (TPCUtils.WouldBlockException ex)
+            catch (RuntimeException ex)
             {
+                if (!TPCUtils.isWouldBlockException(ex))
+                    throw ex;
+
                 if (logger.isTraceEnabled())
                     logger.trace("Failed to execute blocking operation, retrying on io schedulers");
 
@@ -594,8 +597,11 @@ public class QueryProcessor implements QueryHandler
                 batch.validate(clientState);
                 return batch.execute(queryState, options, queryStartNanoTime);
             }
-            catch (TPCUtils.WouldBlockException ex)
+            catch (RuntimeException ex)
             {
+                if (!TPCUtils.isWouldBlockException(ex))
+                    throw ex;
+
                 return RxThreads.subscribeOnIo(
                     Single.defer(() -> {
                         batch.checkAccess(clientState);

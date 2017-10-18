@@ -141,13 +141,21 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             {
                 doReadChunk(position, uncompressed, ret, bufferHandle);
             }
-            catch (TPCUtils.WouldBlockException e)
-            {
-                ioExecutor().execute(() -> doReadChunk(position, uncompressed, ret, bufferHandle));
-            }
             catch (Throwable t)
             {
-                error(t, uncompressed, ret, bufferHandle);
+                if (TPCUtils.isWouldBlockException(t))
+                    ioExecutor().execute(() -> {
+                        try
+                        {
+                            doReadChunk(position, uncompressed, ret, bufferHandle);
+                        }
+                        catch (Throwable tt)
+                        {
+                            error(tt, uncompressed, ret, bufferHandle);
+                        }
+                    });
+                else
+                    error(t, uncompressed, ret, bufferHandle);
             }
 
             return ret;
@@ -220,14 +228,13 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                         }
 
                     }
-                    catch (TPCUtils.WouldBlockException ex)
-                    {
-                        ioExecutor().execute(() -> completed(result, attachment));
-                        return;
-                    }
                     catch (Throwable t)
                     {
-                        error(t, uncompressed, futureBuffer, bufferHandle);
+                        if (TPCUtils.isWouldBlockException(t))
+                            ioExecutor().execute(() -> completed(result, attachment));
+                        else
+                            error(t, uncompressed, futureBuffer, bufferHandle);
+
                         return;
                     }
 
@@ -271,23 +278,26 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             {
                 future.complete(doReadChunk(position, uncompressed));
             }
-            catch (TPCUtils.WouldBlockException e)
-            {
-                // we use this instead of CompletableFuture.supplyAsync() to avoid wrapping exceptions into CompletionException
-                ioExecutor().execute(() -> {
-                    try
-                    {
-                        future.complete(doReadChunk(position, uncompressed));
-                    }
-                    catch (Throwable t)
-                    {
-                        future.completeExceptionally(t);
-                    }
-                });
-            }
             catch (Throwable t)
             {
-               future.completeExceptionally(t);
+                if (TPCUtils.isWouldBlockException(t))
+                {
+                    // we use this instead of CompletableFuture.supplyAsync() to avoid wrapping exceptions into CompletionException
+                    ioExecutor().execute(() -> {
+                        try
+                        {
+                            future.complete(doReadChunk(position, uncompressed));
+                        }
+                        catch (Throwable tt)
+                        {
+                            future.completeExceptionally(tt);
+                        }
+                    });
+                }
+                else
+                {
+                    future.completeExceptionally(t);
+                }
             }
             return future;
         }

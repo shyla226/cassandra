@@ -40,6 +40,11 @@ public class TPCUtils
         }
     }
 
+    public static boolean isWouldBlockException(Throwable t)
+    {
+        return Throwables.getRootCause(t) instanceof WouldBlockException;
+    }
+
     public static <T> T blockingGet(Single<T> single)
     {
         if (TPC.isTPCThread())
