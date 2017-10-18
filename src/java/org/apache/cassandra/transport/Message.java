@@ -595,6 +595,14 @@ public abstract class Message
         @Override
         public boolean apply(Throwable exception)
         {
+            if (exception instanceof RuntimeException &&
+                exception.getCause() != null &&
+                exception.getCause() instanceof IOException)
+            {
+                // Netty 4.0.52 wraps client issues such as NotSslRecordException into decoder exceptions, which are RuntimeExceptions, not IOExceptions
+                exception = exception.getCause();
+            }
+
             String message;
             try
             {
