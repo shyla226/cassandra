@@ -1,4 +1,5 @@
 DSE 5.1.4
+ * Do not leak body buffer in case of protocol exceptions and upgrade Netty to 4.0.52 (APOLLO-1257)
  * Ensure that the list and set selectors elements are all of the same type (APOLLO-905)
  * Always define execution_profiles in cqlsh.py (APOLLO-1150)
  * Fix stress-tool not outputting row/s (APOLLO-1123)

@@ -218,8 +218,6 @@ public class Frame
 
             // extract body
             ByteBuf body = buffer.slice(idx, (int) bodyLength);
-            body.retain();
-
             idx += bodyLength;
             buffer.readerIndex(idx);
 
@@ -240,7 +238,7 @@ public class Frame
                         streamId);
             }
 
-            results.add(new Frame(new Header(version, decodedFlags, streamId, type), body));
+            results.add(new Frame(new Header(version, decodedFlags, streamId, type), body.retain()));
         }
 
         private void fail()
