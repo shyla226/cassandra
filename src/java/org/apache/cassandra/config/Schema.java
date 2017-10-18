@@ -297,7 +297,7 @@ public class Schema
 
     private Set<String> getNonSystemKeyspacesSet()
     {
-        return Sets.difference(keyspaces.keySet(), SchemaConstants.SYSTEM_KEYSPACE_NAMES);
+        return Sets.difference(keyspaces.keySet(), SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES);
     }
 
     /**
@@ -338,6 +338,18 @@ public class Schema
     public List<String> getUserKeyspaces()
     {
         return ImmutableList.copyOf(Sets.difference(getNonSystemKeyspacesSet(), SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES));
+    }
+
+    public Keyspaces getReplicatedKeyspaces()
+    {
+        Keyspaces.Builder builder = Keyspaces.builder();
+
+        keyspaces.values()
+                 .stream()
+                 .filter(k -> !SchemaConstants.isLocalSystemKeyspace(k.name))
+                 .forEach(builder::add);
+
+        return builder.build();
     }
 
     /**
