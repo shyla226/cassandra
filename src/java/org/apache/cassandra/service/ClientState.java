@@ -56,7 +56,7 @@ public class ClientState
 
     private static final Set<IResource> READABLE_SYSTEM_RESOURCES = new HashSet<>();
     private static final Set<IResource> PROTECTED_AUTH_RESOURCES = new HashSet<>();
-    private static final Set<IResource> DROPPABLE_SYSTEM_TABLES = new HashSet<>();
+    private static final Set<IResource> DROPPABLE_SYSTEM_AUTH_TABLES = new HashSet<>();
 
     static
     {
@@ -75,7 +75,7 @@ public class ClientState
             PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getRoleManager().protectedResources());
         }
 
-        DROPPABLE_SYSTEM_TABLES.add(DataResource.table(SchemaConstants.AUTH_KEYSPACE_NAME, "resource_role_permissons_index"));
+        DROPPABLE_SYSTEM_AUTH_TABLES.add(DataResource.table(SchemaConstants.AUTH_KEYSPACE_NAME, "resource_role_permissons_index"));
     }
 
     // Current user for the session
@@ -486,7 +486,7 @@ public class ClientState
         if (SchemaConstants.isReplicatedSystemKeyspace(keyspace))
         {
             // allow users with sufficient privileges to alter replication params of replicated system keyspaces
-            if (perm == CorePermission.ALTER || (perm == CorePermission.DROP && DROPPABLE_SYSTEM_TABLES.contains(resource)))
+            if (perm == CorePermission.ALTER || (perm == CorePermission.DROP && DROPPABLE_SYSTEM_AUTH_TABLES.contains(resource)))
                 return;
 
             // prevent all other modifications of replicated system keyspaces
