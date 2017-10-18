@@ -1,7 +1,8 @@
 4.0
+ * Checksum sstable metadata (CASSANDRA-13321, CASSANDRA-13593)
+ * Add result set metadata to prepared statement MD5 hash calculation (CASSANDRA-10786)
  * Add incremental repair support for --hosts, --force, and subrange repair (CASSANDRA-13818)
  * Refactor GcCompactionTest to avoid boxing (CASSANDRA-13941)
- * Checksum sstable metadata (CASSANDRA-13321)
  * Expose recent histograms in JmxHistograms (CASSANDRA-13642)
  * Add SERIAL and LOCAL_SERIAL support for cassandra-stress (CASSANDRA-13925)
  * LCS needlessly checks for L0 STCS candidates multiple times (CASSANDRA-12961)
@@ -141,6 +142,7 @@
 
 
 3.11.2
+ * Update jackson JSON jars (CASSANDRA-13949)
  * Avoid locks when checking LCS fanout and if we should defrag (CASSANDRA-13930)
 Merged from 3.0:
  * Don't let user drop or generally break tables in system_distributed (CASSANDRA-13813)
