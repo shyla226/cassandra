@@ -91,7 +91,7 @@ public final class Schema
      */
     public static void validateKeyspaceNotSystem(String keyspace)
     {
-        if (SchemaConstants.isSystemKeyspace(keyspace))
+        if (SchemaConstants.isLocalSystemKeyspace(keyspace))
             throw new InvalidRequestException(format("%s keyspace is not user-modifiable", keyspace));
     }
 
@@ -317,7 +317,7 @@ public final class Schema
 
     private Set<String> getNonSystemKeyspacesSet()
     {
-        return Sets.difference(keyspaces.names(), SchemaConstants.SYSTEM_KEYSPACE_NAMES);
+        return Sets.difference(keyspaces.names(), SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES);
     }
 
     /**
@@ -562,6 +562,18 @@ public final class Schema
         updateVersionAndAnnounce();
     }
 
+    /*
+     * Reload schema from local disk. Useful if a user made changes to schema tables by hand, or has suspicion that
+     * in-memory representation got out of sync somehow with what's on disk.
+     */
+    public synchronized void reloadSchemaAndAnnounceVersion()
+    {
+        Keyspaces before = keyspaces.filter(k -> !SchemaConstants.isLocalSystemKeyspace(k.name));
+        Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
+        merge(before, after);
+        updateVersionAndAnnounce();
+    }
+
     /**
      * Merge remote schema in form of mutations with local and mutate ks/cf metadata objects
      * (which also involves fs operations on add/drop ks/cf)
@@ -590,6 +602,11 @@ public final class Schema
         // apply the schema mutations and fetch the new versions of the altered keyspaces
         Keyspaces after = SchemaKeyspace.fetchKeyspaces(affectedKeyspaces);
 
+        merge(before, after);
+    }
+
+    private synchronized void merge(Keyspaces before, Keyspaces after)
+    {
         MapDifference<String, KeyspaceMetadata> keyspacesDiff = before.diff(after);
 
         // dropped keyspaces

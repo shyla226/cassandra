@@ -118,7 +118,7 @@ public class Keyspace
 
     public static Keyspace open(String keyspaceName)
     {
-        if (initialized || SchemaConstants.isSystemKeyspace(keyspaceName))
+        if (initialized || SchemaConstants.isLocalSystemKeyspace(keyspaceName))
             return open(keyspaceName, Schema.instance, true);
 
         throw new IllegalStateException(String.format("Cannot open non-system keyspace %s as server is not yet initialized.", keyspaceName));
@@ -407,7 +407,7 @@ public class Keyspace
 
     private TPCBoundaries computeTPCBoundaries()
     {
-        if (SchemaConstants.isSystemKeyspace(metadata.name))
+        if (SchemaConstants.isLocalSystemKeyspace(metadata.name))
             return TPCBoundaries.NONE;
 
         List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(this);
@@ -641,7 +641,7 @@ public class Keyspace
     {
         assert writeBarrier != null : "Expected non null write barrier";
 
-        if (SchemaConstants.isSystemKeyspace(mutation.getKeyspaceName()))
+        if (SchemaConstants.isLocalSystemKeyspace(mutation.getKeyspaceName()))
         {
             logger.warn("Attempted to apply system mutation {} during shutdown but keyspace was already closed to mutations",
                          mutation);
@@ -748,7 +748,7 @@ public class Keyspace
 
     public static Iterable<Keyspace> system()
     {
-        return toKeyspaces(SchemaConstants.SYSTEM_KEYSPACE_NAMES);
+        return toKeyspaces(SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES);
     }
 
     /**

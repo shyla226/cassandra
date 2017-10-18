@@ -19,7 +19,6 @@ package org.apache.cassandra.service;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
@@ -58,6 +57,7 @@ public class ClientState
     private static final Set<IResource> READABLE_SYSTEM_RESOURCES = new HashSet<>();
     private static final Set<IResource> PROTECTED_AUTH_RESOURCES = new HashSet<>();
     private static final Set<IResource> DROPPABLE_SYSTEM_TABLES = new HashSet<>();
+
     static
     {
         // We want these system cfs to be always readable to authenticated users since many tools rely on them
@@ -413,15 +413,21 @@ public class ClientState
     throws UnauthorizedException, InvalidRequestException
     {
         validateKeyspace(keyspace);
+
         if (isInternal)
             return;
+
         validateLogin();
+
         preventSystemKSSchemaModification(keyspace, resource, perm);
+
         if ((perm == CorePermission.SELECT) && READABLE_SYSTEM_RESOURCES.contains(resource))
             return;
+
         if (PROTECTED_AUTH_RESOURCES.contains(resource))
             if ((perm == CorePermission.CREATE) || (perm == CorePermission.ALTER) || (perm == CorePermission.DROP))
                 throw new UnauthorizedException(String.format("%s schema is protected", resource));
+
         ensureHasPermission(perm, resource);
     }
 
@@ -469,24 +475,23 @@ public class ClientState
 
     private void preventSystemKSSchemaModification(String keyspace, DataResource resource, Permission perm) throws UnauthorizedException
     {
-        // we only care about schema modification.
-        if (!((perm == CorePermission.ALTER) || (perm == CorePermission.DROP) || (perm == CorePermission.CREATE)))
+        // we only care about DDL statements
+        if (perm != CorePermission.ALTER && perm != CorePermission.DROP && perm != CorePermission.CREATE)
             return;
 
-        // prevent system keyspace modification (not only because this could be dangerous, but also because this just
-        // wouldn't work with the way the schema of those system keyspace/table schema is hard-coded)
-        if (SchemaConstants.isSystemKeyspace(keyspace))
+        // prevent ALL local system keyspace modification
+        if (SchemaConstants.isLocalSystemKeyspace(keyspace))
             throw new UnauthorizedException(keyspace + " keyspace is not user-modifiable.");
 
-        // Allow users with sufficient privileges to alter options on certain distributed system keyspaces/tables.
-        // We only allow ALTER, not CREATE nor DROP, outside of a few specific tables that can be dropped  because they
-        // are not used anymore but we prefer leaving user the responsibility to drop them. Note that even when altering
-        // is allowed, only the table options can be altered but any change to the table schema (adding/removing columns
-        // typically) is forbidden by AlterTableStatement.
         if (SchemaConstants.isReplicatedSystemKeyspace(keyspace))
         {
-            if (perm != CorePermission.ALTER && !(perm == CorePermission.DROP && DROPPABLE_SYSTEM_TABLES.contains(resource)))
-                throw new UnauthorizedException(String.format("Cannot %s %s", perm, resource));
+            // allow users with sufficient privileges to alter replication params of replicated system keyspaces
+            if ((perm == CorePermission.ALTER && resource.isKeyspaceLevel()) 
+                    || (perm == CorePermission.DROP && DROPPABLE_SYSTEM_TABLES.contains(resource)))
+                return;
+
+            // prevent all other modifications of replicated system keyspaces
+            throw new UnauthorizedException(String.format("Cannot %s %s", perm, resource));
         }
     }
 

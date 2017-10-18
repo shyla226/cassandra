@@ -1085,6 +1085,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private Completable maybeAddKeyspace(KeyspaceMetadata ksm)
     {
+        /*
+         * We use timestamp of 0, intentionally, so that varying timestamps wouldn't cause schema mismatches on
+         * newly added nodes.
+         *
+         * Having the initial/default timestamp as 0 also allows users to make and persist changes to replication
+         * of our replicated system keyspaces.
+         *
+         * In case that we need to make incompatible changes to those kesypaces/tables, we'd need to bump the timestamp
+         * on per-keyspace/per-table basis. So far we've never needed to.
+         */
         return MigrationManager.announceNewKeyspace(ksm, 0, false)
                                .onErrorResumeNext(e -> {
                                    if (e instanceof AlreadyExistsException)
@@ -3118,7 +3128,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int forceKeyspaceCleanup(int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
     {
-        if (SchemaConstants.isSystemKeyspace(keyspaceName))
+        if (SchemaConstants.isLocalSystemKeyspace(keyspaceName))
             throw new RuntimeException("Cleanup of the system keyspace is neither necessary nor wise");
 
         CompactionManager.AllSSTableOpStatus status = CompactionManager.AllSSTableOpStatus.SUCCESSFUL;
@@ -3429,7 +3439,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Map<String, TabularData> snapshotMap = new HashMap<>();
         for (Keyspace keyspace : Keyspace.all())
         {
-            if (SchemaConstants.isSystemKeyspace(keyspace.getName()))
+            if (SchemaConstants.isLocalSystemKeyspace(keyspace.getName()))
                 continue;
 
             for (ColumnFamilyStore cfStore : keyspace.getColumnFamilyStores())
@@ -3455,7 +3465,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         long total = 0;
         for (Keyspace keyspace : Keyspace.all())
         {
-            if (SchemaConstants.isSystemKeyspace(keyspace.getName()))
+            if (SchemaConstants.isLocalSystemKeyspace(keyspace.getName()))
                 continue;
 
             for (ColumnFamilyStore cfStore : keyspace.getColumnFamilyStores())
@@ -5300,6 +5310,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public void resetLocalSchema() throws IOException
     {
         MigrationManager.resetLocalSchema();
+    }
+
+    public void reloadLocalSchema()
+    {
+        Schema.instance.reloadSchemaAndAnnounceVersion();
     }
 
     public void setTraceProbability(double probability)
