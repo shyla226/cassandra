@@ -486,8 +486,7 @@ public class ClientState
         if (SchemaConstants.isReplicatedSystemKeyspace(keyspace))
         {
             // allow users with sufficient privileges to alter replication params of replicated system keyspaces
-            if ((perm == CorePermission.ALTER && resource.isKeyspaceLevel()) 
-                    || (perm == CorePermission.DROP && DROPPABLE_SYSTEM_TABLES.contains(resource)))
+            if (perm == CorePermission.ALTER || (perm == CorePermission.DROP && DROPPABLE_SYSTEM_TABLES.contains(resource)))
                 return;
 
             // prevent all other modifications of replicated system keyspaces
