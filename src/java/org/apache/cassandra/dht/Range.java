@@ -437,6 +437,11 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
      */
     public boolean isTrulyWrapAround()
     {
+        return isTrulyWrapAround(left, right);
+    }
+
+    public static <T extends RingPosition<T>> boolean isTrulyWrapAround(T left, T right)
+    {
         T minValue = right.minValue();
         return isWrapAround(left, right) && !right.equals(minValue);
     }

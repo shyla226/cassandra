@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -389,6 +390,12 @@ public class QueryProcessor implements QueryHandler
         return execute(query, cl, internalQueryState(), values);
     }
 
+    public static CompletableFuture<UntypedResultSet> executeAsync(String query, ConsistencyLevel cl, Object... values)
+    throws RequestExecutionException
+    {
+        return executeAsync(query, cl, internalQueryState(), values);
+    }
+
     /**
      * Executes the query.
      *
@@ -405,19 +412,17 @@ public class QueryProcessor implements QueryHandler
     public static UntypedResultSet execute(String query, ConsistencyLevel cl, QueryState state, Object... values)
     throws RequestExecutionException
     {
-        try
-        {
-            ParsedStatement.Prepared prepared = prepareInternal(query);
-            ResultMessage result = TPCUtils.blockingGet(prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime()));
-            if (result instanceof ResultMessage.Rows)
-                return UntypedResultSet.create(((ResultMessage.Rows)result).result);
-            else
-                return UntypedResultSet.EMPTY;
-        }
-        catch (RequestValidationException e)
-        {
-            throw new RuntimeException("Error validating " + query, e);
-        }
+        return TPCUtils.blockingGet(executeAsync(query, cl, state, values));
+    }
+
+    public static CompletableFuture<UntypedResultSet> executeAsync(String query, ConsistencyLevel cl, QueryState state, Object... values)
+    throws RequestExecutionException
+    {
+        ParsedStatement.Prepared prepared = prepareInternal(query);
+        return TPCUtils.toFuture(prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime()))
+                       .thenApply(result -> result instanceof ResultMessage.Rows
+                                            ? UntypedResultSet.create(((ResultMessage.Rows)result).result)
+                                            : UntypedResultSet.EMPTY);
     }
 
     public static UntypedResultSet executeInternalWithPaging(String query, PageSize pageSize, Object... values)

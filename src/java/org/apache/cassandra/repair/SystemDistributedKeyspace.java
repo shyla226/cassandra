@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -64,15 +63,16 @@ import org.apache.cassandra.schema.Functions;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SpeculativeRetryParam;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.schema.Views;
-import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.Throwables;
 
 import static java.lang.String.format;
 
@@ -443,21 +443,22 @@ public final class SystemDistributedKeyspace
         }
         catch (Throwable t)
         {
-            logger.error(String.format("Unexpected error while %s; %s", operationDescription, NODESYNC_ERROR_IMPACT_MSG), t);
+            logger.error(String.format("Unexpected error while %s: %s", operationDescription, NODESYNC_ERROR_IMPACT_MSG), t);
             return defaultOnError;
         }
     }
 
+    public static CompletableFuture<List<NodeSyncRecord>> nodeSyncRecords(Segment segment)
+    {
+        return nodeSyncRecords(segment.table, segment.range);
+    }
+
     /**
-     * Retrieves the recorded NodeSync validations that cover a specific {@code segment}.
-     * <p>
-     * Note that we're interested in the status for a single segment, but the ranges stored in the table may be of
-     * different granularity than the one we're interested of, so in practice we return a list of all records that
-     * intersect with the segment of interest. In most case though, we consolidate those records into one to make it
-     * easier to work with using {@link NodeSyncRecord#consolidate}.
+     * Retrieves the recorded NodeSync validations that cover a specific {@code range} of a specific table.
      *
-     * @param segment the segment for which to retrieve the records.
-     * @return the NodeSync records that cover {@code segment} fully.
+     * @param table the table for which to retrieve the records.
+     * @param range the range for which to retrieve the records. This <b>must</b> be a non wrapping range.
+     * @return all the NodeSync records that cover {@code range}.
      */
     // TODO(Sylvain): this actually doesn't guarantee to get all records covering a segment, because any range
     // that starts strictly before the requested segment but covers it will not be fetched. I don't think it's
@@ -472,51 +473,51 @@ public final class SystemDistributedKeyspace
     // The idea being that as we segments won't be of completely random size, we can make it so that we don't fetch
     // anything unnecessary in the "normal" case while make it much more likely to get what we should in the "bad" cases,
     // thus lowering the performance impact of this issue (to something hopefully completely negligible).
-    public static List<NodeSyncRecord> nodeSyncRecords(Segment segment)
+    public static CompletableFuture<List<NodeSyncRecord>> nodeSyncRecords(TableMetadata table, Range<Token> range)
     {
-        logger.trace("Requesting NodeSync records for segment {}", segment);
+        assert !range.isTrulyWrapAround();
 
-        Token.TokenFactory tkf = segment.table.partitioner.getTokenFactory();
+        logger.trace("Requesting NodeSync records for range {} of table {}", range, table);
 
-        Callable<List<NodeSyncRecord>> callable = () ->
-        {
+        Token.TokenFactory tkf = table.partitioner.getTokenFactory();
+
+        // Note that unavailable exceptions will show synchronously while timeouts will show asynchronously (and of
+        // course unexpected exception can happen anywhere), hence the 2 calls to withNodeSyncExceptionHandling.
+        Callable<CompletableFuture<List<NodeSyncRecord>>> callable = () -> queryNodeSyncRecords(table, range, tkf) .thenApply(rows -> {
             List<NodeSyncRecord> records = new ArrayList<>();
-            Iterator<UntypedResultSet> iter = queryNodeSyncRecords(segment, tkf);
-            while (iter.hasNext())
+            for (UntypedResultSet.Row row : rows)
             {
-                for (UntypedResultSet.Row row : iter.next())
+                try
                 {
-                    try
-                    {
-                        Token start = tkf.fromByteArray(row.getBytes("start_token"));
-                        Token end = tkf.fromByteArray(row.getBytes("end_token"));
-                        Range<Token> range = new Range<>(start, end);
-                        ValidationInfo lastSuccessfulValidation = row.has("last_successful_validation")
-                                                                  ? ValidationInfo.fromBytes(row.getBytes("last_successful_validation"))
-                                                                  : null;
-                        ValidationInfo lastUnsuccessfulValidation = row.has("last_unsuccessful_validation")
-                                                                    ? ValidationInfo.fromBytes(row.getBytes("last_unsuccessful_validation"))
-                                                                    : null;
-                        // The last validation is the last successful one if either there is no unsuccessful one recorded or there is one but
-                        // it is older than the last successful one (the later case shouldn't really happen since we remove the last unsuccessful
-                        // on a successful one, but no harm in handling that properly if that ever change).
-                        ValidationInfo lastValidation = lastUnsuccessfulValidation == null || (lastSuccessfulValidation != null && lastSuccessfulValidation.isMoreRecentThan(lastUnsuccessfulValidation))
-                                                        ? lastSuccessfulValidation
-                                                        : lastUnsuccessfulValidation;
-                        InetAddress lockedBy = row.has("locked_by") ? row.getInetAddress("locked_by") : null;
-                        records.add(new NodeSyncRecord(new Segment(segment.table, range), lastValidation, lastSuccessfulValidation, lockedBy));
-                    }
-                    catch (RuntimeException e)
-                    {
-                        // Log the issue, but simply ignore the specific record otherwise
-                        noSpamLogger.warn("Unexpected error (msg: {}) reading NodeSync record: {}", e.getMessage(), NODESYNC_ERROR_IMPACT_MSG);
-                    }
+                    Token start = tkf.fromByteArray(row.getBytes("start_token"));
+                    Token end = tkf.fromByteArray(row.getBytes("end_token"));
+                    ValidationInfo lastSuccessfulValidation = row.has("last_successful_validation")
+                                                              ? ValidationInfo.fromBytes(row.getBytes("last_successful_validation"))
+                                                              : null;
+                    ValidationInfo lastUnsuccessfulValidation = row.has("last_unsuccessful_validation")
+                                                                ? ValidationInfo.fromBytes(row.getBytes("last_unsuccessful_validation"))
+                                                                : null;
+                    // The last validation is the last successful one if either there is no unsuccessful one recorded or there is one but
+                    // it is older than the last successful one (the later case shouldn't really happen since we remove the last unsuccessful
+                    // on a successful one, but no harm in handling that properly if that ever change).
+                    ValidationInfo lastValidation = lastUnsuccessfulValidation == null || (lastSuccessfulValidation != null && lastSuccessfulValidation.isMoreRecentThan(lastUnsuccessfulValidation))
+                                                    ? lastSuccessfulValidation
+                                                    : lastUnsuccessfulValidation;
+                    InetAddress lockedBy = row.has("locked_by") ? row.getInetAddress("locked_by") : null;
+                    records.add(new NodeSyncRecord(new Segment(table, new Range<>(start, end)), lastValidation, lastSuccessfulValidation, lockedBy));
+                }
+                catch (RuntimeException e)
+                {
+                    // Log the issue, but simply ignore the specific record otherwise
+                    noSpamLogger.warn("Unexpected error (msg: {}) reading NodeSync record: {}", e.getMessage(), NODESYNC_ERROR_IMPACT_MSG);
                 }
             }
             return records;
-        };
+        }).exceptionally(err -> withNodeSyncExceptionHandling(() -> { throw Throwables.cleaned(err); },
+                                                              Collections.emptyList(),
+                                                              "reading NodeSync records"));
         return withNodeSyncExceptionHandling(callable,
-                                             Collections.emptyList(),
+                                             CompletableFuture.completedFuture(Collections.emptyList()),
                                              "reading NodeSync records");
     }
 
@@ -528,15 +529,35 @@ public final class SystemDistributedKeyspace
         return val;
     }
 
-    private static Iterator<UntypedResultSet> queryNodeSyncRecords(Segment segment, Token.TokenFactory tkf)
+    private static List<ByteBuffer> queriedGroups(Token start, Token end)
     {
-        Token start = segment.range.left;
-        Token end = segment.range.right;
+        int startGroup = rangeGroupFor(start);
+        int endGroup = end.isMinimum()
+                       ? 255 // Groups are the first byte of the token, so they go from 0 to 255.
+                       : rangeGroupFor(end);
+
+        assert startGroup <= endGroup : String.format("start=%s (group: %d), end=%s (group: %d)", start, startGroup, end, endGroup);
+
+        // Common for non trivially small tables where there will be much more than 256 segments and thus one segment
+        // won't span multiple groups in most case.
+        if (startGroup == endGroup)
+            return Collections.singletonList(ByteBufferUtil.bytes((byte)startGroup));
+
+        List<ByteBuffer> l = new ArrayList<>(endGroup - startGroup + 1);
+        for (int i = startGroup; i <= endGroup; i++)
+            l.add(ByteBufferUtil.bytes((byte)i));
+        return l;
+    }
+
+    private static CompletableFuture<UntypedResultSet> queryNodeSyncRecords(TableMetadata table, Range<Token> range, Token.TokenFactory tkf)
+    {
+        Token start = range.left;
+        Token end = range.right;
 
         String qBase = "SELECT start_token, end_token, last_successful_validation, last_unsuccessful_validation, locked_by"
                        + " FROM %s.%s"
                        + " WHERE keyspace_name = ? AND table_name = ?"
-                       + " AND range_group = ?"
+                       + " AND range_group IN ?"
                        + " AND start_token >= ?";
 
         // Not that even though segment ranges can't be wrapping, the "last" range will still have the min token as
@@ -546,31 +567,15 @@ public final class SystemDistributedKeyspace
         if (!end.isMinimum())
             qBase += " AND start_token < ?";
 
-        final String q = String.format(qBase, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS);
+        String q = String.format(qBase, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS);
 
-        final int startGroup = rangeGroupFor(start);
-        final int endGroup = end.isMinimum()
-                             ? 255 // Groups are the first byte of the token, so they go from 0 to 255.
-                             : rangeGroupFor(end);
+        List<ByteBuffer> groups = queriedGroups(start, end);
+        ByteBuffer startBytes = tkf.toByteArray(start);
+        ByteBuffer endBytes = end.isMinimum() ? null : tkf.toByteArray(end);
 
-        final ByteBuffer startBytes = tkf.toByteArray(start);
-        final ByteBuffer endBytes = end.isMinimum() ? null : tkf.toByteArray(end);
-
-        return new AbstractIterator<UntypedResultSet>()
-        {
-            private int nextGroup = startGroup;
-
-            protected UntypedResultSet computeNext()
-            {
-                if (nextGroup > endGroup)
-                    return endOfData();
-
-                ByteBuffer group = ByteBufferUtil.bytes((byte)nextGroup++);
-                return end.isMinimum()
-                       ? QueryProcessor.execute(q, ConsistencyLevel.ONE, segment.table.keyspace, segment.table.name, group, startBytes)
-                       : QueryProcessor.execute(q, ConsistencyLevel.ONE, segment.table.keyspace, segment.table.name, group, startBytes, endBytes);
-            }
-        };
+        return end.isMinimum()
+               ? QueryProcessor.executeAsync(q, ConsistencyLevel.ONE, table.keyspace, table.name, groups, startBytes)
+               : QueryProcessor.executeAsync(q, ConsistencyLevel.ONE, table.keyspace, table.name, groups, startBytes, endBytes);
     }
 
     /**
@@ -645,8 +650,11 @@ public final class SystemDistributedKeyspace
      *
      * @param segment the segment that has been validated.
      * @param info the information regarding the NodeSync validation to record.
+     * @param wasPreviousSuccessful whether the previous validation was successful or not. This is an optimization and
+     *                              doesn't have to be exact (it's ok to pass {@code false} if this is unknown for
+     *                              instance), but avoid generating too much tombstones unnecessarily.
      */
-    public static void recordNodeSyncValidation(Segment segment, ValidationInfo info)
+    public static void recordNodeSyncValidation(Segment segment, ValidationInfo info, boolean wasPreviousSuccessful)
     {
         logger.trace("Recording (and unlocking) NodeSync validation of segment {}: {}", segment, info);
 
@@ -664,7 +672,11 @@ public final class SystemDistributedKeyspace
             // (we only want to record the last unsuccessful one if it's more recent than the last successful one,
             // otherwise it's no useful enough to be worth the bytes).
             lastSuccessfulValidation = info.toBytes();
-            lastUnsuccessfulValidation = null;
+            // Note that if the previous validation was already successful, we won't need to erase anything, so save
+            // the tombstone, avoiding getting into tombstone threshold warnings (and generally speeding up reading).
+            // Note that it's not a huge deal if the value of wasPreviousSuccessful if wrong: in the worst case we'll
+            // keep around some info on an old unsuccessful validation, but it will timeout anyway.
+            lastUnsuccessfulValidation = wasPreviousSuccessful ? ByteBufferUtil.UNSET_BYTE_BUFFER : null;
         }
         else
         {

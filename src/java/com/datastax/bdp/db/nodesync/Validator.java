@@ -12,11 +12,11 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.RateLimiter;
@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.config.NodeSyncConfig;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
@@ -82,13 +83,6 @@ class Validator
     private static final Logger logger = LoggerFactory.getLogger(Validator.class);
 
     /**
-     * The TTL used on the {@link SystemDistributedKeyspace#NODESYNC_STATUS} "lock". Note that this doesn't put a limit
-     * on the maximum time for validating a segment as the lock is refreshed if necessary, it's only here to have the
-     * lock automatically release on failure.
-     */
-    private static final long LOCK_TIMEOUT_MS = Long.getLong("dse.nodesync.segment_lock_timeout_ms", TimeUnit.MINUTES.toMillis(10));
-
-    /**
      * The possible states of a validator.
      */
     private enum State
@@ -108,9 +102,7 @@ class Validator
         }
     }
 
-    private final NodeSyncService service;
-    private final Segment segment;
-    private final long startTime;
+    private final ValidationLifecycle lifecycle;
 
     private final ValidationMetrics metrics = new ValidationMetrics();
     private final RateLimiter limiter;
@@ -134,15 +126,13 @@ class Validator
     @Nullable
     private volatile Set<InetAddress> missingNodes;
 
-    private volatile long nextLockRefreshTimeMs;
-
-    private Validator(NodeSyncService service, Segment segment, long startTime)
+    private Validator(ValidationLifecycle lifecycle)
     {
-        this.service = service;
-        this.segment = segment;
-        this.startTime = startTime;
-        this.limiter = service.config.rateLimiter;
-        this.pageSize = new PageSize(Ints.checkedCast(service.config.getPageSize(SizeUnit.BYTES)), PageSize.PageUnit.BYTES);
+        this.lifecycle = lifecycle;
+
+        NodeSyncConfig config = lifecycle.service().config;
+        this.limiter = config.rateLimiter;
+        this.pageSize = new PageSize(Ints.checkedCast(config.getPageSize(SizeUnit.BYTES)), PageSize.PageUnit.BYTES);
 
         this.observer = new Observer();
         AbstractReplicationStrategy replicationStrategy = Keyspace.open(table().keyspace).getReplicationStrategy();
@@ -155,25 +145,18 @@ class Validator
     }
 
     /**
-     * Creates a new validator and "lock" it in the {@link SystemDistributedKeyspace#NODESYNC_STATUS} table.
+     * Creates a new validator on the provided segment, which must have been locked prior to this call.
      * <p>
      * Note that because the lock has been set, caller should ensure that the validator is dealt with relatively
      * promptly (failure to release the lock isn't critical in the sense that the lock has a timeout in the first place
      * but that timeout is meant to protect against node failures, not programmers error).
-     * <p>
-     * See {@link NodeSyncRecord#lockedBy} for details on how we use the segment "lock" in practice.
      *
-     * @param service the NodeSync service for which this is a validator.
-     * @param segment the segment to validate/repair.
-     * @return the newly created and "locked" {@link Validator}.
+     * @param lifecycle the lifecycle manager for the segment to validate/repair.
+     * @return the newly created {@link Validator}.
      */
-    static Validator createAndLock(NodeSyncService service, Segment segment)
+    static Validator create(ValidationLifecycle lifecycle)
     {
-        long now = System.currentTimeMillis();
-        Validator validator = new Validator(service, segment, now);
-        // Setup the lock initially.
-        validator.refreshLock(now);
-        return validator;
+        return new Validator(lifecycle);
     }
 
     /**
@@ -186,7 +169,7 @@ class Validator
 
     Segment segment()
     {
-        return segment;
+        return lifecycle.segment();
     }
 
     ValidationMetrics metrics()
@@ -196,12 +179,12 @@ class Validator
 
     private TableMetadata table()
     {
-        return segment.table;
+        return segment().table;
     }
 
     private Range<Token> range()
     {
-        return segment.range;
+        return segment().range;
     }
 
     Future executeOn(ValidationExecutor executor)
@@ -216,8 +199,8 @@ class Validator
             throw new IllegalStateException("Cannot call executeOn multiple times");
         }
 
-        ReadCommand command = new NodeSyncReadCommand(segment,
-                                                      FBUtilities.nowInSeconds(),
+        ReadCommand command = new NodeSyncReadCommand(segment(),
+                                                      NodeSyncHelpers.time().currentTimeSeconds(),
                                                       executor.asScheduler());
         QueryPager pager = command.getPager(null, ProtocolVersion.CURRENT);
         // We don't want to use CL.ALL, because that would throw Unavailable unless all nodes are up. Instead, we want
@@ -232,7 +215,7 @@ class Validator
                                          .readRepairDecision(ReadRepairDecision.GLOBAL)
                                          .build(System.nanoTime());
 
-        logger.trace("Starting execution of validation on {}", segment);
+        logger.trace("Starting execution of validation on {}", segment());
         try
         {
             flowFuture = fetchAll(executor, pager, context).lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
@@ -267,7 +250,7 @@ class Validator
     {
         assert !pager.isExhausted();
         // Maybe schedule a refresh of the lock.
-        maybeRefreshLock();
+        lifecycle.onNewPage();
         observer.onNewPage();
         return pager.fetchPage(pageSize, context)
                     .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), executor));
@@ -275,7 +258,7 @@ class Validator
 
     private boolean isDone(QueryPager pager)
     {
-        return pager.isExhausted() || state.get() == State.CANCELLED;
+        return pager.isExhausted() || state.get() == State.CANCELLED || lifecycle.isInvalidated();
     }
 
     private void handleError(Throwable t, PageProcessingStatsListener listener)
@@ -337,13 +320,11 @@ class Validator
         if (previous.isDone())
             return previous == State.CANCELLED;
 
-        logger.trace("Cancelling validation of segment {}", segment);
+        logger.trace("Cancelling validation of segment {}", segment());
+        lifecycle.cancel();
 
         if (flowFuture != null)
             flowFuture.cancel(true);
-
-        // Release the lock
-        SystemDistributedKeyspace.forceReleaseNodeSyncSegmentLock(segment);
 
         return completionFuture.cancel(true);
     }
@@ -355,11 +336,11 @@ class Validator
             return;
 
         if (logger.isTraceEnabled())
-            logger.trace("Finished execution of validation on {}: metrics={}", segment, metrics.toDebugString());
+            logger.trace("Finished execution of validation on {}: metrics={}", segment(), metrics.toDebugString());
 
-        service.updateMetrics(table(), metrics);
-        ValidationInfo info = new ValidationInfo(startTime, validationOutcome, missingNodes);
-        SystemDistributedKeyspace.recordNodeSyncValidation(segment, info);
+        lifecycle.service().updateMetrics(table(), metrics);
+        ValidationInfo info = new ValidationInfo(lifecycle.startTime(), validationOutcome, missingNodes);
+        lifecycle.onCompletion(info);
         completionFuture.complete(info);
     }
 
@@ -371,21 +352,6 @@ class Validator
         listener.onPageProcessing(observer.dataValidatedBytesForPage,
                                   observer.limiterWaitTimeNanosForPage,
                                   observer.timeIdleBeforeProcessingPage);
-    }
-
-    private void refreshLock(long currentTimeMs)
-    {
-        SystemDistributedKeyspace.lockNodeSyncSegment(segment, LOCK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-
-        // Refresh a bit (1/4 of the time) before the previous record timeout
-        nextLockRefreshTimeMs = currentTimeMs + (3 * LOCK_TIMEOUT_MS / 4);
-    }
-
-    private void maybeRefreshLock()
-    {
-        long currentTimeMs = System.currentTimeMillis();
-        if (currentTimeMs > nextLockRefreshTimeMs)
-            refreshLock(currentTimeMs);
     }
 
     static interface PageProcessingStatsListener

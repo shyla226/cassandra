@@ -1638,9 +1638,9 @@ public class NodeProbe implements AutoCloseable
         return mosProxy;
     }
 
-    public boolean enableNodeSync()
+    public boolean enableNodeSync(long timeout, TimeUnit timeoutUnit) throws TimeoutException
     {
-        return nodeSyncProxy.enable();
+        return nodeSyncProxy.enable(timeout, timeoutUnit);
     }
 
     public boolean disableNodeSync(boolean force, long timeout, TimeUnit timeoutUnit) throws TimeoutException

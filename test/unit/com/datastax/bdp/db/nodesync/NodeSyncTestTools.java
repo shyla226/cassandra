@@ -1,19 +1,7 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Please see the included license file for details.
  */
 package com.datastax.bdp.db.nodesync;
 
@@ -21,19 +9,19 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
-import com.datastax.bdp.db.nodesync.NodeSyncRecord;
-import com.datastax.bdp.db.nodesync.Segment;
-import com.datastax.bdp.db.nodesync.ValidationInfo;
-import com.datastax.bdp.db.nodesync.ValidationOutcome;
-import com.datastax.bdp.db.nodesync.ValidationProposer;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Sets;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -59,9 +47,9 @@ public class NodeSyncTestTools
     // assumes that the time is genuine timestamp for proper display, so the methods of this class ends up mixing the
     // value passed in the/ test with the current time so we get the best of both word. We do use a reference fixed for
     // a single test execution so things are decently predictable.
-    private static final long NOW = System.currentTimeMillis();
+    private static final long NOW = NodeSyncHelpers.time().currentTimeMillis();
 
-    static final IPartitioner PARTITIONER = Murmur3Partitioner.instance;
+    private static final IPartitioner PARTITIONER = Murmur3Partitioner.instance;
 
     /**
      * Thin wrapping around {@link TableMetadata#builder} that sets the partitioner.
@@ -120,12 +108,20 @@ public class NodeSyncTestTools
      * @param actual the iterator for the segments to check.
      */
     @SuppressWarnings("unchecked")
-    static void assertSegments(List<Segment> expected,
-                               Iterator<Segment> actual)
+    static void assertSegments(List<Segment> expected, Segments actual)
     {
-        List<Segment> actualAsList = new ArrayList<>();
-        Iterators.addAll(actualAsList, actual);
-        assertEquals(expected, actualAsList);
+        assertEquals(String.format("Expected %d segment but got %d: %s != %s",
+                                   expected.size(), actual.size(), expected, actual),
+                     expected.size(), actual.size());
+
+        for (int i = 0; i < expected.size(); i++)
+        {
+            Segment e = expected.get(i);
+            Segment a = actual.get(i);
+            assertEquals(String.format("At index %d, expected %s but got %s (%s != %s)",
+                                       i, e, a, expected, actual),
+                         e, a);
+        }
     }
 
     /**
@@ -145,28 +141,52 @@ public class NodeSyncTestTools
     }
 
     /**
-     * Asserts that the next segments produced by {@code proposer} are the {@code expected} ones. Note that this doesn't
+     * Asserts that the next segments produced by {@code actual} are {@code expected} ones. Note that this doesn't
      * check on purpose that {@code actual} doesn't have more segments, as when testing continuous proposers they will
      * generate segment indefinitely and we only want to test the n first generated in this case (but the test can
      * manually check the proposer if necessary after this call).
      *
-     * @param expected the segments that we expect {@code proposer} to generate next.
-     * @param proposer the {@link ValidationProposer} to test.
+     * @param expected the segments that we expect {@code actual} to generate next.
+     * @param actual the segments to test.
      */
-    static void assertSegments(List<Segment> expected,
-                               ValidationProposer proposer)
+    static void assertSegments(List<Segment> expected, Iterator<ValidationProposal> actual)
     {
         for (int i = 0; i < expected.size(); i++)
         {
             Segment nextExpected = expected.get(i);
-            final int idx = i;
-            boolean hadProposal = proposer.supplyNextProposal(p -> assertEquals(String.format("Expected %s for %dth segment, but got %s", nextExpected, idx, p.segment()),
-                                                                                nextExpected,
-                                                                                p.segment));
-
             assertTrue(String.format("Expected at least %d segment(s) but got only %d. First missing range is %s", expected.size(), i, nextExpected),
-                       hadProposal);
+                       actual.hasNext());
+
+            ValidationProposal nextActual = actual.next();
+            assertEquals(String.format("Expected %s for %dth segment, but got %s", nextExpected, i, nextActual.segment()),
+                         nextExpected,
+                         nextActual.segment());
         }
+    }
+
+    static Iterator<ValidationProposal> continuousProposerAsIterator(TableState state)
+    {
+        return new Iterator<ValidationProposal>()
+        {
+            private int clock;
+            private ValidationProposal next;
+            private final ContinuousValidationProposer proposer = new ContinuousValidationProposer(state, p -> next = p).start();
+
+            public boolean hasNext()
+            {
+                return true;
+            }
+
+            public ValidationProposal next()
+            {
+                ValidationProposal toReturn = next;
+                // Fake an activation and completion of validation to get progress; This will update next.
+                ValidationLifecycle.createAndStart(toReturn.segmentRef, false)
+                                   .onCompletion(new ValidationInfo(++clock, ValidationOutcome.FULL_IN_SYNC, null));
+                proposer.generateNextProposal();
+                return toReturn;
+            }
+        };
     }
 
     private static ValidationInfo vInfo(long daysAgo, ValidationOutcome outcome, Set<InetAddress> missingNodes)
@@ -330,6 +350,48 @@ public class NodeSyncTestTools
         public List<NodeSyncRecord> asList()
         {
             return new ArrayList<>(records);
+        }
+    }
+
+    public static class DevNullTableProxy implements NodeSyncStatusTableProxy
+    {
+        private static final Logger logger = LoggerFactory.getLogger(DevNullTableProxy.class);
+
+        private final boolean log;
+
+        public DevNullTableProxy()
+        {
+            this(false);
+        }
+
+        public DevNullTableProxy(boolean log)
+        {
+            this.log = log;
+        }
+
+        public CompletableFuture<List<NodeSyncRecord>> nodeSyncRecords(TableMetadata table, Range<Token> range)
+        {
+            if (log)
+                logger.info("Querying node records for {} on range {}", table, range);
+            return CompletableFuture.completedFuture(Collections.emptyList());
+        }
+
+        public void lockNodeSyncSegment(Segment segment, long timeout, TimeUnit timeoutUnit)
+        {
+            if (log)
+                logger.info("Locking segment {} with timeout {} {}", segment, timeout, timeoutUnit);
+        }
+
+        public void forceReleaseNodeSyncSegmentLock(Segment segment)
+        {
+            if (log)
+                logger.info("Force unlocking segment {}", segment);
+        }
+
+        public void recordNodeSyncValidation(Segment segment, ValidationInfo info, boolean wasSuccess)
+        {
+            if (log)
+                logger.info("Recording validation for {}: {}", segment, info);
         }
     }
 }

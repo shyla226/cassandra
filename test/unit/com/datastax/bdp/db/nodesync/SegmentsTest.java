@@ -1,28 +1,15 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Please see the included license file for details.
  */
 package com.datastax.bdp.db.nodesync;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import org.junit.Test;
-
-import com.datastax.bdp.db.nodesync.Segment;
-import com.datastax.bdp.db.nodesync.Segments;
 
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.Range;
@@ -50,51 +37,66 @@ public class SegmentsTest
     }
 
     /**
-     * Tests {@link Segments#splitRangeAndUnwrap} in the simple cases where there is no wrapping.
+     * Tests segment generation in the simple case of single non-wrapping range.
      */
     @Test
-    public void testSplitRangeAndUnwrapSimple() throws Exception
+    public void testGenerateSingleNonWrappingRange() throws Exception
     {
-        assertRanges(asList(range(0, 100)),
-                     Segments.splitRangeAndUnwrap(range(0, 100), 0, PARTITIONER));
+        TableMetadata table = metadataBuilder("ks", "table")
+                              .addPartitionKeyColumn("k", Int32Type.instance)
+                              .build();
 
-        assertRanges(asList(range(0, 50), range(50, 100)),
-                     Segments.splitRangeAndUnwrap(range(0, 100), 1, PARTITIONER));
+        List<Range<Token>> toSplit = Collections.singletonList(range(0, 100));
 
-        assertRanges(asList(range(0, 25), range(25, 50),
-                            range(50, 75), range(75, 100)),
-                     Segments.splitRangeAndUnwrap(range(0, 100), 2, PARTITIONER));
+        assertSegments(segs(table).add(0, 100).asList(),
+                     Segments.generate(table, toSplit, 0));
 
-        assertRanges(asList(range(0, 12), range(12, 25),
-                            range(25, 37), range(37, 50),
-                            range(50, 62), range(62, 75),
-                            range(75, 87), range(87, 100)),
-                     Segments.splitRangeAndUnwrap(range(0, 100), 3, PARTITIONER));
+        assertSegments(segs(table).add(0, 50).add(50, 100).asList(),
+                       Segments.generate(table, toSplit, 1));
+
+        assertSegments(segs(table).add(0, 25).add(25, 50)
+                                  .add(50, 75).add(75, 100).asList(),
+                     Segments.generate(table, toSplit, 2));
+
+        assertSegments(segs(table).add(0, 12).add(12, 25)
+                                  .add(25, 37).add(37, 50)
+                                  .add(50, 62).add(62, 75)
+                                  .add(75, 87).add(87, 100).asList(),
+                     Segments.generate(table, toSplit, 3));
     }
 
     /**
-     * Tests {@link Segments#splitRangeAndUnwrap} with unwrapping involved.
+     * Tests segment generation in the simple case of single wrapping range.
      */
     @Test
-    public void testSplitRangeAndUnwrapWithUnwrapping() throws Exception
+    public void testGenerateSingleWrappingRange() throws Exception
     {
+        TableMetadata table = metadataBuilder("ks", "table")
+                              .addPartitionKeyColumn("k", Int32Type.instance)
+                              .build();
+
         // We use the range (0, 0] to split (which cover the whole ring due to wrapping) because 0 is basically in the
         // middle of the partitioner range, which makes it a bit cleaner to express split points.
+        List<Range<Token>> toSplit = Collections.singletonList(range(0, 0));
 
-        assertRanges(asList(range(0, min()), range(min(), 0)),
-                     Segments.splitRangeAndUnwrap(range(0, 0), 0, PARTITIONER));
+        assertSegments(segs(table).add(min(), 0).add(0, min()).asList(),
+                       Segments.generate(table, toSplit, 0));
 
-        assertRanges(asList(range(0, max()), range(max() , min()), range(min(), 0)),
-                     Segments.splitRangeAndUnwrap(range(0, 0), 1, PARTITIONER));
+        assertSegments(segs(table).add(min(), 0).add(0, max()).add(max() , min()).asList(),
+                       Segments.generate(table, toSplit, 1));
 
-        assertRanges(asList(range(0, max()/2), range(max()/2, max()),
-                            range(max() , min()), // unwrapping in action
-                            range(min(), min()/2), range(min()/2, 0)),
-                     Segments.splitRangeAndUnwrap(range(0, 0), 2, PARTITIONER));
+        assertSegments(segs(table).add(min(), min()/2).add(min()/2, 0)
+                                  .add(0, max()/2).add(max()/2, max())
+                                  .add(max() , min())
+                                  .asList(),
+                       Segments.generate(table, toSplit, 2));
     }
 
+    /**
+     * Tests segment generation with multiple ranges.
+     */
     @Test
-    public void testSplitRangesAtDepth()
+    public void testGenerateMultipleRanges()
     {
         TableMetadata table = metadataBuilder("ks", "table")
                               .addPartitionKeyColumn("k", Int32Type.instance)
@@ -117,10 +119,122 @@ public class SegmentsTest
                                  .add(300, 325).add(325, 350).add(350, 375).add(375, 400)
                                  .asList();
 
-        assertSegments(expected, Segments.generateSegments(table, ranges, depth));
+        assertSegments(expected, Segments.generate(table, ranges, depth));
 
         // estimatedSegments should always be exact in the context of those tests
         assertEquals(expected.size(), Segments.estimateSegments(ranges, depth));
 
+    }
+
+    @Test
+    public void testFullyIncludedIn()
+    {
+        TableMetadata table = metadataBuilder("ks", "table")
+                              .addPartitionKeyColumn("k", Int32Type.instance)
+                              .build();
+
+        // Creates segments corresponding to: (0, 50], (50, 100], (200, 250], (250, 300]
+        List<Range<Token>> toSplit = Arrays.asList(range(0, 100), range(200, 300));
+        Segments segments = Segments.generate(table, toSplit, 1);
+        // Sanity check
+        assertSegments(segs(table).add(0, 50).add(50, 100)
+                                  .add(200, 250).add(250, 300).asList(),
+                       segments);
+
+        // Large segment that include it all
+        assertAllIncluded(segments, seg(table, -100, 500), 0, 4);
+
+        // Exact segment should full include itself
+        assertOneIncluded(segments, seg(table, 0, 50), 0);
+        assertOneIncluded(segments, seg(table, 50, 100), 1);
+        assertOneIncluded(segments, seg(table, 200, 250), 2);
+        assertOneIncluded(segments, seg(table, 250, 300), 3);
+
+        // Inclusion of 2 consecutive segment (typical of "the depth have been increased")
+        assertAllIncluded(segments, seg(table, 0, 100), 0, 2);
+        assertAllIncluded(segments, seg(table, 200, 300), 2, 4);
+
+        // Smaller segments  shouldn't include a bigger one
+        assertNothingIncluded(segments, seg(table, 1, 50));
+        assertNothingIncluded(segments, seg(table, 50, 99));
+        assertNothingIncluded(segments, seg(table, 201, 249));
+        assertNothingIncluded(segments, seg(table, 251, 300));
+
+        // Intersection is not inclusion
+        assertNothingIncluded(segments, seg(table, 25, 75));
+        assertNothingIncluded(segments, seg(table, 75, 249));
+
+        // Mix of some fully included segment and some not fully included
+        assertOneIncluded(segments, seg(table, 20, 150), 1);
+        assertOneIncluded(segments, seg(table, 150, 275), 2);
+        assertAllIncluded(segments, seg(table, 20, 275), 1, 3);
+
+        // Tests with min tokens
+        assertAllIncluded(segments, seg(table, min(), min()), 0, 4);
+        assertAllIncluded(segments, seg(table, 150, min()), 2, 4);
+        assertAllIncluded(segments, seg(table, min(), 150), 0, 2);
+    }
+
+    @Test
+    public void testFullyIncludedInMinToken()
+    {
+        // Test to make sure we handle the min token within the segments correctly.
+
+        TableMetadata table = metadataBuilder("ks", "table")
+                              .addPartitionKeyColumn("k", Int32Type.instance)
+                              .build();
+
+        // Creates segments corresponding to: (min, -1], (-1, min] (because -1 is the midpoint between Long.MIN_VALUE and Long.MAX_VALUE)
+        List<Range<Token>> toSplit = Collections.singletonList(range(min(), min()));
+        Segments segments = Segments.generate(table, toSplit, 1);
+        // Sanity check
+        assertSegments(segs(table).add(min(), -1).add(-1, min()).asList(), segments);
+
+
+        // Only the segment covering the full ring will include everything
+        assertAllIncluded(segments, seg(table, min(), min()), 0, 2);
+
+        // Check other possible inclusions
+        assertOneIncluded(segments, seg(table, min(),10), 0);
+        assertOneIncluded(segments, seg(table, -10, min()), 1);
+
+        // And non-inclusions
+        assertNothingIncluded(segments, seg(table, min(), -10));
+        assertNothingIncluded(segments, seg(table, 10, min()));
+        assertNothingIncluded(segments, seg(table, -10, 10));
+    }
+
+    /**
+     * Asserts that {@code segments.findFullyIncludedInd(seg)} returns no segments included.
+     */
+    private static void assertNothingIncluded(Segments segments, Segment seg)
+    {
+        int[] res = segments.findFullyIncludedIn(seg);
+        assertTrue(String.format("%s should include nothing from %s, but got %s from findFullyIncludedIn()",
+                                 seg, segments, Arrays.toString(res)),
+                   res[0] >= res[1]);
+    }
+
+    /**
+     * Asserts that {@code segments.findFullyIncludedInd(seg)} returns a single segment of index {@code included}.
+     */
+    private static void assertOneIncluded(Segments segments, Segment seg, int included)
+    {
+        int[] res = segments.findFullyIncludedIn(seg);
+        assertTrue(String.format("%s should include exactly index %d from %s, but got %s from findFullyIncludedIn()",
+                                 seg, included, segments, Arrays.toString(res)),
+                   res[0] == included && res[1] == (included+1));
+    }
+
+    /**
+     * Asserts that {@code segments.findFullyIncludedInd(seg)} returns all segment of index between {@code startInclusive}
+     * and {@code endExclusive}.
+     */
+    private static void assertAllIncluded(Segments segments, Segment seg, int startInclusive, int endExclusive)
+    {
+        int[] res = segments.findFullyIncludedIn(seg);
+        assertTrue(String.format("%s should include indexes [%d, %d) from %s, but got %s from findFullyIncludedIn()",
+                                 seg, startInclusive, endExclusive, segments, Arrays.toString(res)),
+                   res[0] == startInclusive && res[1] == endExclusive);
     }
 }

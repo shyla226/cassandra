@@ -1,19 +1,7 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Please see the included license file for details.
  */
 package com.datastax.bdp.db.nodesync;
 
@@ -22,25 +10,20 @@ import java.util.List;
 import org.junit.After;
 import org.junit.Test;
 
-import com.datastax.bdp.db.nodesync.NodeSyncHelpers;
-import com.datastax.bdp.db.nodesync.NodeSyncService;
-import com.datastax.bdp.db.nodesync.UserValidationOptions;
-import com.datastax.bdp.db.nodesync.UserValidationProposer;
-
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.SystemTimeSource;
 
 import static com.datastax.bdp.db.nodesync.NodeSyncTestTools.*;
 import static java.util.Arrays.asList;
-import static org.junit.Assert.*;
 
 public class UserValidationProposerTest extends AbstractValidationProposerTester
 {
     @After
     public void cleanupTask()
     {
-        NodeSyncHelpers.resetTableSizeAndLocalRangeProviders();
+        NodeSyncHelpers.resetTestParameters();
     }
 
     @Test
@@ -82,15 +65,14 @@ public class UserValidationProposerTest extends AbstractValidationProposerTester
         List<Range<Token>> requested = asList(requestedRanges);
 
         // We have 3 local ranges and 10MB max seg size, so...
-        NodeSyncHelpers.setTableSizeAndLocalRangeProviders(t -> depth * mb(31), TEST_RANGES);
+        NodeSyncHelpers.setTestParameters(t -> depth * mb(31), TEST_RANGES, mb(10), null);
 
         NodeSyncService service = new NodeSyncService(); // Not even started, just here because we need a reference below
+        NodeSyncState state = new NodeSyncState(service);
         UserValidationOptions options = new UserValidationOptions("test", table, requested);
-        UserValidationProposer proposer = UserValidationProposer.create(service, options, mb(10));
+        UserValidationProposer proposer = UserValidationProposer.create(state, options);
 
-        proposer.init();
-
-        assertEquals(segs(table).addAll(expected).asList(), proposer.segmentsToValidate());
+        assertSegments(segs(table).addAll(expected).asList(), proposer);
     }
 
 }

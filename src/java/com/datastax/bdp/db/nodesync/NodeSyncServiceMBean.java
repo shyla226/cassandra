@@ -19,10 +19,20 @@ public interface NodeSyncServiceMBean
     public static final String MBEAN_NAME = String.format("%s:type=%s", JMX_GROUP, "NodeSyncService");
 
     /**
-     * Enables the NodeSync service if it wasn't already running.
+     * Enables the NodeSync service if it wasn't already running, blocking until the service is started up.
      * @return {@code true} if the service was started, {@code false} if it was already running.
      */
     public boolean enable();
+
+    /**
+     * Enables the NodeSync service if it wasn't already running, blocking until the service is started up.
+     *
+     * @param timeout how long the method should wait for the service to report proper startup. If the service hasn't
+     *                finish startup within this timeout, a {@link TimeoutException} is thrown.
+     * @param timeoutUnit the unit for {@code timeout}.
+     * @return {@code true} if the service was started, {@code false} if it was already running.
+     */
+    public boolean enable(long timeout, TimeUnit timeoutUnit) throws TimeoutException;
 
     /**
      * Disables the NodeSync service (if it is running) and blocks (indefinitely) on the shutdown completing.
@@ -37,7 +47,7 @@ public interface NodeSyncServiceMBean
     public boolean disable();
 
     /**
-     * Disables the NodeSync service (if it is running)  and blocks on the shutdown completing.
+     * Disables the NodeSync service (if it is running) and blocks on the shutdown completing.
      *
      * @param force whether the shutdown should be forced, which means that ongoing validation will be interrupted and the
      *              service is stopped as quickly as possible. if {@code false}, a clean shutdown is performed where

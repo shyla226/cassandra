@@ -35,7 +35,7 @@ public class ValidationMetrics implements Serializable
 {
     private static final long serialVersionUID = 42L;
 
-    private final long startTime = System.currentTimeMillis();
+    private final long startTime = NodeSyncHelpers.time().currentTimeMillis();
 
     // The number of pages having a particular outcome. Indexed by ValidationOutcome.ordinal().
     private final long[] pagesByOutcome = new long[ValidationOutcome.values().length];
@@ -186,7 +186,7 @@ public class ValidationMetrics implements Serializable
     {
         StringBuilder sb = new StringBuilder();
 
-        long duration = System.currentTimeMillis() - startTime;
+        long duration = NodeSyncHelpers.time().currentTimeMillis() - startTime;
         sb.append("duration=").append(duration).append("ms");
         if (duration > 1000)
             sb.append(duration > 1000 * 1000 ? " (~" : " (").append(Units.toString(duration, TimeUnit.MILLISECONDS)).append(')');

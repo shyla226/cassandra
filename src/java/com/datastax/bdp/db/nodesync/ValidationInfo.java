@@ -160,7 +160,7 @@ public class ValidationInfo
     @Override
     public String toString()
     {
-        long now = System.currentTimeMillis();
+        long now = NodeSyncHelpers.time().currentTimeMillis();
         TimeValue age = TimeValue.of(now - startedAt, TimeUnit.MILLISECONDS);
         return String.format("%s=%s ago%s",
                              outcome,

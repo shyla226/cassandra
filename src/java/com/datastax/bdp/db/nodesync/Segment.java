@@ -32,7 +32,7 @@ public class Segment implements Comparable<Segment>
     public Segment(TableMetadata table, Range<Token> range)
     {
         assert table != null && range != null;
-        assert !range.isTrulyWrapAround();
+        assert !range.isTrulyWrapAround() : range + " is wrapping around";
         this.table = table;
         this.range = range;
     }

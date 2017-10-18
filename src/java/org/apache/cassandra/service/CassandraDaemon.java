@@ -587,14 +587,12 @@ public class CassandraDaemon
 
         if (DatabaseDescriptor.getNodeSyncConfig().isEnabled())
         {
-            try
-            {
-                StorageService.instance.nodeSyncService.enable();
-            }
-            catch (Exception e)
-            {
-                logger.error("Unexpected error starting the NodeSync service. No tables will be validated by NodeSync.", e);
-            }
+            // Not blocking because starting NodeSync can take "some" time (due to loading all the states for the NodeSync-enabled
+            // tables and there is no reason to block anything else on that.
+            StorageService.instance.nodeSyncService.enableAsync().whenComplete((s, e) -> {
+                if (e != null)
+                    logger.error("Unexpected error starting the NodeSync service. No tables will be validated by NodeSync.", e);
+            });
         }
     }
 

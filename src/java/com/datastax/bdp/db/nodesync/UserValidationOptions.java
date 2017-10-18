@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Splitter;
+import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
@@ -47,14 +48,14 @@ class UserValidationOptions
     /** The normalized list of ranges on which validation should operate. This can be {@code null} in which case the
      * user validation is on all local ranges (this cannot be empty however). */
     @Nullable
-    final List<Range<Token>> validatedRanges;
+    final ImmutableList<Range<Token>> validatedRanges;
 
     UserValidationOptions(String id, TableMetadata table, Collection<Range<Token>> validatedRanges)
     {
         assert validatedRanges == null || !validatedRanges.isEmpty();
         this.id = id;
         this.table = table;
-        this.validatedRanges = validatedRanges == null ? null : Range.normalize(validatedRanges);
+        this.validatedRanges = validatedRanges == null ? null : ImmutableList.copyOf(Range.normalize(validatedRanges));
     }
 
     /**

@@ -1684,9 +1684,16 @@ public class CompactionManager implements CompactionManagerMBean
 
     public static int getDefaultGcBefore(ColumnFamilyStore cfs, int nowInSec)
     {
+        TableMetadata table = cfs.metadata();
         // 2ndary indexes have ExpiringColumns too, so we need to purge tombstones deleted before now. We do not need to
         // add any GcGrace however since 2ndary indexes are local to a node.
-        return cfs.isIndex() ? nowInSec : cfs.gcBefore(nowInSec);
+        // We also special case GcGS == 0, because having this being set imply the user knows tombstones can safely be
+        // purged immediately without any checks, so we want to avoid the NodeSync check below in this case.
+        if (cfs.isIndex() || table.params.gcGraceSeconds == 0)
+            return nowInSec;
+
+        int gcBefore = cfs.gcBefore(nowInSec);
+        return StorageService.instance.nodeSyncService.canPurge(table, gcBefore) ? gcBefore : NO_GC;
     }
 
     public static class ValidationCompactionIterator extends CompactionIterator

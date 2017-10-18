@@ -28,6 +28,14 @@ public interface TimeSource
     long currentTimeMillis();
 
     /**
+     * @return the current time in seconds.
+     */
+    default int currentTimeSeconds()
+    {
+        return (int) (currentTimeMillis() / 1000);
+    }
+
+    /**
      *
      * @return Returns the current time value in nanoseconds.
      *

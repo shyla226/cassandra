@@ -6,50 +6,67 @@
 package com.datastax.bdp.db.nodesync;
 
 import java.net.InetAddress;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-import com.google.common.base.Joiner;
-import com.google.common.collect.Iterables;
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.NamedThreadFactory;
+import com.datastax.bdp.db.utils.concurrent.CompletableFutures;
+import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.IEndpointLifecycleSubscriber;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.Throwables;
 
 /**
  * Continuously schedules the segment validations to be ran (by an {@link ValidationExecutor}) for NodeSync.
  * <p>
- * A scheduler gets validation proposals ({@link ValidationProposal}) from a set of {@link ValidationProposer} and
- * prioritize them for execution. At a high level, it can be seen as a multiplexer of validation proposals where the
- * inputs are the configured {@link ValidationProposer} (at least one for each table with NodeSync enabled) and the
- * output is consumed by {@link ValidationExecutor} (which runs the corresponding validations).
+ * There is 2 types of validations that the scheduler deals with:
+ * - normal 'continuous' NodeSync validations.
+ * - user triggered user validations.
+ * <p>
+ * For the first kind, the scheduler maintains for each NodeSync-enable table a corresponding
+ * {@link ContinuousValidationProposer}. it then "multiplex" the proposal of all those per-table continuous proposer to
+ * provide the next validation that should be performed.
+ * <p>
+ * For the second kind, user validations, those are manually submitted by users through JMX. User validations always
+ * take precedence over continuous ones, so continuous validations will basically "pause" as soon as a user validation
+ * comes in. The scheduler will then schedule all the validation of that user validation and only resume continous
+ * validations once the user validation is finished. If a new user validation comes while another one is running, it
+ * will queue up behind that running validation (and any previously queued user validations).
  * <p>
  * Note that priority between proposals is not decided by this class but is rather directly implemented by the
  * comparison on {@link ValidationProposal}, so this class main job is to merge the proposal from multiple proposers
  * in a way that respects priority and is thread-safe (individual {@link ValidationProposer} are not thread-safe but
  * {@link ValidationExecutor} is multi-threaded).
- * <p>
- * This class also handles the default per-table {@link ContinuousTableValidationProposer} necessary to NodeSync,
- * creating one for every table with NodeSync enabled at startup and maintaining that set when table are created,
- * updated or removed.
  * <p>
  * This class and all it's publicly-visible methods <b>ARE</b> thread-safe.
  */
@@ -57,85 +74,85 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
 {
     private static final Logger logger = LoggerFactory.getLogger(ValidationScheduler.class);
 
-    private final NodeSyncService service;
-    /**
-     * Sets of the active validation proposers. The fact it is a set is important to guarantee for instance that we don't
-     * end up with 2 {@link ContinuousTableValidationProposer} object for the same table, see {@link ContinuousTableValidationProposer#equals(Object)}
-     * (Note: we don't use the alternative of making this a map keyed by {@link TableMetadata} because 1) we want to
-     * leave open the possibility to have non-table based proposers and 2) because while we don't want 2
-     * {@link ContinuousTableValidationProposer} for the same table, we might want 2 {@link UserValidationProposer} on
-     * the same table (for say, different ranges) or for any other future proposer.
-     */
-    private final Set<ValidationProposer> proposers;
-    private final PriorityQueue<ValidationProposal> proposalQueue;
+    final NodeSyncState state;
+
+    private final Map<TableId, ContinuousValidationProposer> continuousValidations = new ConcurrentHashMap<>();
+    private final PriorityQueue<ContinuousValidationProposer.Proposal> continuousProposals = new PriorityQueue<>();
+
+    private final Map<String, UserValidationProposer> userValidations= new ConcurrentHashMap<>();
+    private final Queue<UserValidationProposer> pendingUserValidations = new ArrayDeque<>();
+    private UserValidationProposer currentUserValidation;
+
 
     // Note: we rely on the lock being re-entrant in queueProposal() below
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition hasProposals = lock.newCondition();
 
-    // Only volatile because only _updated_ within the lock
-    private volatile long queuedProposals;
+    private final AtomicLong scheduledValidations = new AtomicLong();
 
     private volatile boolean isShutdown;
 
     /**
-     * The actions we perform on either schema changes or topology changes are costly-ish (they may involve reading
-     * distributed system tables if we add/init a new proposer for instance), but by default the corresponding listener
-     * methods are done on threads that may not expect those calls to take time. Typically, {@link IEndpointLifecycleSubscriber}
-     * methods are executed on {@link Stage#GOSSIP} and we don't want to slow gossip. So we use a simple single thread
-     * executor to offload the execution of those change.
-     * Note that both schema and topology changes are basically very infrequent, and acting on them for NodeSync is not
-     * performance critical either, so there is probably no reason to use more than one thread.
+     * Handle asynchronous action for the scheduler, including loading initial {@link TableState} (which is costly-ish,
+     * as it reads system tables) and any actions performed on either schema or topology changes.
+     * <p>
+     * Note that for schema/topology changes in particular, it's a good idea to not do any costly work on the threads on
+     * which their callbacks (from {@link SchemaChangeListener}/{@link IEndpointLifecycleSubscriber}) are called, as
+     * those may be called on thread where blocking isn't a good idea (typically, {@link Stage#GOSSIP}).
+     * <p>
+     * Also note that in general the event this executor executes are infrequent and not that latency sensitive, but
+     * we could come in burst (typically, at NodeSync startup, we'll need to load the state of all NodeSync-enabled
+     * table). So we allow the executor to grow if necessary (to get some parallelism at startup, or when someone enable
+     * on all its table typically) but let the threads timeout in general.
      */
-    private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor(new NamedThreadFactory("ValidationSchedulerEventExecutor"));
+    // Note: we want some parallelism when multiple table state has to be loaded (startup for instance) but user can
+    // have very many table and we don't want that get out of hand so we use a max size. The choice of that max size
+    // is a bit arbitrary tbh.
+    private final ExecutorService eventExecutor = DebuggableThreadPoolExecutor.createWithMaximumPoolSize("ValidationSchedulerEventExecutor",
+                                                                                                         8,
+                                                                                                         60, TimeUnit.SECONDS);
 
-    private final UserValidations userValidations;
-
-    ValidationScheduler(NodeSyncService service)
+    ValidationScheduler(NodeSyncState state)
     {
-        this.service = service;
-        this.proposers = new HashSet<>();
-        this.proposalQueue = new PriorityQueue<>();
-        this.userValidations = new UserValidations(this);
-    }
-
-    NodeSyncService service()
-    {
-        return service;
-    }
-
-    void createInitialProposers()
-    {
-        List<ContinuousTableValidationProposer> initialProposers = ContinuousTableValidationProposer.createAll(service);
-        if (!initialProposers.isEmpty())
-        {
-            logger.debug("Adding NodeSync validation proposer for tables {}", toTableNamesString(initialProposers));
-            addAll(initialProposers);
-        }
-    }
-
-    private static String toTableNamesString(List<? extends AbstractValidationProposer> proposers)
-    {
-        return "{ " + Joiner.on(", ").join(Iterables.transform(proposers, AbstractValidationProposer::table)) + " }";
-    }
-
-    UserValidations userValidations()
-    {
-        return userValidations;
+        this.state = state;
     }
 
     /**
-     * Adds a new proposer to this scheduler.
+     * Add a new user validation.
+     * <p>
+     * If no other user validation are running, this validation will start immediately and take all NodeSync bandwidth
+     * on this node until completion. If another user validations is running, it will be queued.
      *
-     * @param proposer the proposer to add.
-     * @return {@code true} if the proposer was added, {@code false} if it was already present and was thus not added.
+     * @param options the options user to create the user validation.
      */
-    boolean add(ValidationProposer proposer)
+    void addUserValidation(UserValidationOptions options)
     {
+        UserValidationProposer proposer = UserValidationProposer.create(state, options);
+        if (userValidations.putIfAbsent(proposer.id(), proposer) != null)
+            throw new IllegalStateException(String.format("Cannot submit user validation with identifier %s as that "
+                                                          + "identifier is already used by an ongoing validation", proposer.id()));
+
+        proposer.completionFuture().whenComplete((s, e) -> {
+            userValidations.remove(proposer.id());
+            if (e == null || e instanceof CancellationException)
+                logger.info("User triggered validation #{} on table {} {}",
+                            proposer.id(), options.table, e == null ? "finished successfully" : "was cancelled");
+            else
+                logger.error("Unexpected error during user triggered validation #{} on table {}",
+                             proposer.id(), options.table, e);
+        });
+
         lock.lock();
         try
         {
-            return addProposer(proposer);
+            pendingUserValidations.offer(proposer);
+            hasProposals.signalAll();
+            // If this user validation is the next in line, it will be executed right away, but otherwise it will wait
+            // on the currently running and potentially other pending, so give that feedback to the user
+            int pendingBefore = (currentUserValidation == null ? 0 : 1) + pendingUserValidations.size() - 1;
+            if (pendingBefore > 0)
+                logger.info("Created user triggered validation #{} on table {}: queued after {} other user validations",
+                            proposer.id(), options.table, pendingBefore);
         }
         finally
         {
@@ -144,136 +161,176 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     }
 
     /**
-     * Adds new proposers to this scheduler. Any proposer that was already part of the scheduler will be ignored.
+     * The continuous proposer for the provider table, if there is one.
      *
-     * @param proposers the proposers to add.
-     * @return {@code true} if <b>any</b> of the proposers has been added, {@code false} if all the proposers were
-     * already present in the scheduler and thus skipped.
+     * @param table the table for which to retrieve the continuous proposer.
+     * @return the continuous proposer for {@code table} if it is present, {@code null} otherwise.
      */
-    boolean addAll(Collection<? extends ValidationProposer> proposers)
+    @Nullable
+    ContinuousValidationProposer getContinuousProposer(TableMetadata table)
     {
-        // Don't bother with the lock if we don't have to.
-        if (proposers.size() == 0)
+        return continuousValidations.get(table.id);
+    }
+
+    /**
+     * Retrieve a user validation proposer by id.
+     *
+     * @param id the user validation id.
+     * @return the proposer corresponding to {@code id}, or {@code null} if no such user validation is known of this
+     * node (which may simply mean that the validation has completed).
+     */
+    @Nullable
+    UserValidationProposer getUserValidation(String id)
+    {
+        return userValidations.get(id);
+    }
+
+    /**
+     * Add the provided table ot the list of continuously validated tables. This is a no-op if the table is already
+     * continuously validated.
+     * <p>
+     * As doing so will generally require loading the initial state of the table from the distributed system table, this
+     * is done asynchronously on the scheduler {@link #eventExecutor}.
+     * <p>
+     * Note that if an unknown error happens during the addition, an error is logged by this error already, so that
+     * caller thread don't need to.
+     *
+     * @param table the table to add.
+     * @return a future on the completion of the addition of {@code table} to the scheduler. The future will return
+     * {@code null} if the table was newly added and the proposer for that table if it was already present.
+     */
+    private CompletableFuture<ContinuousValidationProposer> addContinuous(TableMetadata table)
+    {
+        // Fast path if we know we already have the table.
+        ContinuousValidationProposer proposer = continuousValidations.get(table.id);
+        if (proposer != null)
+            return CompletableFuture.completedFuture(proposer);
+
+        return CompletableFuture.supplyAsync(() -> {
+            // Outside the lock on purpose: we don't want to serialize state loading.
+            TableState tableState = state.getOrLoad(table);
+            lock.lock();
+            try
+            {
+                return addContinuousInternal(tableState);
+            }
+            finally
+            {
+                lock.unlock();
+            }
+        }, eventExecutor).exceptionally(t -> {
+            // Don't log on races with DROP, it's basically harmless.
+            if (!Throwables.isCausedBy(t, UnknownTableException.class))
+                logger.error("Unexpected error while starting NodeSync on {} following the table creation; " +
+                             "The table will not be validated by NodeSync on this node until this is resolved",
+                             table, Throwables.unwrapped(t));
+            throw Throwables.cleaned(t);
+        });
+    }
+
+    /**
+     * Adds new tables to the list of continuously validated tables. Any table that was already present will be ignored.
+     *
+     * @param tables the tables to add.
+     * @return a future on the completion of the addition that return the metadata for all table that have actually
+     * been added (as any table already present is skipped).
+     */
+    CompletableFuture<List<TableMetadata>> addAllContinuous(Stream<TableMetadata> tables)
+    {
+        // We first submit the loading of all state to the eventExecutor in parallel. Once all have completed, we grab
+        // the lock to add all the corresponding proposers to the scheduler.
+        // Note that if a given table is already loaded, grabbing it's state will be immediate and addContinuousInternal
+        // will them simply ignore the table.
+        List<CompletableFuture<TableState>> stateLoaders =  tables.map(t -> CompletableFuture.supplyAsync(() -> state.getOrLoad(t),
+                                                                                                          eventExecutor))
+                                                                  .collect(Collectors.toList());
+
+        if (stateLoaders.isEmpty())
+            return CompletableFuture.completedFuture(Collections.emptyList());
+
+        return CompletableFutures.allAsList(stateLoaders).thenApply(states -> {
+            lock.lock();
+            try
+            {
+                List<TableMetadata> added = new ArrayList<>(states.size());
+                for (TableState state : states)
+                {
+                    if (addContinuousInternal(state) == null)
+                        added.add(state.table());
+                }
+                return added;
+            }
+            finally
+            {
+                lock.unlock();
+            }
+        });
+
+    }
+
+    /**
+     * Removes a table from the list of continuously validated tables. This is a no-op if the scheduler isn't validating
+     * the provided table.
+     *
+     * @param table the table to remove.
+     * @return {@code true} if {@code table} was removed, {@code false} if the scheduler didn't had that table.
+     */
+    private boolean removeContinuous(TableMetadata table)
+    {
+        lock.lock();
+        try
+        {
+            return cancelAndRemove(table);
+        }
+        finally
+        {
+            lock.unlock();
+        }
+    }
+
+    // *Must* only be called while holding the lock
+    private ContinuousValidationProposer addContinuousInternal(TableState tableState)
+    {
+        TableId id = tableState.table().id;
+        // Note that since we're holding the lock, that check is not racy with the following addition
+        ContinuousValidationProposer previous = continuousValidations.get(id);
+        if (previous != null)
+            return previous;
+
+        ContinuousValidationProposer proposer = new ContinuousValidationProposer(tableState, this::queueProposal);
+        continuousValidations.put(id, proposer);
+        proposer.start();
+        return null;
+    }
+
+    // *Must* only be called while holding the lock
+    private boolean cancelAndRemove(TableMetadata table)
+    {
+        ContinuousValidationProposer proposer = continuousValidations.remove(table.id);
+        if (proposer == null)
             return false;
 
-        lock.lock();
-        try
-        {
-            boolean addedAny = false;
-            for (ValidationProposer proposer : proposers)
-                addedAny |= addProposer(proposer);
-            return addedAny;
-        }
-        finally
-        {
-            lock.unlock();
-        }
+        proposer.cancel();
+        return true;
     }
 
     /**
-     * Removes a proposer from this scheduler. This is a no-op if the scheduler didn't had the provided proposer.
-     *
-     * @param proposer the proposer to remove.
-     * @return {@code true} if {@code proposer} was removed, {@code false} if the scheduler didn't had that proposer.
-     * Note that the proposer will be cancelled as part of this operation (but this will be a no-op if it was already
-     * completed/cancelled when passed to this method anyway).
+     * How many table are currently continuously validated by this scheduler.
      */
-    boolean remove(ValidationProposer proposer)
+    int continuouslyValidatedTables()
     {
-        lock.lock();
-        try
-        {
-            return cancelAndRemoveProposer(proposer);
-        }
-        finally
-        {
-            lock.unlock();
-        }
-    }
-
-    // *Must* only be called while holding the lock
-    private boolean addProposer(ValidationProposer proposer)
-    {
-        // Don't initialize a proposer if it was a duplicate for a proposer we already had; this avoid duplicate work.
-        boolean added = proposers.add(proposer);
-        if (added)
-        {
-            proposer.init();
-            requeue(proposer);
-        }
-        return added;
-    }
-
-    // *Must* only be called while holding the lock
-    private boolean cancelAndRemoveProposer(ValidationProposer proposer)
-    {
-        // We need to cancel the removed proposer (to cancel no-yet-activated proposals and make sure in general than
-        // we don't wrongly preserve the proposer due to activities concurrent to this call) but the actual proposer to
-        // remove might not be the one passed to that method (see removeContinuousProposerFor() for instance). So we
-        // have to iterate to find the actual object we're about to remove.
-        // TODO(Sylvain): this is as clean as it could be. We should refactor things a bit to avoid that (probably make
-        // ValidationProposer expose an ID class and use that to turn 'proposers' into a map keyed by such ID, so we
-        // don't have to rely on subtle equal behavior).
-        for (Iterator<ValidationProposer> iter = proposers.iterator(); iter.hasNext();)
-        {
-            ValidationProposer p = iter.next();
-            if (!proposer.equals(p))
-                continue;
-
-            p.cancel();
-            iter.remove();
-            return true;
-        }
-        return false;
-    }
-
-    private void mapOnProposers(Function<ValidationProposer, ValidationProposer> fct)
-    {
-        lock.lock();
-        try
-        {
-            List<ValidationProposer> toAdd = new ArrayList<>();
-            List<ValidationProposer> toRemove = new ArrayList<>();
-            for (ValidationProposer proposer : proposers)
-            {
-                ValidationProposer updated = fct.apply(proposer);
-                if (updated == proposer)
-                    continue;
-
-                // Either updated is null, meaning we should remove the proposer, or it's an updated version and we
-                // have to remove the current one and add the new one.
-                toRemove.add(proposer);
-                if (updated != null)
-                    toAdd.add(updated);
-            }
-
-            // The order below don't matter much, but do the remove first so we don't grow proposalQueue unnecessarily
-            toRemove.forEach(this::cancelAndRemoveProposer);
-            toAdd.forEach(this::addProposer);
-        }
-        finally
-        {
-            lock.unlock();
-        }
+        return continuousValidations.size();
     }
 
     /**
-     * How many proposers are currently active.
-     */
-    int proposerCount()
-    {
-        return proposers.size();
-    }
-
-    /**
-     * How many proposals were queued (and so generated by proposers) since the scheduler was created.
+     * How many validations have been scheduled since creation.
      * <p>
      * The main use of this value is that if it don't increase for a given period of time, it means nothing has been
      * done by the scheduler.
      */
-    long queuedProposalCount()
+    long scheduledValidations()
     {
-        return queuedProposals;
+        return scheduledValidations.get();
     }
 
     /**
@@ -308,7 +365,10 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
             // on purpose.
             Validator validator = proposal.activate();
             if (validator != null)
+            {
+                scheduledValidations.incrementAndGet();
                 return validator;
+            }
         }
     }
 
@@ -325,9 +385,14 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
             if (isShutdown)
                 return;
 
-            proposers.forEach(ValidationProposer::cancel);
-            proposers.clear();
-            proposalQueue.clear();
+            continuousValidations.values().forEach(ValidationProposer::cancel);
+            continuousValidations.clear();
+            continuousProposals.clear();
+
+            userValidations.values().forEach(ValidationProposer::cancel);
+            userValidations.clear();
+            pendingUserValidations.clear();
+            currentUserValidation = null;
 
             isShutdown = true;
             hasProposals.signalAll();
@@ -345,7 +410,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         lock.lock();
         try
         {
-            while ((proposal = proposalQueue.poll()) == null)
+            while ((proposal = nextProposal()) == null)
             {
                 if (!blockUntilAvailable)
                     return null;
@@ -354,10 +419,6 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
 
                 hasProposals.awaitUninterruptibly();
             }
-
-            // Requeue before leaving the lock. This ensures that if the corresponding ValidationProposer has priority
-            // over all others, all his proposals get taken before any other.
-            requeue(proposal.proposer());
             return proposal;
         }
         finally
@@ -367,24 +428,44 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     }
 
     // This *must* be called while holding the lock
-    private void requeue(ValidationProposer proposer)
+    private ValidationProposal nextProposal()
     {
-        if (!proposer.supplyNextProposal(this::queueProposal))
-            proposers.remove(proposer); // We don't call cancelAndRemove() because when requeue() is called, we haven't
-                                        // even started processing the previous proposal, so we don't want to cancel.
-                                        // Besides, getting here means that the proposer itself told us it was done so
-                                        // there is no reason to cancel it.
+        ValidationProposal p = nextUserValidationProposal();
+        if (p != null)
+            return p;
+
+        return continuousProposals.poll();
+    }
+
+    private ValidationProposal nextUserValidationProposal()
+    {
+        if (currentUserValidation == null || !currentUserValidation.hasNext())
+        {
+            do
+            {
+                currentUserValidation = pendingUserValidations.poll();
+                if (currentUserValidation == null)
+                    return null;
+
+                logger.info("Starting user triggered validation #{} on table {}",
+                            currentUserValidation.id(), currentUserValidation.table());
+
+            } while (!currentUserValidation.hasNext());
+        }
+        return currentUserValidation.next();
     }
 
     // This needs the lock but may or may not be called while already holding it, so we acquire said lock and rely
-    // on re-entrancy if it was hold already.
-    private void queueProposal(ValidationProposal proposal)
+    // on reentrancy if it was hold already.
+    private void queueProposal(ContinuousValidationProposer.Proposal proposal)
     {
         lock.lock();
         try
         {
-            proposalQueue.add(proposal);
-            ++queuedProposals;
+            if (isShutdown)
+                return;
+
+            continuousProposals.add(proposal);
             hasProposals.signal();
         }
         finally
@@ -404,37 +485,34 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         // On single node cluster, we don't create any proposers since nothing can be validated. So now that we have
         // another node, we should add the proposers for any NodeSync-enabled table. Note that this is not the only situation
         // where we could have 0 proposers, this could also be due to no table being NodeSync-enabled/no keyspace having RF>1.
-        // Calling ContinuousTableValidationProposer.createAll() is harmless in those case however, it will simply return an
+        // Calling ContinuousValidationProposer.createAll() is harmless in those case however, it will simply return an
         // empty list. And since join events are pretty rare and createAll is pretty cheap particularly in those cases, ...
-        if (proposerCount() == 0)
+        if (continuouslyValidatedTables() == 0)
         {
-            eventExecutor.execute(() -> {
-                List<ContinuousTableValidationProposer> proposers = ContinuousTableValidationProposer.createAll(service);
-                if (!proposers.isEmpty())
-                {
+            addAllContinuous(NodeSyncHelpers.nodeSyncEnabledTables()).thenAccept(tables -> {
+                if (!tables.isEmpty())
                     logger.info("{} has joined the cluster: starting NodeSync validations on tables {} as consequence",
-                                endpoint, toTableNamesString(proposers));
-                    addAll(proposers);
-                }
+                                endpoint, tables);
             });
         }
         else
         {
-            // TODO: that mean some tokens will have changed/be added which might impact our local ranges and thus the
-            // segment we should generate. So we could re-generate our "cached" proposals to take new range into account,
-            // but I'm not 100% sure if we "could" or truly "should": that is, while we still use the "old" segments,
-            // the node might end up querying ranges that are not strict subsets of the range it owns, which should be
-            // harmless-ish (slightly inefficient but as it's very temporary), but need to double-check.
+            maybeUpdateLocalRanges();
         }
     }
 
+    private void maybeUpdateLocalRanges()
+    {
+        // Submit and update to each proposer with the current local ranges. If those haven't changed, the update will
+        // simply be a no-op.
+        for (ContinuousValidationProposer proposer : continuousValidations.values())
+            eventExecutor.submit(() -> proposer.state.update(NodeSyncHelpers.localRanges(proposer.table().keyspace)));
+    }
+
+
     public void onLeaveCluster(InetAddress endpoint)
     {
-        // TODO: same as for onJoinCluster regarding token changes. Aside from that, not sure if we want to bother about
-        // the leaving node making us a single node cluster. In theory this would be cleaner, but 1) going back to a
-        // single node cluster while having keyspace with RF > 1 is really an edge case while 2) I'm not sure the methods
-        // from IEndpointLifecycleSubscribed are guaranteed to be serialized so I wouldn't want to risk having NodeSync
-        // basically break (by not adding the proposers when we should) if there is a leave/join race.
+        maybeUpdateLocalRanges();
     }
 
     public void onUp(InetAddress endpoint)
@@ -454,7 +532,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
 
     public void onMove(InetAddress endpoint)
     {
-        // TODO: same onJoin/onLeave
+        maybeUpdateLocalRanges();
     }
 
     /*
@@ -472,7 +550,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         // table from the keyspace for inclusion, while if it's decreased to 1, we should remove all tables.
         // Note that we actually cannot know what was the RF before the ALTER, only what it is now (something we should
         // change, but that's another story), so we simply blindly add/remove tables depending on the current RF and
-        // rely on the fact that ContinuousTableValidationProposer equality is solely based on the table (by design), and so
+        // rely on the fact that ContinuousValidationProposer equality is solely based on the table (by design), and so
         // this will do the right thing.
         Keyspace ks = Schema.instance.getKeyspaceInstance(keyspace);
         // Shouldn't happen I suppose in practice, but could imagine a race between ALTER and DROP getting us this so
@@ -480,48 +558,42 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         if (ks == null)
             return;
 
-        eventExecutor.execute(() -> {
-            if (ks.getReplicationStrategy().getReplicationFactor() <= 1)
-            {
-                Set<TableMetadata> removed = new HashSet<>();
-                ks.getColumnFamilyStores().forEach(s -> {
-                    if (removeContinuousProposerFor(s.metadata()))
-                        removed.add(s.metadata());
-                });
-                if (!removed.isEmpty())
-                    logger.info("Stopping NodeSync validations on tables {} because keyspace {} is not replicated anymore",
-                                removed, keyspace);
-            }
-            else
-            {
-                List<ContinuousTableValidationProposer> proposers = ContinuousTableValidationProposer.createForKeyspace(service, ks);
-                if (addAll(proposers))
-                {
+        if (ks.getReplicationStrategy().getReplicationFactor() <= 1)
+        {
+            Set<TableMetadata> removed = new HashSet<>();
+            ks.getColumnFamilyStores().forEach(s -> {
+                if (removeContinuous(s.metadata()))
+                    removed.add(s.metadata());
+            });
+            if (!removed.isEmpty())
+                logger.info("Stopping NodeSync validations on tables {} because keyspace {} is not replicated anymore",
+                            removed, keyspace);
+        }
+        else
+        {
+            addAllContinuous(NodeSyncHelpers.nodeSyncEnabledTables(ks)).thenAccept(tables -> {
+                if (!tables.isEmpty())
                     // As mentioned above, it's absolutely possible the addition above was a complete no-op, but if it
                     // wasn't, that (almost surely, we could have raced with another change, but that's sufficiently
                     // unlikely that we ignore it for the purpose of logging) means the RF of the keyspace has just
                     // been increased.
                     logger.info("Starting NodeSync validations on tables {} following increase of the replication factor on {}",
-                                toTableNamesString(proposers), keyspace);
-                }
-            }
-        });
+                                tables, keyspace);
+            });
+        }
     }
 
     public void onCreateTable(String keyspace, String table)
     {
         ColumnFamilyStore store = ColumnFamilyStore.getIfExists(keyspace, table);
         // As always, protect against hypothetical race with a drop, no matter how unlikely this is.
-        if (store == null)
+        if (store == null || !NodeSyncHelpers.isNodeSyncEnabled(store))
             return;
 
-        eventExecutor.execute(() ->
-                              ContinuousTableValidationProposer.create(service, store)
-                                                               .ifPresent(p -> {
-                                                                   if (add(p))
-                                                                       logger.info("Starting NodeSync validations on newly created table {}",
-                                                                                   store.metadata());
-                                                               }));
+        addContinuous(store.metadata()).thenAccept(previous -> {
+            if (previous == null)
+                logger.info("Starting NodeSync validations on newly created table {}", store.metadata());
+        });
     }
 
     public void onAlterTable(String keyspace, String table, boolean affectsStatements)
@@ -531,37 +603,64 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         if (store == null)
             return;
 
-        // Don't bother doing anything if the keyspace the table is in is not replicated, or we're a one node cluster
-        if (store.keyspace.getReplicationStrategy().getReplicationFactor() <= 1 || StorageService.instance.getTokenMetadata().getAllEndpoints().size() == 1)
+        // Don't bother doing anything if we're a one node cluster
+        if (StorageService.instance.getTokenMetadata().getAllEndpoints().size() == 1)
             return;
 
-        eventExecutor.execute(() -> {
-            // We want to keep things as generic and flexible for future new implementations of ValidationProposer, so when a table
-            // is updated, we let each proposer tell us exactly if it's affected and how.
-            mapOnProposers(c -> c.onTableUpdate(store.metadata()));
-
-            // On top of updating any existing proposer, we may have to create a new ContinuousTableValidationProposer if the alter
-            // happens to have just turned NodeSync on for this table. As we can't really know what the alter did, we simply
-            // blindly add a new proposer is NodeSync is enabled now and let that be a no-op if NodeSync was already on before (we
-            // waste the proposer proposer on any other type of alter, which is a shame, but the right way to fix this is to
-            // improve the listener interface and in the meantime, schema change are comparatively rare events so a little
-            // inefficiently don't matter concretely (outside of hurting our feelings that is)).
-            ContinuousTableValidationProposer.create(service, store).ifPresent(p -> {
-                if (add(p))
-                    logger.info("Starting NodeSync validations on table {}: it has been enabled with ALTER TABLE", store.metadata());
+        TableMetadata metadata = store.metadata();
+        // Again, we don't really know what was the alter, but we want to add the table if NodeSync just got enabled
+        // and remove it if it just got disabled. And as both adding an already present table and removing a non
+        // present one are no-ops...
+        if (NodeSyncHelpers.isNodeSyncEnabled(store))
+        {
+            addContinuous(metadata).thenAcceptAsync(previous -> {
+                if (previous == null)
+                    logger.info("Starting NodeSync validations on table {}: it has been enabled with ALTER TABLE", metadata);
+                else
+                    previous.state.onTableUpdate();
+            }, eventExecutor);
+        }
+        else
+        {
+            eventExecutor.submit(() -> {
+                if (removeContinuous(metadata))
+                    logger.info("Stopping NodeSync validations on table {} following user deactivation", metadata);
             });
-        });
+        }
     }
 
     public void onDropTable(String keyspace, String table)
     {
-        // Same on alter, we let proposer tell us if they are affected by the drop.
-        eventExecutor.execute(() -> mapOnProposers(c -> c.onTableRemoval(keyspace, table)));
-    }
+        eventExecutor.execute(() -> {
+            // It's annoying because we don't get the TableMetadata/TableId and can't fetch it anymore due to the drop
+            // (this is a downside of the current SchemaListener interface; could and should be fixed). So we have to
+            // iterate.
+            continuousValidations.values()
+                                 .stream()
+                                 .filter(p -> p.table().keyspace.equals(keyspace) && p.table().name.equals(table))
+                                 .map(p -> p.table().id)
+                                 .findAny()
+                                 .ifPresent(id -> {
+                                    continuousValidations.remove(id);
+                                    // Logging at debug because when you explicitly dropped a table, it doesn't feel like you'd care too much
+                                    // about that confirmation. Further, when a keyspace is dropped, this is called for every table it has
+                                    // and this would feel like log spamming if the keyspace has very many tables.
+                                    logger.debug("Stopping NodeSync validations on table {}.{} as the table has been dropped", keyspace, table);
+                                });
 
-    private boolean removeContinuousProposerFor(TableMetadata metadata)
-    {
-        return remove(ContinuousTableValidationProposer.dummyProposerFor(metadata));
+            Iterator<UserValidationProposer> iter = userValidations.values().iterator();
+            while (iter.hasNext())
+            {
+                UserValidationProposer proposer = iter.next();
+                if (proposer.table().keyspace.equals(keyspace) && proposer.table().name.equals(table))
+                {
+                    proposer.cancel();
+                    iter.remove();
+                    // Note: we don't remove from the pending queue, but as we cancelled the proposer, this will be
+                    // dealt with automatically
+                }
+            }
+        });
     }
 
     /**

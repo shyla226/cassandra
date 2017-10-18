@@ -21,13 +21,12 @@ package org.apache.cassandra.concurrent;
 import java.util.concurrent.*;
 import java.util.function.Supplier;
 
-import com.google.common.base.Throwables;
-
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.Single;
 import io.reactivex.SingleObserver;
 import io.reactivex.internal.disposables.EmptyDisposable;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.ExecutableLock;
 
 public class TPCUtils
@@ -42,7 +41,7 @@ public class TPCUtils
 
     public static boolean isWouldBlockException(Throwable t)
     {
-        return Throwables.getRootCause(t) instanceof WouldBlockException;
+        return com.google.common.base.Throwables.getRootCause(t) instanceof WouldBlockException;
     }
 
     public static <T> T blockingGet(Single<T> single)
@@ -70,13 +69,9 @@ public class TPCUtils
         {
             return future.get();
         }
-        catch (CompletionException e)
+        catch (Exception e)
         {
-            throw Throwables.propagate(e.getCause());
-        }
-        catch (ExecutionException|InterruptedException e)
-        {
-            throw new RuntimeException(e);
+            throw Throwables.cleaned(e);
         }
     }
 
@@ -89,13 +84,9 @@ public class TPCUtils
         {
             future.get();
         }
-        catch (CompletionException e)
+        catch (Exception e)
         {
-            throw Throwables.propagate(e.getCause());
-        }
-        catch (ExecutionException|InterruptedException e)
-        {
-            throw new RuntimeException(e);
+            throw Throwables.cleaned(e);
         }
     }
 
@@ -286,7 +277,7 @@ public class TPCUtils
         }
         catch (Exception ex)
         {
-            throw Throwables.propagate(ex);
+            throw Throwables.cleaned(ex);
         }
     }
 }

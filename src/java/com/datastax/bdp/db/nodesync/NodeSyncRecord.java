@@ -89,6 +89,30 @@ public class NodeSyncRecord
     }
 
     /**
+     * Empty record for the provided segment.
+     */
+    @VisibleForTesting
+    static NodeSyncRecord empty(Segment segment)
+    {
+        return new NodeSyncRecord(segment, null, null, null);
+    }
+
+    long lastValidationTimeMs()
+    {
+        return lastValidation == null ? NodeSyncHelpers.NO_VALIDATION_TIME : lastValidation.startedAt;
+    }
+
+    long lastSuccessfulValidationTimeMs()
+    {
+        return lastSuccessfulValidation == null ? NodeSyncHelpers.NO_VALIDATION_TIME : lastSuccessfulValidation.startedAt;
+    }
+
+    boolean isLocked()
+    {
+        return lockedBy != null;
+    }
+
+    /**
      * Consolidate a list of records that cover a given segment.
      * <p>
      * For reasons explained in {@link Segment} and {@link SystemDistributedKeyspace#nodeSyncRecords}, while
@@ -105,16 +129,15 @@ public class NodeSyncRecord
      *                        Note that in most case this will either be empty (we have no record for that segment yet)
      *                        or contain a single record corresponding to {@code segment} exactly and the method optimize
      *                        for this. The method is resilient to the list containing records that don't intersect with
-     *                        {@code segment.range} but those are simply ignored.
-     * @return a record for {@code segment} that consolidate/combine the information of {@code coveringRecords}, or
-     * {@code null} if no information on the segment is recorded, or {@code coveringRecords} doesn't cover the segment
-     * fully.
+     *                        {@code segment.range} (and that is currently relied on during startup, see
+     *                        {@link TableState#load}) but those are simply ignored.
+     * @return a record for {@code segment} that consolidate/combine the information of {@code coveringRecords}. If there
+     * is no record to consolidate, the returned record will simply have all its fields to {@code null}.
      */
-    @Nullable
     static NodeSyncRecord consolidate(Segment segment, List<NodeSyncRecord> coveringRecords)
     {
         if (coveringRecords.isEmpty())
-            return null;
+            return empty(segment);
 
         Range<Token> range = segment.range;
         if (coveringRecords.size() == 1)
@@ -128,7 +151,7 @@ public class NodeSyncRecord
             if (record.segment.range.contains(range))
                 return new NodeSyncRecord(segment, record.lastValidation, record.lastSuccessfulValidation, record.lockedBy);
             else
-                return null;
+                return empty(segment);
         }
 
         // We have more than one record so we need to truly consolidate.
@@ -141,9 +164,6 @@ public class NodeSyncRecord
                                                                coveringRecords.size(),
                                                       r -> r.lastValidation);
         InetAddress lockedBy = consolidateLockedBy(range, coveringRecords);
-
-        if (lastValidation == null && lastSuccessfulValidation == null && lockedBy == null)
-            return null;
 
         return new NodeSyncRecord(segment, lastValidation, lastSuccessfulValidation, lockedBy);
     }

@@ -584,7 +584,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
          */
         private void maybeWarnOnMaxedOut(double recentRate)
         {
-            long now = System.currentTimeMillis();
+            long now = NodeSyncHelpers.time().currentTimeMillis();
             if (lastMaxedOutWarn >= 0 && (now - lastMaxedOutWarn) < NodeSyncService.MIN_VALIDATION_INTERVAL_MS)
                 return;
 

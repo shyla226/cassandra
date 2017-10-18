@@ -1,19 +1,7 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Please see the included license file for details.
  */
 package com.datastax.bdp.db.nodesync;
 
@@ -28,47 +16,99 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.SystemTimeSource;
+import org.apache.cassandra.utils.TimeSource;
+import org.apache.cassandra.utils.units.SizeUnit;
 
 /**
  * Static helper methods for NodeSync.
  */
 abstract class NodeSyncHelpers
 {
+    public static final long NO_VALIDATION_TIME = Long.MIN_VALUE;
+
     private NodeSyncHelpers() {}
 
     // For unit testing, we sometime want to fake the size on disk of tables, as well as the local ranges of a keyspace
     // (some NodeSync unit tests only depend on those parameters and it's easier to provide it that way than to go
     // through the painful setup that would yield the same results). This is what the following static variables allow
-    // us to achieve.
+    // us to achieve (note that we don't bother with volatile because those shouldn't be updated except for tests, and
+    // for tests they are updated before tests are even started).
 
-    private static final ToLongFunction<ColumnFamilyStore> DEFAULT_TABLE_SIZE_PROVIDER = t -> t.getMemtablesLiveSize() + t.metric.liveDiskSpaceUsed.getCount();
-    private static final Function<String, Collection<Range<Token>>> DEFAULT_LOCAL_RANGES_PROVIDER = StorageService.instance::getLocalRanges;
-    private static ToLongFunction<ColumnFamilyStore> tableSizeProvider = DEFAULT_TABLE_SIZE_PROVIDER;
-    private static Function<String, Collection<Range<Token>>> localRangesProvider = DEFAULT_LOCAL_RANGES_PROVIDER;
+    private static ToLongFunction<ColumnFamilyStore> tableSizeProvider = NodeSyncHelpers::defaultTableSizeProvider;
+    private static Function<String, Collection<Range<Token>>> localRangesProvider = NodeSyncHelpers::defaultLocalRangeProvider;
+
+    /**
+     * The target size for table segments. NodeSync will compute segments so that, in the hypothesis of perfect
+     * distribution, segments are lower than this this. Of course, we won't have perfect distribution in practice,
+     * so this is more a target size, but distribution should still be good enough in practice (or you will have
+     * bigger problem than large NodeSync segments).
+     */
+    // TODO(Sylvain): Not sure how good of a default it is, could be worth some experimentation (but doesn't seem too bad either)
+    private static final long DEFAULT_SEGMENT_SIZE_TARGET = Long.getLong("dse.nodesync.segment_size_target_bytes", SizeUnit.MEGABYTES.toBytes(200));
+    private static long segmentSizeTarget = DEFAULT_SEGMENT_SIZE_TARGET;
+
+    private static TimeSource timeSource = new SystemTimeSource();
+
 
     /**
      * Used by some unit tests to fake the size of table on disk and the local ranges.
      * Should <b>not</b> be used outside of tests.
-     * Also, tests that do use that should make sure to use {@link #resetTableSizeAndLocalRangeProviders} after the test.
+     * Also, tests that do use that should make sure to use {@link #resetTestParameters} after the test.
      */
     @VisibleForTesting
-    static void setTableSizeAndLocalRangeProviders(ToLongFunction<ColumnFamilyStore> sizeProvider,
-                                                   Function<String, Collection<Range<Token>>> rangeProvider)
+    static void setTestParameters(ToLongFunction<ColumnFamilyStore> sizeProvider,
+                                  Function<String, Collection<Range<Token>>> rangeProvider,
+                                  long segmentSize,
+                                  TimeSource time)
     {
-        tableSizeProvider = sizeProvider;
-        localRangesProvider = rangeProvider;
+        if (sizeProvider != null)
+            tableSizeProvider = sizeProvider;
+        if (rangeProvider != null)
+            localRangesProvider = rangeProvider;
+        if (segmentSize >= 0)
+            segmentSizeTarget = segmentSize;
+        if (time != null)
+            timeSource = time;
     }
 
     /**
-     * Reset the providers to their default after it has been changed through {@link #setTableSizeAndLocalRangeProviders}.
+     * Reset the providers to their default after it has been changed through {@link #setTestParameters}.
      * Should <b>not</b> be used outside of tests.
      */
     @VisibleForTesting
-    static void resetTableSizeAndLocalRangeProviders()
+    static void resetTestParameters()
     {
-        tableSizeProvider = DEFAULT_TABLE_SIZE_PROVIDER;
-        localRangesProvider = DEFAULT_LOCAL_RANGES_PROVIDER;
+        tableSizeProvider = NodeSyncHelpers::defaultTableSizeProvider;
+        localRangesProvider = NodeSyncHelpers::defaultLocalRangeProvider;
+        segmentSizeTarget = DEFAULT_SEGMENT_SIZE_TARGET;
+        timeSource = new SystemTimeSource();
+    }
+
+    // Default method used for get the local range. Note: the only reason we don't directly refer to
+    // StorageService.instance::getLocalRanges directly in the static field initialization of this class is that this
+    // make class initialization trigger StorageService initialization and that's annoying for some tests which do
+    // initialize this class but don't use this in particular.
+    private static Collection<Range<Token>> defaultLocalRangeProvider(String str)
+    {
+        return StorageService.instance.getLocalRanges(str);
+    }
+
+    private static long defaultTableSizeProvider(ColumnFamilyStore t)
+    {
+        return t.getMemtablesLiveSize() + t.metric.liveDiskSpaceUsed.getCount();
+    }
+
+    static long segmentSizeTarget()
+    {
+        return segmentSizeTarget;
+    }
+
+    static TimeSource time()
+    {
+        return timeSource;
     }
 
     /**
@@ -108,12 +148,20 @@ abstract class NodeSyncHelpers
      *
      * @return a stream of the {@link ColumnFamilyStore} of every tables that NodeSync should be validating.
      */
-    static Stream<ColumnFamilyStore> nodeSyncEnabledTables()
+    static Stream<TableMetadata> nodeSyncEnabledTables()
+    {
+        return nodeSyncEnabledStores().map(ColumnFamilyStore::metadata);
+    }
+
+    /**
+     * Same as {@link #nodeSyncEnabledTables()} but return the {@link ColumnFamilyStore} instead of the metadata.
+     */
+    static Stream<ColumnFamilyStore> nodeSyncEnabledStores()
     {
         return StorageService.instance.getNonSystemKeyspaces()
                                       .stream()
                                       .map(Keyspace::open)
-                                      .flatMap(NodeSyncHelpers::nodeSyncEnabledTables);
+                                      .flatMap(NodeSyncHelpers::nodeSyncEnabledStores);
     }
 
     /**
@@ -123,7 +171,15 @@ abstract class NodeSyncHelpers
      * @param keyspace the keyspace for which to list NodeSync enabled tables.
      * @return a stream of the {@link ColumnFamilyStore} of every tables in {@code keyspace} that NodeSync should be validating.
      */
-    static Stream<ColumnFamilyStore> nodeSyncEnabledTables(Keyspace keyspace)
+    static Stream<TableMetadata> nodeSyncEnabledTables(Keyspace keyspace)
+    {
+        return nodeSyncEnabledStores(keyspace).map(ColumnFamilyStore::metadata);
+    }
+
+    /**
+     * Same as {@link #nodeSyncEnabledTables(Keyspace)} but return the {@link ColumnFamilyStore} instead of the metadata.
+     */
+    static Stream<ColumnFamilyStore> nodeSyncEnabledStores(Keyspace keyspace)
     {
         if (!isReplicated(keyspace))
             return Stream.empty();
@@ -149,6 +205,8 @@ abstract class NodeSyncHelpers
      */
     static boolean isNodeSyncEnabled(ColumnFamilyStore store)
     {
-        return isReplicated(store.keyspace) && store.metadata().params.nodeSync.isEnabled(store.metadata());
+        return StorageService.instance.getTokenMetadata().getAllEndpoints().size() > 1
+               && isReplicated(store.keyspace)
+               && store.metadata().params.nodeSync.isEnabled(store.metadata());
     }
 }

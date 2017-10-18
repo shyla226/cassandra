@@ -1,19 +1,7 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Please see the included license file for details.
  */
 package com.datastax.bdp.db.nodesync;
 
@@ -23,11 +11,6 @@ import java.util.Collections;
 import java.util.List;
 
 import org.junit.Test;
-
-import com.datastax.bdp.db.nodesync.NodeSyncRecord;
-import com.datastax.bdp.db.nodesync.Segment;
-import com.datastax.bdp.db.nodesync.ValidationInfo;
-import com.datastax.bdp.db.nodesync.ValidationOutcome;
 
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.schema.TableMetadata;
@@ -44,6 +27,8 @@ public class NodeSyncRecordTest
 
     // Overall segment over which the test consolidate.
     private static final Segment SEGMENT = seg(TABLE, 0, 100);
+
+    private static final NodeSyncRecord EMPTY_RECORD = NodeSyncRecord.empty(SEGMENT);
 
     private static final InetAddress DUMMY_LOCK = inet(127, 0, 0, 1);
     private static final ValidationInfo DUMMY_INFO = new ValidationInfo(0, ValidationOutcome.completed(false, false), null);
@@ -278,7 +263,7 @@ public class NodeSyncRecordTest
     @Test
     public void consolidateEmpty() throws Exception
     {
-        assertEquals(null, NodeSyncRecord.consolidate(SEGMENT, Collections.emptyList()));
+        assertEquals(EMPTY_RECORD, NodeSyncRecord.consolidate(SEGMENT, Collections.emptyList()));
     }
 
     /** Also trivial case where we consolidate a single record that happens to be the segment for which we consolidate.*/
@@ -304,7 +289,7 @@ public class NodeSyncRecordTest
                                                    record(seg(TABLE, -10, 50), fullInSync(1)),
                                                    record(seg(TABLE, 1, 101), inet(127, 0, 0, 1))))
         {
-            assertEquals(null, NodeSyncRecord.consolidate(SEGMENT, Collections.singletonList(record)));
+            assertEquals(EMPTY_RECORD, NodeSyncRecord.consolidate(SEGMENT, Collections.singletonList(record)));
         }
     }
 
@@ -380,7 +365,7 @@ public class NodeSyncRecordTest
         RecordsBuilder toConsolidate = records(TABLE).add(0, 10, fullInSync(10))
                                                      .add(10, 60, fullInSync(12))
                                                      .add(61, 100, fullInSync(8));
-        assertEquals(null, NodeSyncRecord.consolidate(SEGMENT, toConsolidate.asList()));
+        assertEquals(EMPTY_RECORD, NodeSyncRecord.consolidate(SEGMENT, toConsolidate.asList()));
     }
 
     @Test
@@ -389,14 +374,13 @@ public class NodeSyncRecordTest
         RecordsBuilder toConsolidate = records(TABLE).add(-200, -100, fullInSync(10))
                                                      .add(-50, -10, fullInSync(12))
                                                      .add(-10, -5, fullInSync(8));
-        assertEquals(null, NodeSyncRecord.consolidate(SEGMENT, toConsolidate.asList()));
+        assertEquals(EMPTY_RECORD, NodeSyncRecord.consolidate(SEGMENT, toConsolidate.asList()));
     }
 
     @Test
     public void consolidateBlockedBy() throws Exception
     {
         RecordsBuilder toConsolidate;
-        NodeSyncRecord expected;
 
         toConsolidate = records(TABLE).add(0, 10, inet(127, 0, 0, 1))
                                       .add(10, 60, inet(127, 0, 0, 2))
@@ -410,7 +394,7 @@ public class NodeSyncRecordTest
         toConsolidate = records(TABLE).add(0, 10, inet(127, 0, 0, 1))
                                       .add(10, 60, fullInSync(1))
                                       .add(60, 100, inet(127, 0, 0, 3));
-        assertEquals(null, NodeSyncRecord.consolidate(SEGMENT, toConsolidate.asList()));
+        assertEquals(EMPTY_RECORD, NodeSyncRecord.consolidate(SEGMENT, toConsolidate.asList()));
     }
     
     /**

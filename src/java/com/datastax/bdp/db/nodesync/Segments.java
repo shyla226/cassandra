@@ -6,16 +6,16 @@
 package com.datastax.bdp.db.nodesync;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Deque;
-import java.util.Iterator;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.AbstractIterator;
-import com.google.common.collect.Iterators;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -23,7 +23,12 @@ import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
- * Static helpers to generate and manipulate segments.
+ * Represents a list of generated segments for a given table (sorted by left token).
+ * <p>
+ * By and large this class behaves like a {@code List<Segment>} where all segments are for the same table, with methods
+ * to generate such list. However, we keep such segment list in memory for all NodeSync-enabled table but really only
+ * work on a handful segments for each table at any given time, so this class optimizes for memory usage on that
+ * assumption.
  * <p>
  * Segments are generated for a given table {@code t} and on the local node in the following way:
  * 1) We compute the "depth" {@code d} of {@code t} (see {@link #depth): that depth is directly related to the size of the data
@@ -54,24 +59,187 @@ import org.apache.cassandra.schema.TableMetadata;
  * code needs to cope with that fact. But the code is still optimized for segment not changing as this the case the
  * vast majority of time.
  *
- *
  * [1]: little in the actual validation code ({@link Validator}) actually assumes that the range validated are local,
  * and it would be possible to not base segment generation on local ranges, but rather to split the whole ring in a
  * predefinite number of segment, with no regard for actual tokens, on have nodes consider those. In fact, this would
  * have the advantage over the current method that this means segments wouldn't change across topology changes. This
  * would however open the question of if and how we distribute segments amongst nodes. If we don't, all nodes would
  * handles the whole ring for all tables (exclusively relying on the system distributed table to avoid duplicated work),
- * but that wouldn't scale well: classes like {@link ContinuousTableValidationProposer} would either use increasing
+ * but that wouldn't scale well: classes like {@link ContinuousValidationProposer } would either use increasing
  * amount of memories when the cluster grows, or would become a lot more complex. If we do try to distribute segments,
  * it's not trivial to do so in a way that guarantees failure tolerance, is fair and never forget any range even with
  * topology changes. Using local ranges solves all those problem "out of the box" (though, again, with the downside that
  * segments are impacted by topology changes).
  * [2]: assuming decently well distributed data.
  */
-abstract class Segments
+class Segments
 {
-    private Segments()
-    {}
+    // As said in the javadoc, we don't keep this as a List<Segment> because as that's memory heavy. Instead, we keep
+    // a single pointer to the table (since all segments belong to it) and encode the list of ranges represented as a
+    // list of tokens, where the ith range is stored by (ranges[i*2], ranges[i*2 + 1]].
+    // This does mean we have to re-create a Segment object every time we access one, but as we only access a few of
+    // them at a time (and not that rapidly overall), this feel like a good trade-off (though, to be fair, that intuition
+    // would need to ultimately be validated properly (and we could get even more aggressive memory wise as well with
+    // more efforts)).
+
+    private final TableMetadata table;
+    // The parameters (local ranges and depth) from which those segments have been created.
+    private final Collection<Range<Token>> localRanges;
+    private final int depth;
+
+    private final int size; // Always ranges.size() / 2, but it's convenient to have it separate.
+    private final List<Token> ranges; // The list of range, sorted by left token
+
+    // This class represents non-wrapped, non-overlapping, sorted ranges, and does so using a list of these ranges
+    // boundaries. So this is basically a sorted list of tokens. Except that when the original local ranges we split
+    // to generate this had a wrapping one, the "last" range here (in sorted order) will have the minimum token as
+    // right bound, and that would make the list not totally sorted, and that makes it a pain to work with. To avoid
+    // that, we use a trick within this class: we replace the min token when basically used as max token by a special
+    // token instance that is made maximal by the comparison method used (see the generate() method for how those are
+    // created). We do replace that "fake maximum token" when returning ranges from this class so this stay private to
+    // this class.
+    // Of course, all this is a hack and could be ideally much cleaner if we were to rework how we deal with
+    // wrapping/non-wrapping token ranges in general (this is not the only place where this is annoying, the code is
+    // riddled with case where having the min token on the right side of a range requires special casing), but such
+    // change is out of scope here.
+    private final Token maxToken;
+    private final Comparator<Token> comparator;
+
+    private final List<Range<Token>> normalizedLocalRanges;
+
+    private Segments(TableMetadata table,
+                     Collection<Range<Token>> localRanges,
+                     int depth,
+                     List<Token> ranges,
+                     Token maxToken,
+                     Comparator<Token> comparator)
+    {
+        assert ranges.size() % 2 == 0 : ranges;
+        this.table = table;
+        this.localRanges = localRanges;
+        this.depth = depth;
+        this.size = ranges.size() / 2;
+        this.ranges = ranges;
+
+        this.maxToken = maxToken;
+        this.comparator = comparator;
+
+        this.normalizedLocalRanges = Range.normalize(localRanges);
+    }
+
+    /**
+     * The local ranges that were used to generate those segments.
+     */
+    Collection<Range<Token>> localRanges()
+    {
+        return localRanges;
+    }
+
+    List<Range<Token>> normalizedLocalRanges()
+    {
+        return normalizedLocalRanges;
+    }
+
+    /**
+     * The depth that was used to generate those segments.
+     */
+    int depth()
+    {
+        return depth;
+    }
+
+    int size()
+    {
+        return size;
+    }
+
+    Segment get(int i)
+    {
+        int rangeIdx = 2 * i;
+        Token left = ranges.get(rangeIdx);
+        Token right = ranges.get(rangeIdx + 1);
+        if (right == maxToken)
+            right = table.partitioner.getMinimumToken();
+        return new Segment(table, new Range<>(left, right));
+    }
+
+    /**
+     * Returns the index range covering the segments of this object that are fully included in the provided one.
+     *
+     * @param segment the segment.
+     * @return a 2 element array {@code a} such that all segments of this object between {@code a[0]} (included) and
+     * {@code a[1]} (excluded) are fully included in {@code segment}. If there is no such segment, the returned array
+     * will simply be such that {@code a[0] >= a[1]}.
+     */
+    int[] findFullyIncludedIn(Segment segment)
+    {
+        // Compute startIdx (resp. endIdx) to be the start of the first (resp. last) range of which we should return the
+        // index.
+
+        int startIdx = Collections.binarySearch(ranges, segment.range.left, comparator);
+        if (startIdx < 0)
+            startIdx = -startIdx-1;
+
+        // if the found idx is a start bound, then it already point to the first range to include (whether it was an
+        // exact match or not, whatever range comes before wasn't fully included). If it's an end bound, it means
+        // that's the end of the first range not fully covered, and we move it to the start of the first one that is.
+        if (!isStartBound(startIdx))
+            ++startIdx;
+
+        if (startIdx >= ranges.size())
+            return new int[]{0, 0};
+
+        int endIdx = ranges.size();
+        if (!segment.range.right.isMinimum())
+        {
+            endIdx = Collections.binarySearch(ranges.subList(startIdx, ranges.size()), segment.range.right, comparator);
+            boolean isExactMatch = endIdx >= 0;
+            if (!isExactMatch)
+                endIdx = -endIdx - 1;
+            // We started our search from startIdx, so make it a true index
+            endIdx = startIdx + endIdx;
+
+            // if the idx found is a start bound, then it already point to the first range to exclude (if it wasn't an exact
+            // match, it still means that any previous range end before that insertion point and thus is fully included).
+            // If its a end bound, then it depends on whether it's an exact match or not. If it is, then the range it points
+            // to is fully included (and so we want to point to the start of the next one). Otherwise, it isn't and it is the
+            // end of the first range not to include (and so we move the point ot its start for consistency).
+            if (!isStartBound(endIdx))
+                endIdx = isExactMatch ? endIdx + 1 : endIdx - 1;
+        }
+        return new int[]{ startIdx / 2, endIdx / 2};
+    }
+
+    @Override
+    public String toString()
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.append(table).append('{');
+        for (int i = 0; i < size; i++)
+            sb.append(i == 0 ? "" : ", ").append(get(i).range);
+        return sb.append('}').toString();
+    }
+
+    private boolean isStartBound(int idx)
+    {
+        return idx % 2 == 0;
+    }
+
+    /**
+     * Computes the depth at which each local ranges should be split for a given table so that each segment covers data
+     * that is (assuming perfect distribution) no bigger than {@link NodeSyncHelpers#segmentSizeTarget()} (of course, in
+     * practice, distribution is never perfect so there is no guarantee that no segment will ever cover more data than
+     * {@link NodeSyncHelpers#segmentSizeTarget()}, but this is good enough for NodeSync).
+     *
+     * @param table the table for which to compute the depth.
+     * @param localRangesCount the number of local ranges to consider for the computation.
+     * @return the depth for splitting {@code localRangesCount} local ranges for {@code table} to respect our segment
+     * size target.
+     */
+    static int depth(ColumnFamilyStore table, int localRangesCount)
+    {
+        return depth(NodeSyncHelpers.estimatedSizeOf(table), localRangesCount, NodeSyncHelpers.segmentSizeTarget());
+    }
 
     /**
      * Computes the depth at which each local ranges should be split for a given table so that each segment covers data
@@ -85,6 +253,7 @@ abstract class Segments
      * @return the depth at which to compute each local range for {@code table} to respect our {@code maxSegmentSizeInBytes}
      * limit, assuming there is {@code localRangesCount} local ranges.
      */
+    @VisibleForTesting
     static int depth(long estimatedTableSizeInBytes, int localRangesCount, long maxSegmentSizeInBytes)
     {
         long rangeSize = estimatedTableSizeInBytes / localRangesCount;
@@ -98,7 +267,7 @@ abstract class Segments
     }
 
     /**
-     * Returns an iterator that produces all the segments for a table given the local ranges and the depth to use.
+     * Returns the segments for a table given the local ranges and the depth to use.
      * <p>
      * This method basically applies {@link #splitRangeAndUnwrap} to each local range so also see the javadoc of that
      * method for more details.
@@ -106,49 +275,53 @@ abstract class Segments
      * @param table the table for which to generate the segments.
      * @param localRanges the local ranges for {@code table}.
      * @param depth the depth to use to generate the segments (generally computed by {@link #depth}, see class javadoc).
-     * @return an iterator over the local segments to consider for {@code table}.
+     * @return the list of ranges to consider as segments for {@code table}.
      */
-    static Iterator<Segment> generateSegments(TableMetadata table, Collection<Range<Token>> localRanges, int depth)
+    static Segments generate(TableMetadata table, Collection<Range<Token>> localRanges, int depth)
     {
-        return new AbstractIterator<Segment>()
-        {
-            private final Iterator<Range<Token>> rangeIterator = localRanges.iterator();
-            private Iterator<Range<Token>> currentRangeIterator = Collections.emptyIterator();
-
-            protected Segment computeNext()
-            {
-                if (currentRangeIterator.hasNext())
-                    return segment(currentRangeIterator.next());
-
-                if (!rangeIterator.hasNext())
-                    return endOfData();
-
-                Range<Token> range = rangeIterator.next();
-                currentRangeIterator = splitRangeAndUnwrap(range, depth, table.partitioner);
-                assert currentRangeIterator.hasNext() : "splitRangeAndUnwrap shouldn't be able to return an empty iterator";
-                return segment(currentRangeIterator.next());
-            }
-
-            private Segment segment(Range<Token> range)
-            {
-                return new Segment(table, range);
-            }
+        // See the comment on the maxToken field of Segments above for what this is about. Note that the reason
+        // we don't use IPartitioner.getMaximumToken(), which would seem much more appropriate, is that not all
+        // partitioner implement that method (the default implementation throws). The comparator ensure that token
+        // is maximal for the comparison though, no matter what it is in practice. Of course, this hack rely on
+        // tokens instance not be "interned", but that's not the case and it would kind of crazy to start interning
+        // them so it's a reasonably safe assumption (also, we should fix that mess at a higher level, so this is
+        // meant to be a temporary hack).
+        // Side-note: the actual value of maxToken matter since we only rely on reference equality on it, but we pick
+        // a deterministic value (for the partitioner) to make things easier to debug/test if necessary.
+        Token maxToken = table.partitioner.midpoint(table.partitioner.getMinimumToken(), table.partitioner.getMinimumToken());
+        Comparator<Token> comparator = (t1, t2) -> {
+            if (t1 == maxToken)
+                return t2 == maxToken ? 0 : 1;
+            if (t2 == maxToken)
+                return -1;
+            return t1.compareTo(t2);
         };
+
+        List<Token> ranges = new ArrayList<>(estimateSegments(localRanges, depth) * 2);
+
+        for (Range<Token> localRange : localRanges)
+            splitRangeAndUnwrap(localRange, depth, table.partitioner, ranges, maxToken);
+
+        // Note: we want the range sorted and they currently are not (because local ranges are not; they could have one
+        // wrapping in particular). The generated ranges are however non-overlapping and non wrapped, so sorting the
+        // tokens will basically preserve the ranges.
+        ranges.sort(comparator);
+        return new Segments(table, localRanges, depth, ranges, maxToken, comparator);
     }
 
     /**
-     * The (estimated) number of segments the iterator from {@link #generateSegments} will generate.
+     * The (estimated) number of segments the iterator from {@link #generate} will generate.
      * <p>
      * It's called an estimate because there is theoretically rare cases where ranges may not be splittable beyond
      * a certain depth and so we keep the contract of the method conservative to avoid surprises (we don't use this
-     * method in places where we couldn't suffer imprecision; if that changes, the simplest solution would be to make
-     * {@link #generateSegments} directly return a list). In practice, it will likely always be exactly the number of
-     * segments generated.
+     * method in places where we couldn't suffer imprecision). In practice, it will likely always be exactly the number
+     * of segments generated.
      *
      * @param depth the depth we'll use to split ranges.
      * @param localRanges the ranges to validate. It must not be empty.
      * @return an estimate of the number of segments obtained when splitting {@code localRanges} at depth {@code depth}.
      */
+    @VisibleForTesting
     static int estimateSegments(Collection<Range<Token>> localRanges, int depth)
     {
         assert !localRanges.isEmpty();
@@ -175,17 +348,19 @@ abstract class Segments
      *              corresponding to the 2 halves of {@code toSplit}, if {@code depth == 2}, it will return 4 ranges, etc.
      *              This cannot be a negative number.
      * @param partitioner the partitioner for the range to split (necessary to do the actual splitting).
-     * @return an iterator over the range produced by splitting {@code toSplit} in half recursively {@code depth} times,
-     * and with no wrapped ranges.
+     * @param output the list of to which to add the generate ranges to. For each range generate, the start and end
+     *               token are added to the list in order.
+     * @param maxToken the token to use if we split a wrapping range to represent the maximum token. See the comment
+     *                 in {@link #generate} for details.
      */
-    @VisibleForTesting
-    static Iterator<Range<Token>> splitRangeAndUnwrap(Range<Token> toSplit, int depth, IPartitioner partitioner)
+    private static void splitRangeAndUnwrap(Range<Token> toSplit, int depth, IPartitioner partitioner, List<Token> output, Token maxToken)
     {
         assert depth >= 0 : "Invalid depth " + depth;
         if (depth == 0)
         {
             // We have nothing to do for depth 0, except for unwrapping the range if it's wrapped.
-            return maybeUnwrap(toSplit);
+            maybeUnwrap(toSplit, output, maxToken);
+            return;
         }
 
         // We special case depth 1 because it's likely somewhat common (along with depth=0). For instance, with 256
@@ -195,93 +370,102 @@ abstract class Segments
         // We course, we still handle higher depth properly below, but worth a simple optimization.
         if (depth == 1)
         {
-            Token midpoint = midpoint(toSplit, partitioner);
+            Token midpoint = midpoint(toSplit.left, toSplit.right, partitioner);
             if (midpoint == null)
-                return maybeUnwrap(toSplit);
-
-            Range<Token> left = new Range<>(toSplit.left, midpoint);
-            Range<Token> right = new Range<>(midpoint, toSplit.right);
-            return Iterators.concat(maybeUnwrap(left), maybeUnwrap(right));
+            {
+                maybeUnwrap(toSplit, output, maxToken);
+            }
+            else
+            {
+                maybeUnwrap(toSplit.left, midpoint, output, maxToken);
+                maybeUnwrap(midpoint, toSplit.right, output, maxToken);
+            }
+            return;
         }
 
-        // At worth, we'll have 1 range waiting to be processed for each depth, plus 1 potential range due to unwrapping.
+        // At worth, we'll have 1 range waiting to be processed for each depth + 1 that we put temporarily to make the
+        // loop easier.
         final Deque<RangeWithDepth> queue = new ArrayDeque<>(depth + 1);
-        queue.offerFirst(withDepth(toSplit, 0));
-        return new AbstractIterator<Range<Token>>()
+        queue.offerFirst(withDepth(toSplit.left, toSplit.right, 0));
+        while (!queue.isEmpty())
         {
-            protected Range<Token> computeNext()
+            RangeWithDepth range = queue.poll();
+            assert range.depth < depth;
+
+            Token midpoint = midpoint(range.left, range.right, partitioner);
+            // Can't split further, so be it
+            if (midpoint == null)
             {
-                while (!queue.isEmpty())
-                {
-                    RangeWithDepth range = queue.poll();
-                    if (range.depth == depth)
-                        return maybeUnwrap(range.range);
-
-                    Token midpoint = midpoint(range.range, partitioner);
-                    // Can't split further, so be it
-                    if (midpoint == null)
-                        return maybeUnwrap(range.range);
-
-                    Range<Token> left = new Range<>(range.range.left, midpoint);
-                    Range<Token> right = new Range<>(midpoint, range.range.right);
-                    int nextDepth = range.depth + 1;
-
-                    queue.offerFirst(withDepth(right, nextDepth));
-
-                    // Save allocating the RangeWithDepth if we've reach our depth
-                    if (nextDepth == depth)
-                        return maybeUnwrap(left);
-
-                    // otherwise, let left be split some more
-                    queue.offerFirst(withDepth(left, nextDepth));
-                }
-                return endOfData();
+                maybeUnwrap(range.left, range.right, output, maxToken);
+                continue;
             }
 
-            // Should only be call for a range we're about to return
-            private Range<Token> maybeUnwrap(Range<Token> range)
+            int nextDepth = range.depth + 1;
+            if (nextDepth == depth)
             {
-                if (!range.isTrulyWrapAround())
-                    return range;
-
-                List<Range<Token>> ranges = range.unwrap();
-                assert ranges.size() == 2;
-                Range<Token> left = ranges.get(0);
-                Range<Token> right = ranges.get(1);
-                queue.offerFirst(withDepth(right, depth));
-                return left;
+                maybeUnwrap(range.left, midpoint, output, maxToken);
+                maybeUnwrap(midpoint, range.right, output, maxToken);
             }
-        };
+            else
+            {
+                // otherwise, let left be split some more
+                queue.offerFirst(withDepth(midpoint, range.right, nextDepth));
+                queue.offerFirst(withDepth(range.left, midpoint, nextDepth));
+            }
+        }
     }
 
-    private static Iterator<Range<Token>> maybeUnwrap(Range<Token> range)
+    private static void maybeUnwrap(Range<Token> range, List<Token> output, Token maxToken)
     {
-        return range.isTrulyWrapAround() ? range.unwrap().iterator() : Iterators.singletonIterator(range);
+        maybeUnwrap(range.left, range.right, output, maxToken);
     }
 
-    private static Token midpoint(Range<Token> range, IPartitioner partitioner)
+    private static void maybeUnwrap(Token left, Token right, List<Token> output, Token maxToken)
     {
-        Token midpoint = partitioner.midpoint(range.left, range.right);
+        if (Range.isTrulyWrapAround(left, right))
+        {
+            add(left, maxToken, output);
+            add(left.minValue(), right, output);
+        }
+        else
+        {
+            // We basically don't want to add the min token to our output but instead replace it by maxToken. But even
+            // if the input range doesn't wrap, it may be using the min token as end bound, so replace it now.
+            add(left, right.isMinimum() ? maxToken : right, output);
+        }
+    }
+
+    private static void add(Token left, Token right, List<Token> output)
+    {
+        output.add(left);
+        output.add(right);
+    }
+
+    private static Token midpoint(Token left, Token right, IPartitioner partitioner)
+    {
+        Token midpoint = partitioner.midpoint(left, right);
         // It's theoretically possible the range is small enough to not be splittable. This shouldn't really happen as
         // local ranges shouldn't be *that* small and we don't split unless a range covers more than SEGMENT_SIZE_TARGET,
         // but let's not have a hard to reproduce bug just-in-case.
-        return midpoint.equals(range.left) || midpoint.equals(range.right) ? null : midpoint;
+        return midpoint.equals(left) || midpoint.equals(right) ? null : midpoint;
     }
 
-    private static RangeWithDepth withDepth(Range<Token> range, int depth)
+    private static RangeWithDepth withDepth(Token left, Token right, int depth)
     {
-        return new RangeWithDepth(range, depth);
+        return new RangeWithDepth(left, right, depth);
     }
 
     // Minor auxiliary class for use by splitRangeAndUnwrap
     private static class RangeWithDepth
     {
-        final Range<Token> range;
-        final int depth;
+        private final Token left;
+        private final Token right;
+        private final int depth;
 
-        private RangeWithDepth(Range<Token> range, int depth)
+        private RangeWithDepth(Token left, Token right, int depth)
         {
-            this.range = range;
+            this.left = left;
+            this.right = right;
             this.depth = depth;
         }
     }

@@ -392,7 +392,7 @@ public class RateSimulator
          */
         public static Info compute(boolean includeAllTables)
         {
-            return new Info((includeAllTables ? allStores() : NodeSyncHelpers.nodeSyncEnabledTables())
+            return new Info((includeAllTables ? allStores() : NodeSyncHelpers.nodeSyncEnabledStores())
                             .map(TableInfo::fromStore)
                             .collect(Collectors.toCollection(Info::newBackingSet)));
         }

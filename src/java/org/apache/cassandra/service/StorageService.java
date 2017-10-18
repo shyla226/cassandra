@@ -232,7 +232,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private final AtomicBoolean doneAuthSetup = new AtomicBoolean(false);
 
-    final NodeSyncService nodeSyncService = new NodeSyncService();
+    public final NodeSyncService nodeSyncService = new NodeSyncService();
 
     private void setBootstrapStateBlocking(SystemKeyspace.BootstrapState state)
     {
@@ -4049,7 +4049,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         try
         {
-            CompletableFuture<Void> nodeSyncStopFuture = nodeSyncService.disable(false);
+            CompletableFuture<Boolean> nodeSyncStopFuture = nodeSyncService.disableAsync(false);
             waitForNodeSyncShutdown(nodeSyncStopFuture);
 
             PendingRangeCalculatorService.instance.blockUntilFinished();
@@ -4128,7 +4128,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
-    private static void waitForNodeSyncShutdown(CompletableFuture<Void> nodeSyncStopFuture) throws InterruptedException, ExecutionException
+    private static void waitForNodeSyncShutdown(CompletableFuture<Boolean> nodeSyncStopFuture) throws InterruptedException, ExecutionException
     {
         // As NodeSync may write into it's own nodesync_status table, wait on it to finish now before flushing
         // tables since the goal of flushing is to ensure we have nothing to replay.
@@ -4653,7 +4653,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             setMode(Mode.DRAINING, "starting drain process", !isFinalShutdown);
 
-            CompletableFuture<Void> nodeSyncStopFuture = nodeSyncService.disable(false);
+            CompletableFuture<Boolean> nodeSyncStopFuture = nodeSyncService.disableAsync(false);
             BatchlogManager.instance.shutdown();
             HintsService.instance.pauseDispatch();
 
