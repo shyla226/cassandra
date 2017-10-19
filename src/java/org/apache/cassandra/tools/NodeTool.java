@@ -158,6 +158,7 @@ public class NodeTool
                 EnableBackup.class,
                 DisableBackup.class,
                 ResetLocalSchema.class,
+                ReloadLocalSchema.class,
                 ReloadTriggers.class,
                 SetCacheKeysToSave.class,
                 DisableThrift.class,

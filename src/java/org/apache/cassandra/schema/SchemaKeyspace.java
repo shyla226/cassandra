@@ -289,7 +289,7 @@ public final class SchemaKeyspace
         for (String schemaTable : ALL)
         {
             String query = String.format("DELETE FROM %s.%s USING TIMESTAMP ? WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, schemaTable);
-            for (String systemKeyspace : SchemaConstants.SYSTEM_KEYSPACE_NAMES)
+            for (String systemKeyspace : SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES)
                 executeOnceInternal(query, timestamp, systemKeyspace);
         }
 
@@ -437,7 +437,7 @@ public final class SchemaKeyspace
 
     private static boolean isSystemKeyspaceSchemaPartition(DecoratedKey partitionKey)
     {
-        return SchemaConstants.isSystemKeyspace(UTF8Type.instance.compose(partitionKey.getKey()));
+        return SchemaConstants.isLocalSystemKeyspace(UTF8Type.instance.compose(partitionKey.getKey()));
     }
 
     /*
@@ -913,7 +913,7 @@ public final class SchemaKeyspace
 
     public static Keyspaces fetchNonSystemKeyspaces()
     {
-        return fetchKeyspacesWithout(SchemaConstants.SYSTEM_KEYSPACE_NAMES);
+        return fetchKeyspacesWithout(SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES);
     }
 
     private static Keyspaces fetchKeyspacesWithout(Set<String> excludedKeyspaceNames)
@@ -1357,6 +1357,18 @@ public final class SchemaKeyspace
      * Merging schema
      */
 
+    /*
+     * Reload schema from local disk. Useful if a user made changes to schema tables by hand, or has suspicion that
+     * in-memory representation got out of sync somehow with what's on disk.
+     */
+    public static synchronized void reloadSchemaAndAnnounceVersion()
+    {
+        Keyspaces before = Schema.instance.getReplicatedKeyspaces();
+        Keyspaces after = fetchNonSystemKeyspaces();
+        mergeSchema(before, after);
+        Schema.instance.updateVersionAndAnnounce();
+    }
+
     /**
      * Merge remote schema in form of mutations with local and mutate ks/cf metadata objects
      * (which also involves fs operations on add/drop ks/cf)
@@ -1390,7 +1402,11 @@ public final class SchemaKeyspace
         // fetch the new state of schema from schema tables (not applied to Schema.instance yet)
         Keyspaces after = fetchKeyspacesOnly(affectedKeyspaces);
 
-        // deal with the diff
+        mergeSchema(before, after);
+    }
+
+    private static synchronized void mergeSchema(Keyspaces before, Keyspaces after)
+    {
         MapDifference<String, KeyspaceMetadata> keyspacesDiff = before.diff(after);
 
         // dropped keyspaces
