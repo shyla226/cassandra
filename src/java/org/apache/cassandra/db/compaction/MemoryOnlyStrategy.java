@@ -95,7 +95,7 @@ public class MemoryOnlyStrategy extends AbstractCompactionStrategy
     // CW - CX + WX  This is trivially greater than zero (the workload size W will be greater than the previous
     // expected compaction size C) so the efficiency monotonically increasing with respect to the size of X.
     //
-    // APOLLO-342: see this comment for a further discussion on this reasoning:
+    // DB-342: see this comment for a further discussion on this reasoning:
     // https://github.com/riptano/apollo/pull/153#discussion_r110808864
     private static final Comparator<SSTableReader> maxSizeComparator = new Comparator<SSTableReader>()
     {

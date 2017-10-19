@@ -360,7 +360,7 @@ public class Keyspace
         this.viewManager = new ViewManager(this);
         for (TableMetadata cfm : metadata.tablesAndViews())
         {
-            if (cfm == null) // unsure how this can happen but it did (APOLLO-395)
+            if (cfm == null) // unsure how this can happen but it did (DB-395)
                 throw new IllegalStateException("Unexpected null metadata for keyspace " + keyspaceName);
 
             logger.trace("Initializing {}.{}", getName(), cfm.name);
@@ -755,7 +755,7 @@ public class Keyspace
      * Convert a list of ks names to ks instances, if possible. If we fail to open the ks,
      * it is suppressed. Even though we receive ksName for keyspaces with valid metadata, if
      * there is a race with dropping the keyspace, the metadata and ks instance may be deleted
-     * after the ks names were returned, see APOLLO-395.
+     * after the ks names were returned, see DB-395.
      *
      * @param ksNames - the list of keyspace names to convert
      *

@@ -74,7 +74,7 @@ public class FileHandle extends SharedCloseableImpl
      A private copy of the memory mapped regions for files that are memory mapped,
      null otherwise.
 
-     This is needed for MemoryOnlyStrategy, see APOLLO-342. It could be removed by storing
+     This is needed for MemoryOnlyStrategy, see DB-342. It could be removed by storing
      a property in the regions to determine if the memory should be locked, rather than driving
      the decision to lock the memory from the compaction strategy.
      */

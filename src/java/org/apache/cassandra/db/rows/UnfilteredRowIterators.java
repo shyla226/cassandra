@@ -167,7 +167,7 @@ public abstract class UnfilteredRowIterators
     {
         // We only want to put something in the digest if the partition is not empty.
         // TODO In pre-TPC, FlowableUnfilteredPartition should not contain empty partition. It's a walkaround
-        // to avoid costly emptyFiltering in Flow. SEE APOLLO-1023
+        // to avoid costly emptyFiltering in Flow. SEE DB-1023
         if (partition.header.isEmpty() && partition.staticRow().isEmpty())
         {
             return partition.content.reduce(true,

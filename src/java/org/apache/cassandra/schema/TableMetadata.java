@@ -21,10 +21,10 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.Objects;
 
+import com.datastax.bdp.db.nodesync.NodeSyncService;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.*;
 
-import com.datastax.apollo.nodesync.NodeSyncService;
 import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;

@@ -125,7 +125,7 @@ public class Mutation implements IMutation, Schedulable
         }
         catch (IllegalStateException | UnknownKeyspaceException e)
         {
-            // Some tests (including ones outside of Apollo) create mutations for keyspaces that don't exist and/or on
+            // Some tests (including ones outside of DSE-DB) create mutations for keyspaces that don't exist and/or on
             // servers that are not initialized, and we will get here when that happens. To not break those tests, we
             // return null here and simply don't set the scheduler/operationExecutor: it's safe to assume those tests
             // are not applying the mutation and that those executors will simply never get used.

@@ -55,7 +55,7 @@ import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
  * This is initialized on startup:
  * @see CassandraDaemon#initializeTPC()
  *
- * Each loop runs managed on a single thread ({@link TPCThread}) which may be pinned to a particular CPU. Apollo can
+ * Each loop runs managed on a single thread ({@link TPCThread}) which may be pinned to a particular CPU. DSE-DB can
  * route tasks relative to a particular partition to a single loop thereby avoiding any multi-threaded access, removing
  * the need for concurrent datastructures and locks.
  */
@@ -167,7 +167,7 @@ public class TPC
          * a scheduler subscribe is called, and therefore indirectly every time observeOn or subscribeOn
          * are called. Provided that the thread local of the calling thread is not changed after scheduling
          * the task, we can be confident that the scheduler's thread will inherit the same thread state,
-         * see APOLLO-488 for more details.
+         * see DB-488 for more details.
          */
         RxJavaPlugins.setScheduleHandler((runnable) -> {
             runnable = TPCRunnable.wrap(runnable);

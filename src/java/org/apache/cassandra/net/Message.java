@@ -308,7 +308,7 @@ public abstract class Message<P>
      */
     boolean isTimedOut(long currentTimeMillis)
     {
-        // Note1: we used to have a list of droppable verbs (it's still in OSS too) but we don't anymore (since APOLLO-497).
+        // Note1: we used to have a list of droppable verbs (it's still in OSS too) but we don't anymore (since DB-497).
         // Instead, all two-way verbs can be dropped once timed out. The rational is that any two-way verb better have a
         // timeout (failure happens, we should not wait indefinitely), but then once that timeout elapses, whomever sent
         // the message will have given up on the response _and_ will have taken any actions necessary on the assumption

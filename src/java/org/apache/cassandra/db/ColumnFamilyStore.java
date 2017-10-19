@@ -1867,7 +1867,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             {
                 for (SSTableReader ssTable : currentView.sstables)
                 {
-                    // As reported in APOLLO-290, custom indexes that use a regular Cassandra table as the backing data
+                    // As reported in DB-290, custom indexes that use a regular Cassandra table as the backing data
                     // store (such as PartitionedVertexTable in DSE) can cause duplicate hardlink errors when a snapshot
                     // is performed.  This is because the backing table is also registered as an Index CFS (see Index.getBackingTable()),
                     // so it gets snapshotted once as an index table, and once as a normal table.  We check for duplicates

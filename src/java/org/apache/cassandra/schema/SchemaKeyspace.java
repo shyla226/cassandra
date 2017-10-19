@@ -25,12 +25,12 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import com.datastax.bdp.db.utils.concurrent.CompletableFutures;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.*;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
-import com.datastax.apollo.utils.concurrent.CompletableFutures;
 import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

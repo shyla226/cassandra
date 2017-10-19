@@ -22,7 +22,7 @@ Operations
      and no longer implicitly prefers the local data center. Specifying no sources or DC/racks is
      now considered an error.
      See `nodetool help rebuild` about which combinations of DCs/racks or endpoints to include or
-     exclude are possible. (APOLLO-581)
+     exclude are possible. (DB-581)
    - Nodetool repair will now run full repairs by default, use "-inc" option to run incremental repair.
    - Incremental repairs are disallowed on tables with Materialized Views or CDC. Run full repairs on these
      tables.
@@ -37,9 +37,9 @@ Operations
 Upgrading
 ---------
    - The ITrigger interface has been modified from "augment" to "augmentNonBlocking" for non-blocking
-     internal architecture (APOLLO-1046).
+     internal architecture (DB-1046).
    - Removed support for directly setting JMX remote port via the com.sun.management.jmxremote.port
-     system property, deprecated since 3.6. See CASSANDRA-11725 and APOLLO-1040 for more details.
+     system property, deprecated since 3.6. See CASSANDRA-11725 and DB-1040 for more details.
    - The table system_auth.resource_role_permissons_index is no longer used and should be dropped
      after all nodes are on 6.0.
    - Incremental repairs are no longer supported on tables with materialized views or CDC until

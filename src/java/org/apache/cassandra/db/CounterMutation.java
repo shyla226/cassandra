@@ -74,7 +74,7 @@ public class CounterMutation implements IMutation, Schedulable
      *   If we were sure that at any given time a partition key is handled by only a TPC thread, then we
      *   could make LOCKS smaller and thread local. However, there are cases when this is currently
      *   not true, such us before StorageService is initialized or when the topology changes. We may
-     *   be able to improve on this in APOLLO-694, which will deal with topology changes.
+     *   be able to improve on this in DB-694, which will deal with topology changes.
      */
     private static final Striped<Semaphore> LOCKS = Striped.semaphore(TPC.getNumCores() * 1024, 1);
 
@@ -228,7 +228,7 @@ public class CounterMutation implements IMutation, Schedulable
                 {
                     Tracing.trace("Failed to acquire counter locks, scheduling retry");
                     // TODO: 1 microsecond is an arbitrary value that was chosen to avoid spinning the CPU too much, we
-                    // should perform some tests to see if there is an impact in changing this value (APOLLO-799)
+                    // should perform some tests to see if there is an impact in changing this value (DB-799)
                     mutation.getScheduler().scheduleDirect(() -> acquireLocks(source, locks, startTime),
                                                            TPCTaskType.COUNTER_ACQUIRE_LOCK,
                                                            1,

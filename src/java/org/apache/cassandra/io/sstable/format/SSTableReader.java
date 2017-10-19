@@ -1623,7 +1623,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         }
 
     /**
-     * Lock memory mapped segments in RAM, see APOLLO-342.
+     * Lock memory mapped segments in RAM, see DB-342.
      * @param instance - the memory only status instance, that keeps track of global limits
      */
     public void lock(MemoryOnlyStatus instance)
@@ -1637,7 +1637,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
 
     /**
-     * Unlock memory mapped segments that were locked in RAM, if any, see APOLLO-342.
+     * Unlock memory mapped segments that were locked in RAM, if any, see DB-342.
      * @param instance - the memory only status instance, that keeps track of global limits
      */
     public void unlock(MemoryOnlyStatus instance)
@@ -1661,10 +1661,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     /**
      * Return the file handles to the files on disk that should be locked in RAM when said files are memory mapped.
      *
-     * APOLLO-342: it's kind of ugly that we need to expose {@link MemoryOnlyStatus} to the sstable
+     * DB-342: it's kind of ugly that we need to expose {@link MemoryOnlyStatus} to the sstable
      * reader, so I prefer to only limit it to the base class by asking the sub-classes for their
      * files, rather than polluting them with MemoryOnlyStatus by making the {@link SSTableReader#lock(MemoryOnlyStatus)}
-     * and related methods abstract, this also avoids duplicating code. See APOLLO-342 and the follow up ticket
+     * and related methods abstract, this also avoids duplicating code. See DB-342 and the follow up ticket
      * for possible improvements.
      *
      * @return - the file handles to the files on disk that can be locked in RAM.

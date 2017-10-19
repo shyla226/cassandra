@@ -110,7 +110,7 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
      *                enough).
      * @return a pair of the created {@code ReadCallback} and the endpoints to query. The reason we also return the
      * endpoints to query (instead of directly using the returned callback {@code endpoints} field) is that we reuse the
-     * data response we got on the digest read (APOLLO-368) and so should not query the corresponding node. In other
+     * data response we got on the digest read (DB-368) and so should not query the corresponding node. In other
      * words, the returned endpoints will be the endpoints of the callback minus one.
      */
     Pair<ReadCallback<FlowablePartition>, Collection<InetAddress>> forDigestMismatchRepair(List<InetAddress> targets)

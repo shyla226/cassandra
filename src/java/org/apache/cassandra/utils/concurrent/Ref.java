@@ -643,7 +643,7 @@ public final class Ref<T> implements RefCounted<T>
         if (clazz == null || clazz == PhantomReference.class || clazz == Class.class || java.lang.reflect.Member.class.isAssignableFrom(clazz))
             return emptyList();
 
-        // APOLLO-942
+        // DB-942
         // Ignore fields for the following classes because of the async file executor in AsynchronousChannelProxy, the epollEventLoop in AIOEpollFileChannel,
         // and the executor and futures used by Caffeine in ChunkCache.
         // The executors own worker threads, which own thread groups, which end up strong referencing FileHandle or ChannelProxy

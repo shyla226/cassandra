@@ -258,7 +258,7 @@ public class Memtable implements Comparable<Memtable>
     // been issued and all writes to the memtable have completed
     public boolean isClean()
     {
-        // Force memtable switch if boundaries have changed (APOLLO-939)
+        // Force memtable switch if boundaries have changed (DB-939)
         return isEmpty() && boundaries.equals(cfs.keyspace.getTPCBoundaries());
     }
 

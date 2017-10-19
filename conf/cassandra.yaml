@@ -1172,7 +1172,7 @@ continuous_paging:
 # each write which may be lower in order to facilitate availability.
 # ideal_consistency_level: EACH_QUORUM
 
-# Memory limit for Apollo In-Memory tables as a fraction of system memory (the default is 0.2, or 20%)
+# Memory limit for DSE In-Memory tables as a fraction of system memory (the default is 0.2, or 20%)
 max_memory_to_lock_fraction: 0.20
 
 # # Can also be specified as a maximum in MB; the fraction value is ignored if this is set to a non-zero value.

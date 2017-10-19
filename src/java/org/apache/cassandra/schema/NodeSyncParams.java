@@ -29,11 +29,10 @@ import java.util.function.Function;
 
 import javax.annotation.Nullable;
 
+import com.datastax.bdp.db.nodesync.NodeSyncService;
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.datastax.apollo.nodesync.NodeSyncService;
 import org.apache.cassandra.cql3.CQLSyntaxHelper;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.InvalidRequestException;

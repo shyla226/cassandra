@@ -289,7 +289,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * have been created because of a potential race between flushing the system
      * index info tables (done by {@link #markIndexesBuilding(Set, boolean, boolean)} and
      * indexing the partition (done by {@link #indexPartition(DecoratedKey, Set, PageSize)}),
-     * see APOLLO-882 for more details.
+     * see DB-882 for more details.
      *
      * @param metadata - the table metadata that contains the metadata of the indexes to create and build
      * @param isNewCF true if the index is added as part of a new table/columnfamily (i.e. loading a CF at startup), 

@@ -1133,7 +1133,7 @@ public class CustomIndexTest extends CQLTester
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 0, 1);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 2, 0, 0);
 
-        // As reported in APOLLO-290, custom indexes that use a regular Cassandra table as the backing data store
+        // As reported in DB-290, custom indexes that use a regular Cassandra table as the backing data store
         // can cause duplicate hardlink errors when a snapshot is performed
         StorageService.instance.takeSnapshot("sometag", KEYSPACE, "index_keyspace");
     }

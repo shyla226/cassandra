@@ -21,11 +21,12 @@ import java.util.Collections;
 
 import org.junit.Test;
 
-import com.datastax.apollo.nodesync.Segment;
+import com.datastax.bdp.db.nodesync.Segment;
+
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.schema.TableMetadata;
 
-import static com.datastax.apollo.nodesync.NodeSyncTestTools.*;
+import static com.datastax.bdp.db.nodesync.NodeSyncTestTools.*;
 import static org.junit.Assert.*;
 
 public class SystemDistributedKeyspaceTest extends CQLTester

@@ -26,9 +26,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.datastax.bdp.db.nodesync.RateSimulator;
 import com.google.common.base.Splitter;
 
-import com.datastax.apollo.nodesync.RateSimulator;
 import io.airlift.airline.Arguments;
 import io.airlift.airline.Command;
 import io.airlift.airline.Option;

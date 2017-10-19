@@ -83,7 +83,7 @@ public class MemoryOnlyStatus implements MemoryOnlyStatusMXBean
             logger.debug("Lock buffer address: {} length: {}", address, length);
             if (NativeLibrary.tryMlock(address, length))
             {
-                // DSP-14169/APOLLO-1052: checking buffer.isLoaded() returns true and judging by the API docs, it's merely a hint
+                // DSP-14169/DB-1052: checking buffer.isLoaded() returns true and judging by the API docs, it's merely a hint
                 // and not a guarantee. Therefore we just call buffer.load() directly to make sure a byte is read and brought into memory.
                 buffer.load();
                 return MemoryLockedBuffer.succeeded(address, lengthRoundedTo4k);

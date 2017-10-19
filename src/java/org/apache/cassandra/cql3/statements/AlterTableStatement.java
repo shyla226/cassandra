@@ -241,7 +241,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
 
                 if (!SchemaConstants.isUserKeyspace(keyspace()))
                 {
-                    // With APOLLO-965, we started allowing users to alter the NodeSync setting on distributed system
+                    // With DB-965, we started allowing users to alter the NodeSync setting on distributed system
                     // tables, but to keep that ticket less risky, we don't allow the altering of any other setting (the
                     // underlying reason being that we don't have a good way in general to let user change those
                     // system table settings while still preserving our ability to change these same settings if we

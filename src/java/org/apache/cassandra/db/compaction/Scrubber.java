@@ -149,7 +149,7 @@ public class Scrubber implements Closeable
 
     public void validatePrimaryKey(ByteBuffer pk, String filename)
     {
-        // Collection indexes incorrectly pick up the validator, see APOLLO-418 for details
+        // Collection indexes incorrectly pick up the validator, see DB-418 for details
         if (cfs.isIndex() && cfs.metadata().partitionKeyType.isCollection())
             return;
         try

@@ -142,7 +142,7 @@ public class MigrationManager
         /*
          * Don't answer schema pulls from nodes with a different or unknown major version (may have incompatible schema)
          * We have to check this condition when answering pulls since we may have a mismatched
-         * version that the requesting node had not yet learned before sending the pull (see APOLLO-1026)
+         * version that the requesting node had not yet learned before sending the pull (see DB-1026)
          */
         return MessagingService.instance().knowsVersion(endpoint)
                && MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version;

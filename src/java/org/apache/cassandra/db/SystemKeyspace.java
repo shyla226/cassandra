@@ -526,7 +526,7 @@ public final class SystemKeyspace
      * start-up services unless it is required (CASSANDRA-9054). Some snitches however do
      * require peers info and {@link DatabaseDescriptor#toolInitialization()} does load
      * the snitches, so we load the peers cache on demand if it is safe to do so (not on
-     * a TPC thread), see APOLLO-1210.
+     * a TPC thread), see DB-1210.
      *
      * WARNING: this method should not be called by a method already holding the {@link #GLOBAL_LOCK}.
      */

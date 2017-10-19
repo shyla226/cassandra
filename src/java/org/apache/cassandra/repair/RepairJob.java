@@ -129,7 +129,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
         }
 
         // This caches token ranges digests received by a given node in this session
-        // to avoid sending the same range to a destination multiple times (APOLLO-390)
+        // to avoid sending the same range to a destination multiple times (DB-390)
         Map<InetAddress, Set<RangeHash>> receivedRangeCache = new HashMap<>();
         List<SyncTask> syncTasks = new ArrayList<>();
         try
@@ -147,7 +147,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
             SyncTask previous = null;
 
             // Sync tasks are submitted sequentially
-            // At the tail, inter-dc syncs task so ranges already transferred from local DC are skipped (APOLLO-390)
+            // At the tail, inter-dc syncs task so ranges already transferred from local DC are skipped (DB-390)
             for (int i = 0; i < treesByDc.size(); i++)
             {
                 for (int j = i + 1; j < treesByDc.size(); j++)
@@ -162,7 +162,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
                 }
             }
 
-            // At the head, intra-dc sync tasks so local range transfers are prioritized (APOLLO-390)
+            // At the head, intra-dc sync tasks so local range transfers are prioritized (DB-390)
             for (List<TreeResponse> localDc : treesByDc)
             {
                 for (int i = 0; i < localDc.size(); i++)
@@ -178,7 +178,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
 
             assert syncTasks.size() == IntMath.binomial(trees.size(), 2) : "Not enough sync tasks.";
 
-            //run sync tasks sequentially to avoid overloading coordinator (APOLLO-216)
+            //run sync tasks sequentially to avoid overloading coordinator (DB-216)
             //after the stream session is started, it will run in paralell
             if (previous != null)
                 taskExecutor.submit(previous);

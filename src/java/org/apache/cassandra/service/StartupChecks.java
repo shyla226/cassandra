@@ -167,7 +167,7 @@ public class StartupChecks
             // If the standard com.sun.management.jmxremote.port property has been set
             // then the JVM agent will have already started up a default JMX connector
             // server, so we don't accept this property anymore.
-            // See: CASSANDRA-11540 & CASSANDRA-11725 & APOLLO-1040
+            // See: CASSANDRA-11540 & CASSANDRA-11725 & DB-1040
             if (System.getProperty("com.sun.management.jmxremote.port") != null)
             {
                     throw new StartupException(StartupException.ERR_WRONG_CONFIG,
@@ -526,7 +526,7 @@ public class StartupChecks
             File dir = new File(dataDir);
             try
             {
-                File tmp = File.createTempFile("apollo", null, dir);
+                File tmp = File.createTempFile("dse-db", null, dir);
                 try
                 {
                     // This is part where Netty opens the file

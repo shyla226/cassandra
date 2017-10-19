@@ -41,8 +41,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
+import com.datastax.bdp.db.nodesync.NodeSyncService;
+import com.datastax.bdp.db.utils.concurrent.CompletableFutures;
 
-import com.datastax.apollo.utils.concurrent.CompletableFutures;
 import io.reactivex.Completable;
 import org.apache.commons.lang3.StringUtils;
 
@@ -85,7 +86,6 @@ import org.apache.cassandra.locator.*;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.repair.*;
-import com.datastax.apollo.nodesync.NodeSyncService;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -1170,7 +1170,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 migrations.add(MigrationManager.forceAnnounceNewTable(expectedTable));
             }
             // If it exists, on an upgrade, it's schema may not be up-to-date so update it if it's not the case.
-            // One of the subtlety is that we let users override the NodeSync parameters (see APOLLO-965) and we don't
+            // One of the subtlety is that we let users override the NodeSync parameters (see DB-965) and we don't
             // want to override such setting here. So we both ignore NodeSync when checking if the defined schema differs
             // from the expected one *and* preserve the defined NodeSync setting if we do have to override the schema.
             // Note that this mean that if we ever want to change the default NodeSync setting for some system tables,

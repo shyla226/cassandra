@@ -23,7 +23,6 @@ import java.util.Collection;
 
 import javax.annotation.Nullable;
 
-import com.datastax.apollo.nodesync.Segment;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -37,6 +36,8 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.versioning.Versioned;
+
+import com.datastax.bdp.db.nodesync.Segment;
 
 /**
  * A read command use by NodeSync.

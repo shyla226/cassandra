@@ -206,7 +206,7 @@ public class PartitionIndex implements Closeable
 
     /**
      * @return the file handle to the file on disk. This is needed for locking the index in RAM,
-     * see APOLLO-342 and follow up ticket on how this should be reworked.
+     * see DB-342 and follow up ticket on how this should be reworked.
      */
     FileHandle getFileHandle()
     {

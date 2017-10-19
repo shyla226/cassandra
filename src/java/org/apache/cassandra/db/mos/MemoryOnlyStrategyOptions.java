@@ -21,7 +21,7 @@ public class MemoryOnlyStrategyOptions
     // from JMX . . . which means that if we alter the compaction strategy to sizetiered, the setting remains
     // until the server is rebooted when it goes back to the SizeTiered default of 4.  This is obviously Not Good,
     // so we just have our own values which default to 2 and 32 respectively.
-    // EDIT post integration (APOLLO-342): it is possible to now rely on the compaction params but we'd have to support
+    // EDIT post integration (DB-342): it is possible to now rely on the compaction params but we'd have to support
     // both the mos_ and the plain version, due to lack of time this has not been done yet
     public static final String MOS_MINCOMPACTIONTHRESHOLD = "mos_min_threshold";
     public static final String MOS_MAXCOMPACTIONTHRESHOLD = "mos_max_threshold";

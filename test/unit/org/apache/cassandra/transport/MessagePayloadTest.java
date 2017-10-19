@@ -150,7 +150,7 @@ public class MessagePayloadTest extends CQLTester
             testMessagePayload(KEYSPACE + ".atable", null, createOptions(protocolVersion, null));
             if (protocolVersion.isGreaterOrEqualTo(ProtocolVersion.V5, ProtocolVersion.DSE_V2))
             {
-                // allow sending keyspaces (APOLLO-600, CASSANDRA-10145)
+                // allow sending keyspaces (DB-600, CASSANDRA-10145)
                 testMessagePayload("anothertable", KEYSPACE, createOptions(protocolVersion, KEYSPACE));
             }
         }

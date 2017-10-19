@@ -43,7 +43,7 @@ import org.apache.cassandra.utils.StatusLogger;
  * here is meant to be meaningful for end users. Further, we sometime want to count separately messages of the same
  * {@link Verb} based on more specific criteria; typically, for reads, we distinguish single partition and range reads
  * because they have different timeouts and tend to be used for different type of tasks, so counting the numbers dropped
- * separately makes sense. Also, we're trying to preserve "some" backward compatibility from pre-APOLLO-497, which
+ * separately makes sense. Also, we're trying to preserve "some" backward compatibility from pre-DB-497, which
  * explains some of the naming of these groups.
  */
 public class DroppedMessages

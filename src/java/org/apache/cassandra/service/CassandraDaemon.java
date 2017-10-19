@@ -125,7 +125,7 @@ public class CassandraDaemon
                 // We should be able to remove this special handling once all the Completable.merge()
                 // and WriteHandler.toObservable() calls have been removed from StorageProxy.
                 // We basically want to remove rx-java from the read and write path and use completable
-                // futures instead, see APOLLO-1038.
+                // futures instead, see DB-1038.
                 logger.debug("Got duplicated request execution exception: {}", e.getMessage());
                 return;
             }
@@ -347,7 +347,7 @@ public class CassandraDaemon
         // Re-populate token metadata after commit log recover (new peers might be loaded onto system keyspace #10293)
         StorageService.instance.populateTokenMetadata();
 
-        // Enable active repair service: this *must* happen prior to enabling compactions (see APOLLO-821)
+        // Enable active repair service: this *must* happen prior to enabling compactions (see DB-821)
         ActiveRepairService.instance.start();
 
         // Enable auto compaction
@@ -436,7 +436,7 @@ public class CassandraDaemon
         nativeTransportService = new NativeTransportService();
 
         // During initialization memtables do not know the correct token boundaries to use.
-        // Flush all to make sure they get updated and don't get stuck on core 0 (APOLLO-939).
+        // Flush all to make sure they get updated and don't get stuck on core 0 (DB-939).
         // There should be no data in the tables at this time, so this should complete very quickly.
         // Wait for it before signalling we are ready.
         FBUtilities.waitOnFutures(Iterables.concat(Iterables.transform(Keyspace.all(),

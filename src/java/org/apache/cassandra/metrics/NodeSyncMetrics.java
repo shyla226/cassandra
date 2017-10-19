@@ -20,8 +20,8 @@ package org.apache.cassandra.metrics;
 import java.util.HashSet;
 import java.util.Set;
 
-import com.datastax.apollo.nodesync.ValidationOutcome;
-import com.datastax.apollo.nodesync.NodeSyncService;
+import com.datastax.bdp.db.nodesync.NodeSyncService;
+import com.datastax.bdp.db.nodesync.ValidationOutcome;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 

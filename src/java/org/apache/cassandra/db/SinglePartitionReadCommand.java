@@ -96,7 +96,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * It's ok to get a smaller oldestUnrepairedTombstone value when ReadCommand is reused, but the concurrent update
      * to this variable is not safe, we might lost update.
      *
-     * SEE APOLLO-1084
+     * SEE DB-1084
      */
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
 

@@ -310,7 +310,7 @@ class ContinuousPageWriter
          * The limiter does not tell how much longer till the next permit is available, so we pause by one tenth
          * of the whole interval between permits, so that we'll never be more than 10% slower (can we do better?).
          * If there is no pause, then the CPU will be spinning for too long if the rate is really small,
-         * see APOLLO-316.
+         * see DB-316.
          * <p>
          * byteman tests inject exceptions in this method, if it is renamed then the tests should be
          * updated as well, see ContinuousPagingErrorsTest

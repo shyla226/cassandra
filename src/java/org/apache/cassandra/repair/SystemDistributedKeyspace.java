@@ -34,16 +34,18 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import com.datastax.bdp.db.nodesync.NodeSyncRecord;
+import com.datastax.bdp.db.nodesync.Segment;
+import com.datastax.bdp.db.nodesync.UserValidationProposer;
+import com.datastax.bdp.db.nodesync.ValidationInfo;
+import com.datastax.bdp.db.nodesync.ValidationMetrics;
+import com.datastax.bdp.db.nodesync.ValidationOutcome;
 import com.google.common.base.Joiner;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.datastax.apollo.nodesync.UserValidationProposer;
-import com.datastax.apollo.nodesync.ValidationMetrics;
-import com.datastax.apollo.nodesync.ValidationOutcome;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -57,9 +59,6 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
-import com.datastax.apollo.nodesync.ValidationInfo;
-import com.datastax.apollo.nodesync.NodeSyncRecord;
-import com.datastax.apollo.nodesync.Segment;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.Functions;
 import org.apache.cassandra.schema.KeyspaceMetadata;

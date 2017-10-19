@@ -68,7 +68,7 @@ import org.apache.cassandra.transport.messages.ResultMessage;
  * is available without the client requesting it, by using sessions
  * uniquely identified by the client state and the frame id of the initial request sent by the client.
  *
- * See APOLLO-3/CASSANDRA-11521 for more details.
+ * See DB-3/CASSANDRA-11521 for more details.
  */
 public class ContinuousPagingService
 {

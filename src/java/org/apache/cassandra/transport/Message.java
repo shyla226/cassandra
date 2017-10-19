@@ -235,10 +235,10 @@ public abstract class Message
 
         /**
          * Set this to false if the response should not be sent to the client.
-         * This is a temporary workaround for APOLLO-3, see also APOLLO-267 for more details.
+         * This is a temporary workaround for DB-3, see also DB-267 for more details.
          * The correct way to fix this would be to change all execute() methods to return an
          * optional response or null, but we want to do this in a separate ticket, at a time
-         * convenient for DSE, since it would be impacted too, see APOLLO-237.
+         * convenient for DSE, since it would be impacted too, see DB-237.
          */
         public final boolean sendToClient;
 

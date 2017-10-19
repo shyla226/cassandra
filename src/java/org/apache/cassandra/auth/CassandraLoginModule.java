@@ -143,7 +143,7 @@ public class CassandraLoginModule implements LoginModule
         credentials.put(PasswordAuthenticator.USERNAME_KEY, username);
         credentials.put(PasswordAuthenticator.PASSWORD_KEY, String.valueOf(password));
 
-        // APOLLO-412: we need to repeat the PasswordAuthenticator credentials validation because the DSE authenticator assumes
+        // DB-412: we need to repeat the PasswordAuthenticator credentials validation because the DSE authenticator assumes
         // a Kerberos connection if the password is null. In order to avoid breaking dtests, we also need to check on
         // the username since the tests expect an error on a missing username, not missing password, if both are missing.
         PasswordAuthenticator.checkValidCredentials(credentials);

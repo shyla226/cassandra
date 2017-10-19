@@ -138,7 +138,7 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
     private void attachConnection(InetAddress from, int sessionIndex, IncomingStreamingConnection connection, boolean isForOutgoing, StreamVersion version) throws IOException
     {
         StreamSession session = coordinator.getOrCreateSessionById(from, sessionIndex, connection.socket.getInetAddress());
-        session.init(this, !isRepairSession()); //Avoid flush storm during repair (APOLLO-466)
+        session.init(this, !isRepairSession()); //Avoid flush storm during repair (DB-466)
         session.handler.initiateOnReceivingSide(connection, isForOutgoing, version);
     }
 

@@ -145,7 +145,7 @@ public class ByteOrderedPartitioner implements IPartitioner
                 sz += Math.scalb(other[shift] & 0xFF, ++shift * -8);
             // Address wraparound.
             // Note: sz may be 0 for different tokens if one adds zeroes at the end of the other. In that case we do
-            // an additional comparison to check for wraparound (APOLLO-934)
+            // an additional comparison to check for wraparound (DB-934)
             if (sz < 0.0 || sz == 0.0 && token.length >= other.length)
                 sz += 1;
 

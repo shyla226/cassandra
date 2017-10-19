@@ -563,7 +563,7 @@ public class AlterTest extends CQLTester
         assertInvalidMessage("Cannot alter schema", alterBase + " RENAME foo TO bar");
         assertInvalidMessage("Cannot alter schema", alterBase + " DROP foo");
 
-        // Now check that we can change the NodeSync parameters (APOLLO-965)
+        // Now check that we can change the NodeSync parameters (DB-965)
         assertEquals(NodeSyncParams.DEFAULT, metadata(keyspace, table).params.nodeSync);
         NodeSyncParams nodeSyncParams = new NodeSyncParams(true, (int)TimeUnit.HOURS.toSeconds(42), Collections.emptyMap());
         execute(alterBase + "WITH nodesync=" + nodeSyncParams);
@@ -574,7 +574,7 @@ public class AlterTest extends CQLTester
         execute(alterBase + "WITH nodesync=" + nodeSyncParams2);
         assertEquals(nodeSyncParams2, metadata(keyspace, table).params.nodeSync);
 
-        // Lastly, check that we cannot update other parameters (since it shouldn't be allowed as of APOLLO-965)
+        // Lastly, check that we cannot update other parameters (since it shouldn't be allowed as of DB-965)
         assertInvalidMessage("Only the nodesync option is user-modifiable", alterBase + " WITH comment='foo'");
         assertInvalidMessage("Only the nodesync option is user-modifiable", alterBase + " WITH gc_grace_seconds=42");
     }
