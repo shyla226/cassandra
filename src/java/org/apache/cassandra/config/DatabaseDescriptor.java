@@ -981,6 +981,12 @@ public class DatabaseDescriptor
                 return 0;
             }
         };
+
+        if (conf.cross_dc_rtt_in_ms < 0)
+        {
+            throw new ConfigurationException("cross_dc_rtt_in_ms must be non-negative, use 0 to disable or positive value to enable.",
+                                             false);
+        }
     }
 
     // definitely not safe for tools + clients - implicitly instantiates schema
@@ -1448,6 +1454,16 @@ public class DatabaseDescriptor
     public static void setWriteRpcTimeout(long timeOutInMillis)
     {
         conf.write_request_timeout_in_ms = timeOutInMillis;
+    }
+
+    public static long getCrossDCRttLatency()
+    {
+        return conf.cross_dc_rtt_in_ms;
+    }
+
+    public static void setCrossDCRttLatency(long timeOutInMillis)
+    {
+        conf.cross_dc_rtt_in_ms = timeOutInMillis;
     }
 
     public static long getCounterWriteRpcTimeout()

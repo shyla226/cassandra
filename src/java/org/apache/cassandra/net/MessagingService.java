@@ -833,10 +833,9 @@ public final class MessagingService implements MessagingServiceMBean
     public int addCallback(IAsyncCallback cb, MessageOut message, InetAddress to, long timeout, boolean failureCallback)
     {
         assert message.verb != Verb.MUTATION; // mutations need to call the overload with a ConsistencyLevel
-        int messageId = nextId();
-        CallbackInfo previous = callbacks.put(messageId, new CallbackInfo(to, cb, callbackDeserializers.get(message.verb), failureCallback), timeout);
-        assert previous == null : String.format("Callback already exists for id %d! (%s)", messageId, previous);
-        return messageId;
+        return addCallbackInternal(to,
+                                   new CallbackInfo(to, cb, callbackDeserializers.get(message.verb), failureCallback),
+                                   timeout);
     }
 
     public int addCallback(IAsyncCallback cb,
@@ -847,18 +846,24 @@ public final class MessagingService implements MessagingServiceMBean
                            boolean allowHints)
     {
         assert message.verb == Verb.MUTATION
-            || message.verb == Verb.COUNTER_MUTATION
-            || message.verb == Verb.PAXOS_COMMIT;
-        int messageId = nextId();
+                || message.verb == Verb.COUNTER_MUTATION
+                || message.verb == Verb.PAXOS_COMMIT;
 
-        CallbackInfo previous = callbacks.put(messageId,
-                                              new WriteCallbackInfo(to,
-                                                                    cb,
-                                                                    message,
-                                                                    callbackDeserializers.get(message.verb),
-                                                                    consistencyLevel,
-                                                                    allowHints),
-                                                                    timeout);
+        return addCallbackInternal(to,
+                                   new WriteCallbackInfo(to,
+                                                         cb,
+                                                         message,
+                                                         callbackDeserializers.get(message.verb),
+                                                         consistencyLevel,
+                                                         allowHints),
+                                   timeout);
+    }
+
+    private int addCallbackInternal(InetAddress to, CallbackInfo callbackInfo, long timeout)
+    {
+        int messageId = nextId();
+        timeout = timeout + DatabaseDescriptor.getEndpointSnitch().getCrossDcRttLatency(to);
+        CallbackInfo previous = callbacks.put(messageId, callbackInfo, timeout);
         assert previous == null : String.format("Callback already exists for id %d! (%s)", messageId, previous);
         return messageId;
     }

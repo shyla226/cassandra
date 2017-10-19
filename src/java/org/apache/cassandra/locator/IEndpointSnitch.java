@@ -64,4 +64,9 @@ public interface IEndpointSnitch
      * to be faster than 2 sequential queries, one against l1 followed by one against l2.
      */
     public boolean isWorthMergingForRangeQuery(List<InetAddress> merged, List<InetAddress> l1, List<InetAddress> l2);
+
+    /**
+     * returns additional cross DC RTT latency in ms applied to cross DC request
+     */
+    public long getCrossDcRttLatency(InetAddress endpoint);
 }
