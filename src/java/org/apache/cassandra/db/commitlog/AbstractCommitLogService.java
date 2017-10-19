@@ -23,12 +23,14 @@ import java.util.concurrent.locks.LockSupport;
 
 import io.reactivex.*;
 import io.reactivex.subjects.BehaviorSubject;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.TimeSource;
 
 public abstract class AbstractCommitLogService
 {
@@ -36,7 +38,7 @@ public abstract class AbstractCommitLogService
     private volatile boolean shutdown = false;
 
     // all Allocations written before this time will be synced
-    protected volatile long lastSyncedAt = System.currentTimeMillis();
+    protected volatile long lastSyncedAt;
 
     // counts of total written, and pending, log messages
     private final AtomicLong written = new AtomicLong(0);
@@ -47,7 +49,8 @@ public abstract class AbstractCommitLogService
     final CommitLog commitLog;
     private final String name;
     private final long pollIntervalNanos;
-
+    final TimeSource timeSource;
+    
     private static final Logger logger = LoggerFactory.getLogger(AbstractCommitLogService.class);
 
     /**
@@ -56,11 +59,13 @@ public abstract class AbstractCommitLogService
      *
      * Subclasses may be notified when a sync finishes by using the syncComplete WaitQueue.
      */
-    AbstractCommitLogService(final CommitLog commitLog, final String name, final long pollIntervalMillis)
+    AbstractCommitLogService(final CommitLog commitLog, final String name, final long pollIntervalMillis, TimeSource timeSource)
     {
         this.commitLog = commitLog;
         this.name = name;
         this.pollIntervalNanos = TimeUnit.NANOSECONDS.convert(pollIntervalMillis, TimeUnit.MILLISECONDS);
+        this.timeSource = timeSource;
+        this.lastSyncedAt = timeSource.nanoTime();
     }
 
     // Separated into individual method to ensure relevant objects are constructed before this is started.
@@ -88,7 +93,7 @@ public abstract class AbstractCommitLogService
                     try
                     {
                         // sync and signal
-                        long syncStarted = System.nanoTime();
+                        long syncStarted = timeSource.nanoTime();
                         // This is a target for Byteman in CommitLogSegmentManagerTest
                         commitLog.sync();
                         lastSyncedAt = syncStarted;
@@ -96,23 +101,23 @@ public abstract class AbstractCommitLogService
                         syncTimePublisher.onNext(syncStarted);
 
                         // sleep any time we have left before the next one is due
-                        long now = System.nanoTime();
+                        long now = timeSource.nanoTime();
                         long wakeUpAt = syncStarted + pollIntervalNanos;
-                        if (wakeUpAt < now)
+                        if (wakeUpAt - now < 0)
                         {
                             // if we have lagged noticeably, update our lag counter
-                            if (firstLagAt == 0)
+                            if (lagCount == 0)
                             {
                                 firstLagAt = now;
                                 totalSyncDuration = syncExceededIntervalBy = syncCount = lagCount = 0;
                             }
-                            syncExceededIntervalBy += now - wakeUpAt;
+                            syncExceededIntervalBy += Math.abs(now - wakeUpAt);
                             lagCount++;
                         }
                         syncCount++;
-                        totalSyncDuration += now - syncStarted;
+                        totalSyncDuration += Math.abs(now - syncStarted);
 
-                        if (firstLagAt > 0)
+                        if (lagCount != 0)
                         {
                             //Only reset the lag tracking if it actually logged this time
                             boolean logged = NoSpamLogger.log(logger,
@@ -121,19 +126,19 @@ public abstract class AbstractCommitLogService
                                                               TimeUnit.MINUTES,
                                                               "Out of {} commit log syncs over the past {}s with average duration of {}ms, {} have exceeded the configured commit interval by an average of {}ms",
                                                               syncCount,
-                                                              String.format("%.2f", (now - firstLagAt) * 1e-9d),
+                                                              String.format("%.2f", Math.abs(now - firstLagAt) * 1e-9d),
                                                               String.format("%.2f", totalSyncDuration * 1e-6d / syncCount),
                                                               lagCount,
                                                               String.format("%.2f", syncExceededIntervalBy * 1e-6d / lagCount));
                            if (logged)
-                               firstLagAt = 0;
+                               lagCount = 0;
                         }
 
                         if (shutdownRequested)
                             return;
 
-                        if (wakeUpAt > now)
-                            LockSupport.parkNanos(wakeUpAt - now);
+                        if (wakeUpAt - now > 0)
+                            LockSupport.parkNanos(Math.abs(wakeUpAt - now));
                     }
                     catch (Throwable t)
                     {
@@ -188,14 +193,14 @@ public abstract class AbstractCommitLogService
      */
     public void syncBlocking()
     {
-        long requestTime = System.nanoTime();
+        long requestTime = timeSource.nanoTime();
         requestExtraSync();
         awaitSyncAt(requestTime).blockingGet();
     }
 
     Completable awaitSyncAt(long syncTime)
     {
-        return syncTimePublisher.filter(v -> v >= syncTime)
+        return syncTimePublisher.filter(v -> v - syncTime > 0)
                                 .first(0L)
                                 .toCompletable();
     }
