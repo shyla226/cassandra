@@ -17,16 +17,18 @@
  */
 package org.apache.cassandra.utils.memory;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.Collection;
+import java.util.LinkedList;
 
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.NativeClustering;
+import org.apache.cassandra.db.NativeDecoratedKey;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.NativeCell;
+import org.apache.cassandra.db.rows.Row;
 
 /**
  * This NativeAllocator uses global slab allocation strategy
@@ -37,6 +39,8 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
  * The slab allocation reduces heap fragmentation from small
  * long-lived objects.
  *
+ * Since we only allocate from specific memtable threads, this class does not need to be thread-safe but we assert
+ * it's only called from the expected thread.
  */
 public class NativeAllocator extends MemtableAllocator
 {
@@ -44,22 +48,17 @@ public class NativeAllocator extends MemtableAllocator
     private final static int MAX_CLONED_SIZE = 128 * 1024; // bigger than this don't go in the region
     private final static int MIN_REGION_SIZE = 8 * 1024;
 
-    // globally stash any Regions we allocate but are beaten to using, and use these up before allocating any more
-    private static final Map<Integer, RaceAllocated> RACE_ALLOCATED = new HashMap<>();
-
-    static
-    {
-        for(int i = MIN_REGION_SIZE ; i <= MAX_REGION_SIZE; i *= 2)
-            RACE_ALLOCATED.put(i, new RaceAllocated());
-    }
-
-    private final AtomicReference<Region> currentRegion = new AtomicReference<>();
-    private final ConcurrentLinkedQueue<Region> regions = new ConcurrentLinkedQueue<>();
+    private Region currentRegion = null;
+    private Collection<Region> regions = new LinkedList<>();
     private final EnsureOnHeap.CloneToHeap cloneToHeap = new EnsureOnHeap.CloneToHeap();
 
-    protected NativeAllocator(NativePool pool)
+    private final int coreId;
+
+    protected NativeAllocator(NativePool pool, int coreId)
     {
         super(pool.onHeap.newAllocator(), pool.offHeap.newAllocator());
+        assert TPC.isValidCoreId(coreId) || coreId == -1;   // -1 is used for estimateRowOverhead and testing
+        this.coreId = coreId;
     }
 
     private static class CloningBTreeRowBuilder extends BTreeRow.Builder
@@ -103,6 +102,7 @@ public class NativeAllocator extends MemtableAllocator
 
     public long allocate(int size)
     {
+        assert TPC.isOnCore(coreId) || coreId == -1;
         assert size >= 0;
         offHeap().allocated(size);
         // satisfy large allocations directly from JVM since they don't cause fragmentation
@@ -110,19 +110,19 @@ public class NativeAllocator extends MemtableAllocator
         if (size > MAX_CLONED_SIZE)
             return allocateOversize(size);
 
-        while (true)
-        {
-            Region region = currentRegion.get();
-            long peer;
-            if (region != null && (peer = region.allocate(size)) > 0)
-                return peer;
+        long peer;
+        Region region = currentRegion;
+        if (region != null && (peer = region.allocate(size)) > 0)
+            return peer;
 
-            trySwapRegion(region, size);
-        }
+        peer = trySwapRegion(size).allocate(size);
+        assert peer > 0;
+        return peer;
     }
 
-    private void trySwapRegion(Region current, int minSize)
+    private Region trySwapRegion(int minSize)
     {
+        Region current = currentRegion;
         // decide how big we want the new region to be:
         //  * if there is no prior region, we set it to min size
         //  * otherwise we double its size; if it's too small to fit the allocation, we round it up to 4-8x its size
@@ -134,19 +134,13 @@ public class NativeAllocator extends MemtableAllocator
         size = Math.min(MAX_REGION_SIZE, size);
 
         // first we try and repurpose a previously allocated region
-        RaceAllocated raceAllocated = RACE_ALLOCATED.get(size);
-        Region next = raceAllocated.poll();
-
-        // if there are none, we allocate one
-        if (next == null)
-            next = new Region(MemoryUtil.allocate(size), size);
+        Region next = new Region(MemoryUtil.allocate(size), size);
 
         // we try to swap in the region we've obtained;
         // if we fail to swap the region, we try to stash it for repurposing later; if we're out of stash room, we free it
-        if (currentRegion.compareAndSet(current, next))
-            regions.add(next);
-        else if (!raceAllocated.stash(next))
-            MemoryUtil.free(next.peer);
+        currentRegion = next;
+        regions.add(next);
+        return next;
     }
 
     private long allocateOversize(int size)
@@ -171,27 +165,6 @@ public class NativeAllocator extends MemtableAllocator
         super.setDiscarded();
     }
 
-    // used to ensure we don't keep loads of race allocated regions around indefinitely. keeps the total bound on wasted memory low.
-    private static class RaceAllocated
-    {
-        final ConcurrentLinkedQueue<Region> stash = new ConcurrentLinkedQueue<>();
-        final Semaphore permits = new Semaphore(8);
-        boolean stash(Region region)
-        {
-            if (!permits.tryAcquire())
-                return false;
-            stash.add(region);
-            return true;
-        }
-        Region poll()
-        {
-            Region next = stash.poll();
-            if (next != null)
-                permits.release();
-            return next;
-        }
-    }
-
     /**
      * A region of memory out of which allocations are sliced.
      *
@@ -213,12 +186,12 @@ public class NativeAllocator extends MemtableAllocator
          * Offset for the next allocation, or the sentinel value -1
          * which implies that the region is still uninitialized.
          */
-        private final AtomicInteger nextFreeOffset = new AtomicInteger(0);
+        private int nextFreeOffset = 0;
 
         /**
          * Total number of allocations satisfied from this buffer
          */
-        private final AtomicInteger allocCount = new AtomicInteger();
+        private int allocCount = 0;
 
         /**
          * Create an uninitialized region. Note that memory is not allocated yet, so
@@ -239,30 +212,22 @@ public class NativeAllocator extends MemtableAllocator
          */
         long allocate(int size)
         {
-            while (true)
-            {
-                int oldOffset = nextFreeOffset.get();
+            int oldOffset = nextFreeOffset;
 
-                if (oldOffset + size > capacity) // capacity == remaining
-                    return -1;
+            if (oldOffset + size > capacity) // capacity == remaining
+                return -1;
 
-                // Try to atomically claim this region
-                if (nextFreeOffset.compareAndSet(oldOffset, oldOffset + size))
-                {
-                    // we got the alloc
-                    allocCount.incrementAndGet();
-                    return peer + oldOffset;
-                }
-                // we raced and lost alloc, try again
-            }
+            nextFreeOffset += size;
+            ++allocCount;
+            return peer + oldOffset;
         }
 
         @Override
         public String toString()
         {
             return "Region@" + System.identityHashCode(this) +
-                    " allocs=" + allocCount.get() + "waste=" +
-                    (capacity - nextFreeOffset.get());
+                    " allocs=" + allocCount + "waste=" +
+                    (capacity - nextFreeOffset);
         }
     }
 

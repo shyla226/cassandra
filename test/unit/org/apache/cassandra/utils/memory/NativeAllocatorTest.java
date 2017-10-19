@@ -81,7 +81,7 @@ public class NativeAllocatorTest
                         isClean.countDown();
                     }
                 }
-            }));
+            }), -1);
             allocatorRef.set(allocator);
             final Runnable markBlocking = new Runnable()
             {

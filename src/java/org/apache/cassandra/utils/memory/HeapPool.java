@@ -29,7 +29,7 @@ public class HeapPool extends MemtablePool
         super(maxOnHeapMemory, 0, cleanupThreshold, cleaner);
     }
 
-    public MemtableAllocator newAllocator()
+    public MemtableAllocator newAllocator(int coreId)
     {
         return new Allocator(this);
     }

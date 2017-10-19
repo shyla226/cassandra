@@ -296,7 +296,7 @@ public class SASIIndex implements Index, INotificationConsumer
 
             public Completable adjustMemtableSize(long additionalSpace)
             {
-                baseCfs.getTracker().getView().getCurrentMemtable().getAllocator().onHeap().allocated(additionalSpace);
+                baseCfs.getTracker().getView().getCurrentMemtable().allocateExtraOnHeap(additionalSpace);
                 return Completable.complete();
             }
         };

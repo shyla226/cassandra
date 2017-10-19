@@ -28,6 +28,7 @@ import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.StreamSupport;
@@ -944,32 +945,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     private void logFlush()
     {
         // reclaiming includes that which we are GC-ing;
-        float onHeapRatio = 0, offHeapRatio = 0;
-        long onHeapTotal = 0, offHeapTotal = 0;
-        Memtable memtable = getTracker().getView().getCurrentMemtable();
-        onHeapRatio +=  memtable.getAllocator().onHeap().ownershipRatio();
-        offHeapRatio += memtable.getAllocator().offHeap().ownershipRatio();
-        onHeapTotal += memtable.getAllocator().onHeap().owns();
-        offHeapTotal += memtable.getAllocator().offHeap().owns();
-
-        for (ColumnFamilyStore indexCfs : indexManager.getAllIndexColumnFamilyStores())
-        {
-            MemtableAllocator allocator = indexCfs.getTracker().getView().getCurrentMemtable().getAllocator();
-            onHeapRatio += allocator.onHeap().ownershipRatio();
-            offHeapRatio += allocator.offHeap().ownershipRatio();
-            onHeapTotal += allocator.onHeap().owns();
-            offHeapTotal += allocator.offHeap().owns();
-        }
+        Memtable.MemoryUsage usage = getCurrentMemoryUsageIncludingIndexes();
 
         logger.debug("Enqueuing flush of {}: {}",
                      name,
                      String.format("%s (%.0f%%) on-heap, %s (%.0f%%) off-heap",
-                                   FBUtilities.prettyPrintMemory(onHeapTotal),
-                                   onHeapRatio * 100,
-                                   FBUtilities.prettyPrintMemory(offHeapTotal),
-                                   offHeapRatio * 100));
+                                   FBUtilities.prettyPrintMemory(usage.ownsOnHeap),
+                                   usage.ownershipRatioOnHeap * 100,
+                                   FBUtilities.prettyPrintMemory(usage.ownsOffHeap),
+                                   usage.ownershipRatioOffHeap * 100));
     }
-
 
     /**
      * Flush if there is unflushed data in the memtables
@@ -1343,26 +1328,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
                 // find the total ownership ratio for the memtable and all SecondaryIndexes owned by this CF,
                 // both on- and off-heap, and select the largest of the two ratios to weight this CF
-                float onHeap = 0f, offHeap = 0f;
-                onHeap += current.getAllocator().onHeap().ownershipRatio();
-                offHeap += current.getAllocator().offHeap().ownershipRatio();
+                Memtable.MemoryUsage usage = cfs.getCurrentMemoryUsageIncludingIndexes();
 
-                for (ColumnFamilyStore indexCfs : cfs.indexManager.getAllIndexColumnFamilyStores())
-                {
-                    MemtableAllocator allocator = indexCfs.getTracker().getView().getCurrentMemtable().getAllocator();
-                    onHeap += allocator.onHeap().ownershipRatio();
-                    offHeap += allocator.offHeap().ownershipRatio();
-                }
-
-                float ratio = Math.max(onHeap, offHeap);
+                float ratio = Math.max(usage.ownershipRatioOnHeap, usage.ownershipRatioOffHeap);
                 if (ratio > largestRatio)
                 {
                     largest = current;
                     largestRatio = ratio;
                 }
 
-                liveOnHeap += onHeap;
-                liveOffHeap += offHeap;
+                liveOnHeap += usage.ownershipRatioOnHeap;
+                liveOffHeap += usage.ownershipRatioOffHeap;
             }
 
             if (largest != null)
@@ -1371,11 +1347,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 float usedOffHeap = Memtable.MEMORY_POOL.offHeap.usedRatio();
                 float flushingOnHeap = Memtable.MEMORY_POOL.onHeap.reclaimingRatio();
                 float flushingOffHeap = Memtable.MEMORY_POOL.offHeap.reclaimingRatio();
-                float thisOnHeap = largest.getAllocator().onHeap().ownershipRatio();
-                float thisOffHeap = largest.getAllocator().offHeap().ownershipRatio();
+                Memtable.MemoryUsage thisUsage = largest.getMemoryUsage();
                 logger.debug("Flushing largest {} to free up room. Used total: {}, live: {}, flushing: {}, this: {}",
                             largest.cfs, ratio(usedOnHeap, usedOffHeap), ratio(liveOnHeap, liveOffHeap),
-                            ratio(flushingOnHeap, flushingOffHeap), ratio(thisOnHeap, thisOffHeap));
+                            ratio(flushingOnHeap, flushingOffHeap), ratio(thisUsage.ownershipRatioOnHeap, thisUsage.ownershipRatioOffHeap));
                 largest.cfs.switchMemtableIfCurrent(largest);
             }
         }
@@ -2605,6 +2580,32 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         // we return the main CFS first, which we rely on for simplicity in switchMemtable(), for getting the
         // latest commit log segment position
         return Iterables.concat(Collections.singleton(this), indexManager.getAllIndexColumnFamilyStores());
+    }
+
+    public Memtable.MemoryUsage getMemoryUsage()
+    {
+        Memtable.MemoryUsage usage = new Memtable.MemoryUsage();
+        for (Memtable m : data.getView().getAllMemtables())
+            m.addMemoryUsage(usage);
+        return usage;
+    }
+
+    public Memtable.MemoryUsage getMemoryUsageIncludingIndexes()
+    {
+        Memtable.MemoryUsage usage = getMemoryUsage();
+        for (ColumnFamilyStore cfs : indexManager.getAllIndexColumnFamilyStores())
+            for (Memtable m : cfs.data.getView().getAllMemtables())
+                m.addMemoryUsage(usage);
+        return usage;
+    }
+
+    private Memtable.MemoryUsage getCurrentMemoryUsageIncludingIndexes()
+    {
+        Memtable.MemoryUsage usage = getTracker().getView().getCurrentMemtable().getMemoryUsage();
+
+        for (ColumnFamilyStore indexCfs : indexManager.getAllIndexColumnFamilyStores())
+            indexCfs.getTracker().getView().getCurrentMemtable().addMemoryUsage(usage);
+        return usage;
     }
 
     public List<String> getBuiltIndexes()

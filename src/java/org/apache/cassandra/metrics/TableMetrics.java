@@ -358,14 +358,14 @@ public class TableMetrics
         {
             public Long getValue()
             {
-                return cfs.getTracker().getView().getCurrentMemtable().getAllocator().onHeap().owns();
+                return cfs.getTracker().getView().getCurrentMemtable().getMemoryUsage().ownsOnHeap;
             }
         });
         memtableOffHeapSize = createTableGauge("MemtableOffHeapSize", new Gauge<Long>()
         {
             public Long getValue()
             {
-                return cfs.getTracker().getView().getCurrentMemtable().getAllocator().offHeap().owns();
+                return cfs.getTracker().getView().getCurrentMemtable().getMemoryUsage().ownsOffHeap;
             }
         });
         memtableLiveDataSize = createTableGauge("MemtableLiveDataSize", new Gauge<Long>()
@@ -379,20 +379,14 @@ public class TableMetrics
         {
             public Long getValue()
             {
-                long size = 0;
-                for (ColumnFamilyStore cfs2 : cfs.concatWithIndexes())
-                    size += cfs2.getTracker().getView().getCurrentMemtable().getAllocator().onHeap().owns();
-                return size;
+                return cfs.getMemoryUsageIncludingIndexes().ownsOnHeap;
             }
         });
         allMemtablesOffHeapSize = createTableGauge("AllMemtablesOffHeapSize", new Gauge<Long>()
         {
             public Long getValue()
             {
-                long size = 0;
-                for (ColumnFamilyStore cfs2 : cfs.concatWithIndexes())
-                    size += cfs2.getTracker().getView().getCurrentMemtable().getAllocator().offHeap().owns();
-                return size;
+                return cfs.getMemoryUsageIncludingIndexes().ownsOffHeap;
             }
         });
         allMemtablesLiveDataSize = createTableGauge("AllMemtablesLiveDataSize", new Gauge<Long>()

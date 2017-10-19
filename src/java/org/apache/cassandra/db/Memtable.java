@@ -111,8 +111,6 @@ public class Memtable implements Comparable<Memtable>
 
     private static final int ROW_OVERHEAD_HEAP_SIZE = estimateRowOverhead(Integer.parseInt(System.getProperty("cassandra.memtable_row_overhead_computation_step", "100000")));
 
-    private final MemtableAllocator allocator;
-
     // the write barrier for directing writes to this memtable during a switch
     private volatile OpOrder.Barrier writeBarrier;
     // the precise upper bound of CommitLogPosition owned by this memtable
@@ -159,7 +157,6 @@ public class Memtable implements Comparable<Memtable>
     {
         this.cfs = cfs;
         this.commitLogLowerBound = commitLogLowerBound;
-        this.allocator = MEMORY_POOL.newAllocator();
         this.initialComparator = cfs.metadata().comparator;
         this.metadata = cfs.metadata();
         this.cfs.scheduleFlush();
@@ -174,7 +171,6 @@ public class Memtable implements Comparable<Memtable>
         this.initialComparator = metadata.comparator;
         this.metadata = metadata;
         this.cfs = null;
-        this.allocator = null;
         this.boundaries = TPCBoundaries.NONE;
         this.subranges = generatePartitionSubranges(boundaries.supportedCores());
     }
@@ -197,9 +193,40 @@ public class Memtable implements Comparable<Memtable>
         return boundaries;
     }
 
-    public MemtableAllocator getAllocator()
+    public void allocateExtraOnHeap(long additionalSpace)
     {
-        return allocator;
+        subranges[0].allocator.onHeap().allocated(additionalSpace);
+    }
+
+    public void allocateExtraOffHeap(long additionalSpace)
+    {
+        subranges[0].allocator.offHeap().allocated(additionalSpace);
+    }
+
+    static public class MemoryUsage
+    {
+        public float ownershipRatioOnHeap = 0.0f;
+        public float ownershipRatioOffHeap = 0.0f;
+        public long ownsOnHeap = 0;
+        public long ownsOffHeap = 0;
+    }
+
+    public MemoryUsage getMemoryUsage()
+    {
+        MemoryUsage stats = new MemoryUsage();
+        addMemoryUsage(stats);
+        return stats;
+    }
+
+    public void addMemoryUsage(MemoryUsage stats)
+    {
+        for (MemtableSubrange s : subranges)
+        {
+            stats.ownershipRatioOnHeap += s.allocator.onHeap().ownershipRatio();
+            stats.ownershipRatioOffHeap += s.allocator.offHeap().ownershipRatio();
+            stats.ownsOnHeap += s.allocator.onHeap().owns();
+            stats.ownsOffHeap += s.allocator.offHeap().owns();
+        }
     }
 
     @VisibleForTesting
@@ -208,12 +235,14 @@ public class Memtable implements Comparable<Memtable>
         assert this.writeBarrier == null;
         this.commitLogUpperBound = commitLogUpperBound;
         this.writeBarrier = writeBarrier;
-        allocator.setDiscarding();
+        for (MemtableSubrange sr : subranges)
+            sr.allocator.setDiscarding();
     }
 
     void setDiscarded()
     {
-        allocator.setDiscarded();
+        for (MemtableSubrange sr : subranges)
+            sr.allocator.setDiscarded();
     }
 
     // decide if this memtable should take the write, or if it should go to the next memtable
@@ -258,7 +287,7 @@ public class Memtable implements Comparable<Memtable>
 
     public boolean isLive()
     {
-        return allocator.isLive();
+        return subranges[0].allocator.isLive();
     }
 
     // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has
@@ -315,13 +344,14 @@ public class Memtable implements Comparable<Memtable>
             assert writeBarrier == null || writeBarrier.isAfter(opGroup)
             : String.format("Put called after write barrier\n%s", FBUtilities.Debug.getStackTrace());
 
-            if (previous == null)
-            {
-                final DecoratedKey cloneKey = allocator.clone(key);
-                AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
-                int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
-                allocator.onHeap().allocated(overhead);
-                partitionMap.updateLiveDataSize(8);
+                if (previous == null)
+                {
+                    MemtableAllocator allocator = partitionMap.allocator;
+                    final DecoratedKey cloneKey = allocator.clone(key);
+                    AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
+                    int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
+                    allocator.onHeap().allocated(overhead);
+                    partitionMap.updateLiveDataSize(8);
 
                 // We'll add the columns later.
                 partitionMap.put(cloneKey, empty);
@@ -348,7 +378,7 @@ public class Memtable implements Comparable<Memtable>
         // We should block the write if there is no space in the memtable memory to let flushes catch up. For
         // efficiency's sake we can't know the exact size this mutation requires; instead we let the limits slip a
         // little and only block _after_ the used space is above the limit.
-        return allocator.whenBelowLimits(write, opGroup, TPC.getForCore(coreId), TPCTaskType.WRITE_SWITCH_FOR_MEMTABLE);
+        return partitionMap.allocator.whenBelowLimits(write, opGroup, TPC.getForCore(coreId), TPCTaskType.WRITE_SWITCH_FOR_MEMTABLE);
     }
 
     /**
@@ -397,9 +427,10 @@ public class Memtable implements Comparable<Memtable>
 
     public String toString()
     {
+        MemoryUsage usage = getMemoryUsage();
         return String.format("Memtable-%s@%s(%s serialized bytes, %s ops, %.0f%%/%.0f%% of on/off-heap limit)",
                              cfs.name, hashCode(), FBUtilities.prettyPrintMemory(getLiveDataSize()), getOperations(),
-                             100 * allocator.onHeap().ownershipRatio(), 100 * allocator.offHeap().ownershipRatio());
+                             100 * usage.ownershipRatioOnHeap, 100 * usage.ownershipRatioOffHeap);
     }
 
     public Flow<FlowableUnfilteredPartition> makePartitionFlow(final ColumnFilter columnFilter, final DataRange dataRange)
@@ -883,6 +914,13 @@ public class Memtable implements Comparable<Memtable>
         private final ColumnsCollector columnsCollector = new ColumnsCollector(metadata.regularAndStaticColumns());
         private final StatsCollector statsCollector = new StatsCollector();
 
+        private final MemtableAllocator allocator;
+
+        private MemtableSubrange(int coreId)
+        {
+            allocator = MEMORY_POOL.newAllocator(coreId);
+        }
+
         public AtomicBTreePartition get(PartitionPosition key)
         {
             return data.get(key);
@@ -924,11 +962,11 @@ public class Memtable implements Comparable<Memtable>
     private MemtableSubrange[] generatePartitionSubranges(int splits)
     {
         if (splits == 1)
-            return new MemtableSubrange[] { new MemtableSubrange() };
+            return new MemtableSubrange[] { new MemtableSubrange(0) };
 
         MemtableSubrange[] partitionMapContainer = new MemtableSubrange[splits];
         for (int i = 0; i < splits; i++)
-            partitionMapContainer[i] = new MemtableSubrange();
+            partitionMapContainer[i] = new MemtableSubrange(i);
 
         return partitionMapContainer;
     }
@@ -937,7 +975,7 @@ public class Memtable implements Comparable<Memtable>
     {
         // calculate row overhead
         int rowOverhead;
-        MemtableAllocator allocator = MEMORY_POOL.newAllocator();
+        MemtableAllocator allocator = MEMORY_POOL.newAllocator(-1);
         ConcurrentNavigableMap<PartitionPosition, Object> partitions = new ConcurrentSkipListMap<>();
         final Object val = new Object();
         for (int i = 0 ; i < count ; i++)

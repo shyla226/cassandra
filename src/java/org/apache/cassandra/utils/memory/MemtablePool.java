@@ -66,7 +66,7 @@ public abstract class MemtablePool
         return cleaner == null ? null : new MemtableCleanerThread<>(this, cleaner);
     }
 
-    public abstract MemtableAllocator newAllocator();
+    public abstract MemtableAllocator newAllocator(int coreId);
 
     public class SubPool
     {

@@ -18,16 +18,11 @@
 package org.apache.cassandra.utils.memory;
 
 import java.nio.ByteBuffer;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.Collection;
+import java.util.LinkedList;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import sun.nio.ch.DirectBuffer;
 
 /**
@@ -43,29 +38,30 @@ import sun.nio.ch.DirectBuffer;
  * Otherwise, variable length byte arrays allocated end up
  * interleaved throughout the heap, and the old generation gets progressively
  * more fragmented until a stop-the-world compacting collection occurs.
+ *
+ * Since we now only write to memtables from one thread, this allocator does not need to be thread-safe but we assert
+ * it's only called from the expected thread.
  */
 public class SlabAllocator extends MemtableBufferAllocator
 {
-    private static final Logger logger = LoggerFactory.getLogger(SlabAllocator.class);
-
-    private final static int REGION_SIZE = 1024 * 1024;
+    private final static int MIN_REGION_SIZE = 8 * 1024;
+    private final static int MAX_REGION_SIZE = 1024 * 1024;
     private final static int MAX_CLONED_SIZE = 128 * 1024; // bigger than this don't go in the region
 
-    // globally stash any Regions we allocate but are beaten to using, and use these up before allocating any more
-    private static final ConcurrentLinkedQueue<Region> RACE_ALLOCATED = new ConcurrentLinkedQueue<>();
-
-    private final AtomicReference<Region> currentRegion = new AtomicReference<>();
-    private final AtomicInteger regionCount = new AtomicInteger(0);
+    private Region currentRegion = null;
 
     // this queue is used to keep references to off-heap allocated regions so that we can free them when we are discarded
-    private final ConcurrentLinkedQueue<Region> offHeapRegions = new ConcurrentLinkedQueue<>();
-    private final AtomicLong unslabbedSize = new AtomicLong(0);
+    private final Collection<Region> offHeapRegions = new LinkedList<>();
     private final boolean allocateOnHeapOnly;
     private final EnsureOnHeap ensureOnHeap;
 
-    SlabAllocator(SubAllocator onHeap, SubAllocator offHeap, boolean allocateOnHeapOnly)
+    private final int coreId;
+
+    SlabAllocator(SubAllocator onHeap, SubAllocator offHeap, boolean allocateOnHeapOnly, int coreId)
     {
         super(onHeap, offHeap);
+        assert TPC.isValidCoreId(coreId) || coreId == -1;   // -1 is used for estimateRowOverhead and testing
+        this.coreId = coreId;
         this.allocateOnHeapOnly = allocateOnHeapOnly;
         this.ensureOnHeap = allocateOnHeapOnly ? new EnsureOnHeap.NoOp() : new EnsureOnHeap.CloneToHeap();
     }
@@ -77,6 +73,8 @@ public class SlabAllocator extends MemtableBufferAllocator
 
     public ByteBuffer allocate(int size)
     {
+        assert TPC.isOnCore(coreId) || coreId == -1;
+
         assert size >= 0;
         if (size == 0)
             return ByteBufferUtil.EMPTY_BYTE_BUFFER;
@@ -86,26 +84,50 @@ public class SlabAllocator extends MemtableBufferAllocator
         // as badly, and fill up our regions quickly
         if (size > MAX_CLONED_SIZE)
         {
-            unslabbedSize.addAndGet(size);
             if (allocateOnHeapOnly)
                 return ByteBuffer.allocate(size);
+
             Region region = new Region(ByteBuffer.allocateDirect(size));
             offHeapRegions.add(region);
             return region.allocate(size);
         }
 
-        while (true)
+        if (currentRegion != null)
         {
-            Region region = getRegion();
-
-            // Try to allocate from this region
-            ByteBuffer cloned = region.allocate(size);
+            ByteBuffer cloned = currentRegion.allocate(size);
             if (cloned != null)
                 return cloned;
-
-            // not enough space!
-            currentRegion.compareAndSet(region, null);
         }
+
+        int regionSize = getRegionSize(size);
+        assert regionSize >= size;
+
+        Region next = new Region(allocateOnHeapOnly ? ByteBuffer.allocate(regionSize) : ByteBuffer.allocateDirect(regionSize));
+        if (!allocateOnHeapOnly)
+            offHeapRegions.add(next);
+        currentRegion = next;
+
+        ByteBuffer cloned = currentRegion.allocate(size);
+        assert cloned != null;
+        return cloned;
+    }
+
+    public int getRegionSize(int minSize)
+    {
+        Region current = currentRegion;
+        // decide how big we want the new region to be:
+        //  * if there is no prior region, we set it to min size
+        //  * otherwise we double its size; if it's too small to fit the allocation, we round it up to 4-8x its size
+        int regionSize;
+        if (current == null)
+            regionSize = MIN_REGION_SIZE;
+        else
+            regionSize = current.data.capacity() * 2;
+
+        if (minSize > regionSize)
+            regionSize = Integer.highestOneBit(minSize) << 3;
+
+        return Math.min(MAX_REGION_SIZE, regionSize);
     }
 
     public void setDiscarded()
@@ -113,37 +135,6 @@ public class SlabAllocator extends MemtableBufferAllocator
         for (Region region : offHeapRegions)
             ((DirectBuffer) region.data).cleaner().clean();
         super.setDiscarded();
-    }
-
-    /**
-     * Get the current region, or, if there is no current region, allocate a new one
-     */
-    private Region getRegion()
-    {
-        while (true)
-        {
-            // Try to get the region
-            Region region = currentRegion.get();
-            if (region != null)
-                return region;
-
-            // No current region, so we want to allocate one. We race
-            // against other allocators to CAS in a Region, and if we fail we stash the region for re-use
-            region = RACE_ALLOCATED.poll();
-            if (region == null)
-                region = new Region(allocateOnHeapOnly ? ByteBuffer.allocate(REGION_SIZE) : ByteBuffer.allocateDirect(REGION_SIZE));
-            if (currentRegion.compareAndSet(null, region))
-            {
-                if (!allocateOnHeapOnly)
-                    offHeapRegions.add(region);
-                regionCount.incrementAndGet();
-                return region;
-            }
-
-            // someone else won race - that's fine, we'll try to grab theirs
-            // in the next iteration of the loop.
-            RACE_ALLOCATED.add(region);
-        }
     }
 
     /**
@@ -165,12 +156,12 @@ public class SlabAllocator extends MemtableBufferAllocator
          * Offset for the next allocation, or the sentinel value -1
          * which implies that the region is still uninitialized.
          */
-        private final AtomicInteger nextFreeOffset = new AtomicInteger(0);
+        private int nextFreeOffset = 0;
 
         /**
          * Total number of allocations satisfied from this buffer
          */
-        private final AtomicInteger allocCount = new AtomicInteger();
+        private int allocCount = 0;
 
         /**
          * Create an uninitialized region. Note that memory is not allocated yet, so
@@ -190,30 +181,23 @@ public class SlabAllocator extends MemtableBufferAllocator
          */
         public ByteBuffer allocate(int size)
         {
-            while (true)
-            {
-                int oldOffset = nextFreeOffset.get();
+            int oldOffset = nextFreeOffset;
 
-                if (oldOffset + size > data.capacity()) // capacity == remaining
-                    return null;
+            if (oldOffset + size > data.capacity()) // capacity == remaining
+                return null;
 
-                // Try to atomically claim this region
-                if (nextFreeOffset.compareAndSet(oldOffset, oldOffset + size))
-                {
-                    // we got the alloc
-                    allocCount.incrementAndGet();
-                    return (ByteBuffer) data.duplicate().position(oldOffset).limit(oldOffset + size);
-                }
-                // we raced and lost alloc, try again
-            }
+            // Try to atomically claim this region
+            nextFreeOffset += size;
+            ++allocCount;
+            return (ByteBuffer) data.duplicate().position(oldOffset).limit(oldOffset + size);
         }
 
         @Override
         public String toString()
         {
             return "Region@" + System.identityHashCode(this) +
-                   " allocs=" + allocCount.get() + "waste=" +
-                   (data.capacity() - nextFreeOffset.get());
+                   " allocs=" + allocCount + "waste=" +
+                   (data.capacity() - nextFreeOffset);
         }
     }
 }

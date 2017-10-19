@@ -29,13 +29,16 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.utils.flow.RxThreads;
 import org.apache.cassandra.utils.memory.HeapAllocator;
 import org.apache.cassandra.utils.memory.NativeAllocator;
 import org.apache.cassandra.utils.memory.NativePool;
@@ -56,21 +59,26 @@ public class NativeCellTest
 
         SchemaLoader.prepareServer();
 
-        nativeAllocator = new NativePool(Integer.MAX_VALUE, Integer.MAX_VALUE, 1f, null).newAllocator();
+        nativeAllocator = new NativePool(Integer.MAX_VALUE, Integer.MAX_VALUE, 1f, null).newAllocator(0);
     }
 
     @Test
     public void testCells() throws IOException
     {
-        for (int run = 0 ; run < 1000 ; run++)
-        {
-            Row.Builder builder = BTreeRow.unsortedBuilder(1);
-            builder.newRow(rndclustering());
-            int count = 1 + rand.nextInt(10);
-            for (int i = 0 ; i < count ; i++)
-                rndcd(builder);
-            test(builder.build());
-        }
+        Completable c = Completable.fromAction(() ->
+                                               {
+                                                   for (int run = 0; run < 1000; run++)
+                                                   {
+                                                       Row.Builder builder = BTreeRow.unsortedBuilder(1);
+                                                       builder.newRow(rndclustering());
+                                                       int count = 1 + rand.nextInt(10);
+                                                       for (int i = 0; i < count; i++)
+                                                           rndcd(builder);
+                                                       test(builder.build());
+                                                   }
+                                               });
+        c.subscribeOn(TPC.getForCore(0))
+         .blockingAwait();
     }
 
     private static Clustering rndclustering()
