@@ -21,6 +21,7 @@ import java.net.InetAddress;
 import java.util.*;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.FBUtilities;
 
 public abstract class AbstractEndpointSnitch implements IEndpointSnitch
 {
@@ -80,5 +81,19 @@ public abstract class AbstractEndpointSnitch implements IEndpointSnitch
                 return true;
         }
         return false;
+    }
+
+    @Override
+    public long getCrossDcRttLatency(InetAddress endpoint)
+    {
+        long crossDCLatency = DatabaseDescriptor.getCrossDCRttLatency();
+        assert crossDCLatency >= 0;
+        return (crossDCLatency == 0 || isLocalDC(endpoint)) ? 0 : crossDCLatency;
+    }
+
+    private static boolean isLocalDC(InetAddress target)
+    {
+        return Objects.equals(DatabaseDescriptor.getLocalDataCenter(),
+                              DatabaseDescriptor.getEndpointSnitch().getDatacenter(target));
     }
 }

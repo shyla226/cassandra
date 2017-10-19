@@ -52,6 +52,9 @@ public interface StorageProxyMBean
     public Long getTruncateRpcTimeout();
     public void setTruncateRpcTimeout(Long timeoutInMillis);
 
+    public long getCrossDCRttLatency();
+    public void setCrossDCRttLatency(long latencyInMillis);
+
     public void setNativeTransportMaxConcurrentConnections(Long nativeTransportMaxConcurrentConnections);
     public Long getNativeTransportMaxConcurrentConnections();
 

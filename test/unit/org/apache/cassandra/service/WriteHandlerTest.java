@@ -33,7 +33,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.WriteType;
-import org.apache.cassandra.locator.IEndpointSnitch;
+import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.Response;
@@ -59,7 +59,7 @@ public class WriteHandlerTest
         metadata.updateHostId(UUID.randomUUID(), InetAddress.getByName("127.1.0.255"));
         metadata.updateHostId(UUID.randomUUID(), InetAddress.getByName("127.2.0.255"));
 
-        DatabaseDescriptor.setEndpointSnitch(new IEndpointSnitch()
+        DatabaseDescriptor.setEndpointSnitch(new AbstractEndpointSnitch()
         {
             public String getRack(InetAddress endpoint)
             {
@@ -98,6 +98,11 @@ public class WriteHandlerTest
             public boolean isWorthMergingForRangeQuery(List<InetAddress> merged, List<InetAddress> l1, List<InetAddress> l2)
             {
                 return false;
+            }
+
+            public long getCrossDcRttLatency(InetAddress endpoint)
+            {
+                return 0;
             }
         });
         DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0);

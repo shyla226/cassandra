@@ -225,7 +225,7 @@ class MessageSerializer implements Message.Serializer
             if (elapsed > 0)
             {
                 MessagingService.instance().metrics.addTimeTaken(from, createdAtMillis - tstamp);
-                createdAtMillis = tstamp;
+                createdAtMillis = tstamp + DatabaseDescriptor.getEndpointSnitch().getCrossDcRttLatency(from) / 2;
             }
         }
 

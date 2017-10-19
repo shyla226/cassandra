@@ -99,6 +99,8 @@ public class Config
 
     public volatile long write_request_timeout_in_ms = 2000L;
 
+    public volatile long cross_dc_rtt_in_ms = 0L;
+
     public volatile long counter_write_request_timeout_in_ms = 5000L;
 
     public volatile long cas_contention_timeout_in_ms = 1000L;

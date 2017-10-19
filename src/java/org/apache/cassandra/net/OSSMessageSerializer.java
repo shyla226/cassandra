@@ -544,6 +544,8 @@ public class OSSMessageSerializer implements Message.Serializer
             MessagingService.instance().metrics.addTimeTaken(from, elapsed);
 
         boolean useSentTime = DatabaseDescriptor.hasCrossNodeTimeout() && elapsed > 0;
-        return useSentTime ? sentConstructionTime : currentTime;
+        return useSentTime
+                ? sentConstructionTime + DatabaseDescriptor.getEndpointSnitch().getCrossDcRttLatency(from) / 2
+                : currentTime;
     }
 }

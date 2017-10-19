@@ -794,6 +794,10 @@ truncate_request_timeout_in_ms: 60000
 # The default timeout for other, miscellaneous operations.
 # Lowest acceptable value is 10 ms.
 request_timeout_in_ms: 10000
+# Additional RTT latency between DCs applied to cross dc request, only set this property when
+# cross dc network latency is high. Value must be non-negative
+#  - Value = 0, means no additional rtt latency is applied
+# cross_dc_rtt_in_ms: 0
 
 # How long before a node logs slow queries. Select queries that take longer than
 # this timeout to execute, will generate an aggregated log message, so that slow queries

@@ -2294,6 +2294,12 @@ public class StorageProxy implements StorageProxyMBean
     public Long getWriteRpcTimeout() { return DatabaseDescriptor.getWriteRpcTimeout(); }
     public void setWriteRpcTimeout(Long timeoutInMillis) { DatabaseDescriptor.setWriteRpcTimeout(timeoutInMillis); }
 
+    @Override
+    public long getCrossDCRttLatency() { return DatabaseDescriptor.getCrossDCRttLatency(); }
+
+    @Override
+    public void setCrossDCRttLatency(long latencyInMillis) { DatabaseDescriptor.setCrossDCRttLatency(latencyInMillis); }
+
     public Long getCounterWriteRpcTimeout() { return DatabaseDescriptor.getCounterWriteRpcTimeout(); }
     public void setCounterWriteRpcTimeout(Long timeoutInMillis) { DatabaseDescriptor.setCounterWriteRpcTimeout(timeoutInMillis); }
 

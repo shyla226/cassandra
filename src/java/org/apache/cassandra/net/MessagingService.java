@@ -289,6 +289,7 @@ public final class MessagingService implements MessagingServiceMBean
                                       long timeout,
                                       TracingAwareExecutor executor)
     {
+        timeout += DatabaseDescriptor.getEndpointSnitch().getCrossDcRttLatency(to);
         CallbackInfo previous = callbacks.put(id, new CallbackInfo<>(to, callback, type, executor, startTimeMillis), timeout);
         assert previous == null : String.format("Callback already exists for id %d! (%s)", id, previous);
     }
