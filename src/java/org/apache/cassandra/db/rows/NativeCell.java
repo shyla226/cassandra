@@ -46,11 +46,9 @@ public class NativeCell extends AbstractCell
     }
 
     public NativeCell(NativeAllocator allocator,
-                      OpOrder.Group writeOp,
                       Cell cell)
     {
         this(allocator,
-             writeOp,
              cell.column(),
              cell.timestamp(),
              cell.ttl(),
@@ -60,7 +58,6 @@ public class NativeCell extends AbstractCell
     }
 
     public NativeCell(NativeAllocator allocator,
-                      OpOrder.Group writeOp,
                       ColumnMetadata column,
                       long timestamp,
                       int ttl,
@@ -83,7 +80,7 @@ public class NativeCell extends AbstractCell
             throw new IllegalStateException();
 
         // cellpath? : timestamp : ttl : localDeletionTime : length : <data> : [cell path length] : [<cell path data>]
-        peer = allocator.allocate((int) size, writeOp);
+        peer = allocator.allocate((int) size);
         MemoryUtil.setByte(peer + HAS_CELLPATH, (byte)(path == null ? 0 : 1));
         MemoryUtil.setLong(peer + TIMESTAMP, timestamp);
         MemoryUtil.setInt(peer + TTL, ttl);

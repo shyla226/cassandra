@@ -30,20 +30,17 @@ public abstract class MemtableBufferAllocator extends MemtableAllocator
         super(onHeap, offHeap);
     }
 
-    public Row.Builder rowBuilder(OpOrder.Group writeOp)
+    public Row.Builder rowBuilder()
     {
-        return allocator(writeOp).cloningBTreeRowBuilder();
+        return allocator.cloningBTreeRowBuilder();
     }
 
-    public DecoratedKey clone(DecoratedKey key, OpOrder.Group writeOp)
+    public DecoratedKey clone(DecoratedKey key)
     {
-        return new BufferDecoratedKey(key.getToken(), allocator(writeOp).clone(key.getKey()));
+        return new BufferDecoratedKey(key.getToken(), allocator.clone(key.getKey()));
     }
 
-    public abstract ByteBuffer allocate(int size, OpOrder.Group opGroup);
+    public abstract ByteBuffer allocate(int size);
 
-    protected AbstractAllocator allocator(OpOrder.Group writeOp)
-    {
-        return new ContextAllocator(writeOp, this);
-    }
+    final private ContextAllocator allocator = new ContextAllocator(this);
 }

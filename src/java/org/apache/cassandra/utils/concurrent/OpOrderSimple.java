@@ -18,6 +18,7 @@
  */
 package org.apache.cassandra.utils.concurrent;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
@@ -154,17 +155,16 @@ public class OpOrderSimple implements OpOrder
          * Another parallel states is ISBLOCKING:
          * <p/>
          * isBlocking => a barrier that is waiting on us (either directly, or via a future Ordered) is blocking general
-         * progress. This state is entered by calling Barrier.markBlocking(). If the running operations are blocked
-         * on a Signal that is also registered with the isBlockingSignal (probably through isSafeBlockingSignal)
-         * then they will be notified that they are blocking forward progress, and may take action to avoid that.
+         * progress. This state is entered by calling Barrier.markBlocking(). Running operations can attach to a change
+         * of the blocking state using the future isBlockingSignal, so that e.g. they can over-allocate resources in
+         * order to break a deadlock.
          */
 
         volatile Group prev;
         volatile Group next;
         final long id; // monotonically increasing id for compareTo()
         private volatile int running = 0; // number of operations currently running.  < 0 means we're expired, and the count of tasks still running is -(running + 1)
-        volatile boolean isBlocking; // indicates running operations are blocking future barriers
-        final WaitQueue isBlockingSignal = new WaitQueue(); // signal to wait on to indicate isBlocking is true
+        final CompletableFuture<Void> isBlockingSignal = new CompletableFuture<>(); // completion signifies entering blocking state; can be attached to
         final WaitQueue waiting = new WaitQueue(); // signal to wait on for completion
 
         static final AtomicIntegerFieldUpdater<Group> runningUpdater = AtomicIntegerFieldUpdater.newUpdater(Group.class, "running");
@@ -293,29 +293,28 @@ public class OpOrderSimple implements OpOrder
         }
 
         /**
+         * Mark this particular group as blocking. Should only be used via Barrier.markBlocking.
+         */
+        void markBlocking()
+        {
+            isBlockingSignal.complete(null);
+        }
+
+        /**
          * @return true if a barrier we are behind is, or may be, blocking general progress,
          * so we should try more aggressively to progress
          */
         public boolean isBlocking()
         {
-            return isBlocking;
+            return isBlockingSignal.isDone();
         }
 
         /**
-         * register to be signalled when a barrier waiting on us is, or maybe, blocking general progress,
-         * so we should try more aggressively to progress
+         * Returns a future which is completed when the blocking status is set.
          */
-        public WaitQueue.Signal isBlockingSignal()
+        public CompletableFuture<Void> whenBlocking()
         {
-            return isBlockingSignal.register();
-        }
-
-        /**
-         * wrap the provided signal to also be signalled if the operation gets marked blocking
-         */
-        public WaitQueue.Signal isBlockingSignal(WaitQueue.Signal signal)
-        {
-            return WaitQueue.any(signal, isBlockingSignal());
+            return isBlockingSignal;
         }
 
         boolean isComplete()
@@ -394,8 +393,7 @@ public class OpOrderSimple implements OpOrder
             Group current = orderOnOrBefore;
             while (current != null)
             {
-                current.isBlocking = true;
-                current.isBlockingSignal.signalAll();
+                current.markBlocking();
                 current = current.prev;
             }
         }

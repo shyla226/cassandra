@@ -36,8 +36,6 @@ import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.concurrent.OpOrderSimple;
 import org.apache.cassandra.utils.memory.HeapAllocator;
 import org.apache.cassandra.utils.memory.NativeAllocator;
 import org.apache.cassandra.utils.memory.NativePool;
@@ -47,7 +45,6 @@ public class NativeCellTest
 
     private static final Logger logger = LoggerFactory.getLogger(NativeCellTest.class);
     private static  NativeAllocator nativeAllocator;
-    private static  OpOrder.Group group;
     private static Random rand;
 
     @BeforeClass
@@ -60,7 +57,6 @@ public class NativeCellTest
         SchemaLoader.prepareServer();
 
         nativeAllocator = new NativePool(Integer.MAX_VALUE, Integer.MAX_VALUE, 1f, null).newAllocator();
-        group =  new OpOrderSimple().start();
     }
 
     @Test
@@ -154,7 +150,7 @@ public class NativeCellTest
 
     private static void test(Row row)
     {
-        Row nrow = clone(row, nativeAllocator.rowBuilder(group));
+        Row nrow = clone(row, nativeAllocator.rowBuilder());
         Row brow = clone(row, HeapAllocator.instance.cloningBTreeRowBuilder());
         Assert.assertEquals(row, nrow);
         Assert.assertEquals(row, brow);

@@ -29,12 +29,10 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
  */
 public final class ContextAllocator extends AbstractAllocator
 {
-    private final OpOrder.Group opGroup;
     private final MemtableBufferAllocator allocator;
 
-    public ContextAllocator(OpOrder.Group opGroup, MemtableBufferAllocator allocator)
+    public ContextAllocator(MemtableBufferAllocator allocator)
     {
-        this.opGroup = opGroup;
         this.allocator = allocator;
     }
 
@@ -54,6 +52,6 @@ public final class ContextAllocator extends AbstractAllocator
 
     public ByteBuffer allocate(int size)
     {
-        return allocator.allocate(size, opGroup);
+        return allocator.allocate(size);
     }
 }

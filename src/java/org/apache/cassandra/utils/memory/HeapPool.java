@@ -42,9 +42,9 @@ public class HeapPool extends MemtablePool
             super(pool.onHeap.newAllocator(), pool.offHeap.newAllocator());
         }
 
-        public ByteBuffer allocate(int size, OpOrder.Group opGroup)
+        public ByteBuffer allocate(int size)
         {
-            super.onHeap().allocate(size, opGroup);
+            super.onHeap().allocated(size);
             return ByteBuffer.allocate(size);
         }
 

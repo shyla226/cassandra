@@ -267,7 +267,7 @@ public class SASIIndex implements Index, INotificationConsumer
             public Completable insertRow(Row row)
             {
                 if (isNewData())
-                    return adjustMemtableSize(index.index(key, row), opGroup);
+                    return adjustMemtableSize(index.index(key, row));
 
                 return Completable.complete();
             }
@@ -294,9 +294,9 @@ public class SASIIndex implements Index, INotificationConsumer
                 return transactionType == IndexTransaction.Type.UPDATE;
             }
 
-            public Completable adjustMemtableSize(long additionalSpace, OpOrder.Group opGroup)
+            public Completable adjustMemtableSize(long additionalSpace)
             {
-                baseCfs.getTracker().getView().getCurrentMemtable().getAllocator().onHeap().allocate(additionalSpace, opGroup);
+                baseCfs.getTracker().getView().getCurrentMemtable().getAllocator().onHeap().allocated(additionalSpace);
                 return Completable.complete();
             }
         };

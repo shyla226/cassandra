@@ -30,7 +30,7 @@ public class TPCRunnable implements Runnable
     private final Runnable runnable;
     private final ExecutorLocals locals;
     private final TPCTaskType stage;
-    private final int scheduledOn;
+    private final TPCMetrics metrics;
 
     public TPCRunnable(TaggedRunnable runnable)
     {
@@ -42,14 +42,14 @@ public class TPCRunnable implements Runnable
         this.runnable = runnable;
         this.locals = locals;
         this.stage = stage;
-        this.scheduledOn = scheduledOn;
+        this.metrics = TPC.metrics(scheduledOn);
 
-        TPC.metrics(scheduledOn).scheduled(stage);
+        metrics.scheduled(stage);
     }
 
     public void run()
     {
-        TPC.metrics().starting(stage);
+        metrics.starting(stage);
 
         ExecutorLocals.set(locals);
 
@@ -61,28 +61,28 @@ public class TPCRunnable implements Runnable
         }
         catch (Throwable t)
         {
-            TPC.metrics().failed(stage, t);
+            metrics.failed(stage, t);
             throw t;
         }
         finally
         {
-            TPC.metrics().completed(stage);
+            metrics.completed(stage);
         }
     }
 
     public void cancelled()
     {
-        TPC.metrics(scheduledOn).cancelled(stage);
+        metrics.cancelled(stage);
     }
 
     public void setPending()
     {
-        TPC.metrics(scheduledOn).pending(stage, +1);
+        metrics.pending(stage, +1);
     }
 
     public void unsetPending()
     {
-        TPC.metrics(scheduledOn).pending(stage, -1);
+        metrics.pending(stage, -1);
     }
 
     public boolean isPendable()
@@ -92,7 +92,7 @@ public class TPCRunnable implements Runnable
 
     public void blocked()
     {
-        TPC.metrics(scheduledOn).blocked(stage);
+        metrics.blocked(stage);
     }
 
     public static TPCRunnable wrap(Runnable runnable)

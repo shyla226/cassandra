@@ -18,10 +18,21 @@
  */
 package org.apache.cassandra.utils.memory;
 
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
+import java.util.concurrent.atomic.AtomicReference;
 
+import io.reactivex.Single;
+import io.reactivex.SingleObserver;
+import io.reactivex.disposables.Disposable;
+import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPCRunnable;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public abstract class MemtableAllocator
@@ -57,8 +68,8 @@ public abstract class MemtableAllocator
         this.offHeap = offHeap;
     }
 
-    public abstract Row.Builder rowBuilder(OpOrder.Group opGroup);
-    public abstract DecoratedKey clone(DecoratedKey key, OpOrder.Group opGroup);
+    public abstract Row.Builder rowBuilder();
+    public abstract DecoratedKey clone(DecoratedKey key);
     public abstract EnsureOnHeap ensureOnHeap();
 
     public SubAllocator onHeap()
@@ -69,6 +80,113 @@ public abstract class MemtableAllocator
     public SubAllocator offHeap()
     {
         return offHeap;
+    }
+
+    /**
+     * Defers the given Single construction, waiting for space if the memtable limits have been exceeded. If the limits
+     * have not been exceeded, the single is constructed and subscribed to immediately. Otherwise the constructing
+     * function is called when space has become available again or if {@code opGroup} becomes blocking. The latter is
+     * done to break the deadlock when a memtable flush is waiting for said operation to complete before it can start
+     * and release memory.
+     *
+     * Since the signals to continue are given on a thread that cannot execute any work, the construction and
+     * subscription are done on the supplied scheduler.
+     */
+    public <T> Single<T> whenBelowLimits(Callable<Single<T>> singleCallable, OpOrder.Group opGroup, StagedScheduler observeOnScheduler, TPCTaskType nextTaskType)
+    {
+        return new Single<T>()
+        {
+            @Override
+            protected void subscribeActual(SingleObserver<? super T> subscriber)
+            {
+                class WhenBelowLimits implements Disposable
+                {
+                    final AtomicReference<TPCRunnable> task = new AtomicReference<>(null);
+                    final Timer.Context timerContext;
+
+                    WhenBelowLimits()
+                    {
+                        // Grab the future before checking fullness so it will certainly fire if a release happens after we have checked a limit.
+                        // The future is shared between the on/offHeap subpools.
+                        CompletableFuture<Void> releaseFuture = onHeap.parent.releaseFuture();
+
+                        if (opGroup.isBlocking() || onHeap.parent.belowLimit() && offHeap.parent.belowLimit())
+                        {
+                            observeOnScheduler.execute(this::subscribeChild, ExecutorLocals.create(), nextTaskType);
+                            timerContext = null;
+                            return;
+                        }
+
+                        timerContext = onHeap.parent.blockedTimerContext();
+
+                        // Create a TPC task which tracks current locals and the number of tasks blocked by this.
+                        task.set(TPCRunnable.wrap(this::subscribeChild,
+                                                  ExecutorLocals.create(),
+                                                  TPCTaskType.WRITE_MEMTABLE_FULL,
+                                                  observeOnScheduler));
+
+                        opGroup.whenBlocking().thenRun(this::complete);
+                        releaseFuture.thenRun(this::onRelease);
+                    }
+
+                    void subscribeChild()
+                    {
+                        Single<T> child;
+                        try
+                        {
+                            child = singleCallable.call();
+                        }
+                        catch (Throwable t)
+                        {
+                            subscriber.onError(t);
+                            return;
+                        }
+
+                        child.subscribe(subscriber);
+                    }
+
+                    public void dispose()
+                    {
+                        TPCRunnable prev = task.getAndSet(null);
+                        if (prev != null)
+                        {
+                            timerContext.close();
+                            prev.cancelled();
+                        }
+                    }
+
+                    public boolean isDisposed()
+                    {
+                        return task.get() == null;
+                    }
+
+                    public void complete()
+                    {
+                        TPCRunnable prev = task.getAndSet(null);
+                        if (prev != null)
+                        {
+                            timerContext.close();
+                            observeOnScheduler.execute(prev);
+                        }
+                    }
+
+                    public void onRelease()
+                    {
+                        if (task.get() == null)
+                            return;     // cancelled or completed
+
+                        // Grab the future before checking fullness so it will certainly fire if a release happens after we have checked a limit.
+                        CompletableFuture<Void> releaseFuture = onHeap.parent.releaseFuture();
+                        if (offHeap.parent.belowLimit() && onHeap.parent.belowLimit())
+                            complete();
+                        else
+                            releaseFuture.thenRun(this::onRelease);
+                    }
+                }
+
+                new WhenBelowLimits();
+            }
+        };
     }
 
     /**
@@ -126,36 +244,18 @@ public abstract class MemtableAllocator
         }
 
         // like allocate, but permits allocations to be negative
-        public void adjust(long size, OpOrder.Group opGroup)
+        public void adjust(long size)
         {
             if (size <= 0)
                 released(-size);
             else
-                allocate(size, opGroup);
-        }
-
-        // allocate memory in the tracker, and mark ourselves as owning it
-        public void allocate(long size, OpOrder.Group opGroup)
-        {
-            assert size >= 0;
-
-            if (parent.tryAllocate(size))
-                acquired(size);
-            else
                 allocated(size);
         }
 
-        // retroactively mark an amount allocated and acquired in the tracker, and owned by us
-        private void allocated(long size)
+        // mark an amount of space as allocated in the tracker, and owned by us
+        public void allocated(long size)
         {
             parent.allocated(size);
-            ownsUpdater.addAndGet(this, size);
-        }
-
-        // retroactively mark an amount acquired in the tracker, and owned by us
-        private void acquired(long size)
-        {
-            parent.acquired(size);
             ownsUpdater.addAndGet(this, size);
         }
 

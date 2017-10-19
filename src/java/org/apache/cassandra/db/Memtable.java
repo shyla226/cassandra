@@ -68,8 +68,6 @@ import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.concurrent.OpOrderSimple;
-import org.apache.cassandra.utils.flow.RxThreads;
 import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.memory.HeapPool;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
@@ -298,44 +296,50 @@ public class Memtable implements Comparable<Memtable>
 
         final int coreId = getCoreFor(key);
         final MemtableSubrange partitionMap = subranges[coreId];
-        return RxThreads.subscribeOnCore(
-            Single.defer(() -> {
-                AtomicBTreePartition previous = partitionMap.get(key);
-                assert TPC.getCoreId() == coreId;
-                if (logger.isTraceEnabled())
-                    logger.trace("Adding key {} to memtable", key);
+        Callable<Single<Long>> write = () ->
+        {
+            AtomicBTreePartition previous = partitionMap.get(key);
+            assert TPC.getCoreId() == coreId;
+            if (logger.isTraceEnabled())
+                logger.trace("Adding key {} to memtable", key);
 
-                assert writeBarrier == null || writeBarrier.isAfter(opGroup)
-                    : String.format("Put called after write barrier\n%s", FBUtilities.Debug.getStackTrace());
+            assert writeBarrier == null || writeBarrier.isAfter(opGroup)
+            : String.format("Put called after write barrier\n%s", FBUtilities.Debug.getStackTrace());
 
-                if (previous == null)
-                {
-                    final DecoratedKey cloneKey = allocator.clone(key, opGroup);
-                    AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
-                    int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
-                    allocator.onHeap().allocate(overhead, opGroup);
-                    partitionMap.updateLiveDataSize(8);
+            if (previous == null)
+            {
+                final DecoratedKey cloneKey = allocator.clone(key);
+                AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
+                int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
+                allocator.onHeap().allocated(overhead);
+                partitionMap.updateLiveDataSize(8);
 
-                    // We'll add the columns later.
-                    partitionMap.put(cloneKey, empty);
-                    previous = empty;
-                }
+                // We'll add the columns later.
+                partitionMap.put(cloneKey, empty);
+                previous = empty;
+            }
 
-                return previous.addAllWithSizeDelta(update, opGroup, indexer);
-           }).map(p -> {
-               partitionMap.updateTimestamp(p.right.stats().minTimestamp);
-               partitionMap.updateLocalDeletionTime(p.right.stats().minLocalDeletionTime);
-               partitionMap.updateLiveDataSize(p.left[0]);
-               partitionMap.updateCurrentOperations(update.operationCount());
+            return previous.addAllWithSizeDelta(update, indexer)
+                           .map(p ->
+                                {
+                                    PartitionUpdate u = p.update;
+                                    partitionMap.updateTimestamp(u.stats().minTimestamp);
+                                    partitionMap.updateLocalDeletionTime(u.stats().minLocalDeletionTime);
+                                    partitionMap.updateLiveDataSize(p.dataSize);
+                                    partitionMap.updateCurrentOperations(u.operationCount());
 
-               // TODO: check if stats are furhter optimisable
-               partitionMap.columnsCollector.update(update.columns());
-               partitionMap.statsCollector.update(update.stats());
+                                    // TODO: check if stats are further optimisable
+                                    partitionMap.columnsCollector.update(u.columns());
+                                    partitionMap.statsCollector.update(u.stats());
 
-            return p.left[1];
-        }),
-        coreId,
-        TPCTaskType.WRITE_SWITCH_FOR_MEMTABLE);
+                                    return p.colUpdateTimeDelta;
+                                });
+        };
+
+        // We should block the write if there is no space in the memtable memory to let flushes catch up. For
+        // efficiency's sake we can't know the exact size this mutation requires; instead we let the limits slip a
+        // little and only block _after_ the used space is above the limit.
+        return allocator.whenBelowLimits(write, opGroup, TPC.getForCore(coreId), TPCTaskType.WRITE_SWITCH_FOR_MEMTABLE);
     }
 
     /**
@@ -861,22 +865,19 @@ public class Memtable implements Comparable<Memtable>
     private static int estimateRowOverhead(final int count)
     {
         // calculate row overhead
-        try (final OpOrder.Group group = new OpOrderSimple().start())
-        {
-            int rowOverhead;
-            MemtableAllocator allocator = MEMORY_POOL.newAllocator();
-            ConcurrentNavigableMap<PartitionPosition, Object> partitions = new ConcurrentSkipListMap<>();
-            final Object val = new Object();
-            for (int i = 0 ; i < count ; i++)
-                partitions.put(allocator.clone(new BufferDecoratedKey(new LongToken(i), ByteBufferUtil.EMPTY_BYTE_BUFFER), group), val);
-            double avgSize = ObjectSizes.measureDeep(partitions) / (double) count;
-            rowOverhead = (int) ((avgSize - Math.floor(avgSize)) < 0.05 ? Math.floor(avgSize) : Math.ceil(avgSize));
-            rowOverhead -= ObjectSizes.measureDeep(new LongToken(0));
-            rowOverhead += AtomicBTreePartition.EMPTY_SIZE;
-            allocator.setDiscarding();
-            allocator.setDiscarded();
-            return rowOverhead;
-        }
+        int rowOverhead;
+        MemtableAllocator allocator = MEMORY_POOL.newAllocator();
+        ConcurrentNavigableMap<PartitionPosition, Object> partitions = new ConcurrentSkipListMap<>();
+        final Object val = new Object();
+        for (int i = 0 ; i < count ; i++)
+            partitions.put(allocator.clone(new BufferDecoratedKey(new LongToken(i), ByteBufferUtil.EMPTY_BYTE_BUFFER)), val);
+        double avgSize = ObjectSizes.measureDeep(partitions) / (double) count;
+        rowOverhead = (int) ((avgSize - Math.floor(avgSize)) < 0.05 ? Math.floor(avgSize) : Math.ceil(avgSize));
+        rowOverhead -= ObjectSizes.measureDeep(new LongToken(0));
+        rowOverhead += AtomicBTreePartition.EMPTY_SIZE;
+        allocator.setDiscarding();
+        allocator.setDiscarded();
+        return rowOverhead;
     }
 
     private static class ColumnsCollector

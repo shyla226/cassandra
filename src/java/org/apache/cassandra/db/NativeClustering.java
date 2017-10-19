@@ -34,7 +34,7 @@ public class NativeClustering extends AbstractClusteringPrefix implements Cluste
 
     private NativeClustering() { peer = 0; }
 
-    public NativeClustering(NativeAllocator allocator, OpOrder.Group writeOp, Clustering clustering)
+    public NativeClustering(NativeAllocator allocator, Clustering clustering)
     {
         int count = clustering.size();
         int metadataSize = (count * 2) + 4;
@@ -44,7 +44,7 @@ public class NativeClustering extends AbstractClusteringPrefix implements Cluste
         assert count < 64 << 10;
         assert dataSize < 64 << 10;
 
-        peer = allocator.allocate(metadataSize + dataSize + bitmapSize, writeOp);
+        peer = allocator.allocate(metadataSize + dataSize + bitmapSize);
         long bitmapStart = peer + metadataSize;
         MemoryUtil.setShort(peer, (short) count);
         MemoryUtil.setShort(peer + (metadataSize - 2), (short) dataSize); // goes at the end of the other offsets

@@ -18,12 +18,13 @@
  */
 package org.apache.cassandra.utils.memory;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.metrics.Timer;
-import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 
 /**
@@ -40,7 +41,9 @@ public abstract class MemtablePool
 
     public final Timer blockedOnAllocating;
 
-    final WaitQueue hasRoom = new WaitQueue();
+    // Future to use to attach to the next release of space. Be sure to check the limit _after_ getting this
+    // so that your handler will be called if memory is released concurrently.
+    public AtomicReference<CompletableFuture<Void>> releaseFuture = new AtomicReference<>(new CompletableFuture<>());
 
     MemtablePool(long maxOnHeapMemory, long maxOffHeapMemory, float cleanThreshold, Runnable cleaner)
     {
@@ -65,11 +68,6 @@ public abstract class MemtablePool
 
     public abstract MemtableAllocator newAllocator();
 
-    /**
-     * Note the difference between acquire() and allocate(); allocate() makes more resources available to all owners,
-     * and acquire() makes shared resources unavailable but still recorded. An Owner must always acquire resources,
-     * but only needs to allocate if there are none already available. This distinction is not always meaningful.
-     */
     public class SubPool
     {
 
@@ -120,32 +118,12 @@ public abstract class MemtablePool
 
         /** Methods to allocate space **/
 
-        boolean tryAllocate(long size)
-        {
-            while (true)
-            {
-                long cur;
-                if ((cur = allocated) + size > limit)
-                    return false;
-                if (allocatedUpdater.compareAndSet(this, cur, cur + size))
-                    return true;
-            }
-        }
-
-        /**
-         * apply the size adjustment to allocated, bypassing any limits or constraints. If this reduces the
-         * allocated total, we will signal waiters
-         */
         private void adjustAllocated(long size)
         {
-            while (true)
-            {
-                long cur = allocated;
-                if (allocatedUpdater.compareAndSet(this, cur, cur + size))
-                    return;
-            }
+            allocatedUpdater.addAndGet(this, size);
         }
 
+        /** Mark an allocation of space, may trigger cleanup */
         void allocated(long size)
         {
             assert size >= 0;
@@ -156,16 +134,13 @@ public abstract class MemtablePool
             maybeClean();
         }
 
-        void acquired(long size)
-        {
-            maybeClean();
-        }
-
+        /** Mark a release of space, triggering waiters */
         void released(long size)
         {
             assert size >= 0;
             adjustAllocated(-size);
-            hasRoom.signalAll();
+            CompletableFuture<Void> future = releaseFuture.getAndSet(new CompletableFuture<>());
+            future.complete(null);
         }
 
         void reclaiming(long size)
@@ -211,9 +186,15 @@ public abstract class MemtablePool
             return new MemtableAllocator.SubAllocator(this);
         }
 
-        public WaitQueue hasRoom()
+        public boolean belowLimit()
         {
-            return hasRoom;
+            // Include equals so we are fine if limit is 0
+            return used() <= limit;
+        }
+
+        public CompletableFuture<Void> releaseFuture()
+        {
+            return releaseFuture.get();
         }
 
         public Timer.Context blockedTimerContext()

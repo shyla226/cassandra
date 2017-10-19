@@ -77,16 +77,11 @@ public class SlabAllocator extends MemtableBufferAllocator
 
     public ByteBuffer allocate(int size)
     {
-        return allocate(size, null);
-    }
-
-    public ByteBuffer allocate(int size, OpOrder.Group opGroup)
-    {
         assert size >= 0;
         if (size == 0)
             return ByteBufferUtil.EMPTY_BYTE_BUFFER;
 
-        (allocateOnHeapOnly ? onHeap() : offHeap()).allocate(size, opGroup);
+        (allocateOnHeapOnly ? onHeap() : offHeap()).allocated(size);
         // satisfy large allocations directly from JVM since they don't cause fragmentation
         // as badly, and fill up our regions quickly
         if (size > MAX_CLONED_SIZE)
@@ -149,11 +144,6 @@ public class SlabAllocator extends MemtableBufferAllocator
             // in the next iteration of the loop.
             RACE_ALLOCATED.add(region);
         }
-    }
-
-    protected AbstractAllocator allocator(OpOrder.Group writeOp)
-    {
-        return new ContextAllocator(writeOp, this);
     }
 
     /**

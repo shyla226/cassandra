@@ -64,12 +64,10 @@ public class NativeAllocator extends MemtableAllocator
 
     private static class CloningBTreeRowBuilder extends BTreeRow.Builder
     {
-        final OpOrder.Group writeOp;
         final NativeAllocator allocator;
-        private CloningBTreeRowBuilder(OpOrder.Group writeOp, NativeAllocator allocator)
+        private CloningBTreeRowBuilder(NativeAllocator allocator)
         {
             super(true);
-            this.writeOp = writeOp;
             this.allocator = allocator;
         }
 
@@ -77,25 +75,25 @@ public class NativeAllocator extends MemtableAllocator
         public void newRow(Clustering clustering)
         {
             if (clustering != Clustering.STATIC_CLUSTERING)
-                clustering = new NativeClustering(allocator, writeOp, clustering);
+                clustering = new NativeClustering(allocator, clustering);
             super.newRow(clustering);
         }
 
         @Override
         public void addCell(Cell cell)
         {
-            super.addCell(new NativeCell(allocator, writeOp, cell));
+            super.addCell(new NativeCell(allocator, cell));
         }
     }
 
-    public Row.Builder rowBuilder(OpOrder.Group opGroup)
+    public Row.Builder rowBuilder()
     {
-        return new CloningBTreeRowBuilder(opGroup, this);
+        return new CloningBTreeRowBuilder(this);
     }
 
-    public DecoratedKey clone(DecoratedKey key, OpOrder.Group writeOp)
+    public DecoratedKey clone(DecoratedKey key)
     {
-        return new NativeDecoratedKey(key.getToken(), this, writeOp, key.getKey());
+        return new NativeDecoratedKey(key.getToken(), this, key.getKey());
     }
 
     public EnsureOnHeap ensureOnHeap()
@@ -103,10 +101,10 @@ public class NativeAllocator extends MemtableAllocator
         return cloneToHeap;
     }
 
-    public long allocate(int size, OpOrder.Group opGroup)
+    public long allocate(int size)
     {
         assert size >= 0;
-        offHeap().allocate(size, opGroup);
+        offHeap().allocated(size);
         // satisfy large allocations directly from JVM since they don't cause fragmentation
         // as badly, and fill up our regions quickly
         if (size > MAX_CLONED_SIZE)

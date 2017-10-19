@@ -79,15 +79,29 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         return true;
     }
 
+    static public class AddResult
+    {
+        public final long dataSize;
+        public final long colUpdateTimeDelta;
+        public final PartitionUpdate update;
+
+        AddResult(long dataSize, long colUpdateTimeDelta, PartitionUpdate update)
+        {
+            this.dataSize = dataSize;
+            this.colUpdateTimeDelta = colUpdateTimeDelta;
+            this.update = update;
+        }
+    }
+
     /**
      * Adds a given update to this in-memtable partition.
      *
      * @return an array containing first the difference in size seen after merging the updates, and second the minimum
      * time detla between updates and the update itself.
      */
-    public Single<Pair<long[], PartitionUpdate>> addAllWithSizeDelta(final PartitionUpdate update, OpOrder.Group writeOp, UpdateTransaction indexer)
+    public Single<AddResult> addAllWithSizeDelta(final PartitionUpdate update, UpdateTransaction indexer)
     {
-        RowUpdater updater = new RowUpdater(this, allocator, writeOp, indexer);
+        RowUpdater updater = new RowUpdater(this, allocator, indexer);
         try
         {
             indexer.start();
@@ -121,8 +135,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         }
         finally
         {
-            return indexer.commit().toSingleDefault(new long[]{updater.dataSize, updater.colUpdateTimeDelta})
-                          .map(p -> Pair.create(p, update));
+            return indexer.commit().toSingleDefault(new AddResult(updater.dataSize, updater.colUpdateTimeDelta, update));
         }
     }
 
@@ -196,7 +209,6 @@ public class AtomicBTreePartition extends AbstractBTreePartition
     {
         final AtomicBTreePartition updating;
         final MemtableAllocator allocator;
-        final OpOrder.Group writeOp;
         final UpdateTransaction indexer;
         final int nowInSec;
         Row.Builder regularBuilder;
@@ -205,11 +217,10 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         long colUpdateTimeDelta = Long.MAX_VALUE;
         List<Row> inserted; // TODO: replace with walk of aborted BTree
 
-        private RowUpdater(AtomicBTreePartition updating, MemtableAllocator allocator, OpOrder.Group writeOp, UpdateTransaction indexer)
+        private RowUpdater(AtomicBTreePartition updating, MemtableAllocator allocator, UpdateTransaction indexer)
         {
             this.updating = updating;
             this.allocator = allocator;
-            this.writeOp = writeOp;
             this.indexer = indexer;
             this.nowInSec = FBUtilities.nowInSeconds();
         }
@@ -219,10 +230,10 @@ public class AtomicBTreePartition extends AbstractBTreePartition
             boolean isStatic = clustering == Clustering.STATIC_CLUSTERING;
             // We know we only insert/update one static per PartitionUpdate, so no point in saving the builder
             if (isStatic)
-                return allocator.rowBuilder(writeOp);
+                return allocator.rowBuilder();
 
             if (regularBuilder == null)
-                regularBuilder = allocator.rowBuilder(writeOp);
+                regularBuilder = allocator.rowBuilder();
             return regularBuilder;
         }
 
@@ -273,7 +284,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
 
         protected void finish()
         {
-            allocator.onHeap().adjust(heapSize, writeOp);
+            allocator.onHeap().adjust(heapSize);
         }
     }
 }

@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.utils.concurrent;
 
+import java.util.concurrent.CompletableFuture;
+
 /**
  * <p>A class for providing synchronization between producers and consumers that do not
  * communicate directly with each other, but where the consumers need to process their
@@ -121,6 +123,11 @@ public interface OpOrder
          * so we should try more aggressively to progress
          */
         public boolean isBlocking();
+
+        /**
+         * Future which fires when the group becomes blocking.
+         */
+        public CompletableFuture<Void> whenBlocking();
     }
 
     /**

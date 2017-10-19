@@ -160,8 +160,7 @@ public class OpOrderThreaded implements OpOrder
         {
             while (current != null)
             {
-                current.isBlocking = true;
-                current.isBlockingSignal.signalAll();
+                current.markBlocking();
                 current = current.prev;
             }
         }

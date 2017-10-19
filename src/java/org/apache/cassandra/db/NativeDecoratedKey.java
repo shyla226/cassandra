@@ -29,14 +29,14 @@ public class NativeDecoratedKey extends DecoratedKey
 {
     final long peer;
 
-    public NativeDecoratedKey(Token token, NativeAllocator allocator, OpOrder.Group writeOp, ByteBuffer key)
+    public NativeDecoratedKey(Token token, NativeAllocator allocator, ByteBuffer key)
     {
         super(token);
         assert key != null;
         assert key.order() == ByteOrder.BIG_ENDIAN;
 
         int size = key.remaining();
-        this.peer = allocator.allocate(4 + size, writeOp);
+        this.peer = allocator.allocate(4 + size);
         MemoryUtil.setInt(peer, size);
         MemoryUtil.setBytes(peer + 4, key);
     }
