@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 
 import org.apache.cassandra.stress.Operation;
@@ -97,12 +98,13 @@ public class SettingsCommandUser extends SettingsCommand
     {
         final SeedManager seeds = new SeedManager(settings);
 
-        final Map<String, TokenRangeIterator> tokenRangeIterators = new LinkedHashMap<>();
-        profiles.forEach((k,v)->tokenRangeIterators.put(k, (v.tokenRangeQueries.isEmpty()
-                                                            ? null
-                                                            : new TokenRangeIterator(settings,
-                                                                                     v.maybeLoadTokenRanges(settings)))));
-
+        final Map<String, Map<String, TokenRangeIterator>> tokenRangeIterators = new LinkedHashMap<>();
+        profiles.forEach((k,v)->tokenRangeIterators.put(k, v.tokenRangeQueries.entrySet()
+                                                                              .stream()
+                                                                              .collect(Collectors.toMap(entry -> entry.getKey(),
+                                                                                                        entry -> new TokenRangeIterator(settings,
+                                                                                                                                        v.maybeLoadTokenRanges(settings),
+                                                                                                                                        entry.getValue())))));
         return new SampledOpDistributionFactory<String>(ratios, clustering)
         {
             protected List<? extends Operation> get(Timer timer, String key, boolean isWarmup)
@@ -126,7 +128,7 @@ public class SettingsCommandUser extends SettingsCommand
                     throw new IllegalArgumentException(String.format("Op name %s contains an invalid profile specname: %s", key, profile_name));
                 }
                 StressProfile profile = profiles.get(profile_name);
-                TokenRangeIterator tokenRangeIterator = tokenRangeIterators.get(profile_name);
+                Map<String, TokenRangeIterator> subTokenRangeIterators = tokenRangeIterators.get(profile_name);
                 PartitionGenerator generator = profile.newGenerator(settings);
                 if (sub_key.equalsIgnoreCase("insert"))
                     return Collections.singletonList(profile.getInsert(timer, generator, seeds, settings));
@@ -134,7 +136,7 @@ public class SettingsCommandUser extends SettingsCommand
                     return profile.getValidate(timer, generator, seeds, settings);
 
                 if (profile.tokenRangeQueries.containsKey(sub_key))
-                    return Collections.singletonList(profile.getBulkReadQueries(sub_key, timer, settings, tokenRangeIterator, isWarmup));
+                    return Collections.singletonList(profile.getBulkReadQueries(sub_key, timer, settings, subTokenRangeIterators.get(sub_key), isWarmup));
 
                 return Collections.singletonList(profile.getQuery(sub_key, timer, generator, seeds, settings, isWarmup));
             }

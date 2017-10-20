@@ -21,15 +21,20 @@ package org.apache.cassandra.stress.operations.userdefined;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.AbstractIterator;
+
 import com.datastax.driver.core.AsyncContinuousPagingResult;
 import com.datastax.driver.core.ColumnDefinitions;
 import com.datastax.driver.core.ColumnMetadata;
 import com.datastax.driver.core.ContinuousPagingOptions;
+import com.datastax.driver.core.PagingState;
+import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.TableMetadata;
@@ -54,6 +59,7 @@ public class TokenRangeQuery extends Operation
     private final String columns;
     private final int pageSize;
     private final int queueSize;
+    private final boolean continuous;
     private final boolean isWarmup;
     private final PrintWriter resultsWriter;
     private final int timeoutSeconds;
@@ -71,6 +77,7 @@ public class TokenRangeQuery extends Operation
         this.columns = sanitizeColumns(def.columns, tableMetadata);
         this.pageSize = isWarmup ? Math.min(100, def.page_size) : def.page_size;
         this.queueSize = def.queue_size;
+        this.continuous = def.continuous;
         this.isWarmup = isWarmup;
         this.resultsWriter = maybeCreateResultsWriter(settings.tokenRange);
         this.timeoutSeconds = def.timeout_sec;
@@ -105,23 +112,118 @@ public class TokenRangeQuery extends Operation
      * Here we store the row iterator to retrieve more pages
      * and we keep track of which partitions have already been retrieved,
      */
-    private final static class State
+    private abstract class State
     {
         public final TokenRange tokenRange;
         public final String query;
-        public AsyncContinuousPagingResult result;
+        final SimpleStatement statement;
+
         public Set<Token> partitions = new HashSet<>();
 
         public State(TokenRange tokenRange, String query)
         {
             this.tokenRange = tokenRange;
             this.query = query;
+            this.statement = makeStatement();
         }
+
+        private SimpleStatement makeStatement()
+        {
+            SimpleStatement statement = new SimpleStatement(query);
+            statement.setReadTimeoutMillis((int)TimeUnit.SECONDS.toMillis(timeoutSeconds));
+            statement.setRoutingToken(tokenRange.getEnd());
+            statement.setConsistencyLevel(JavaDriverClient.from(settings.command.consistencyLevel));
+            return statement;
+        }
+
+        abstract Iterable<Row> execute(JavaDriverClient client) throws Exception;
+        abstract boolean isLast();
+        abstract void cancel();
 
         @Override
         public String toString()
         {
             return String.format("[%s, %s]", tokenRange.getStart(), tokenRange.getEnd());
+        }
+    }
+
+    private final class ContinuousPagingState extends State
+    {
+        public AsyncContinuousPagingResult result;
+
+        public ContinuousPagingState(TokenRange tokenRange, String query)
+        {
+            super(tokenRange, query);
+        }
+
+        Iterable<Row> execute(JavaDriverClient client) throws Exception
+        {
+            if (result == null)
+            {
+                result = client.execute(statement, ContinuousPagingOptions.builder()
+                                                                          .withMaxEnqueuedPages(queueSize)
+                                                                          .withPageSize(pageSize, ContinuousPagingOptions.PageUnit.ROWS)
+                                                                          .build()).get(timeoutSeconds, TimeUnit.SECONDS);
+            }
+            else
+            {
+                result = result.nextPage().get(timeoutSeconds, TimeUnit.SECONDS); // optimistically prefetched
+            }
+
+            return result.currentPage();
+        }
+
+        boolean isLast()
+        {
+            return result != null && result.isLast();
+        }
+
+        void cancel()
+        {
+            if (result != null)
+                result.cancel();
+        }
+    }
+
+    private final class NormalPagingState extends State
+    {
+        ResultSet result;
+        PagingState pagingState;
+
+        NormalPagingState(TokenRange tokenRange, String query)
+        {
+            super(tokenRange, query);
+            statement.setFetchSize(pageSize);
+        }
+
+        Iterable<Row> execute(JavaDriverClient client) throws Exception
+        {
+            if (pagingState != null)
+                statement.setPagingState(pagingState);
+
+            result = client.execute(statement);
+            pagingState = result.getExecutionInfo().getPagingState();
+
+            return () -> new AbstractIterator<Row>() {
+                int numRows = result.getAvailableWithoutFetching();
+
+                protected Row computeNext()
+                {
+                    while (numRows-- > 0)
+                        return result.one();
+
+                    return endOfData();
+                }
+            };
+        }
+
+        boolean isLast()
+        {
+            return result != null && pagingState == null;
+        }
+
+        void cancel()
+        {
         }
     }
 
@@ -161,27 +263,11 @@ public class TokenRangeQuery extends Operation
                 if (range == null)
                     return true; // no more token ranges to process
 
-                state = new State(range, buildQuery(range));
+                state = continuous ? new ContinuousPagingState(range, buildQuery(range)) : new NormalPagingState(range, buildQuery(range));
                 currentState.set(state);
             }
 
-            if (state.result == null || state.result.isLast())
-            {
-                SimpleStatement statement = new SimpleStatement(state.query);
-                statement.setReadTimeoutMillis((int)TimeUnit.SECONDS.toMillis(timeoutSeconds));
-                statement.setRoutingToken(state.tokenRange.getEnd());
-                statement.setConsistencyLevel(JavaDriverClient.from(settings.command.consistencyLevel));
-                state.result = client.execute(statement, ContinuousPagingOptions.builder()
-                                                                            .withMaxEnqueuedPages(queueSize)
-                                                                            .withPageSize(pageSize, ContinuousPagingOptions.PageUnit.ROWS)
-                                                                            .build()).get(timeoutSeconds, TimeUnit.SECONDS);
-            }
-            else
-            {
-                state.result = state.result.nextPage().get(timeoutSeconds, TimeUnit.SECONDS);
-            }
-
-            for (Row row : state.result.currentPage())
+            for (Row row : state.execute(client))
             {
                 rowCount++;
 
@@ -200,10 +286,10 @@ public class TokenRangeQuery extends Operation
             if (shouldSaveResults())
                 flushResults();
 
-            if (isWarmup || state.result.isLast())
+            if (isWarmup || state.isLast())
             { // no more pages to fetch or just warming up, ready to move on to another token range
                 if (isWarmup)
-                    state.result.cancel();
+                    state.cancel();
 
                 currentState.set(null);
             }
@@ -303,8 +389,8 @@ public class TokenRangeQuery extends Operation
         if (ret == 0)
         {
             State state = currentState.get();
-            if (state != null && state.result != null)
-                state.result.cancel(); // be nice to the driver
+            if (state != null)
+                state.cancel(); // be nice to the driver
         }
 
         return ret;

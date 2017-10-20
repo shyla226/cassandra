@@ -23,6 +23,7 @@ import java.util.TreeSet;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 import com.datastax.driver.core.TokenRange;
+import org.apache.cassandra.stress.StressYaml;
 import org.apache.cassandra.stress.settings.StressSettings;
 
 public class TokenRangeIterator
@@ -31,17 +32,26 @@ public class TokenRangeIterator
     private final ConcurrentLinkedQueue<TokenRange> pendingRanges;
     private final boolean wrap;
 
-    public TokenRangeIterator(StressSettings settings, Set<TokenRange> tokenRanges)
+    public TokenRangeIterator(StressSettings settings, Set<TokenRange> tokenRanges, StressYaml.TokenRangeQueryDef queryDef)
     {
-        this.tokenRanges = maybeSplitRanges(tokenRanges, settings.tokenRange.splitFactor);
+        this.tokenRanges = maybeSplitRanges(tokenRanges, settings.tokenRange.splitFactor, queryDef.min_num_tokens);
         this.pendingRanges = new ConcurrentLinkedQueue<>(this.tokenRanges);
         this.wrap = settings.tokenRange.wrap;
+
+        //System.out.println(String.format("Min num tokens: %d, token ranges: %s", queryDef.min_num_tokens, this.tokenRanges));
     }
 
-    private static Set<TokenRange> maybeSplitRanges(Set<TokenRange> tokenRanges, int splitFactor)
+    private static Set<TokenRange> maybeSplitRanges(Set<TokenRange> tokenRanges, int splitFactor, int minNumTokens)
     {
-        if (splitFactor <= 1)
-            return tokenRanges;
+        if (tokenRanges.isEmpty())
+            throw new RuntimeException("Expected at least one token range");
+
+        if (splitFactor <= 1 && tokenRanges.size() >= minNumTokens)
+            return tokenRanges; // no need to split and we have as many tokens as we need
+
+        // if even after splitting we don't have enough tokens, adjust the split factor
+        if ((tokenRanges.size() * splitFactor) < minNumTokens)
+            splitFactor = (int)Math.ceil((double)minNumTokens / tokenRanges.size());
 
         Set<TokenRange> ret = new TreeSet<>();
         for (TokenRange range : tokenRanges)
