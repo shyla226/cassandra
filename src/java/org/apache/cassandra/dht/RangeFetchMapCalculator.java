@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.RangeStreamer.ISourceFilter;
+import org.apache.cassandra.dht.RangeStreamer.StreamConsistency;
 import org.psjava.algo.graph.flownetwork.FordFulkersonAlgorithm;
 import org.psjava.algo.graph.flownetwork.MaximumFlowAlgorithm;
 import org.psjava.algo.graph.flownetwork.MaximumFlowAlgorithmResult;
@@ -375,7 +376,7 @@ public class RangeFetchMapCalculator
             //We could not find any source for this range which passed the filters. Ignore if localhost is part of the endpoints for this range
             if (!sourceFound && !rangesWithSources.get(range).contains(FBUtilities.getBroadcastAddress()))
             {
-                RangeStreamer.handleSourceNotFound(keyspace, useStrictConsistency, range);
+                RangeStreamer.handleSourceNotFound(keyspace, useStrictConsistency, range, 0, 1, StreamConsistency.ONE);
             }
         }
 

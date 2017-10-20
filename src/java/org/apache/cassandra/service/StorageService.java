@@ -704,7 +704,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
-    private boolean isReplacing()
+    public boolean isReplacing()
     {
         if (System.getProperty("cassandra.replace_address_first_boot", null) != null && SystemKeyspace.bootstrapComplete())
         {
@@ -1007,6 +1007,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return DatabaseDescriptor.getReplaceAddress().equals(FBUtilities.getBroadcastAddress());
     }
 
+    public static RangeStreamer.StreamConsistency getReplaceConsistency()
+    {
+        try
+        {
+            return RangeStreamer.StreamConsistency.valueOf(System.getProperty("cassandra.replace_consistency", "ONE").toUpperCase());
+        } catch (IllegalArgumentException e)
+        {
+            logger.warn("Could not parse -Dcassandra.replace_consistency={} property. Using replace consistency of ONE.", System.getProperty("cassandra.replace_consistency"));
+            return RangeStreamer.StreamConsistency.ONE;
+        }
+    }
+
     public void gossipSnitchInfo()
     {
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
@@ -1276,6 +1288,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                                        FBUtilities.getBroadcastAddress(),
                                                        StreamOperation.REBUILD,
                                                        useStrictConsistency && !replacing,
+                                                       RangeStreamer.StreamConsistency.ONE,
                                                        DatabaseDescriptor.getEndpointSnitch(),
                                                        streamStateStore,
                                                        false,
@@ -1611,7 +1624,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         setMode(Mode.JOINING, "Starting to bootstrap...", true);
         BootStrapper bootstrapper = new BootStrapper(FBUtilities.getBroadcastAddress(), tokens, tokenMetadata);
         bootstrapper.addProgressListener(progressSupport);
-        ListenableFuture<StreamState> bootstrapStream = bootstrapper.bootstrap(streamStateStore, useStrictConsistency && !replacing); // handles token update
+        // handles token update
+        ListenableFuture<StreamState> bootstrapStream = bootstrapper.bootstrap(streamStateStore,
+                                                                               useStrictConsistency && !replacing,
+                                                                               replacing ? getReplaceConsistency() : RangeStreamer.StreamConsistency.ONE);
         Futures.addCallback(bootstrapStream, new FutureCallback<StreamState>()
         {
             @Override
@@ -1672,7 +1688,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // already bootstrapped ranges are filtered during bootstrap
             BootStrapper bootstrapper = new BootStrapper(FBUtilities.getBroadcastAddress(), tokens, tokenMetadata);
             bootstrapper.addProgressListener(progressSupport);
-            ListenableFuture<StreamState> bootstrapStream = bootstrapper.bootstrap(streamStateStore, useStrictConsistency && !replacing); // handles token update
+            // handles token update
+            ListenableFuture<StreamState> bootstrapStream = bootstrapper.bootstrap(streamStateStore,
+                                                                                   useStrictConsistency && !replacing,
+                                                                                   replacing ? getReplaceConsistency() : RangeStreamer.StreamConsistency.ONE);
             Futures.addCallback(bootstrapStream, new FutureCallback<StreamState>()
             {
                 @Override
@@ -2007,9 +2026,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private Map<Range<Token>, List<InetAddress>> constructRangeToEndpointMap(String keyspace, List<Range<Token>> ranges)
     {
         Map<Range<Token>, List<InetAddress>> rangeToEndpointMap = new HashMap<>(ranges.size());
+        AbstractReplicationStrategy strategy = Keyspace.open(keyspace).getReplicationStrategy();
         for (Range<Token> range : ranges)
         {
-            rangeToEndpointMap.put(range, Keyspace.open(keyspace).getReplicationStrategy().getNaturalEndpoints(range.right));
+            rangeToEndpointMap.put(range, strategy.getNaturalEndpoints(range.right));
         }
         return rangeToEndpointMap;
     }
@@ -4386,7 +4406,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     }
 
                     // stream requests
-                    Multimap<InetAddress, Range<Token>> workMap = RangeStreamer.getWorkMapForMove(rangesToFetchWithPreferredEndpoints, keyspace, FailureDetector.instance, useStrictConsistency);
+                    Multimap<InetAddress, Range<Token>> workMap = RangeStreamer.getWorkMapForMove(rangesToFetchWithPreferredEndpoints,
+                                                                                                  keyspace,
+                                                                                                  FailureDetector.instance,
+                                                                                                  useStrictConsistency);
                     for (InetAddress address : workMap.keySet())
                     {
                         logger.debug("Will request range {} of keyspace {} from endpoint {}", workMap.get(address), keyspace, address);
