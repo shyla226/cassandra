@@ -2355,7 +2355,7 @@ public class DatabaseDescriptor
     {
         conf.otc_backlog_expiration_interval_ms = intervalInMillis;
     }
- 
+
     public static int getWindowsTimerInterval()
     {
         return conf.windows_timer_interval;

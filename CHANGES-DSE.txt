@@ -3,6 +3,7 @@ DSE 5.1.4
  * Always define execution_profiles in cqlsh.py (APOLLO-1150)
  * Fix stress-tool not outputting row/s (APOLLO-1123)
 Merged from dse5.0:
+ * Added "-Dcassandra.replace_consistency" to support replace from multiple sources (APOLLO-247)
  * Add cross_dc_rtt_in_ms to cross dc requests, default 0 (APOLLO-854)
  * Backport CASSANDRA-13299, Throttle base partitions during MV repair streaming to prevent OOM (APOLLO-878)
  * Backport CASSANDRA-13079: Warn user to run full repair when increasing replication factor (APOLLO-602)
