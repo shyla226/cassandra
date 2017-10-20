@@ -1,5 +1,5 @@
 dse 6.0.0s
- * Rename artifacts to "db” (APOLLO-1201)
+ * Rename artifacts to "db” (DB-1201)
  * Forbid advancing KeyScanningIterator before either exhausting or closing the current iterator (DB-1199)
  * Add result set metadata to prepared statement MD5 hash calculation (DB-608)
  * Add command line tool for NodeSync (DB-948)
