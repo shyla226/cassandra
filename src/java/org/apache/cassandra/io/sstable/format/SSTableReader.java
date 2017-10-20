@@ -1668,14 +1668,25 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return dataFile.createReader(limiter);
     }
 
+    public RandomAccessReader openDataReader(RateLimiter limiter, int prefetch)
+    {
+        assert limiter != null;
+        return dataFile.createReader(limiter, prefetch);
+    }
+
     public RandomAccessReader openDataReader()
     {
         return dataFile.createReader();
     }
 
-    public RandomAccessReader openDataReader(Rebufferer.ReaderConstraint rc)
+    public RandomAccessReader openDataReader(int prefetch)
     {
-        return dataFile.createReader(rc);
+        return dataFile.createReader(Rebufferer.ReaderConstraint.NONE, prefetch);
+    }
+
+    public RandomAccessReader openDataReader(Rebufferer.ReaderConstraint rc, int prefetch)
+    {
+        return dataFile.createReader(rc, prefetch);
     }
 
     public AsynchronousChannelProxy getDataChannel()

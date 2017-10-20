@@ -34,6 +34,8 @@ public class CacheMissMetrics
     public final Meter misses;
     /** Total number of cache requests */
     public final Meter requests;
+    /** Total number of {@link org.apache.cassandra.io.util.Rebufferer.NotInCacheException} */
+    public final Meter notInCacheExceptions;
     /** Latency of misses */
     public final Timer missLatency;
     /** all time cache hit rate */
@@ -62,6 +64,7 @@ public class CacheMissMetrics
         capacity = Metrics.register(factory.createMetricName("Capacity"), (Gauge<Long>) cache::capacity);
         misses = Metrics.meter(factory.createMetricName("Misses"));
         requests = Metrics.meter(factory.createMetricName("Requests"));
+        notInCacheExceptions = Metrics.meter(factory.createMetricName("NotInCacheExceptions"));
         missLatency = Metrics.timer(factory.createMetricName("MissLatency"));
         hitRate = Metrics.register(factory.createMetricName("HitRate"), new RatioGauge()
         {
@@ -108,5 +111,12 @@ public class CacheMissMetrics
     {
         requests.mark(-requests.getCount());
         misses.mark(-misses.getCount());
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("Requests: %s, Misses: %s, NotInCacheExceptions: %s, missLatency: %s",
+                             requests, misses, notInCacheExceptions, missLatency);
     }
 }

@@ -125,6 +125,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         }
 
         @Override
+        public boolean supportsPrefetch()
+        {
+            return true;
+        }
+
+        @Override
         public CompletableFuture<ByteBuffer> readChunk(long position, ByteBuffer uncompressed)
         {
             CompletableFuture<ByteBuffer> ret = new CompletableFuture<>();
@@ -261,6 +267,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         {
             super(channel, metadata);
             this.regions = regions;
+        }
+
+        @Override
+        public boolean supportsPrefetch()
+        {
+            return false;
         }
 
         @Override

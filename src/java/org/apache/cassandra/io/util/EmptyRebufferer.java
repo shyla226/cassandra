@@ -17,6 +17,10 @@
  */
 package org.apache.cassandra.io.util;
 
+import java.util.concurrent.CompletableFuture;
+
+import org.apache.cassandra.concurrent.TPCUtils;
+
 public class EmptyRebufferer implements Rebufferer, RebuffererFactory
 {
     AsynchronousChannelProxy channel;
@@ -46,9 +50,25 @@ public class EmptyRebufferer implements Rebufferer, RebuffererFactory
         return this;
     }
 
+    @Override
+    public boolean supportsPrefetch()
+    {
+        return false; // nothing to prefetch
+    }
+
     public BufferHolder rebuffer(long position)
     {
         return EMPTY;
+    }
+
+    public CompletableFuture<BufferHolder> rebufferAsync(long position)
+    {
+        return TPCUtils.completedFuture(EMPTY);
+    }
+
+    public int rebufferSize()
+    {
+        return 0;
     }
 
     public BufferHolder rebuffer(long position, ReaderConstraint constraint)

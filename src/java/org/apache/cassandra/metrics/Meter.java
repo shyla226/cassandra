@@ -225,4 +225,11 @@ public class Meter extends com.codahale.metrics.Meter implements Metered, Compos
     {
         count.compose(metric.count);
     }
+
+    @Override
+    public String toString()
+    {
+        return String.format("count: %d, 1-min: %.2f, 5-min: %.2f, 15-min: %.2f",
+                             getCount(), getOneMinuteRate(), getFiveMinuteRate(), getFiveMinuteRate());
+    }
 }

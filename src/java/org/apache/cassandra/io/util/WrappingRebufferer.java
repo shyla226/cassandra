@@ -18,8 +18,9 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import javax.annotation.Nullable;
 
 public class WrappingRebufferer implements Rebufferer
@@ -30,7 +31,7 @@ public class WrappingRebufferer implements Rebufferer
     public WrappingRebufferer(Rebufferer source)
     {
         this.source = source;
-        this.buffers = new ArrayDeque<>(2);
+        this.buffers = new ConcurrentLinkedDeque<>();
     }
 
     @Override
@@ -38,6 +39,18 @@ public class WrappingRebufferer implements Rebufferer
     {
         BufferHolder bufferHolder = source.rebuffer(position, constraint);
         return newBufferHolder().initialize(bufferHolder, bufferHolder.buffer(), bufferHolder.offset());
+    }
+
+    @Override
+    public CompletableFuture<BufferHolder> rebufferAsync(long position)
+    {
+        return source.rebufferAsync(position)
+                     .thenApply(bufferHolder -> newBufferHolder().initialize(bufferHolder, bufferHolder.buffer(), bufferHolder.offset()));
+    }
+
+    public int rebufferSize()
+    {
+        return source.rebufferSize();
     }
 
     protected WrappingBufferHolder newBufferHolder()

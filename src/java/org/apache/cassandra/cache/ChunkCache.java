@@ -49,13 +49,20 @@ public class ChunkCache
     private static final Logger logger = LoggerFactory.getLogger(ChunkCache.class);
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     public static final long cacheSize = 1024L * 1024L * Math.max(0, DatabaseDescriptor.getFileCacheSizeInMB() - RESERVED_POOL_SPACE_IN_MB);
-    public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
+
+    private static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
+    private static final DiskOptimizationStrategy diskOptimizationStrategy = DatabaseDescriptor.getDiskOptimizationStrategy();
 
     public static final ChunkCache instance = cacheSize > 0 ? new ChunkCache() : null;
     private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
 
     private final AsyncLoadingCache<Key, Buffer> cache;
     public final CacheMissMetrics metrics;
+
+    public static int roundForCaching(int bufferSize)
+    {
+        return diskOptimizationStrategy.roundForCaching(bufferSize, roundUp);
+    }
 
     static class Key
     {
@@ -96,7 +103,7 @@ public class ChunkCache
 
         public String toString()
         {
-            return path + "@" + position;
+            return path + '@' + position;
         }
     }
 
@@ -332,9 +339,51 @@ public class ChunkCache
 
             /**
              * Notify the caller this page isn't ready
-             * but give them the Buffer container so they can register a callback
+             * but don't give them the buffer because it has not been referenced.
              */
-            throw new NotInCacheException(asyncBuffer, key.path, key.position);
+            throw new NotInCacheException(asyncBuffer.thenAccept(buffer -> {}), key.path, key.position);
+        }
+
+        @Override
+        public CompletableFuture<BufferHolder> rebufferAsync(long position)
+        {
+            metrics.requests.mark();
+            CompletableFuture<BufferHolder> ret = new CompletableFuture<>();
+            getPage(position, ret, 0);
+            return ret;
+        }
+
+        private void getPage(long position, CompletableFuture<BufferHolder> ret, int numAttempts)
+        {
+            long pageAlignedPos = position & alignmentMask;
+            cache.get(new Key(source, pageAlignedPos))
+                 .whenComplete((page, error) -> {
+                     if (error != null)
+                     {
+                         ret.completeExceptionally(error);
+                         return;
+                     }
+
+                     BufferHolder buffer = page.reference();
+                     if (buffer != null)
+                     {
+                         ret.complete(buffer);
+                     }
+                     else if (numAttempts < 1024)
+                     {
+                         TPC.bestTPCScheduler().scheduleDirect(() -> getPage(position, ret, numAttempts + 1));
+                     }
+                     else
+                     {
+                         ret.completeExceptionally(new IllegalStateException("Failed to acquire buffer from cache after 1024 attempts"));
+                     }
+                 });
+        }
+
+        @Override
+        public int rebufferSize()
+        {
+            return source.chunkSize();
         }
 
         public void invalidate(long position)
@@ -347,6 +396,12 @@ public class ChunkCache
         public Rebufferer instantiateRebufferer()
         {
             return this;
+        }
+
+        @Override
+        public boolean supportsPrefetch()
+        {
+            return source.supportsPrefetch();
         }
 
         @Override

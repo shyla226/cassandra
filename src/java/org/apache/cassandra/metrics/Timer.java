@@ -223,4 +223,13 @@ public class Timer extends com.codahale.metrics.Timer implements Metered, Sampli
     {
         return histogram;
     }
+
+    @Override
+    public String toString()
+    {
+        Snapshot snapshot = histogram.getSnapshot();
+        return String.format("min: %d, avg: %.2f, max: %d, [p50: %.2f, p75: %.2f, p95: %.2f, p99: %.2f]",
+                             snapshot.getMin(), snapshot.getMean(), snapshot.getMax(),
+                             snapshot.getMedian(), snapshot.get75thPercentile(), snapshot.get95thPercentile(), snapshot.get99thPercentile());
+    }
 }

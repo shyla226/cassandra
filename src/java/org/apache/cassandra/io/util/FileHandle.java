@@ -37,6 +37,7 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
+import org.apache.cassandra.utils.memory.BufferPool;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 
@@ -164,7 +165,17 @@ public class FileHandle extends SharedCloseableImpl
      */
     public RandomAccessReader createReader(Rebufferer.ReaderConstraint constraint)
     {
-        return new RandomAccessReader(instantiateRebufferer(null), constraint);
+        return new RandomAccessReader(instantiateRebufferer(0, null), constraint);
+    }
+
+    /**
+     * Create {@link RandomAccessReader} with configured method of reading content of the file.
+     *
+     * @return RandomAccessReader for the file
+     */
+    public RandomAccessReader createReader(Rebufferer.ReaderConstraint constraint, int prefetch)
+    {
+        return new RandomAccessReader(instantiateRebufferer(prefetch, null), constraint);
     }
 
     /**
@@ -176,7 +187,21 @@ public class FileHandle extends SharedCloseableImpl
      */
     public RandomAccessReader createReader(RateLimiter limiter)
     {
-        return new RandomAccessReader(instantiateRebufferer(limiter), Rebufferer.ReaderConstraint.NONE);
+        return createReader(limiter, 0);
+    }
+
+    /**
+     * Create {@link RandomAccessReader} with configured method of reading content of the file.
+     * Reading from file will be rate limited by given {@link RateLimiter} and a prefetch factor
+     * given by {@code prefetch}.
+     *
+     * @param limiter RateLimiter to use for rate limiting read
+     * @param prefetch the number of buffers to prefetch or zero to disable prefetch
+     * @return RandomAccessReader for the file
+     */
+    public RandomAccessReader createReader(RateLimiter limiter, int prefetch)
+    {
+        return new RandomAccessReader(instantiateRebufferer(prefetch, limiter), Rebufferer.ReaderConstraint.NONE);
     }
 
     public FileDataInput createReader(long position, Rebufferer.ReaderConstraint rc)
@@ -203,12 +228,15 @@ public class FileHandle extends SharedCloseableImpl
         channel.tryToSkipCache(0, position);
     }
 
-    private Rebufferer instantiateRebufferer(RateLimiter limiter)
+    private Rebufferer instantiateRebufferer(int prefetch, RateLimiter limiter)
     {
         Rebufferer rebufferer = rebuffererFactory.instantiateRebufferer();
 
+        if (prefetch > 0 && rebuffererFactory.supportsPrefetch())
+            rebufferer = new PrefetchingRebufferer(rebufferer, prefetch);
+
         if (limiter != null)
-            rebufferer = new LimitingRebufferer(rebufferer, limiter, DiskOptimizationStrategy.MAX_BUFFER_SIZE);
+            rebufferer = new LimitingRebufferer(rebufferer, limiter, BufferPool.CHUNK_SIZE);
         return rebufferer;
     }
 
@@ -443,7 +471,7 @@ public class FileHandle extends SharedCloseableImpl
                     }
                     else
                     {
-                        int chunkSize = DiskOptimizationStrategy.roundForCaching(bufferSize, ChunkCache.roundUp);
+                        int chunkSize = ChunkCache.roundForCaching(bufferSize);
                         rebuffererFactory = maybeCached(new SimpleChunkReader(channelCopy, length, bufferType, chunkSize));
                     }
                 }

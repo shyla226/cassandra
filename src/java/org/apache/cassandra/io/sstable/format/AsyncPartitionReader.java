@@ -296,7 +296,7 @@ class AsyncPartitionReader
             }
 
             if (dataFileOwner.compareAndSet(DataFileOwner.NONE, DataFileOwner.PARTITION_READER))
-                dfile = table.openDataReader(ReaderConstraint.ASYNC);   // This does not include a read and can't throw
+                dfile = table.openDataReader(ReaderConstraint.ASYNC, 0); // This does not include a read and can't throw
 
             filePos = indexEntry.position;
             state = State.HAVE_DFILE;
@@ -408,7 +408,7 @@ class AsyncPartitionReader
             case NONE:
                 // partition reader closed, we need to reopen file
                 dataFileOwner.set(DataFileOwner.PARTITION_SUBSCRIPTION);
-                return dfile = table.openDataReader(ReaderConstraint.ASYNC);
+                return dfile = table.openDataReader(ReaderConstraint.ASYNC, 0);
             default:
                 throw new AssertionError(); // if it was this, compareAndSet should have worked
             }

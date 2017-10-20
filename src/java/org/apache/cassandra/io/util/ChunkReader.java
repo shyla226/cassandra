@@ -21,6 +21,8 @@ package org.apache.cassandra.io.util;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import io.netty.util.Recycler;
 import org.apache.cassandra.io.compress.BufferType;
 
@@ -89,5 +91,11 @@ public interface ChunkReader extends RebuffererFactory
         {
             handle.recycle(this);
         }
+    }
+
+    @VisibleForTesting
+    public static ChunkReader simple(AsynchronousChannelProxy channel, long fileLength, BufferType bufferType, int bufferSize)
+    {
+        return new SimpleChunkReader(channel, fileLength, bufferType, bufferSize);
     }
 }

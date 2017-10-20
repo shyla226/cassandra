@@ -38,7 +38,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.UnsafeCopy;
 import sun.nio.ch.DirectBuffer;
@@ -708,9 +707,9 @@ public final class FileUtils
      *
      * @return true if data directories are all SSD
      */
-    public static boolean isSSD()
+    public static boolean isSSD(boolean diskOptimStrategyIsSSD, String[] dataFileLocations)
     {
-        boolean isSSD = DatabaseDescriptor.getDiskOptimizationStrategy() instanceof SsdDiskOptimizationStrategy;
+        boolean isSSD = diskOptimStrategyIsSSD;
 
         if (FBUtilities.isLinux)
         {
@@ -718,7 +717,7 @@ public final class FileUtils
             {
                 Map<Path, String> dirToPartition = getDiskPartitions();
 
-                for (String dataDir : DatabaseDescriptor.getAllDataFileLocations())
+                for (String dataDir : dataFileLocations)
                 {
                     Path dataPath = Paths.get(dataDir).toAbsolutePath();
                     boolean found = false;

@@ -19,8 +19,11 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.CompletableFuture;
 
 import org.junit.Test;
+
+import org.apache.cassandra.concurrent.TPCUtils;
 
 import static org.junit.Assert.*;
 
@@ -106,6 +109,16 @@ public class WrappingRebuffererTest
         {
             offset = position;
             return this;
+        }
+
+        public CompletableFuture<BufferHolder> rebufferAsync(long position)
+        {
+            return TPCUtils.completedFuture(rebuffer(position));
+        }
+
+        public int rebufferSize()
+        {
+            return buffer.capacity();
         }
 
         public ByteBuffer buffer()

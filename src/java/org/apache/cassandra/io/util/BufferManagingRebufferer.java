@@ -22,10 +22,10 @@ package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.utils.memory.BufferPool;
@@ -33,36 +33,28 @@ import org.apache.cassandra.utils.memory.BufferPool;
 /**
  * Buffer manager used for reading from a ChunkReader when cache is not in use. Instances of this class are
  * reader-specific and thus do not need to be thread-safe since the reader itself isn't.
- *
- * The instances reuse themselves as the BufferHolder to avoid having to return a new object for each rebuffer call.
  */
-public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer.BufferHolder
+public abstract class BufferManagingRebufferer implements Rebufferer
 {
-    private static Logger logger = LoggerFactory.getLogger(BufferManagingRebufferer.class);
+    private final Deque<BufferHolderImpl> buffers;
     protected final ChunkReader source;
-    protected final ByteBuffer buffer;
-    protected long offset = 0;
 
     abstract long alignedPosition(long position);
 
-    protected BufferManagingRebufferer(ChunkReader wrapped)
+    BufferManagingRebufferer(ChunkReader wrapped)
     {
+        this.buffers = new ArrayDeque<>();
         this.source = wrapped;
-        buffer = BufferPool.get(wrapped.chunkSize(), wrapped.preferredBufferType()).order(ByteOrder.BIG_ENDIAN);
-        buffer.limit(0);
     }
 
     @Override
     public void closeReader()
     {
-        BufferPool.put(buffer);
-        offset = -1;
     }
 
     @Override
     public void close()
     {
-        assert offset == -1;    // reader must be closed at this point.
         source.close();
     }
 
@@ -83,20 +75,42 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     {
         assert !TPC.isTPCThread();
 
-        offset = alignedPosition(position);
+        BufferHolder ret = newBufferHolder(alignedPosition(position));
         try
         {
-            source.readChunk(offset, buffer).join();
+            source.readChunk(ret.offset(), ret.buffer()).join();
         }
         catch (CompletionException t)
         {
+            ret.release();
             if (t.getCause() != null && t.getCause() instanceof RuntimeException)
                 throw (RuntimeException) t.getCause();
 
             throw t;
         }
 
-        return this;
+        return ret;
+    }
+
+    @Override
+    public CompletableFuture<BufferHolder> rebufferAsync(long position)
+    {
+        BufferHolder ret = newBufferHolder(alignedPosition(position));
+        return source.readChunk(ret.offset(), ret.buffer())
+                     .handle((buffer, err) -> {
+                         if (err != null)
+                         {
+                             ret.release();
+                             throw new CompletionException(err);
+                         }
+                         return ret;
+                     });
+    }
+
+    @Override
+    public int rebufferSize()
+    {
+        return source.chunkSize();
     }
 
     public BufferHolder rebuffer(long position, ReaderConstraint constraint)
@@ -120,30 +134,59 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     @Override
     public String toString()
     {
-        return "BufferManagingRebufferer." + getClass().getSimpleName() + ":" + source;
+        return "BufferManagingRebufferer." + getClass().getSimpleName() + ':' + source;
     }
 
-    // BufferHolder methods
-
-    public ByteBuffer buffer()
+    BufferHolder newBufferHolder(long offset)
     {
-        return buffer;
+        BufferHolderImpl ret = buffers.pollFirst();
+        if (ret == null)
+            ret = new BufferHolderImpl();
+
+        return ret.init(offset);
     }
 
-    public long offset()
+    private class BufferHolderImpl implements Rebufferer.BufferHolder
     {
-        return offset;
+        private long offset = -1L;
+        private ByteBuffer buffer = null;
+
+        private BufferHolderImpl init(long offset)
+        {
+            assert this.offset == -1L && this.buffer == null : "Attempted to initialize before releasing for previous use";
+
+            this.offset = offset;
+            this.buffer = BufferPool.get(source.chunkSize(), source.preferredBufferType()).order(ByteOrder.BIG_ENDIAN);
+            this.buffer.limit(0);
+
+            return this;
+        }
+
+        public ByteBuffer buffer()
+        {
+            return buffer;
+        }
+
+        public long offset()
+        {
+            return offset;
+        }
+
+        public void release()
+        {
+            assert offset != -1 && buffer != null : "released twice";
+
+            BufferPool.put(buffer);
+            buffer = null;
+            offset = -1;
+
+            buffers.offerFirst(this);
+        }
     }
 
-    @Override
-    public void release()
+    static class Unaligned extends BufferManagingRebufferer
     {
-        // nothing to do, we don't delete buffers before we're closed.
-    }
-
-    public static class Unaligned extends BufferManagingRebufferer
-    {
-        public Unaligned(ChunkReader wrapped)
+        Unaligned(ChunkReader wrapped)
         {
             super(wrapped);
         }
@@ -155,9 +198,9 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
         }
     }
 
-    public static class Aligned extends BufferManagingRebufferer
+    static class Aligned extends BufferManagingRebufferer
     {
-        public Aligned(ChunkReader wrapped)
+        Aligned(ChunkReader wrapped)
         {
             super(wrapped);
             assert Integer.bitCount(wrapped.chunkSize()) == 1;
@@ -166,7 +209,7 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
         @Override
         long alignedPosition(long position)
         {
-            return position & -buffer.capacity();
+            return position & -source.chunkSize();
         }
     }
 }

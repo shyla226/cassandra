@@ -31,6 +31,7 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.Rebufferer;
@@ -343,7 +344,9 @@ public class CompactionController implements AutoCloseable
 
     private FileDataInput openDataFile(SSTableReader reader)
     {
-        return limiter != null ? reader.openDataReader(limiter) : reader.openDataReader();
+        return limiter != null
+               ? reader.openDataReader(limiter, DiskOptimizationStrategy.NUM_READ_AHEAD_BUFFERS)
+               : reader.openDataReader(DiskOptimizationStrategy.NUM_READ_AHEAD_BUFFERS);
     }
 
     /**
