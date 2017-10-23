@@ -15,32 +15,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.cql3;
+package org.apache.cassandra.tools.nodetool;
 
-import java.util.Locale;
+import io.airlift.airline.Command;
+import org.apache.cassandra.tools.NodeProbe;
+import org.apache.cassandra.tools.NodeTool;
 
-public class RoleName
+@Command(name = "handoffwindow", description = "Print current hinted handoff window")
+public class HandoffWindow extends NodeTool.NodeToolCmd
 {
-    private String name;
-
-    public void setName(String name, boolean keepCase)
-    {
-        this.name = keepCase ? name : (name == null ? name : name.toLowerCase(Locale.US));
-    }
-
-    public boolean hasName()
-    {
-        return name != null;
-    }
-
-    public String getName()
-    {
-        return name;
-    }
-
     @Override
-    public String toString()
+    public void execute(NodeProbe probe)
     {
-        return name;
+        System.out.println(String.format("Hinted handoff window is %s",
+                                         probe.getMaxHintWindow()));
     }
 }

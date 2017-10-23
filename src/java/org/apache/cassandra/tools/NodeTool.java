@@ -186,7 +186,8 @@ public class NodeTool
                 RelocateSSTables.class,
                 ViewBuildStatus.class,
                 InMemoryStatus.class,
-                MarkUnrepaired.class
+                MarkUnrepaired.class,
+                HandoffWindow.class
         );
 
         if (withSequence)
