@@ -41,18 +41,13 @@ public class ChunkCache
 {
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     public static final long cacheSize = 1024L * 1024L * Math.max(0, DatabaseDescriptor.getFileCacheSizeInMB() - RESERVED_POOL_SPACE_IN_MB);
+    public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
 
     private static boolean enabled = cacheSize > 0;
     public static final ChunkCache instance = enabled ? new ChunkCache() : null;
 
     private final LoadingCache<Key, Buffer> cache;
     public final CacheMissMetrics metrics;
-
-    public static int bufferToChunkSize(int bufferSize)
-    {
-        int chunkSize = Integer.highestOneBit(bufferSize);
-        return Math.min(DiskOptimizationStrategy.MAX_BUFFER_SIZE, Math.max(4096, chunkSize));
-    }
 
     static class Key
     {
@@ -225,7 +220,7 @@ public class ChunkCache
         {
             source = file;
             int chunkSize = file.chunkSize();
-            assert Integer.bitCount(chunkSize) == 1;    // Must be power of two
+            assert Integer.bitCount(chunkSize) == 1 : String.format("%d must be a power of two", chunkSize);
             alignmentMask = -chunkSize;
         }
 
