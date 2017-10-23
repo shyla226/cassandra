@@ -431,6 +431,10 @@ public class DatabaseDescriptor
             }
         }
 
+        // round down for SSDs and round up for spinning disks
+        if (conf.file_cache_round_up == null)
+            conf.file_cache_round_up = conf.disk_optimization_strategy == Config.DiskOptimizationStrategy.spinning;
+
         if (conf.memtable_offheap_space_in_mb == null)
             conf.memtable_offheap_space_in_mb = (int) (Runtime.getRuntime().maxMemory() / (4 * 1048576));
         if (conf.memtable_offheap_space_in_mb < 0)
@@ -2235,6 +2239,18 @@ public class DatabaseDescriptor
         }
 
         return conf.file_cache_size_in_mb;
+    }
+
+    public static boolean getFileCacheRoundUp()
+    {
+        if (conf.file_cache_round_up == null)
+        {
+            // In client mode the value is not set.
+            assert DatabaseDescriptor.isClientInitialized();
+            return false;
+        }
+
+        return conf.file_cache_round_up;
     }
 
     public static boolean getBufferPoolUseHeapIfExhausted()

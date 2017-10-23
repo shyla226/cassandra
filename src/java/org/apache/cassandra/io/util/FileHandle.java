@@ -436,7 +436,7 @@ public class FileHandle extends SharedCloseableImpl
                     }
                     else
                     {
-                        int chunkSize = ChunkCache.bufferToChunkSize(bufferSize);
+                        int chunkSize = DiskOptimizationStrategy.roundForCaching(bufferSize, ChunkCache.roundUp);
                         rebuffererFactory = maybeCached(new SimpleChunkReader(channelCopy, length, bufferType, chunkSize));
                     }
                 }

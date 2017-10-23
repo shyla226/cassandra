@@ -49,18 +49,13 @@ public class ChunkCache
     private static final Logger logger = LoggerFactory.getLogger(ChunkCache.class);
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     public static final long cacheSize = 1024L * 1024L * Math.max(0, DatabaseDescriptor.getFileCacheSizeInMB() - RESERVED_POOL_SPACE_IN_MB);
+    public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
 
     public static final ChunkCache instance = cacheSize > 0 ? new ChunkCache() : null;
     private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
 
     private final AsyncLoadingCache<Key, Buffer> cache;
     public final CacheMissMetrics metrics;
-
-    public static int bufferToChunkSize(int bufferSize)
-    {
-        int chunkSize = Integer.highestOneBit(bufferSize);
-        return Math.min(DiskOptimizationStrategy.MAX_BUFFER_SIZE, Math.max(4096, chunkSize));
-    }
 
     static class Key
     {
@@ -267,7 +262,7 @@ public class ChunkCache
         {
             source = file;
             int chunkSize = file.chunkSize();
-            assert Integer.bitCount(chunkSize) == 1 : chunkSize; // Must be power of two
+            assert Integer.bitCount(chunkSize) == 1 : String.format("%d must be a power of two", chunkSize);
             alignmentMask = -chunkSize;
         }
 

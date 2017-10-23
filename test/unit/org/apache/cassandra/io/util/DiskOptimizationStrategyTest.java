@@ -41,7 +41,7 @@ public class DiskOptimizationStrategyTest
         assertEquals(8192, strategy.roundBufferSize(4097));
         assertEquals(8192, strategy.roundBufferSize(8191));
         assertEquals(8192, strategy.roundBufferSize(8192));
-        assertEquals(16384, strategy.roundBufferSize(8193));
+        assertEquals(12288, strategy.roundBufferSize(8193));
         assertEquals(65536, strategy.roundBufferSize(65535));
         assertEquals(65536, strategy.roundBufferSize(65536));
         assertEquals(65536, strategy.roundBufferSize(65537));
@@ -58,13 +58,13 @@ public class DiskOptimizationStrategyTest
         assertEquals(4096, strategy.bufferSize(100));
         assertEquals(4096, strategy.bufferSize(4096));
         assertEquals(8192, strategy.bufferSize(4505));   // just < (4096 + 4096 * 0.1)
-        assertEquals(16384, strategy.bufferSize(4506));  // just > (4096 + 4096 * 0.1)
+        assertEquals(12288, strategy.bufferSize(4506));  // just > (4096 + 4096 * 0.1)
 
         strategy = new SsdDiskOptimizationStrategy(0.5);
         assertEquals(8192, strategy.bufferSize(4506));  // just > (4096 + 4096 * 0.1)
         assertEquals(8192, strategy.bufferSize(6143));  // < (4096 + 4096 * 0.5)
-        assertEquals(16384, strategy.bufferSize(6144));  // = (4096 + 4096 * 0.5)
-        assertEquals(16384, strategy.bufferSize(6145));  // > (4096 + 4096 * 0.5)
+        assertEquals(12288, strategy.bufferSize(6144));  // = (4096 + 4096 * 0.5)
+        assertEquals(12288, strategy.bufferSize(6145));  // > (4096 + 4096 * 0.5)
 
         strategy = new SsdDiskOptimizationStrategy(1.0); // never add a page
         assertEquals(8192, strategy.bufferSize(8191));
@@ -84,33 +84,59 @@ public class DiskOptimizationStrategyTest
         assertEquals(8192, strategy.bufferSize(10));
         assertEquals(8192, strategy.bufferSize(100));
         assertEquals(8192, strategy.bufferSize(4096));
-        assertEquals(16384, strategy.bufferSize(4097));
+        assertEquals(12288, strategy.bufferSize(4097));
     }
 
     @Test
-    public void testBufferSizeToChunkeSize()
+    public void testRoundUpForCaching()
     {
-        Config cfg = new Config();
-        cfg.file_cache_size_in_mb = 64 * 1024 * 1024;
-        DatabaseDescriptor.setConfig(cfg);
-        assertEquals(4096, ChunkCache.bufferToChunkSize(-1));
-        assertEquals(4096, ChunkCache.bufferToChunkSize(0));
-        assertEquals(4096, ChunkCache.bufferToChunkSize(1));
-        assertEquals(4096, ChunkCache.bufferToChunkSize(4095));
-        assertEquals(4096, ChunkCache.bufferToChunkSize(4096));
-        assertEquals(4096, ChunkCache.bufferToChunkSize(4097));
-        assertEquals(4096, ChunkCache.bufferToChunkSize(4098));
-        assertEquals(8192, ChunkCache.bufferToChunkSize(8193));
-        assertEquals(8192, ChunkCache.bufferToChunkSize(12288));
-        assertEquals(65536, ChunkCache.bufferToChunkSize(65536));
-        assertEquals(65536, ChunkCache.bufferToChunkSize(65537));
-        assertEquals(65536, ChunkCache.bufferToChunkSize(131072));
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(-1, true));
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(0, true));
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(1, true));
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(4095, true));
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(4096, true));
+        assertEquals(8192, DiskOptimizationStrategy.roundForCaching(4097, true));
+        assertEquals(8192, DiskOptimizationStrategy.roundForCaching(4098, true));
+        assertEquals(8192, DiskOptimizationStrategy.roundForCaching(8192, true));
+        assertEquals(16384, DiskOptimizationStrategy.roundForCaching(8193, true));
+        assertEquals(16384, DiskOptimizationStrategy.roundForCaching(12288, true));
+        assertEquals(16384, DiskOptimizationStrategy.roundForCaching(16384, true));
+        assertEquals(65536, DiskOptimizationStrategy.roundForCaching(65536, true));
+        assertEquals(65536, DiskOptimizationStrategy.roundForCaching(65537, true));
+        assertEquals(65536, DiskOptimizationStrategy.roundForCaching(131072, true));
 
-        for (int cs = 4096; cs < 65536; cs <<= 1)
+        for (int cs = 4096; cs < 65536; cs <<= 1) // 4096, 8192, 12288, ..., 65536
         {
-            for (int i = cs; i < cs * 2 - 1; i++)
+            for (int i = (cs - 4095); i <= cs; i++) // 1 -> 4096, 4097 -> 8192, ...
             {
-                assertEquals(cs, ChunkCache.bufferToChunkSize(i));
+                assertEquals(cs, DiskOptimizationStrategy.roundForCaching(i, true));
+            }
+        }
+    }
+
+    @Test
+    public void testRoundDownForCaching()
+    {
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(-1, false));
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(0, false));
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(1, false));
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(4095, false));
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(4096, false));
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(4097, false));
+        assertEquals(4096, DiskOptimizationStrategy.roundForCaching(4098, false));
+        assertEquals(8192, DiskOptimizationStrategy.roundForCaching(8192, false));
+        assertEquals(8192, DiskOptimizationStrategy.roundForCaching(8193, false));
+        assertEquals(8192, DiskOptimizationStrategy.roundForCaching(12288, false));
+        assertEquals(16384, DiskOptimizationStrategy.roundForCaching(16384, false));
+        assertEquals(65536, DiskOptimizationStrategy.roundForCaching(65536, false));
+        assertEquals(65536, DiskOptimizationStrategy.roundForCaching(65537, false));
+        assertEquals(65536, DiskOptimizationStrategy.roundForCaching(131072, false));
+
+        for (int cs = 4096; cs < 65536; cs <<= 1) // 4096, 8192, 12288, ..., 65536
+        {
+            for (int i = cs; i < cs * 2 - 1; i++) // 4096 -> 8191, 8192 -> 12287, ...
+            {
+                assertEquals(cs, DiskOptimizationStrategy.roundForCaching(i, false));
             }
         }
     }
