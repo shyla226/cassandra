@@ -56,12 +56,12 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 @Measurement(iterations = 10, time = 2, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 1
 , jvmArgsAppend = {"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
-//                   "-Dcassandra.storagedir=/tmp/foobar",
-//                   "-XX:CompileCommandFile=/home/jake/workspace/cassandra/conf/hotspot_compiler",
-//                                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder",
-//                                   "-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints", "-XX:+PreserveFramePointer"
-                                   //"-XX:StartFlightRecording=duration=60s,filename=./profiling-data.jfr,name=profile,settings=profile",
-                                  // "-XX:FlightRecorderOptions=settings=/home/jake/workspace/cassandra/profiling-advanced.jfc,samplethreads=true"
+//                 "-Dcassandra.storagedir=/tmp/foobar",
+//                 "-XX:CompileCommandFile=/home/jake/workspace/cassandra/conf/hotspot_compiler",
+//                 "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder",
+//                 "-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints", "-XX:+PreserveFramePointer"
+//                 "-XX:StartFlightRecording=duration=60s,filename=./profiling-data.jfr,name=profile,settings=profile",
+//                 "-XX:FlightRecorderOptions=settings=/home/jake/workspace/cassandra/profiling-advanced.jfc,samplethreads=true"
 }
 )
 @Threads(1)
@@ -72,11 +72,14 @@ public class ReadWriteTest extends CQLTester
     String table;
     PreparedStatement writeStatement;
     PreparedStatement readStatement;
-    int numRows = 1_100_000;
+
     long numReads = 0;
 
-    @Param({"1000", "64"})
-    int INFLIGHT = 1;
+    @Param("100000")
+    int numRows;
+
+    @Param("64")
+    int inflight;
     List<ResultSetFuture> futures;
     ColumnFamilyStore cfs;
 
@@ -101,12 +104,12 @@ public class ReadWriteTest extends CQLTester
         cfs.disableAutoCompaction();
 
         //Warm up
-        futures = new ArrayList<>(INFLIGHT);
+        futures = new ArrayList<>(inflight);
         System.err.println("Writing " + numRows);
         int lastPrint = 0;
-        for (int i = 0; i < numRows; i += INFLIGHT)
+        for (int i = 0; i < numRows; i += inflight)
         {
-            int max = Math.min(INFLIGHT, numRows - i);
+            int max = Math.min(inflight, numRows - i);
             for (int j = 0; j < max; ++j)
             {
                 long v = i + j;
@@ -149,7 +152,7 @@ public class ReadWriteTest extends CQLTester
     @Benchmark
     public Object read() throws Throwable
     {
-        for (int i = 0; i < INFLIGHT; i++)
+        for (int i = 0; i < inflight; i++)
             futures.add(executeNetAsync(ProtocolVersion.CURRENT, readStatement.bind( numReads++ % numRows )));
 
         FBUtilities.waitOnFutures(futures);
