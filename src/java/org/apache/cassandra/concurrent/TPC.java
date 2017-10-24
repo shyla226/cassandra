@@ -515,6 +515,9 @@ public class TPC
         }
     }
 
+    /**
+     * @return nanoTimeSinceStartup which is compatible with Netty scheduled tasks
+     */
     public static long nanoTimeSinceStartup()
     {
         return NettyTime.nanoSinceStartup();
