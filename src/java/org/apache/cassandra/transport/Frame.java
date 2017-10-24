@@ -105,8 +105,21 @@ public class Frame
             USE_BETA;
 
             private static final Flag[] ALL_VALUES = values();
+            private static final EnumSet<Flag>[] DESERIALIZATION_TABLE = new EnumSet[1 << ALL_VALUES.length];
+            static
+            {
+                for (int i = 0; i < DESERIALIZATION_TABLE.length; i++)
+                {
+                    DESERIALIZATION_TABLE[i] = deserialize0(i);
+                }
+            }
 
             public static EnumSet<Flag> deserialize(int flags)
+            {
+                return DESERIALIZATION_TABLE[flags & (DESERIALIZATION_TABLE.length - 1)];
+            }
+
+            private static EnumSet<Flag> deserialize0(int flags)
             {
                 EnumSet<Flag> set = EnumSet.noneOf(Flag.class);
                 for (int n = 0; n < ALL_VALUES.length; n++)

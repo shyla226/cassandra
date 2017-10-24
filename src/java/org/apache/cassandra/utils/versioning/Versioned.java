@@ -22,24 +22,27 @@ import java.util.function.Function;
 
 public class Versioned<V extends Enum<V> & Version<V>, T>
 {
-    private final EnumMap<V, T> serializers;
+    private final T[] serializers;
     private final Function<V, ? extends T> creator;
 
     public Versioned(Class<V> versionClass, Function<V, ? extends T> creator)
     {
-        this.serializers = new EnumMap<>(versionClass);
+        this.serializers = (T[]) new Object[versionClass.getEnumConstants().length];
         this.creator = creator;
 
         V last = versionClass.getEnumConstants()[versionClass.getEnumConstants().length - 1];
-        serializers.put(last, creator.apply(last));
+        serializers[last.ordinal()] =  creator.apply(last);
     }
 
     public T get(V version)
     {
-        // This is absolutely racy. However, serializer *must* be stateless, and we don't care much about having
-        // a few duplicate instantiations for a short window the first time a particular version is used (in
-        // practice, since we pre-instantiate the current version, this will only happen at startup and likely
-        // for just one version). So we don't bother synchronizing anything.
-        return serializers.computeIfAbsent(version, k -> creator.apply(version));
+        // this is racy and may result in double init of a serializer, but that is (apparently) harmless
+        final int ordinal = version.ordinal();
+        final T serializer = serializers[ordinal];
+        if (serializer == null)
+        {
+            return serializers[ordinal] = creator.apply(version);
+        }
+        return serializer;
     }
 }
