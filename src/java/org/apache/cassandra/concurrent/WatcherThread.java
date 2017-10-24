@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.concurrent;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -30,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.jctools.queues.MpscUnboundedArrayQueue;
 
 /**
  * This class is responsible for keeping tabs on threads that register as a {@link MonitorableThread}.
@@ -47,47 +49,63 @@ public class WatcherThread
 {
     public static final Supplier<WatcherThread> instance = Suppliers.memoize(WatcherThread::new);
 
-    private static final Logger logger = LoggerFactory.getLogger(WatcherThread.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(WatcherThread.class);
+    private static final long WATCHER_SLEEP_NANOS = Long.getLong("apollo.watcher.sleep.nanos", 1);
+
+    private final MpscUnboundedArrayQueue<Runnable> commands = new MpscUnboundedArrayQueue<>(128);
+    private final ArrayList<MonitorableThread> monitoredThreads = new ArrayList<>(Runtime.getRuntime().availableProcessors() * 2);
+    private final ArrayList<Runnable> loopActions = new ArrayList<>(4);
     private final Thread watcherThread;
+
     private volatile boolean shutdown;
-    private final CopyOnWriteArrayList<MonitorableThread> monitoredThreads;
-    private final CopyOnWriteArrayList<Runnable> loopActions;
+
 
     private WatcherThread()
     {
         this.shutdown = false;
-        this.monitoredThreads = new CopyOnWriteArrayList<>();
-        this.loopActions = new CopyOnWriteArrayList<>();
-
-        watcherThread = new Thread(() -> {
-            while (!shutdown)
-            {
-                try
-                {
-                    long nanoTime = TPC.nanoTimeSinceStartup();
-                    for (MonitorableThread thread : monitoredThreads)
-                        if (thread.shouldUnpark(nanoTime))
-                            thread.unpark();
-
-                    for (Runnable action : loopActions)
-                        action.run();
-                }
-                catch (Throwable t)
-                {
-                    JVMStabilityInspector.inspectThrowable(t);
-                    logger.error("WatcherThread exception: ", t);
-                }
-                LockSupport.parkNanos(1);
-            }
-
-            for (MonitorableThread thread : monitoredThreads)
-                thread.unpark();
-        });
-
+        watcherThread = new Thread(this::run);
         watcherThread.setName("ThreadWatcher");
         watcherThread.setPriority(Thread.MAX_PRIORITY);
         watcherThread.setDaemon(true);
         watcherThread.start();
+    }
+
+    private void run()
+    {
+        final ArrayList<Runnable> loopActions = this.loopActions;
+        final ArrayList<MonitorableThread> monitoredThreads = this.monitoredThreads;
+        while (!shutdown)
+        {
+            try
+            {
+                commands.drain(r -> r.run());
+                for (int i = 0; i < loopActions.size(); i++)
+                {
+                    Runnable action = loopActions.get(i);
+                    action.run();
+                }
+                final long nanoTime = TPC.nanoTimeSinceStartup();
+                for (int i = 0; i < monitoredThreads.size(); i++)
+                {
+                    MonitorableThread thread = monitoredThreads.get(i);
+                    if (thread.shouldUnpark(nanoTime))
+                    {
+                        // TODO: add a counter we can track for unpark rate
+                        thread.unpark();
+                    }
+                }
+
+            }
+            catch (Throwable t)
+            {
+                JVMStabilityInspector.inspectThrowable(t);
+                LOGGER.error("WatcherThread exception: ", t);
+            }
+            LockSupport.parkNanos(WATCHER_SLEEP_NANOS);
+        }
+
+        for (MonitorableThread thread : monitoredThreads)
+            thread.unpark();
     }
 
     /**
@@ -95,7 +113,7 @@ public class WatcherThread
      */
     public void addThreadsToMonitor(Collection<MonitorableThread> threads)
     {
-        monitoredThreads.addAll(threads);
+        threads.forEach(t -> addThreadToMonitor(t));
     }
 
     /**
@@ -103,7 +121,7 @@ public class WatcherThread
      */
     public void addThreadToMonitor(MonitorableThread thread)
     {
-        monitoredThreads.add(thread);
+        commands.offer(() -> monitoredThreads.add(thread));
     }
 
     /**
@@ -111,7 +129,7 @@ public class WatcherThread
      */
     public void removeThreadToMonitor(MonitorableThread thread)
     {
-        monitoredThreads.remove(thread);
+        commands.offer(() -> monitoredThreads.remove(thread));
     }
 
     /**
@@ -119,7 +137,7 @@ public class WatcherThread
      */
     public void removeThreadsToMonitor(Collection<MonitorableThread> threads)
     {
-        monitoredThreads.removeAll(threads);
+        threads.forEach(t -> removeThreadToMonitor(t));
     }
 
     /**
@@ -128,7 +146,7 @@ public class WatcherThread
      */
     public void addAction(Runnable action)
     {
-        loopActions.add(action);
+        commands.offer(() -> loopActions.add(action));
     }
 
     public void shutdown()
