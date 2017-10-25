@@ -233,12 +233,11 @@ public class Frame
 
             // extract body
             ByteBuf body = buffer.slice(idx, (int) bodyLength);
-            body.retain();
 
             idx += bodyLength;
             buffer.readerIndex(idx);
 
-            return new Frame(new Header(version, decodedFlags, streamId, type), body);
+            return new Frame(new Header(version, decodedFlags, streamId, type), body.retain());
         }
 
         @Override
@@ -246,25 +245,34 @@ public class Frame
         throws Exception
         {
             Frame frame = decodeFrame(buffer);
-            if (frame == null) return;
+            if (frame == null)
+                return;
 
-            Attribute<Connection> attrConn = ctx.channel().attr(Connection.attributeKey);
-            Connection connection = attrConn.get();
-            if (connection == null)
+            try
             {
-                // First message seen on this channel, attach the connection object
-                connection = factory.newConnection(ctx.channel(), frame.header.version);
-                attrConn.set(connection);
+                Attribute<Connection> attrConn = ctx.channel().attr(Connection.attributeKey);
+                Connection connection = attrConn.get();
+                if (connection == null)
+                {
+                    // First message seen on this channel, attach the connection object
+                    connection = factory.newConnection(ctx.channel(), frame.header.version);
+                    attrConn.set(connection);
+                }
+                else if (connection.getVersion() != frame.header.version)
+                {
+                    throw ErrorMessage.wrap(
+                    new ProtocolException(String.format(
+                    "Invalid message version. Got %s but previous messages on this connection had version %s",
+                    frame.header.version, connection.getVersion())),
+                    frame.header.streamId);
+                }
+                results.add(frame);
             }
-            else if (connection.getVersion() != frame.header.version)
+            catch (Throwable t)
             {
-                throw ErrorMessage.wrap(
-                        new ProtocolException(String.format(
-                                "Invalid message version. Got %s but previous messages on this connection had version %s",
-                                frame.header.version, connection.getVersion())),
-                        frame.header.streamId);
+                frame.release();
+                throw t;
             }
-            results.add(frame);
         }
 
         private void fail()
