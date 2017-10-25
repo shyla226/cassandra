@@ -21,7 +21,7 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 
-import com.datastax.apollo.audit.IAuditWriter;
+import com.datastax.bdp.db.audit.IAuditWriter;
 import org.apache.cassandra.auth.CassandraRoleManager;
 import org.apache.cassandra.locator.GossipingPropertyFileSnitch;
 import org.apache.cassandra.locator.IEndpointSnitch;

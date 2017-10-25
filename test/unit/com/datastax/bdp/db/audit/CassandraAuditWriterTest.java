@@ -3,7 +3,7 @@
  *
  * Please see the included license file for details.
  */
-package com.datastax.apollo.audit;
+package com.datastax.bdp.db.audit;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -34,10 +34,10 @@ import org.apache.cassandra.utils.UUIDGen;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 
-import static com.datastax.apollo.audit.CassandraAuditWriter.BatchController;
-import static com.datastax.apollo.audit.CassandraAuditWriter.BatchControllerFactory;
-import static com.datastax.apollo.audit.CassandraAuditWriter.BatchingOptions;
-import static com.datastax.apollo.audit.CassandraAuditWriter.DefaultBatchController;
+import static com.datastax.bdp.db.audit.CassandraAuditWriter.BatchController;
+import static com.datastax.bdp.db.audit.CassandraAuditWriter.BatchControllerFactory;
+import static com.datastax.bdp.db.audit.CassandraAuditWriter.BatchingOptions;
+import static com.datastax.bdp.db.audit.CassandraAuditWriter.DefaultBatchController;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;

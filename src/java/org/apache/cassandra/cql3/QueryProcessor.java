@@ -38,9 +38,9 @@ import com.google.common.util.concurrent.MoreExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.apollo.audit.AuditableEvent;
-import com.datastax.apollo.audit.AuditableEventType;
-import com.datastax.apollo.audit.cql3.CqlAuditLogger;
+import com.datastax.bdp.db.audit.AuditableEvent;
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.cql3.CqlAuditLogger;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.reactivex.Completable;
@@ -248,6 +248,15 @@ public class QueryProcessor implements QueryHandler
                 statement.validate(clientState);
                 return statement.execute(queryState, options, queryStartNanoTime);
             }
+            catch (RequestValidationException|RequestExecutionException e)
+            {
+                AuditableEvent.Builder builder = AuditableEvent.Builder.fromClientState(clientState);
+                builder.type(AuditableEventType.REQUEST_FAILURE);
+                builder.operation(statement.toString());
+                auditLogger.logFailedQuery(Lists.newArrayList(builder.build()), e);
+                logger.trace("Unexpected exception when trying to process a statement: " + e.getMessage(), e);
+                throw e;
+            }
             catch (RuntimeException ex)
             {
                 if (!TPCUtils.isWouldBlockException(ex))
@@ -265,15 +274,6 @@ public class QueryProcessor implements QueryHandler
                                                                                                   queryStartNanoTime);
                                                                      });
                 return RxThreads.subscribeOnIo(single, TPCTaskType.EXECUTE_STATEMENT);
-            }
-            catch (RequestValidationException|RequestExecutionException e)
-            {
-                AuditableEvent.Builder builder = AuditableEvent.Builder.fromClientState(clientState);
-                builder.type(AuditableEventType.REQUEST_FAILURE);
-                builder.operation(statement.toString());
-                auditLogger.logFailedQuery(Lists.newArrayList(builder.build()), e);
-                logger.trace("Unexpected exception when trying to process a statement: " + e.getMessage(), e);
-                throw e;
             }
         });
 
@@ -558,9 +558,6 @@ public class QueryProcessor implements QueryHandler
             prepared.rawCQLStatement = queryString;
             validateBindingMarkers(prepared);
 
-//            PreparedStatementCache.instance.addQueryInfo(prepared.statement,
-//                                                         queryString,
-//                                                         prepared.boundNames);
             if (isAuditEnabled())
                 events = auditLogger.getEventsForPrepare(prepared.statement,
                                                          queryString,
@@ -630,7 +627,6 @@ public class QueryProcessor implements QueryHandler
         preparedStatements.put(statementId, prepared);
 
         ResultSet.ResultMetadata resultMetadata = ResultSet.ResultMetadata.fromPrepared(prepared);
-        //PreparedStatementCache.instance.addQueryInfo(prepared.statement, queryString, prepared.boundNames);
         Single<UntypedResultSet> observable = SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
         return observable.map(resultSet -> new ResultMessage.Prepared(statementId, resultMetadata.getResultMetadataId(), prepared));
     }
@@ -667,7 +663,6 @@ public class QueryProcessor implements QueryHandler
 
         metrics.preparedStatementsExecuted.inc();
 
-        //Pair<String, List<ColumnSpecification>> queryInfo = PreparedStatementCache.instance.getQueryInfo(statement);
         ParsedStatement.Prepared preparedStatement = (ParsedStatement.Prepared) statement;
 
         List<AuditableEvent> events = null;
@@ -713,6 +708,16 @@ public class QueryProcessor implements QueryHandler
                 return auditLogger.logEvents(events).andThen(batch.execute(queryState, options, queryStartNanoTime)
                                                                   .onErrorResumeNext(maybeAuditLogErrors(events)));
             }
+            catch (UnauthorizedException e)
+            {
+                auditLogger.logUnauthorizedAttempt(events, e);
+                throw e;
+            }
+            catch (InvalidRequestException | RequestExecutionException e)
+            {
+                auditLogger.logFailedQuery(events, e);
+                throw e;
+            }
             catch (RuntimeException ex)
             {
                 if (!TPCUtils.isWouldBlockException(ex))
@@ -727,16 +732,6 @@ public class QueryProcessor implements QueryHandler
                 }),
                 TPCTaskType.EXECUTE_STATEMENT
                 );
-            }
-            catch (UnauthorizedException e)
-            {
-                auditLogger.logUnauthorizedAttempt(events, e);
-                throw e;
-            }
-            catch (InvalidRequestException | RequestExecutionException e)
-            {
-                auditLogger.logFailedQuery(events, e);
-                throw e;
             }
         });
     }

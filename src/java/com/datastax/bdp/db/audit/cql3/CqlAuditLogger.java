@@ -3,7 +3,7 @@
  *
  * Please see the included license file for details.
  */
-package com.datastax.apollo.audit.cql3;
+package com.datastax.bdp.db.audit.cql3;
 
 import java.util.Collections;
 import java.util.List;
@@ -13,9 +13,9 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.apollo.audit.AuditLogger;
-import com.datastax.apollo.audit.AuditableEvent;
-import com.datastax.apollo.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.AuditLogger;
+import com.datastax.bdp.db.audit.AuditableEvent;
+import com.datastax.bdp.db.audit.AuditableEventType;
 import io.reactivex.Completable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.BatchQueryOptions;

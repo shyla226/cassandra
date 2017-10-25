@@ -3,12 +3,12 @@
  *
  * Please see the included license file for details.
  */
-package com.datastax.apollo.audit;
+package com.datastax.bdp.db.audit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.apollo.audit.cql3.AuditUtils;
+import com.datastax.bdp.db.audit.cql3.AuditUtils;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;

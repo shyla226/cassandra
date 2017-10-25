@@ -1,4 +1,4 @@
-package com.datastax.apollo.audit.cql3;
+package com.datastax.bdp.db.audit.cql3;
 
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
