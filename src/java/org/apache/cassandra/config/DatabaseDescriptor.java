@@ -51,8 +51,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.apollo.audit.AuditLogger;
-import com.datastax.apollo.audit.AuditLoggingOptions;
+import com.datastax.bdp.db.audit.AuditLogger;
+import com.datastax.bdp.db.audit.AuditLoggingOptions;
 import com.sun.management.OperatingSystemMXBean;
 import org.apache.cassandra.auth.AllowAllInternodeAuthenticator;
 import org.apache.cassandra.auth.AuthConfig;

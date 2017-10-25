@@ -3,7 +3,7 @@
  *
  * Please see the included license file for details.
  */
-package com.datastax.apollo.audit.cql3;
+package com.datastax.bdp.db.audit.cql3;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -17,9 +17,9 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.apollo.audit.AuditableEvent;
-import com.datastax.apollo.audit.AuditableEventType;
-import com.datastax.apollo.audit.BindVariablesFormatter;
+import com.datastax.bdp.db.audit.AuditableEvent;
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.BindVariablesFormatter;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.statements.AlterKeyspaceStatement;

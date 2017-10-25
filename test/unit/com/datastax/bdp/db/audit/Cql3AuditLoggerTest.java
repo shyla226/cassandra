@@ -3,7 +3,7 @@
  *
  * Please see the included license file for details.
  */
-package com.datastax.apollo.audit;
+package com.datastax.bdp.db.audit;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -19,7 +19,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.datastax.apollo.audit.cql3.AuditableEventGenerator;
+import com.datastax.bdp.db.audit.cql3.AuditableEventGenerator;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.cql3.CQLStatement;

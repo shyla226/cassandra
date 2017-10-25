@@ -3,7 +3,7 @@
  *
  * Please see the included license file for details.
  */
-package com.datastax.apollo.audit;
+package com.datastax.bdp.db.audit;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,8 +24,7 @@ import com.datastax.driver.core.querybuilder.Batch;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.datastax.driver.core.querybuilder.Update;
 
-import static com.datastax.apollo.audit.AuditLoggingTestSupport.assertAllEventsInSameBatch;
-import static com.datastax.apollo.audit.AuditLoggingTestSupport.assertEventProperties;
+import static com.datastax.bdp.db.audit.AuditLoggingTestSupport.assertEventProperties;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -132,7 +131,7 @@ public class NativeProtocolAuditLoggingTest extends AbstractCql3AuditLoggingTest
         session.execute("INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ;", 3, 72);
         Stack<AuditableEvent> events = getEvents();
         assertEquals(1, events.size());
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [k=3,v=72]");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [k=3,v=72]");
     }
 
     @Test
@@ -148,9 +147,9 @@ public class NativeProtocolAuditLoggingTest extends AbstractCql3AuditLoggingTest
 
         Stack<AuditableEvent> events = getEvents();
         assertEquals(2, events.size());
-        assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [k=2,v=48]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [k=1,v=24]");
+        AuditLoggingTestSupport.assertAllEventsInSameBatch(events);
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [k=2,v=48]");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [k=1,v=24]");
     }
 
     @Test
@@ -175,11 +174,11 @@ public class NativeProtocolAuditLoggingTest extends AbstractCql3AuditLoggingTest
         session.execute(b);
         Stack<AuditableEvent> events = getEvents();
         assertEquals(2, events.size());
-        assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, ccf,
-           "UPDATE Counters SET count = count + 1 WHERE column1 = ? AND column2 = ? ; [column1=data1,column2=data2]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, ccf,
-           "UPDATE Counters SET count = count + 1 WHERE column1 = ? AND column2 = ? ; [column1=data1,column2=data2]");
+        AuditLoggingTestSupport.assertAllEventsInSameBatch(events);
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, ccf,
+                                                      "UPDATE Counters SET count = count + 1 WHERE column1 = ? AND column2 = ? ; [column1=data1,column2=data2]");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, ccf,
+                                                      "UPDATE Counters SET count = count + 1 WHERE column1 = ? AND column2 = ? ; [column1=data1,column2=data2]");
     }
 
     @Test
@@ -197,11 +196,11 @@ public class NativeProtocolAuditLoggingTest extends AbstractCql3AuditLoggingTest
 
         Stack<AuditableEvent> events = getEvents();
         assertEquals(4, events.size());
-        assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [bind variable values unavailable]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (3, 72) ;");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [k=2,v=48]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [k=1,v=24]");
+        AuditLoggingTestSupport.assertAllEventsInSameBatch(events);
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [bind variable values unavailable]");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (3, 72) ;");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [k=2,v=48]");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [k=1,v=24]");
     }
 
     @Test
@@ -226,7 +225,7 @@ public class NativeProtocolAuditLoggingTest extends AbstractCql3AuditLoggingTest
         
         Stack<AuditableEvent> events = getEvents();
         assertEquals(1, events.size());
-        assertEventProperties(events.pop(), AuditableEventType.CQL_SELECT, ks, cf, "SELECT * FROM \"Standard1\"");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_SELECT, ks, cf, "SELECT * FROM \"Standard1\"");
     }
 
     class NativeProtocolPreparedStmtHandle implements PreparedStmtHandle

@@ -3,7 +3,7 @@
  *
  * Please see the included license file for details.
  */
-package com.datastax.apollo.audit;
+package com.datastax.bdp.db.audit;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -17,10 +17,6 @@ import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
 
-import com.datastax.apollo.audit.AuditFilter;
-import com.datastax.apollo.audit.AuditLogger;
-import com.datastax.apollo.audit.AuditableEvent;
-import com.datastax.apollo.audit.AuditableEventType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -31,9 +27,7 @@ import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.triggers.ITrigger;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-import static com.datastax.apollo.audit.AuditLoggingTestSupport.assertAllEventsInSameBatch;
-import static com.datastax.apollo.audit.AuditLoggingTestSupport.assertEventProperties;
-import static com.datastax.apollo.audit.AuditLoggingTestSupport.assertMatchingEventInList;
+import static com.datastax.bdp.db.audit.AuditLoggingTestSupport.assertEventProperties;
 import static org.junit.Assert.assertEquals;
 
 public abstract class AbstractCql3AuditLoggingTest extends CQLTester
@@ -101,7 +95,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
     {
         String cql = "SELECT * FROM \"Standard1\"";
         executeCql3Query(cql, false);
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_SELECT, ks, cf, cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.CQL_SELECT, ks, cf, cql);
     }
 
     @Test
@@ -115,10 +109,10 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         executeCql3Query(cql, false);
         Stack<AuditableEvent> events = getEvents();
         assertEquals(3, events.size());
-        assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_DELETE, ks, cf, "DELETE FROM Standard1 WHERE k = 2 ;");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "UPDATE Standard1 SET v = 48 WHERE k = 1 ;");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO Standard1 ( k , v ) VALUES ( 0 , 24 ) ;");
+        AuditLoggingTestSupport.assertAllEventsInSameBatch(events);
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_DELETE, ks, cf, "DELETE FROM Standard1 WHERE k = 2 ;");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "UPDATE Standard1 SET v = 48 WHERE k = 1 ;");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO Standard1 ( k , v ) VALUES ( 0 , 24 ) ;");
     }
 
     @Test
@@ -126,7 +120,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
     {
         String cql = "SELECT * FROM \"Standard1\"";
         prepareCql3Query(cql, false);
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_PREPARE_STATEMENT, ks, cf, cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.CQL_PREPARE_STATEMENT, ks, cf, cql);
     }
 
     @Test
@@ -135,7 +129,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         String cql = "SELECT * FROM \"Standard1\"";
         PreparedStmtHandle handle = prepareCql3Query(cql, false);
         executePreparedCql3Query(handle, Collections.<Object>emptyList());
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_SELECT, ks, cf, cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.CQL_SELECT, ks, cf, cql);
     }
 
     @Test
@@ -147,7 +141,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         PreparedStmtHandle handle = prepareCql3Query(cql, false);
         executePreparedCql3Query(handle, variables);
         String expected = cql + " [k=0]";
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_SELECT, ks, cf, expected);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.CQL_SELECT, ks, cf, expected);
     }
 
     @Ignore("APOLLO-903")
@@ -159,7 +153,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
 
         PreparedStmtHandle handle = prepareCql3Query(cql, false);
         executePreparedCql3Query(handle, variables);
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_UPDATE, ks, cf, cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.CQL_UPDATE, ks, cf, cql);
     }
 
     @Test
@@ -171,7 +165,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         PreparedStmtHandle handle = prepareCql3Query(cql, false);
         executePreparedCql3Query(handle, variables);
         String expected = cql + " [k=0,v=24,[timestamp]=999,[ttl]=1]";
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_UPDATE, ks, cf, expected);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.CQL_UPDATE, ks, cf, expected);
     }
 
     @Test
@@ -182,7 +176,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
 
         PreparedStmtHandle handle = prepareCql3Query(cql, false);
         executePreparedCql3Query(handle, variables);
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_DELETE, ks, cf, cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.CQL_DELETE, ks, cf, cql);
     }
 
     @Test
@@ -194,7 +188,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         PreparedStmtHandle handle = prepareCql3Query(cql, false);
         executePreparedCql3Query(handle, variables);
         String expected = cql + " [k=0]";
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_DELETE, ks, cf, expected);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.CQL_DELETE, ks, cf, expected);
     }
 
     @Test
@@ -206,7 +200,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         PreparedStmtHandle handle = prepareCql3Query(cql, false);
         executePreparedCql3Query(handle, variables);
         String expected = cql + " [k=0,k=1]";
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_DELETE, ks, cf, expected);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.CQL_DELETE, ks, cf, expected);
     }
 
     @Test
@@ -224,10 +218,10 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         executePreparedCql3Query(handle, variables);
         Stack<AuditableEvent> events = getEvents();
         assertEquals(3, events.size());
-        assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_DELETE, ks, cf, "DELETE FROM Standard1 WHERE k = ? ; [k=2]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "UPDATE Standard1 SET v = ? WHERE k = ? ; [v=48,k=1]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO Standard1 ( k , v ) VALUES ( ? , ? ) USING TTL ? ; [k=0,v=24,[ttl]=3600]");
+        AuditLoggingTestSupport.assertAllEventsInSameBatch(events);
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_DELETE, ks, cf, "DELETE FROM Standard1 WHERE k = ? ; [k=2]");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "UPDATE Standard1 SET v = ? WHERE k = ? ; [v=48,k=1]");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO Standard1 ( k , v ) VALUES ( ? , ? ) USING TTL ? ; [k=0,v=24,[ttl]=3600]");
     }
 
     @Test
@@ -238,7 +232,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         executeCql3Query(cql, false);
         // altering schema causes java driver to refresh its view, so we
         // don't care about all the queries it issues after that
-        assertMatchingEventInList(getEvents(), AuditableEventType.ADD_KS, "create_test", null, cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.ADD_KS, "create_test", null, cql);
     }
 
     @Test
@@ -252,7 +246,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         executeCql3Query(cql, false);
         // altering schema causes java driver to refresh its view, so we
         // don't care about all the queries it issues after that
-        assertMatchingEventInList(getEvents(), AuditableEventType.UPDATE_KS, "alter_test", null, cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.UPDATE_KS, "alter_test", null, cql);
     }
 
     @Test
@@ -265,7 +259,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         executeCql3Query(cql, false);
         // altering schema causes java driver to refresh its view, so we
         // don't care about all the queries it issues after that
-        assertMatchingEventInList(getEvents(), AuditableEventType.DROP_KS, "drop_test", null, cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.DROP_KS, "drop_test", null, cql);
     }
 
     @Test
@@ -276,7 +270,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         executeCql3Query(cql, false);
         // altering schema causes java driver to refresh its view, so we
         // don't care about all the queries it issues after that
-        assertMatchingEventInList(getEvents(), AuditableEventType.ADD_CF, "keyspace1", "create_table", cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.ADD_CF, "keyspace1", "create_table", cql);
     }
 
     @Test
@@ -289,7 +283,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         executeCql3Query(cql, false);
         // altering schema causes java driver to refresh its view, so we
         // don't care about all the queries it issues after that
-        assertMatchingEventInList(getEvents(), AuditableEventType.UPDATE_CF, "keyspace1", "alter_table", cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.UPDATE_CF, "keyspace1", "alter_table", cql);
     }
 
     @Test
@@ -302,7 +296,7 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         executeCql3Query(cql, false);
         // altering schema causes java driver to refresh its view, so we
         // don't care about all the queries it issues after that
-        assertMatchingEventInList(getEvents(), AuditableEventType.DROP_CF, "keyspace1", "drop_table", cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.DROP_CF, "keyspace1", "drop_table", cql);
     }
 
     /**
@@ -323,13 +317,13 @@ public abstract class AbstractCql3AuditLoggingTest extends CQLTester
         executeCql3Query(create_cql, false);
 
         // check create logging
-        assertMatchingEventInList(getEvents(), AuditableEventType.CREATE_TRIGGER, ks, cf, create_cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.CREATE_TRIGGER, ks, cf, create_cql);
 
         String drop_cql = String.format("DROP TRIGGER test_trigger ON %s.\"%s\"", ks, cf);
         executeCql3Query(drop_cql, false);
 
         // check drop logging
-        assertMatchingEventInList(getEvents(), AuditableEventType.DROP_TRIGGER, ks, cf, drop_cql);
+        AuditLoggingTestSupport.assertMatchingEventInList(getEvents(), AuditableEventType.DROP_TRIGGER, ks, cf, drop_cql);
     }
 
     protected void assertLastEventProperties(AuditableEventType type, String keyspace, String columnFamily) throws Exception
