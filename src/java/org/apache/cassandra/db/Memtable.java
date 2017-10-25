@@ -30,6 +30,7 @@ import com.google.common.base.Throwables;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCBoundaries;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.flow.Flow;
 import io.reactivex.Single;
 
@@ -65,9 +66,11 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.MergeIterator;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.flow.FlowSource;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscriptionRecipient;
 import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.memory.HeapPool;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
@@ -177,15 +180,21 @@ public class Memtable implements Comparable<Memtable>
     }
 
     /**
-     * Calculates a core for the given key. Boundaries are calculated on the memtable creation, therefore are
-     * independent from topology changes, so this function will stably yeild the correct core for the key over
+     * Calculates a core for the given partition. Boundaries are calculated on the memtable creation, therefore are
+     * independent from topology changes, so this function will stably yield the correct core for the partition over
      * the lifetime of the memtable.
      */
-    private int getCoreFor(DecoratedKey key)
+    private int getCoreFor(PartitionPosition position)
     {
-        int coreId = TPC.getCoreForKey(boundaries, key);
+        int coreId = TPC.getCoreForKey(boundaries, position);
         assert coreId >= 0 && coreId < subranges.length : "Received invalid core id : " + coreId;
         return coreId;
+    }
+
+    @VisibleForTesting
+    TPCBoundaries getBoundaries()
+    {
+        return boundaries;
     }
 
     public MemtableAllocator getAllocator()
@@ -393,7 +402,7 @@ public class Memtable implements Comparable<Memtable>
                              100 * allocator.onHeap().ownershipRatio(), 100 * allocator.offHeap().ownershipRatio());
     }
 
-    public Flow<FlowableUnfilteredPartition> makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
+    public Flow<FlowableUnfilteredPartition> makePartitionFlow(final ColumnFilter columnFilter, final DataRange dataRange)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -404,39 +413,101 @@ public class Memtable implements Comparable<Memtable>
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
 
-        ArrayList<Pair<Integer, Callable<List<FlowableUnfilteredPartition>>>> all = new ArrayList<>(subranges.length);
-
-        for (int i = 0; i < subranges.length; i++)
+        class PartitionFlow extends FlowSource<FlowableUnfilteredPartition>
         {
-            final int coreId = i;
+            private final int coreId;
+            private final boolean filterStart;
+            private final boolean filterStop;
 
-            all.add(Pair.create(coreId, () -> {
+            private Iterator<java.util.Map.Entry<PartitionPosition, AtomicBTreePartition>> currentPartitions;
+
+            PartitionFlow(int coreId, boolean filterStart, boolean filterStop)
+            {
+                this.coreId = coreId;
+                // exclude partitions before the start (the left bound), only true for the first range unless startIsMin
+                this.filterStart = filterStart;
+                // exclude partitions after the end (the right bound), only true for the last range unless stopIsMin
+                this.filterStop = filterStop;
+            }
+
+            private SortedMap<PartitionPosition, AtomicBTreePartition> getTrimmedSubRange()
+            {
                 MemtableSubrange memtableSubrange = subranges[coreId];
-                SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange;
 
-                if (startIsMin)
-                   trimmedMemtableSubrange = stopIsMin ? memtableSubrange.data : memtableSubrange.data.headMap(keyRange.right, includeStop);
-                else
-                   trimmedMemtableSubrange = stopIsMin
-                                             ? memtableSubrange.data.tailMap(keyRange.left, includeStart)
-                                             : memtableSubrange.data.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
-
-                List<FlowableUnfilteredPartition> ret = new ArrayList<>(trimmedMemtableSubrange.size());
-                for (Map.Entry<PartitionPosition, AtomicBTreePartition> entry : trimmedMemtableSubrange.entrySet())
-                {
-                    PartitionPosition position = entry.getKey();
-                    assert position instanceof DecoratedKey;
-                    DecoratedKey key = (DecoratedKey)position;
-                    ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
-                    ret.add(filter.getFlowableUnfilteredPartition(columnFilter, entry.getValue()));
+                if (filterStart && filterStop) // this can happen when there is only one range
+                {   // return the data between start and stop
+                    return memtableSubrange.data.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
                 }
-                return ret;
-            }));
+                else if (filterStart)
+                { // return the data from the start onwards
+                    return memtableSubrange.data.tailMap(keyRange.left, includeStart);
+                }
+                else if (filterStop)
+                { // return the data up to the stop
+                    return memtableSubrange.data.headMap(keyRange.right, includeStop);
+                }
+                else
+                {
+                    // return all the data
+                    return memtableSubrange.data;
+                }
+            }
+
+            public void requestFirst(FlowSubscriber<FlowableUnfilteredPartition> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+            {
+                subscribe(subscriber, subscriptionRecipient);
+                currentPartitions = getTrimmedSubRange().entrySet().iterator();
+
+                if (!currentPartitions.hasNext())
+                    subscriber.onComplete();
+                else
+                    requestNext();
+            }
+
+            public void requestNext()
+            {
+                // if we get here we know that currentPartitions has at least one item because of the check in requestFirst() and
+                // at the end of this method, when there are no more items we either call onComplete or onFinal respectively
+                java.util.Map.Entry<PartitionPosition, AtomicBTreePartition> entry = currentPartitions.next();
+                PartitionPosition position = entry.getKey();
+                assert position instanceof DecoratedKey;
+                DecoratedKey key = (DecoratedKey) position;
+                ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
+                FlowableUnfilteredPartition partition = filter.getFlowableUnfilteredPartition(columnFilter, entry.getValue());
+
+                if (currentPartitions.hasNext())
+                    subscriber.onNext(partition);
+                else
+                    subscriber.onFinal(partition);
+            }
+
+            public void close() throws Exception
+            {
+                // nothing to close
+            }
         }
 
-        return Flow.fromIterable(all)
-                   .flatMap(pair -> Threads.evaluateOnCore(pair.right, pair.left, TPCTaskType.READ_SWITCH_FOR_MEMTABLE))
-                   .flatMap(list -> Flow.fromIterable(list));
+        // Note that we cannot capture start and end in two different local classes because of this compiler bug:
+        // https://bugs.openjdk.java.net/browse/JDK-8169345
+        int start = startIsMin ? 0 : getCoreFor(keyRange.left);
+        int end = stopIsMin ? subranges.length - 1 : getCoreFor(keyRange.right);
+
+        if (start == end) // avoid the concat if we only have one
+            return new PartitionFlow(start, !startIsMin, !stopIsMin)
+                   .lift(Threads.requestOnCore(start, TPCTaskType.READ_SWITCH_FOR_MEMTABLE));
+        else
+            return Flow.concat(() -> new AbstractIterator<Flow<FlowableUnfilteredPartition>>()
+            {
+                int current = start;
+                protected Flow<FlowableUnfilteredPartition> computeNext()
+                {
+                    int i = current++;
+                    return i <= end
+                           ? new PartitionFlow(i, i == start && !startIsMin, i == end && !stopIsMin)
+                             .lift(Threads.requestOnCore(i, TPCTaskType.READ_SWITCH_FOR_MEMTABLE))
+                           : endOfData();
+                }
+            });
     }
 
     public List<FlushRunnable> createFlushRunnables(LifecycleTransaction txn)

@@ -1817,12 +1817,12 @@ public abstract class Flow<T>
      */
     public static <T> Flow<T> empty()
     {
-        return new EmptyFlow<>();
+        return EMPTY;
     }
 
-    static class EmptyFlow<T> extends Flow<T>
+    private static final Flow EMPTY = new Flow()
     {
-        public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+        public void requestFirst(FlowSubscriber subscriber, FlowSubscriptionRecipient subscriptionRecipient)
         {
             subscriptionRecipient.onSubscribe(FlowSubscription.DONE);
             subscriber.onComplete();

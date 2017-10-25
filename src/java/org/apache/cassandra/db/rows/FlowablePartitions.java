@@ -279,30 +279,70 @@ public class FlowablePartitions
                 toMerge[idx] = current;
             }
 
+            /**
+             * Merge the partitions, depending on whether there is a row merge listener we call the appropriate method,
+             * see {@link #mergeAllPartitions(UnfilteredRowIterators.MergeListener)} or {@link #mergeNonEmptyPartitions()}.
+             *
+             * @return a merged partition
+             */
             public FlowableUnfilteredPartition getReduced()
             {
-                UnfilteredRowIterators.MergeListener rowListener = listener == null ? null : listener.getRowMergeListener(header.partitionKey, toMerge);
+                UnfilteredRowIterators.MergeListener rowListener = listener == null
+                                                                   ? null
+                                                                   : listener.getRowMergeListener(header.partitionKey, toMerge);
+                return rowListener == null ? mergeNonEmptyPartitions() : mergeAllPartitions(rowListener);
+            }
 
-                FlowableUnfilteredPartition nonEmptyPartition = null;
-                int nonEmptyPartitions = 0;
+            /**
+             * Merge all the partitions, creating empty partitions if some source did not produce a partition. This
+             * is required because the listener expects to receive one partition per source.
+             *
+             * @param rowListener - the merge listener
+             *
+             * @return a merged partition
+             */
+            private FlowableUnfilteredPartition mergeAllPartitions(UnfilteredRowIterators.MergeListener rowListener)
+            {
+                FlowableUnfilteredPartition empty = null;
 
                 for (int i = 0, length = toMerge.length; i < length; i++)
                 {
                     FlowableUnfilteredPartition element = toMerge[i];
                     if (element == null)
                     {
-                        toMerge[i] = FlowablePartitions.empty(header.metadata, header.partitionKey, header.isReverseOrder);
-                    }
-                    else
-                    {
-                        nonEmptyPartitions++;
-                        nonEmptyPartition = element;
+                        if (empty == null)
+                            empty = FlowablePartitions.empty(header.metadata, header.partitionKey, header.isReverseOrder);
+                        toMerge[i] = empty;
                     }
                 }
 
-                return nonEmptyPartitions == 1 && rowListener == null
-                       ? nonEmptyPartition
-                       : FlowablePartitions.merge(Arrays.asList(toMerge), nowInSec, rowListener);
+                return FlowablePartitions.merge(Arrays.asList(toMerge), nowInSec, rowListener);
+            }
+
+            /**
+             * Merge non-empty partitions. If no partitions are found, then return an empty partition, otherwise only
+             * merge the partitions that are available, discarding those that are null. We can only do this optimization
+             * when there is no listener, see {@link #getReduced()}.
+             *
+             * @return a merged partition
+             */
+            private FlowableUnfilteredPartition mergeNonEmptyPartitions()
+            {
+                List<FlowableUnfilteredPartition> nonEmptyPartitions = new ArrayList<>(toMerge.length);
+
+                for (int i = 0, length = toMerge.length; i < length; i++)
+                {
+                    FlowableUnfilteredPartition element = toMerge[i];
+                    if (element != null)
+                        nonEmptyPartitions.add(element);
+                }
+
+                if (nonEmptyPartitions.isEmpty())
+                    return FlowablePartitions.empty(header.metadata, header.partitionKey, header.isReverseOrder);
+                else if (nonEmptyPartitions.size() == 1)
+                    return nonEmptyPartitions.get(0);
+                else
+                    return FlowablePartitions.merge(nonEmptyPartitions, nowInSec, null);
             }
 
             public void onKeyChange()
