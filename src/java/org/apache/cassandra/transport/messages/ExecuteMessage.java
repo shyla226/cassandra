@@ -22,7 +22,6 @@ import com.google.common.collect.ImmutableMap;
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Single;
 
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -114,7 +113,6 @@ public class ExecuteMessage extends Message.Request
                 throw new PreparedQueryNotFoundException(statementId);
 
             options.prepare(prepared.boundNames);
-            CQLStatement statement = prepared.statement;
 
             if (state.shouldTraceRequest(isTracingRequested()))
                 setUpTracing(state, prepared);
@@ -122,7 +120,7 @@ public class ExecuteMessage extends Message.Request
             // Some custom QueryHandlers are interested by the bound names. We provide them this information
             // by wrapping the QueryOptions.
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.boundNames);
-            return handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime)
+            return handler.processPrepared(prepared, state, queryOptions, getCustomPayload(), queryStartNanoTime)
                           .map(response -> {
 
                               if (response instanceof ResultMessage.Rows)
