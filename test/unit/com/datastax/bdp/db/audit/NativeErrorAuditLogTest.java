@@ -21,13 +21,13 @@ import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Attributes;
 import org.apache.cassandra.cql3.BatchQueryOptions;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
+import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -128,7 +128,7 @@ public class NativeErrorAuditLogTest extends CQLTester
     {
         QueryHandler queryHandler = QueryProcessor.instance;
         MD5Digest preparedId = TPCUtils.blockingGet(queryHandler.prepare(select, getClientState(), null)).statementId;
-        CQLStatement prepared = queryHandler.getPrepared(preparedId).statement;
+        ParsedStatement.Prepared prepared = queryHandler.getPrepared(preparedId);
 
         try
         {

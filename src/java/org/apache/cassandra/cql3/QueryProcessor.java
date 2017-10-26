@@ -631,19 +631,21 @@ public class QueryProcessor implements QueryHandler
         return observable.map(resultSet -> new ResultMessage.Prepared(statementId, resultMetadata.getResultMetadataId(), prepared));
     }
 
-    public Single<ResultMessage> processPrepared(CQLStatement statement,
-                                                           QueryState state,
-                                                           QueryOptions options,
-                                                           Map<String, ByteBuffer> customPayload,
-                                                           long queryStartNanoTime)
-    throws RequestExecutionException, RequestValidationException
+    public Single<ResultMessage> processPrepared(ParsedStatement.Prepared prepared,
+                                                 QueryState state,
+                                                 QueryOptions options,
+                                                 Map<String, ByteBuffer> customPayload,
+                                                 long queryStartNanoTime)
     {
-        return processPrepared(statement, state, options, queryStartNanoTime);
+        return processPrepared(prepared, state, options, queryStartNanoTime);
     }
 
-    public Single<ResultMessage> processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
-    throws RequestExecutionException, RequestValidationException
+    public Single<ResultMessage> processPrepared(ParsedStatement.Prepared prepared,
+                                                 QueryState queryState,
+                                                 QueryOptions options,
+                                                 long queryStartNanoTime)
     {
+        CQLStatement statement = prepared.statement;
         List<ByteBuffer> variables = options.getValues();
 
         // Check to see if there are any bound variables to verify
@@ -663,15 +665,13 @@ public class QueryProcessor implements QueryHandler
 
         metrics.preparedStatementsExecuted.inc();
 
-        ParsedStatement.Prepared preparedStatement = (ParsedStatement.Prepared) statement;
-
         List<AuditableEvent> events = null;
         if (isAuditEnabled())
             events = auditLogger.getEvents(statement,
-                                           preparedStatement.rawCQLStatement,
+                                           prepared.rawCQLStatement,
                                            queryState,
                                            options,
-                                           preparedStatement.boundNames);
+                                           prepared.boundNames);
 
         Single<ResultMessage> executeAndMaybeAuditLogErrors = processStatement(statement,
                                                                                queryState,
