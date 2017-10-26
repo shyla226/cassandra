@@ -135,6 +135,18 @@ public class NativeProtocolAuditLoggingTest extends AbstractCql3AuditLoggingTest
     }
 
     @Test
+    public void preparedStatementWithVariablesAndUnsetIsLogged() throws Exception
+    {
+        Session session = initTestClient(false);
+        PreparedStatement ps1 = session.prepare("INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ;");
+        session.execute(ps1.bind(3));
+        Stack<AuditableEvent> events = getEvents();
+        assertEquals(2, events.size());
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ; [k=3,v=UNSET]");
+        AuditLoggingTestSupport.assertEventProperties(events.pop(), AuditableEventType.CQL_PREPARE_STATEMENT, ks, cf, "INSERT INTO \"Standard1\" (k, v) VALUES (?, ?) ;");
+    }
+
+    @Test
     public void batchOfPreparedStatementsIsLogged() throws Exception
     {
         Session session = initTestClient(false);

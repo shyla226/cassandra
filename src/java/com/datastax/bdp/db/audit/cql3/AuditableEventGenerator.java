@@ -51,6 +51,7 @@ import org.apache.cassandra.cql3.statements.UseStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class AuditableEventGenerator
 {
@@ -243,7 +244,21 @@ public class AuditableEventGenerator
             for (ByteBuffer var : variables)
             {
                 spec = boundNames.get(idx++);
-                formatter.collect(spec.name.toString(), var == null ? "NULL" : spec.type.getString(var));
+                String strValue;
+                if (var == null)
+                {
+                    strValue = "NULL";
+                }
+                else if (var == ByteBufferUtil.UNSET_BYTE_BUFFER)
+                {
+                    strValue = "UNSET";
+                }
+                else
+                {
+                    strValue = spec.type.getString(var);
+                }
+
+                formatter.collect(spec.name.toString(), strValue);
             }
             return formatter.format();
         }
