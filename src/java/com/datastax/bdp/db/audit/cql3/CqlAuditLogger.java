@@ -52,7 +52,7 @@ public class CqlAuditLogger
                 result = result.andThen(recordEvent);
         }
 
-        return result;
+        return result == null ? Completable.complete() : result;
     }
 
     public Completable logUnauthorizedAttempt(List<AuditableEvent> events, UnauthorizedException e)
