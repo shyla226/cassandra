@@ -309,7 +309,7 @@ public class QueryProcessor implements QueryHandler
             if (!queryState.getClientState().isInternal)
                 metrics.regularStatementsExecuted.inc();
 
-            List<AuditableEvent> events = null;
+            List<AuditableEvent> events = Collections.emptyList();
 
             if (isAuditEnabled())
             {
@@ -546,7 +546,7 @@ public class QueryProcessor implements QueryHandler
 
     public static Single<ResultMessage.Prepared> prepare(String queryString, ClientState clientState)
     {
-        List<AuditableEvent> events = null;
+        List<AuditableEvent> events = Collections.emptyList();
         try
         {
             ResultMessage.Prepared existing = getStoredPreparedStatement(queryString, clientState.getRawKeyspace());
@@ -665,7 +665,7 @@ public class QueryProcessor implements QueryHandler
 
         metrics.preparedStatementsExecuted.inc();
 
-        List<AuditableEvent> events = null;
+        List<AuditableEvent> events = Collections.emptyList();
         if (isAuditEnabled())
             events = auditLogger.getEvents(statement,
                                            prepared.rawCQLStatement,
@@ -695,7 +695,8 @@ public class QueryProcessor implements QueryHandler
     {
         final ClientState clientState = queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace());
         return Single.defer(() -> {
-            List<AuditableEvent> events = null;
+
+            List<AuditableEvent> events = Collections.emptyList();
 
             if (isAuditEnabled())
                 events = auditLogger.getEvents(batch, queryState, options);
@@ -969,7 +970,7 @@ public class QueryProcessor implements QueryHandler
 
     public static <T extends ResultMessage> io.reactivex.functions.Function<Throwable, SingleSource<T>> maybeAuditLogErrors(List<AuditableEvent> events)
     {
-        if (events == null)
+        if (events.isEmpty())
             return Single::error;
 
         return e ->
@@ -991,7 +992,7 @@ public class QueryProcessor implements QueryHandler
 
     public static Completable maybeAuditLog(List<AuditableEvent> events)
     {
-        if (events == null)
+        if (events.isEmpty())
             return Completable.complete();
 
         return auditLogger.logEvents(events);
