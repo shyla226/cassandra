@@ -5,33 +5,42 @@
  */
 package com.datastax.bdp.db.audit;
 
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Stack;
+import java.util.UUID;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.datastax.driver.core.BatchStatement;
-import com.datastax.driver.core.BoundStatement;
-import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.PreparedStatement;
-import com.datastax.driver.core.ProtocolOptions;
-import com.datastax.driver.core.Session;
-import com.datastax.driver.core.SimpleStatement;
-import com.datastax.driver.core.Statement;
+import com.datastax.driver.core.*;
 import com.datastax.driver.core.querybuilder.Assignment;
 import com.datastax.driver.core.querybuilder.Batch;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.datastax.driver.core.querybuilder.Update;
 
-import static com.datastax.bdp.db.audit.AuditLoggingTestSupport.assertEventProperties;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.FBUtilities;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-public class NativeProtocolAuditLoggingTest extends AbstractCql3AuditLoggingTest
+public class NativeProtocolAuditLoggingTest extends Cql3AuditLoggingTester
 {
     Cluster clusterCompressed = null;
     Cluster clusterNotCompressed = null;
+
+    @BeforeClass
+    public static void setUpClass()
+    {
+        Cql3AuditLoggingTester.setUpClass();
+
+        InetAddress host = FBUtilities.getBroadcastAddress();
+        Gossiper.instance.initializeNodeUnsafe(host, UUID.randomUUID(), 1);
+        StorageService.instance.setNativeTransportReady(true);
+    }
 
     public Session initTestClient(boolean withCompression) throws Exception
     {
@@ -168,7 +177,6 @@ public class NativeProtocolAuditLoggingTest extends AbstractCql3AuditLoggingTest
     public void queryBuilderBatchIsLogged() throws Exception
     {
         Session session = initTestClient(false);
-        Cluster cluster = clusterNotCompressed;
 
         List<Update> queries = new ArrayList<Update>();
 
@@ -177,8 +185,8 @@ public class NativeProtocolAuditLoggingTest extends AbstractCql3AuditLoggingTest
             Assignment inc = QueryBuilder.incr("count");
             Update countUpdate = QueryBuilder.update(QueryBuilder.quote(ccf));
             Update.Assignments incs = countUpdate.with(inc);
-            Update.Where where = incs.where(QueryBuilder.eq(QueryBuilder.quote("column1"), "data1"));
-            where.and(QueryBuilder.eq(QueryBuilder.quote("column2"), "data2"));
+            Update.Where where = incs.where(QueryBuilder.eq("column1", "data1"));
+            where.and(QueryBuilder.eq("column2", "data2"));
             queries.add(countUpdate);
         }
 

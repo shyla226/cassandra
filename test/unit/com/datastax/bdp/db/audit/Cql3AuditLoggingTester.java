@@ -27,10 +27,9 @@ import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.triggers.ITrigger;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-import static com.datastax.bdp.db.audit.AuditLoggingTestSupport.assertEventProperties;
 import static org.junit.Assert.assertEquals;
 
-public abstract class AbstractCql3AuditLoggingTest extends CQLTester
+public abstract class Cql3AuditLoggingTester extends CQLTester
 {
     // Black box tests of audit logging for CQL
     // Tests here only cover CQL3
