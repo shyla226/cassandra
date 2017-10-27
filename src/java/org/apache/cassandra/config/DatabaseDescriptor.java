@@ -415,8 +415,11 @@ public class DatabaseDescriptor
             {
                 OperatingSystemMXBean osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
                 conf.file_cache_size_in_mb = (int) (osBean.getTotalPhysicalMemorySize() / (3 * 1048576));
-                logger.warn("Falling back to default file_cache_size_in_mb calculation. file_cache_size_in_mb is set to {}. Set `-DMaxDirectMemorySize` for " +
-                            "a more precise calculation", conf.file_cache_size_in_mb);
+                if (!toolInitialized)
+                {
+                    logger.warn("Falling back to default file_cache_size_in_mb calculation. file_cache_size_in_mb is set to {}. Set `-DMaxDirectMemorySize` for " +
+                                "a more precise calculation", conf.file_cache_size_in_mb);
+                }
             }
         }
 
