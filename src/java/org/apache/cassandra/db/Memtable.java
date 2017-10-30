@@ -93,16 +93,20 @@ public class Memtable implements Comparable<Memtable>
         switch (DatabaseDescriptor.getMemtableAllocationType())
         {
             case unslabbed_heap_buffers:
+                logger.debug("Memtables allocating with on heap buffers");
                 return new HeapPool(heapLimit, DatabaseDescriptor.getMemtableCleanupThreshold(), new ColumnFamilyStore.FlushLargestColumnFamily());
             case heap_buffers:
+                logger.debug("Memtables allocating with on heap slabs");
                 return new SlabPool(heapLimit, 0, DatabaseDescriptor.getMemtableCleanupThreshold(), new ColumnFamilyStore.FlushLargestColumnFamily());
             case offheap_buffers:
                 if (!FileUtils.isCleanerAvailable)
                 {
                     throw new IllegalStateException("Could not free direct byte buffer: offheap_buffers is not a safe memtable_allocation_type without this ability, please adjust your config. This feature is only guaranteed to work on an Oracle JVM. Refusing to start.");
                 }
+                logger.debug("Memtables allocating with off heap buffers");
                 return new SlabPool(heapLimit, offHeapLimit, DatabaseDescriptor.getMemtableCleanupThreshold(), new ColumnFamilyStore.FlushLargestColumnFamily());
             case offheap_objects:
+                logger.debug("Memtables allocating with off heap objects");
                 return new NativePool(heapLimit, offHeapLimit, DatabaseDescriptor.getMemtableCleanupThreshold(), new ColumnFamilyStore.FlushLargestColumnFamily());
             default:
                 throw new AssertionError();
@@ -176,13 +180,13 @@ public class Memtable implements Comparable<Memtable>
     }
 
     /**
-     * Calculates a core for the given partition. Boundaries are calculated on the memtable creation, therefore are
-     * independent from topology changes, so this function will stably yield the correct core for the partition over
+     * Calculates a core for the given key. Boundaries are calculated on the memtable creation, therefore are
+     * independent from topology changes, so this function will stably yield the correct core for the key over
      * the lifetime of the memtable.
      */
-    private int getCoreFor(PartitionPosition position)
+    private int getCoreFor(DecoratedKey key)
     {
-        int coreId = TPC.getCoreForKey(boundaries, position);
+        int coreId = TPC.getCoreForKey(boundaries, key);
         assert coreId >= 0 && coreId < subranges.length : "Received invalid core id : " + coreId;
         return coreId;
     }
@@ -433,33 +437,55 @@ public class Memtable implements Comparable<Memtable>
                              100 * usage.ownershipRatioOnHeap, 100 * usage.ownershipRatioOffHeap);
     }
 
-    public Flow<FlowableUnfilteredPartition> makePartitionFlow(final ColumnFilter columnFilter, final DataRange dataRange)
+    /**
+     * Used for re-ordering partitions when the memtable partitioner is not the same as the TPC partitioner.
+     * This is a trivial reducer that expects only one partition at a time, since partitions are unique
+     * in the memtable.
+     */
+    private static class MergeReducer<P> extends Reducer<P, P>
+    {
+        P reduced;
+
+        public boolean trivialReduceIsTrivial()
+        {
+            return true;
+        }
+
+        public void onKeyChange()
+        {
+            reduced = null;
+        }
+
+        public void reduce(int idx, P current)
+        {
+            assert reduced == null : "partitions are unique so this should have been called only once";
+            reduced = current;
+        }
+
+        public P getReduced()
+        {
+            return reduced;
+        }
+    }
+
+    /**
+     * Return the partitions on a specific core.
+     *
+     * @param coreId - we query the partitions for this core only
+     * @param filterStart exclude partitions before the start (the left bound), only true for the first range unless startIsMin
+     * @param filterStop exclude partitions after the end (the right bound), only true for the last range unless stopIsMin
+     */
+    private Flow<FlowableUnfilteredPartition> getCorePartitions(int coreId, ColumnFilter columnFilter, DataRange dataRange, boolean filterStart, boolean filterStop)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
-
-        boolean startIsMin = keyRange.left.isMinimum();
-        boolean stopIsMin = keyRange.right.isMinimum();
 
         boolean isBound = keyRange instanceof Bounds;
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
 
-        class PartitionFlow extends FlowSource<FlowableUnfilteredPartition>
+        return new FlowSource<FlowableUnfilteredPartition>()
         {
-            private final int coreId;
-            private final boolean filterStart;
-            private final boolean filterStop;
-
             private Iterator<java.util.Map.Entry<PartitionPosition, AtomicBTreePartition>> currentPartitions;
-
-            PartitionFlow(int coreId, boolean filterStart, boolean filterStop)
-            {
-                this.coreId = coreId;
-                // exclude partitions before the start (the left bound), only true for the first range unless startIsMin
-                this.filterStart = filterStart;
-                // exclude partitions after the end (the right bound), only true for the last range unless stopIsMin
-                this.filterStop = filterStop;
-            }
 
             private SortedMap<PartitionPosition, AtomicBTreePartition> getTrimmedSubRange()
             {
@@ -516,16 +542,49 @@ public class Memtable implements Comparable<Memtable>
             {
                 // nothing to close
             }
-        }
+        }.lift(Threads.requestOnCore(coreId, TPCTaskType.READ_SWITCH_FOR_MEMTABLE));
+    }
 
-        // Note that we cannot capture start and end in two different local classes because of this compiler bug:
-        // https://bugs.openjdk.java.net/browse/JDK-8169345
-        int start = startIsMin ? 0 : getCoreFor(keyRange.left);
-        int end = stopIsMin ? subranges.length - 1 : getCoreFor(keyRange.right);
+    /**
+     *  Return the partitions in the given data range. Gather all partitions from all threads and merge them. This method should be
+     *  called only when the partitions in the memtable are not in the same order as the order according to which they are split
+     *  into sub-ranges by the default (TPC) partitioner.
+     *
+     *  This is a very expensive operation.
+     */
+    private Flow<FlowableUnfilteredPartition> getMergedPartitions(final ColumnFilter columnFilter, final DataRange dataRange)
+    {
+        AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
-        if (start == end) // avoid the concat if we only have one
-            return new PartitionFlow(start, !startIsMin, !stopIsMin)
-                   .lift(Threads.requestOnCore(start, TPCTaskType.READ_SWITCH_FOR_MEMTABLE));
+        boolean startIsMin = keyRange.left.isMinimum();
+        boolean stopIsMin = keyRange.right.isMinimum();
+
+        List<Flow<FlowableUnfilteredPartition>> partitionFlows = new ArrayList<>(subranges.length);
+        for (int i = 0; i < subranges.length; i++)
+            partitionFlows.add(getCorePartitions(i, columnFilter, dataRange, !startIsMin, !stopIsMin));
+
+        return Flow.merge(partitionFlows,
+                          Comparator.comparing(FlowableUnfilteredPartition::partitionKey),
+                          new MergeReducer<>());
+    }
+
+    /**
+     * Return the partitions in the given data range assuming that they are already ordered, which is the case when the
+     * memtable partitioner is the same as the global (TPC) partitioner. We only query the sub-ranges within the query bounds,
+     * so as to avoid jumping on all core threads, unlike what's done in {@link #getMergedPartitions(ColumnFilter, DataRange)}.
+     */
+    private Flow<FlowableUnfilteredPartition> getSequentialPartitions(final ColumnFilter columnFilter, final DataRange dataRange)
+    {
+        AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
+
+        boolean startIsMin = keyRange.left.isMinimum();
+        boolean stopIsMin = keyRange.right.isMinimum();
+
+        int start = startIsMin ? 0 : TPC.getCoreForBound(boundaries, keyRange.left); // the first core to query
+        int end = stopIsMin ? subranges.length - 1 :  TPC.getCoreForBound(boundaries, keyRange.right); // the last core to query
+
+        if (start == end) // avoid the concat if we are only querying one core
+            return getCorePartitions(start, columnFilter, dataRange, !startIsMin, !stopIsMin);
         else
             return Flow.concat(() -> new AbstractIterator<Flow<FlowableUnfilteredPartition>>()
             {
@@ -534,11 +593,27 @@ public class Memtable implements Comparable<Memtable>
                 {
                     int i = current++;
                     return i <= end
-                           ? new PartitionFlow(i, i == start && !startIsMin, i == end && !stopIsMin)
-                             .lift(Threads.requestOnCore(i, TPCTaskType.READ_SWITCH_FOR_MEMTABLE))
+                           ? getCorePartitions(i, columnFilter, dataRange, i == start && !startIsMin, i == end && !stopIsMin)
                            : endOfData();
                 }
             });
+    }
+
+    /**
+     * Return a flow of partitions in the memtable, that match the given data range and with the column filter applied
+     * to each partitioner. Depending on the memtable partitioner, this method dispatches to either
+     * {@link #getMergedPartitions(ColumnFilter, DataRange)} or {@link #getSequentialPartitions(ColumnFilter, DataRange)}.
+     *
+     * If the memtable partitioner is not the same as the global (TPC) partitioner, then this operation becomes
+     * very expensive, especially on machines with many cores. This is the case for index tables or system tables,
+     * we shouldn't have too many range queries that fall into this category.
+     */
+    public Flow<FlowableUnfilteredPartition> makePartitionFlow(final ColumnFilter columnFilter, final DataRange dataRange)
+    {
+        if (!metadata.partitioner.equals(DatabaseDescriptor.getPartitioner()))
+            return getMergedPartitions(columnFilter, dataRange);
+        else
+            return getSequentialPartitions(columnFilter, dataRange);
     }
 
     public List<FlushRunnable> createFlushRunnables(LifecycleTransaction txn)
@@ -738,38 +813,20 @@ public class Memtable implements Comparable<Memtable>
                 return;
             }
 
-            logger.debug("Writing {}, flushed range = ({}, {}], state: {}",
-                         Memtable.this.toString(), from, to, state);
+            logger.debug("Writing {}, flushed range = ({}, {}], state: {}, partitioner {}",
+                         Memtable.this.toString(), from, to, state, metadata.partitioner);
 
             try
             {
                 List<Iterator<AtomicBTreePartition>> partitions = partitionsToFlush();
 
-                // TPC: For OrderPreservingPartitioners we must merge across the memtable ranges
-                // To ensure the subranges are written in the correct order.
-                // As the ranges in TPC are based on long token and not the ordered token
-                if (metadata.partitioner.preservesOrder() && partitions.size() > 1)
+                // TPC: If the partitioner is not the same as the one used for TPC (e.g. indexes)  we must merge
+                // across the memtable ranges to ensure that the subranges are written in the correct order.
+                if (!metadata.partitioner.equals(DatabaseDescriptor.getPartitioner()) && partitions.size() > 1)
                 {
-                    partitions = Collections.singletonList(MergeIterator.get(partitions, Comparator.comparing(AtomicBTreePartition::partitionKey), new Reducer<AtomicBTreePartition, AtomicBTreePartition>()
-                    {
-                        AtomicBTreePartition reduced = null;
-
-                        @Override
-                        public boolean trivialReduceIsTrivial()
-                        {
-                            return true;
-                        }
-
-                        public void reduce(int idx, AtomicBTreePartition current)
-                        {
-                            reduced = current;
-                        }
-
-                        public AtomicBTreePartition getReduced()
-                        {
-                            return reduced;
-                        }
-                    }));
+                    partitions = Collections.singletonList(MergeIterator.get(partitions,
+                                                                             Comparator.comparing(AtomicBTreePartition::partitionKey),
+                                                                             new MergeReducer<>()));
                 }
 
                 // (we can't clear out the map as-we-go to free up memory,
@@ -802,7 +859,7 @@ public class Memtable implements Comparable<Memtable>
                             }
                             catch (Throwable t)
                             {
-                                logger.debug("Error when flushing rows: {}/{}", t.getClass().getName(), t.getMessage());
+                                logger.debug("Error when flushing: {}/{}", t.getClass().getName(), t.getMessage());
                                 Throwables.propagate(t);
                             }
                         }

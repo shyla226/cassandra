@@ -39,9 +39,11 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
@@ -178,7 +180,6 @@ public class MemtableTest extends CQLTester
             checkPartitions(partitionsByRange, Collections.singletonList(range), partitions.toList().blockingSingle());
 
         }
-
     }
 
     void checkPartitions(Map<Range<Token>, List<FlowableUnfilteredPartition>> partitionsByRange, List<Range<Token>> ranges, List<FlowableUnfilteredPartition> partitions)
@@ -195,4 +196,52 @@ public class MemtableTest extends CQLTester
         for (int i = 0; i < expectedPartitions.size(); i++)
             assertEquals(expectedPartitions.get(i).partitionKey(), partitions.get(i).partitionKey());
     }
+
+    @Test
+    public void testMakePartitionFlow_Index() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, value int)");
+        createIndex("CREATE INDEX ON %s (value)");
+
+        for (int i = 0; i < 100; i++)
+            execute("INSERT INTO %s (pk, value) VALUES (?, ?)", i, i);
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore().indexManager.getAllIndexColumnFamilyStores().iterator().next();
+        IPartitioner partitioner = cfs.metadata().partitioner;
+        assertTrue(partitioner instanceof LocalPartitioner);
+
+        Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
+        TPCBoundaries boundaries = memtable.getBoundaries();
+        assertTrue("Expected boundaries for more than 1 core", boundaries.supportedCores() > 1);
+
+        final ColumnFilter columnFilter = ColumnFilter.all(cfs.metadata());
+
+        checkPartitions(0, 100, memtable.makePartitionFlow(columnFilter, DataRange.allData(partitioner)));
+
+        checkPartitions(0, 51,  memtable.makePartitionFlow(columnFilter,
+                                                           DataRange.forKeyRange(Range.makeRowRange(partitioner.getMinimumToken(),
+                                                                                                    partitioner.getToken(Int32Type.instance.decompose(50))))));
+        checkPartitions(51, 49, memtable.makePartitionFlow(columnFilter,
+                                                           DataRange.forKeyRange(Range.makeRowRange(partitioner.getToken(Int32Type.instance.decompose(50)),
+                                                                                                    partitioner.getMinimumToken()))));
+
+        checkPartitions(1, 99, memtable.makePartitionFlow(columnFilter,
+                                                          DataRange.forKeyRange(Range.makeRowRange(partitioner.getToken(Int32Type.instance.decompose(0)),
+                                                                                                   partitioner.getToken(Int32Type.instance.decompose(100))))));
+
+        checkPartitions(51, 10, memtable.makePartitionFlow(columnFilter,
+                                                           DataRange.forKeyRange(Range.makeRowRange(partitioner.getToken(Int32Type.instance.decompose(50)),
+                                                                                                    partitioner.getToken(Int32Type.instance.decompose(60))))));
+    }
+
+
+    void checkPartitions(int min, int num, Flow<FlowableUnfilteredPartition> flow)
+    {
+        List<FlowableUnfilteredPartition> partitions = flow.toList().blockingSingle();
+        assertEquals(num, partitions.size());
+
+        for (int i = 0; i < num; i++)
+            assertEquals(min + i, (int)Int32Type.instance.compose(partitions.get(i).partitionKey().getKey()));
+    }
+
 }

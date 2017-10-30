@@ -33,6 +33,7 @@ import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Token;
@@ -378,64 +379,126 @@ public class TPC
     }
 
     /**
-     * Return the id of the core that is assigned to run operations on the specified keyspace and partition position.
+     * Return the id of the core that is assigned to run operations on the specified keyspace and partition key.
      * <p>
      * Core zero is returned if {@link StorageService} is not yet initialized, since in this case we cannot assign an
-     * partition key to any core.
+     * partition key to any core, or for system keyspaces
+     * ({@link org.apache.cassandra.schema.SchemaConstants#LOCAL_SYSTEM_KEYSPACE_NAMES}).
      *
      * @param keyspace - the keyspace
-     * @param key - the partition position, normally the key but we may receive the MIN or MAX bounds for range queries.
+     * @param key - the partition key
      *
      * @return the core id for this partition
      */
     @Inline
-    public static int getCoreForKey(Keyspace keyspace, PartitionPosition key)
+    public static int getCoreForKey(Keyspace keyspace, DecoratedKey key)
     {
         return getCoreForKey(keyspace.getTPCBoundaries(), key);
     }
 
     /**
-     * Return the id of the core that is assigned to run operations on the specified keyspace boundaries and partition.
+     * Return the id of the core that is assigned to run operations on the specified keyspace boundaries and partition key.
      * <p>
      * Core zero is returned if no boundaries are available.
      *
      * @param boundaries - the keyspace boundaries
-     * @param key - the partition position, normally the key but we may receive the MIN or MAX bounds for range queries.
+     * @param key - the partition key
      *
      * @return the core id for this partition
      */
-    public static int getCoreForKey(TPCBoundaries boundaries, PartitionPosition key)
+    public static int getCoreForKey(TPCBoundaries boundaries, DecoratedKey key)
     {
-        // Handles both the system keyspace (but cheaper that comparing strings) and if the node is not sufficiently
-        // initialized yet than we can compute its boundaries
+        // Boundaries are missing if the node is not sufficiently initialized yet, or for local system tables.
         if (boundaries == TPCBoundaries.NONE)
             return 0;
 
         Token keyToken = key.getToken();
-
         // Convert to top level partitioner for secondary indexes
         if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
-            keyToken = key.getTokenForPartitioner(DatabaseDescriptor.getPartitioner());
+            keyToken = DatabaseDescriptor.getPartitioner().getToken(key.getKey());
 
         return boundaries.getCoreFor(keyToken);
     }
 
     /**
      * Return the TPC scheduler of the core that is assigned to run operations on the specified keyspace
-     * and partition, see {@link TPC#perCoreSchedulers}.
+     * and partition key, see {@link TPC#perCoreSchedulers}.
      * <p>
      * The scheduler for core zero is returned if {@link StorageService} is not yet initialized,
-     * since in this case we cannot assign any partition to any core.
+     * since in this case we cannot assign any partition key to any core, or for system keyspaces
+     * ({@link org.apache.cassandra.schema.SchemaConstants#LOCAL_SYSTEM_KEYSPACE_NAMES}).
      *
      * @param keyspace - the keyspace
-     * @param key - the partition position, normally the key but we may receive the MIN or MAX bounds for range queries.
+     * @param key - the partition key
      *
      * @return the TPC scheduler
      */
     @Inline
-    public static TPCScheduler getForKey(Keyspace keyspace, PartitionPosition key)
+    public static TPCScheduler getForKey(Keyspace keyspace, DecoratedKey key)
     {
         return getForCore(getCoreForKey(keyspace, key));
+    }
+
+    /**
+     * Return the id of the core that is assigned to run operations on the specified keyspace and partition position.
+     * <p>
+     * Core zero is returned if {@link StorageService} is not yet initialized, since in this case we cannot assign an
+     * partition key to any core, for system tables ({@link org.apache.cassandra.schema.SchemaConstants#LOCAL_SYSTEM_KEYSPACE_NAMES}),
+     * or if the partitioner does not match the top level partitioner.
+     *
+     * @param keyspace - the keyspace
+     * @param position - the partition position
+     *
+     * @return the core id for this partition position
+     */
+    @Inline
+    public static int getCoreForBound(Keyspace keyspace, PartitionPosition position)
+    {
+        return getCoreForBound(keyspace.getTPCBoundaries(), position);
+    }
+
+    /**
+     * Return the id of the core that is assigned to run operations on the specified keyspace boundaries and partition position.
+     * <p>
+     * Core zero is returned if no boundaries are available, or if the partitioner does not match the top level partitioner.
+     *
+     * @param boundaries - the keyspace boundaries
+     * @param position - the partition position
+     *
+     * @return the core id for this partition position
+     */
+    public static int getCoreForBound(TPCBoundaries boundaries, PartitionPosition position)
+    {
+        // Boundaries are missing if the node is not sufficiently initialized yet, or for local system tables.
+        if (boundaries == TPCBoundaries.NONE)
+            return 0;
+
+        // If the partitioner doesn't match the top level partitioner used for TPC, there isn't much we
+        // can do unlike the case for keys, so we return core zero
+        if (position.getPartitioner() != DatabaseDescriptor.getPartitioner())
+           return 0;
+
+        return boundaries.getCoreFor(position.getToken());
+    }
+
+    /**
+     * Return the TPC scheduler of the core that is assigned to run operations on the specified keyspace
+     * and partition position, see {@link TPC#perCoreSchedulers}.
+     * <p>
+     * The scheduler for core zero is returned if {@link StorageService} is not yet initialized,
+     * since in this case we cannot assign any partition to any core, for system tables
+     * ({@link org.apache.cassandra.schema.SchemaConstants#LOCAL_SYSTEM_KEYSPACE_NAMES}), or if
+     * the partitioner of the position does not match the global partitioner.
+     *
+     * @param keyspace - the keyspace
+     * @param position - the partition position
+     *
+     * @return the TPC scheduler
+     */
+    @Inline
+    public static TPCScheduler getForBound(Keyspace keyspace, PartitionPosition position)
+    {
+        return getForCore(getCoreForBound(keyspace, position));
     }
 
     public static TPCMetrics metrics()
