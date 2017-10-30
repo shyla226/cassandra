@@ -1,3 +1,8 @@
+DSE 5.1.6
+Merged from dse5.0:
+* Add metrics on coordination of read commands (APOLLO-637)
+
+
 DSE 5.1.4
  * Do not leak body buffer in case of protocol exceptions and upgrade Netty to 4.0.52 (APOLLO-1257)
  * Ensure that the list and set selectors elements are all of the same type (APOLLO-905)
