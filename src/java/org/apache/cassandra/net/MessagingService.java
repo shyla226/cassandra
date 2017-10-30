@@ -26,6 +26,7 @@ import java.nio.channels.ServerSocketChannel;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -105,7 +106,7 @@ public final class MessagingService implements MessagingServiceMBean
 
     private final DroppedMessages droppedMessages = new DroppedMessages();
 
-    private final List<ILatencySubscriber> subscribers = new ArrayList<>();
+    private final List<ILatencySubscriber> subscribers = new CopyOnWriteArrayList<>();
 
     // protocol versions of the other nodes in the cluster
     private final ConcurrentMap<InetAddress, MessagingVersion> versions = new NonBlockingHashMap<>();

@@ -103,6 +103,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no internal DB ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no internal DB ticket)
 Merged from dse5.0:
+ * Add metrics on coordination of read commands (DB-637)
  * Added "-Dcassandra.replace_consistency" to support replace from multiple sources (DB-247)
  * Add cross_dc_rtt_in_ms to cross dc requests, default 0 (DB-854)
  * Make scrub validate the partition key, add validation to schema mutation creation (DB-657)

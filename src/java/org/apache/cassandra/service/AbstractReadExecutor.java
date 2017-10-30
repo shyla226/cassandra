@@ -38,11 +38,13 @@ import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.metrics.ReadCoordinationMetrics;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.SpeculativeRetryParam;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.flow.Flow;
 
 /**
@@ -62,6 +64,11 @@ public abstract class AbstractReadExecutor
     protected final ReadCallback<FlowablePartition> handler;
     protected final DigestVersion digestVersion;
     protected final ColumnFamilyStore cfs;
+
+    static
+    {
+        MessagingService.instance().register(ReadCoordinationMetrics::updateReplicaLatency);
+    }
 
     AbstractReadExecutor(ColumnFamilyStore cfs, ReadCommand command, List<InetAddress> targetReplicas, ReadContext ctx)
     {
@@ -160,6 +167,12 @@ public abstract class AbstractReadExecutor
         ConsistencyLevel consistencyLevel = ctx.consistencyLevel;
         List<InetAddress> allReplicas = StorageProxy.getLiveSortedEndpoints(keyspace, command.partitionKey());
         List<InetAddress> targetReplicas = ctx.filterForQuery(allReplicas);
+
+        // See APOLLO-637
+        if (!allReplicas.contains(FBUtilities.getBroadcastAddress()))
+            ReadCoordinationMetrics.nonreplicaRequests.inc();
+        else if (!targetReplicas.contains(FBUtilities.getBroadcastAddress()))
+            ReadCoordinationMetrics.preferredOtherReplicas.inc();
 
         // Throw UAE early if we don't have enough replicas.
         consistencyLevel.assureSufficientLiveNodes(keyspace, targetReplicas);
