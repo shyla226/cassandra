@@ -3,78 +3,78 @@ DSE 5.0.12
  * Add new rebuild mode reset-no-snapshot (DB-1224)
  * Add 'nodetool abortrebuild' (DB-1234)
  * Make assassinate more resilient to missing tokens (DB-1283)
- * Add metrics on coordination of read commands (APOLLO-637)
+ * Add metrics on coordination of read commands (DB-637)
 
 
 DSE 5.0.11
- * Added "-Dcassandra.replace_consistency" to support replace from multiple sources (APOLLO-247)
- * Add cross_dc_rtt_in_ms to cross dc requests, default 0 (APOLLO-854)
- * Backport CASSANDRA-13299, Throttle base partitions during MV repair streaming to prevent OOM (APOLLO-878)
- * Backport CASSANDRA-13079: Warn user to run full repair when increasing replication factor (APOLLO-602)
- * Add anticompaction metrics and warn users when incremental repair is inefficient (APOLLO-689)
+ * Added "-Dcassandra.replace_consistency" to support replace from multiple sources (DB-247)
+ * Add cross_dc_rtt_in_ms to cross dc requests, default 0 (DB-854)
+ * Backport CASSANDRA-13299, Throttle base partitions during MV repair streaming to prevent OOM (DB-878)
+ * Backport CASSANDRA-13079: Warn user to run full repair when increasing replication factor (DB-602)
+ * Add anticompaction metrics and warn users when incremental repair is inefficient (DB-689)
 
 
 DSE 5.0.10
- * Make scrub validate the partition key, add validation to schema mutation creation (APOLLO-657)
- * Group multiple view updates within the same base partition to speedup view build process(APOLLO-969)
- * Add nodetool mark_unrepaired command (APOLLO-692)
- * Make full repair default and disallow incremental repair on MV tables (APOLLO-596)
- * Revert CASSANDRA-11223 behavior in AbstractReadCommandBuilder (APOLLO-1010)
- * Simplify role-permissions handling (APOLLO-796)
- * Prevent marking remote SSTables shadowing compacted data as repaired (APOLLO-688)
- * fix completed rebuild logging always says 0 bytes (APOLLO-810)
- * nodetool rebuild & bootstrap improvements (APOLLO-581)
+ * Make scrub validate the partition key, add validation to schema mutation creation (DB-657)
+ * Group multiple view updates within the same base partition to speedup view build process(DB-969)
+ * Add nodetool mark_unrepaired command (DB-692)
+ * Make full repair default and disallow incremental repair on MV tables (DB-596)
+ * Revert CASSANDRA-11223 behavior in AbstractReadCommandBuilder (DB-1010)
+ * Simplify role-permissions handling (DB-796)
+ * Prevent marking remote SSTables shadowing compacted data as repaired (DB-688)
+ * fix completed rebuild logging always says 0 bytes (DB-810)
+ * nodetool rebuild & bootstrap improvements (DB-581)
 Merged from DSE 4.8.14:
-  * Allow aggressive expiration of fully expired sstables without timestamp/key overlap checks (APOLLO-902)
+  * Allow aggressive expiration of fully expired sstables without timestamp/key overlap checks (DB-902)
 
 
 DSE 5.0.9
- * Skip complex column range tombstones on simple columns (APOLLO-480)
- * Fail remaining ongoing tasks when aborting a repair job (APOLLO-669)
- * On node failure, fail only repair tasks of that node (APOLLO-669)
- * Coerce integer JSON values to timestamp as well as long values (APOLLO-483)
+ * Skip complex column range tombstones on simple columns (DB-480)
+ * Fail remaining ongoing tasks when aborting a repair job (DB-669)
+ * On node failure, fail only repair tasks of that node (DB-669)
+ * Coerce integer JSON values to timestamp as well as long values (DB-483)
 Merged from DSE 4.8.14:
- * Integrate top threads command in nodetool (APOLLO-652)
+ * Integrate top threads command in nodetool (DB-652)
 
 
 DSE 5.0.8
- * Handle missing metadata when opening a keyspace (APOLLO-395)
- * Bounded range splitting token allocation for first RF nodes (APOLLO-121)
- * Backport CASSANDRA-12858: Add the range limit for the split ratio in PartitionerTestCase (APOLLO-121)
- * Partial backport of token splitting from CASSANDRA-12777: Implement the NoReplicationTokenAllocator (APOLLO-121)
- * Log when waiting remaining repair tasks to finish (APOLLO-103)
- * Avoid AssertionError when shutting down finished repair executor (APOLLO-119)
- * Add allocate_tokens_for_local_replication_factor flag (APOLLO-34)
- * Backport CASSANDRA-13080: Use new token allocation for non bootstrap case as well (APOLLO-34)
- * Backport CASSANDRA-12990: More fixes to the TokenAllocator (APOLLO-34)
- * cqlsh SOURCE cmd shouldn't assume PlainTextAuthenticator (APOLLO-492)
- * Skip flush on repair streaming (APOLLO-466)
- * Minor optimization in GPFS, and related snitches (APOLLO-479)
- * Issue CQL native protocol warning that DTCS is deprecated (APOLLO-327)
- * Log message when rebuild has finished (APOLLO-465)
- * Improve repair overstreaming for multi-DCs and large RFs (APOLLO-390)
+ * Handle missing metadata when opening a keyspace (DB-395)
+ * Bounded range splitting token allocation for first RF nodes (DB-121)
+ * Backport CASSANDRA-12858: Add the range limit for the split ratio in PartitionerTestCase (DB-121)
+ * Partial backport of token splitting from CASSANDRA-12777: Implement the NoReplicationTokenAllocator (DB-121)
+ * Log when waiting remaining repair tasks to finish (DB-103)
+ * Avoid AssertionError when shutting down finished repair executor (DB-119)
+ * Add allocate_tokens_for_local_replication_factor flag (DB-34)
+ * Backport CASSANDRA-13080: Use new token allocation for non bootstrap case as well (DB-34)
+ * Backport CASSANDRA-12990: More fixes to the TokenAllocator (DB-34)
+ * cqlsh SOURCE cmd shouldn't assume PlainTextAuthenticator (DB-492)
+ * Skip flush on repair streaming (DB-466)
+ * Minor optimization in GPFS, and related snitches (DB-479)
+ * Issue CQL native protocol warning that DTCS is deprecated (DB-327)
+ * Log message when rebuild has finished (DB-465)
+ * Improve repair overstreaming for multi-DCs and large RFs (DB-390)
 
 
 DSE 5.0.7
- * Connection refused should be logged less frequently (APOLLO-455)
- * Always log flush errors (APOLLO-227)
+ * Connection refused should be logged less frequently (DB-455)
+ * Always log flush errors (DB-227)
 
 
 DSE 5.0.6
  * Disable preemptive sstable opening if sstable_preemptive_open_interval_in_mb <= 0,
-   and warn about high GC pressure for values below 4 (APOLLO-386)
+   and warn about high GC pressure for values below 4 (DB-386)
  * Filter out duplicate sstables when performing snapshots to avoid
-   duplicate hardlink errors (APOLLO-290)
- * Prevent duplicate SyncUtil.force() in SeqentialWriter on close (APOLLO-351)
- * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
- * Backport CASSANDRA-11503: Add repaired percentage metric (APOLLO-88)
+   duplicate hardlink errors (DB-290)
+ * Prevent duplicate SyncUtil.force() in SeqentialWriter on close (DB-351)
+ * Perform repair sync sequentially to avoid overloading coordinator (DB-216)
+ * Backport CASSANDRA-11503: Add repaired percentage metric (DB-88)
 
 
 DSE 5.0.5
- * Backport CASSANDRA-10134: Always perform collision check before joining ring (APOLLO-232)
- * Backport CASSANDRA-12461: Add pre- and post-shutdown hooks to Storage Service (APOLLO-48)
+ * Backport CASSANDRA-10134: Always perform collision check before joining ring (DB-232)
+ * Backport CASSANDRA-12461: Add pre- and post-shutdown hooks to Storage Service (DB-48)
 
 
 DSE 5.0.4
- * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
- * Exponential backoff when hint delivery fails (APOLLO-17)
+ * Wait for remaining tasks to finish on RepairJob after task failure (DB-87)
+ * Exponential backoff when hint delivery fails (DB-17)
