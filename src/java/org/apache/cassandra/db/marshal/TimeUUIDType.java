@@ -86,7 +86,7 @@ public class TimeUUIDType extends TemporalType<UUID>
         assert ((msb >>> 12) & 0xf) == 1;
         ByteBuffer swizzled = ByteBuffer.allocate(16);
         swizzled.putLong(0, TimeUUIDType.reorderTimestampBytes(msb));
-        swizzled.putLong(8, b.getLong(8));
+        swizzled.putLong(8, b.getLong(s + 8));
 
         return ByteSource.fixedLength(swizzled);
     }

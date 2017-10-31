@@ -392,9 +392,9 @@ public class ByteSourceTest
         TupleType tt = new TupleType(ImmutableList.of(AsciiType.instance, Int32Type.instance));
         List<ByteBuffer> tests = ImmutableList.of
             (
-                TupleType.buildValue(AsciiType.instance.decompose(""), Int32Type.instance.decompose(0)),
-                TupleType.buildValue(AsciiType.instance.decompose(""), Int32Type.instance.decompose(null)),
-                TupleType.buildValue(AsciiType.instance.decompose("")),
+                TupleType.buildValue(decomposeAndRandomPad(AsciiType.instance, ""), decomposeAndRandomPad(Int32Type.instance, 0)),
+                TupleType.buildValue(decomposeAndRandomPad(AsciiType.instance, ""), decomposeAndRandomPad(Int32Type.instance, null)),
+                TupleType.buildValue(decomposeAndRandomPad(AsciiType.instance, "")),
                 TupleType.buildValue()
             );
         testBuffers(tt, tests);
@@ -421,11 +421,11 @@ public class ByteSourceTest
         CompositeType tt = CompositeType.getInstance(AsciiType.instance, Int32Type.instance);
         List<ByteBuffer> tests = ImmutableList.of
             (
-                CompositeType.build(AsciiType.instance.decompose(""), Int32Type.instance.decompose(0)),
-                CompositeType.build(AsciiType.instance.decompose(""), Int32Type.instance.decompose(null)),
-                CompositeType.build(AsciiType.instance.decompose("")),
+                CompositeType.build(decomposeAndRandomPad(AsciiType.instance, ""), decomposeAndRandomPad(Int32Type.instance, 0)),
+                CompositeType.build(decomposeAndRandomPad(AsciiType.instance, ""), decomposeAndRandomPad(Int32Type.instance, null)),
+                CompositeType.build(decomposeAndRandomPad(AsciiType.instance, "")),
                 CompositeType.build(),
-                CompositeType.build(true, AsciiType.instance.decompose("")),
+                CompositeType.build(true, decomposeAndRandomPad(AsciiType.instance, "")),
                 CompositeType.build(true)
             );
         for (ByteBuffer b : tests)
@@ -436,8 +436,8 @@ public class ByteSourceTest
     void assertCompositeComparesSame(AbstractType t1, AbstractType t2, Object o1, Object o2, Object o3, Object o4)
     {
         CompositeType tt = CompositeType.getInstance(t1, t2);
-        ByteBuffer b1 = CompositeType.build(t1.decompose(o1), t2.decompose(o2));
-        ByteBuffer b2 = CompositeType.build(t1.decompose(o3), t2.decompose(o4));
+        ByteBuffer b1 = CompositeType.build(decomposeAndRandomPad(t1, o1), decomposeAndRandomPad(t2, o2));
+        ByteBuffer b2 = CompositeType.build(decomposeAndRandomPad(t1, o3), decomposeAndRandomPad(t2, o4));
         assertComparesSame(tt, b1, b2);
     }
     
@@ -530,7 +530,7 @@ public class ByteSourceTest
     public void testType(AbstractType type, Object[] values)
     {
         for (Object i : values) {
-            ByteBuffer b = type.decompose(i);
+            ByteBuffer b = decomposeAndRandomPad(type, i);
             System.out.format("Value %s (%s) bytes %s ByteSource %s\n",
                     safeStr(i),
                     safeStr(type.getSerializer().toCQLLiteral(b)),
@@ -549,7 +549,7 @@ public class ByteSourceTest
         try
         {
             for (Object i : values) {
-                ByteBuffer b = type.decompose(i);
+                ByteBuffer b = decomposeAndRandomPad(type, i);
                 System.out.format("Value %s bytes %s ByteSource %s\n",
                         safeStr(type.getSerializer().toCQLLiteral(b)),
                         safeStr(ByteBufferUtil.bytesToHex(b)),
@@ -611,8 +611,8 @@ public class ByteSourceTest
 
     void assertComparesSame(AbstractType type, Object v1, Object v2)
     {
-        ByteBuffer b1 = type.decompose(v1);
-        ByteBuffer b2 = type.decompose(v2);
+        ByteBuffer b1 = decomposeAndRandomPad(type, v1);
+        ByteBuffer b2 = decomposeAndRandomPad(type, v2);
         int expected = Integer.signum(type.compare(b1, b2));
         int actual = Integer.signum(ByteSource.compare(type.asByteComparableSource(b1), type.asByteComparableSource(b2)));
         if (expected == actual)
@@ -631,5 +631,19 @@ public class ByteSourceTest
         }
         else
             assertEquals(String.format("Failed comparing %s(%s) and %s(%s)", safeStr(v1), ByteBufferUtil.bytesToHex(b1), safeStr(v2), ByteBufferUtil.bytesToHex(b2)), expected, actual);
+    }
+
+    ByteBuffer decomposeAndRandomPad(AbstractType type, Object v)
+    {
+        ByteBuffer b = type.decompose(v);
+        Random rand = ThreadLocalRandom.current();
+        int padBefore = rand.nextInt(16);
+        int padAfter = rand.nextInt(16);
+        ByteBuffer padded = ByteBuffer.allocate(b.remaining() + padBefore + padAfter);
+        rand.ints(padBefore).forEach(x -> padded.put((byte) x));
+        padded.put(b);
+        rand.ints(padAfter).forEach(x -> padded.put((byte) x));
+        padded.clear().limit(padded.capacity() - padAfter).position(padBefore);
+        return padded;
     }
 }

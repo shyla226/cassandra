@@ -120,7 +120,8 @@ public class UUIDType extends AbstractType<UUID>
             swizzled.putLong(0, TimeUUIDType.reorderTimestampBytes(msb));
         else
             swizzled.putLong(0, (version << 60) | ((msb >>> 4) & 0x0FFFFFFFFFFFF000L) | (msb & 0xFFFL));
-        swizzled.putLong(8, b.getLong(8));
+
+        swizzled.putLong(8, b.getLong(s + 8));
 
         return ByteSource.fixedLength(swizzled);
     }

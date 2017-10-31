@@ -83,7 +83,7 @@ class RowIndexWriter
     private ByteSource nudge(ByteSource v, int nudgeAt)
     {
         v.reset();
-        return new ByteSource()
+        return new ByteSource.WithToString()
         {
             int cur = 0;
 
