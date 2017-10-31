@@ -956,17 +956,32 @@ public abstract class CQLTester
         return sessionNet(protocolVersion).execute(formatQuery(query), values);
     }
 
+    protected com.datastax.driver.core.ResultSet executeNet(String query, Object... values) throws Throwable
+    {
+        return executeNet(getDefaultVersion(), query, values);
+    }
+
     protected com.datastax.driver.core.PreparedStatement prepareNet(ProtocolVersion protocolVersion, String query)
     {
         return sessionNet(protocolVersion).prepare(query);
     }
 
-    protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, BoundStatement statement)
+    protected com.datastax.driver.core.PreparedStatement prepareNet(String query)
+    {
+        return prepareNet(getDefaultVersion(), query);
+    }
+
+    protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, Statement statement)
     {
         return sessionNet(protocolVersion).execute(statement);
     }
 
-    protected com.datastax.driver.core.ResultSetFuture executeNetAsync(ProtocolVersion protocolVersion, BoundStatement statement)
+    protected com.datastax.driver.core.ResultSet executeNet(Statement statement)
+    {
+        return executeNet(getDefaultVersion(), statement);
+    }
+    
+    protected com.datastax.driver.core.ResultSetFuture executeNetAsync(ProtocolVersion protocolVersion, Statement statement)
     {
         return sessionNet(protocolVersion).executeAsync(statement);
     }
