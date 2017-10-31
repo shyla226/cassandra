@@ -6,21 +6,10 @@
 package com.datastax.bdp.db.audit;
 
 import org.junit.Assert;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
-
-//@Category(UnitTest.class)
 public class AuditFilterTest
 {
-
-    @BeforeClass
-    public static void setupClass() throws Exception {
-        // Needed because this reads authentication config settings
-        DatabaseDescriptor.daemonInitialization();
-    }
-
     @Test
     public void checkIncludedKeyspaceFilter() throws Exception
     {

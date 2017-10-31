@@ -15,7 +15,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.driver.core.utils.UUIDs;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.UnauthorizedException;
@@ -339,7 +338,7 @@ public class AuditableEvent
             {
                 uid = UUIDGen.getTimeUUID();
             }
-            timestamp = UUIDs.unixTimestamp(uid);
+            timestamp = UUIDGen.unixTimestamp(uid);
             return new AuditableEvent(this);
         }
     }
