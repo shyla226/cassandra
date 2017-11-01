@@ -165,14 +165,22 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     private final boolean isIncremental;
     private ScheduledFuture<?> keepAliveFuture = null;
 
-    public static enum State
+    public enum State
     {
-        INITIALIZED,
-        PREPARING,
-        STREAMING,
-        WAIT_COMPLETE,
-        COMPLETE,
-        FAILED,
+        INITIALIZED(false),
+        PREPARING(false),
+        STREAMING(false),
+        WAIT_COMPLETE(false),
+        COMPLETE(true),
+        ABORTED(true),
+        FAILED(true);
+
+        public final boolean finalState;
+
+        State(boolean finalState)
+        {
+            this.finalState = finalState;
+        }
     }
 
     private volatile State state = State.INITIALIZED;
@@ -338,7 +346,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
 
     private void failIfFinished()
     {
-        if (state() == State.COMPLETE || state() == State.FAILED)
+        if (state().finalState)
             throw new RuntimeException(String.format("Stream %s is finished with state %s", planId(), state().name()));
     }
 
@@ -465,11 +473,9 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         {
             state(finalState);
 
-            if (finalState == State.FAILED)
-            {
+            if (finalState.finalState && finalState != State.COMPLETE)
                 for (StreamTask task : Iterables.concat(receivers.values(), transfers.values()))
                     task.abort();
-            }
 
             if (keepAliveFuture != null)
             {
@@ -599,6 +605,24 @@ public class StreamSession implements IEndpointStateChangeSubscriber
                                                                                             peer.equals(connecting) ? "" : " through " + connecting.getHostAddress(),
                                                                                             e);
         }
+    }
+
+    /**
+     * Abort this stream session.
+     *
+     * A {@link SessionFailedMessage} is being sent to and the session is closed with {@link State#ABORTED}.
+     *
+     * @param reason some message to log
+     */
+    public void abort(String reason)
+    {
+        logger.warn("[Stream #{}] Streaming aborted: {}", planId(), reason);
+
+        // send session failure message
+        if (handler.isOutgoingConnected())
+            handler.sendMessage(new SessionFailedMessage());
+        // fail session
+        closeSession(State.ABORTED);
     }
 
     /**

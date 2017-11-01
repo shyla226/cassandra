@@ -176,7 +176,8 @@ public class NodeTool
                 RefreshSizeEstimates.class,
                 RelocateSSTables.class,
                 ViewBuildStatus.class,
-                MarkUnrepaired.class
+                MarkUnrepaired.class,
+                AbortRebuild.class
         );
 
         if (withSequence)

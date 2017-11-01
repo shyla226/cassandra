@@ -27,6 +27,7 @@ import java.util.Map.Entry;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
@@ -38,7 +39,6 @@ import javax.management.openmbean.TabularData;
 import javax.management.openmbean.TabularDataSupport;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Joiner;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
@@ -198,7 +198,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /* we bootstrap but do NOT join the ring unless told to do so */
     private boolean isSurveyMode = Boolean.parseBoolean(System.getProperty("cassandra.write_survey", "false"));
     /* true if node is rebuilding and receiving data */
-    private final AtomicBoolean isRebuilding = new AtomicBoolean();
+    private final AtomicReference<RangeStreamer> currentRebuild = new AtomicReference<>();
     private final AtomicBoolean isDecommissioning = new AtomicBoolean();
 
     private volatile boolean initialized = false;
@@ -1218,12 +1218,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                            RebuildMode mode,
                            StreamingOptions options)
     {
-        // check ongoing rebuild
-        if (!isRebuilding.compareAndSet(false, true))
-        {
-            throw new IllegalStateException("Node is still rebuilding. Check nodetool netstats.");
-        }
-
         keyspaces = keyspaces != null ? keyspaces : Collections.emptyList();
 
         // check the arguments
@@ -1241,20 +1235,25 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         logger.info("starting rebuild for {}", msg);
         long t0 = System.currentTimeMillis();
 
+        RangeStreamer streamer = new RangeStreamer(tokenMetadata,
+                                                   null,
+                                                   FBUtilities.getBroadcastAddress(),
+                                                   "Rebuild",
+                                                   useStrictConsistency && !replacing,
+                                                   RangeStreamer.StreamConsistency.ONE,
+                                                   DatabaseDescriptor.getEndpointSnitch(),
+                                                   streamStateStore,
+                                                   false,
+                                                   options.toSourceFilter(DatabaseDescriptor.getEndpointSnitch(),
+                                                                          FailureDetector.instance));
+        // check ongoing rebuild
+        if (!currentRebuild.compareAndSet(null, streamer))
+        {
+            throw new IllegalStateException("Node is still rebuilding. Check nodetool netstats.");
+        }
+
         try
         {
-            RangeStreamer streamer = new RangeStreamer(tokenMetadata,
-                                                       null,
-                                                       FBUtilities.getBroadcastAddress(),
-                                                       "Rebuild",
-                                                       useStrictConsistency && !replacing,
-                                                       RangeStreamer.StreamConsistency.ONE,
-                                                       DatabaseDescriptor.getEndpointSnitch(),
-                                                       streamStateStore,
-                                                       false,
-                                                       options.toSourceFilter(DatabaseDescriptor.getEndpointSnitch(),
-                                                                              FailureDetector.instance));
-
             if (keyspaces.isEmpty())
             {
                 keyspaces = Schema.instance.getNonLocalStrategyKeyspaces();
@@ -1354,8 +1353,23 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         finally
         {
             // rebuild is done (successfully or not)
-            isRebuilding.set(false);
+            currentRebuild.set(null);
         }
+    }
+
+    public void abortRebuild(String reason)
+    {
+        if (reason == null)
+            reason = "Manually aborted";
+
+        RangeStreamer streamer = currentRebuild.get();
+        if (streamer == null)
+            throw new IllegalStateException("No active rebuild");
+
+        // Do not clear the 'currentRebuild' field here. The currently active 'RangeStreamer' will exit and
+        // therefore clear the reference in 'StorageService.rebuild()'.
+
+        streamer.abort(reason);
     }
 
     public void setRpcTimeout(long value)

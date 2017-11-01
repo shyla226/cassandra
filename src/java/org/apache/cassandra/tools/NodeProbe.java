@@ -1216,6 +1216,11 @@ public class NodeProbe implements AutoCloseable
         return ssProxy.rebuild(keyspaces, tokens, mode, whitelistDcs, blacklistDcs, whitelistSources, blacklistSources);
     }
 
+    public void abortRebuild(String reason)
+    {
+        ssProxy.abortRebuild(reason);
+    }
+
     public List<String> sampleKeyRange()
     {
         return ssProxy.sampleKeyRange();
