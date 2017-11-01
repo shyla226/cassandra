@@ -82,6 +82,11 @@ public final class SessionInfo implements Serializable
         return state == StreamSession.State.FAILED;
     }
 
+    public boolean isAborted()
+    {
+        return state == StreamSession.State.ABORTED;
+    }
+
     /**
      * Update progress of receiving/sending file.
      *

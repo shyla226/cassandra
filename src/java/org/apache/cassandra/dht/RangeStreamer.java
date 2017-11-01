@@ -65,6 +65,7 @@ public class RangeStreamer
     private final IEndpointSnitch snitch;
     private final StreamStateStore stateStore;
     private final StreamConsistency streamConsistency;
+    private StreamResultFuture streamFuture;
 
     /**
      * A filter applied to sources to stream from when constructing a fetch map.
@@ -373,7 +374,17 @@ public class RangeStreamer
             streamPlan.requestRanges(source, preferred, keyspace, ranges);
         }
 
-        return streamPlan.execute();
+        streamFuture = streamPlan.execute();
+
+        return streamFuture;
+    }
+
+    public void abort(String reason)
+    {
+        if (streamFuture == null)
+            throw new IllegalStateException("Range streaming has not been started");
+
+        streamFuture.abort(reason);
     }
 
     public enum StreamConsistency

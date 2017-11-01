@@ -187,7 +187,8 @@ public class NodeTool
                 ViewBuildStatus.class,
                 InMemoryStatus.class,
                 MarkUnrepaired.class,
-                HandoffWindow.class
+                HandoffWindow.class,
+                AbortRebuild.class
         );
 
         if (withSequence)
