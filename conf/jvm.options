@@ -133,9 +133,16 @@
 # Disable biased locking to avoid biased lock revokation pauses
 -XX:-UseBiasedLocking
 
-### Debug options
+### Debug/profiling options
 
-# uncomment to enable flight recorder (Development use only)
+# There's no adverse side effect to enabling the debug info, so leave on by default to allow better info for profilers
+-XX:+UnlockDiagnosticVMOptions
+-XX:+DebugNonSafepoints
+
+# If you plan to profile using perf you will need to enable this option
+#-XX:+PreserveFramePointer
+
+# Uncomment to enable flight recorder (Use in production is subject to Oracle licensing)
 #-XX:+UnlockCommercialFeatures
 #-XX:+FlightRecorder
 
@@ -144,9 +151,6 @@
 #-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=1414
 
 # uncomment to have Cassandra JVM log internal method compilation (developers only)
-#-XX:+UnlockDiagnosticVMOptions
-#-XX:+DebugNonSafepoints
-#-XX:+PreserveFramePointer
 #-XX:+LogCompilation
 
 #################
