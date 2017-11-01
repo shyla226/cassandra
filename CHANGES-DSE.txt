@@ -1,6 +1,7 @@
 DSE 5.1.6
 Merged from dse5.0:
-* Add metrics on coordination of read commands (APOLLO-637)
+ * Make assassinate more resilient to missing tokens (DB-1283)
+ * Add metrics on coordination of read commands (APOLLO-637)
 
 
 DSE 5.1.4
