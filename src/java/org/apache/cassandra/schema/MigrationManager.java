@@ -472,6 +472,7 @@ public class MigrationManager
 
     private static void pushSchemaMutation(InetAddress endpoint, SchemaMigration schema)
     {
+        logger.debug("[DB-1261] Pushing schema to endpoint " + endpoint);
         MessagingService.instance().send(Verbs.SCHEMA.PUSH.newRequest(endpoint, schema));
     }
 

@@ -375,7 +375,7 @@ public final class SchemaKeyspace
         return PartitionRangeReadCommand.allDataRead(cfs.metadata(), FBUtilities.nowInSeconds());
     }
 
-    static SchemaMigration convertSchemaToMutations()
+    static synchronized SchemaMigration convertSchemaToMutations()
     {
         Map<DecoratedKey, Mutation> mutationMap = new HashMap<>();
 

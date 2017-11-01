@@ -82,6 +82,7 @@ final class MigrationTask extends WrappedRunnable
             @Override
             public void onResponse(Response<SchemaMigration> message)
             {
+                logger.debug("[DB-1261] Pulled schema from endpoint " + endpoint + "; will try applying locally now...");
                 try
                 {
                     Schema.instance.mergeAndAnnounceVersion(message.payload());
@@ -105,6 +106,7 @@ final class MigrationTask extends WrappedRunnable
         if (monitoringBootstrapStates.contains(SystemKeyspace.getBootstrapState()))
             inflightTasks.offer(completionLatch);
 
+        logger.debug("[DB-1261] Pulling schema from endpoint " + endpoint);
         MessagingService.instance().send(Verbs.SCHEMA.PULL.newRequest(endpoint, EmptyPayload.instance), cb);
     }
 }
