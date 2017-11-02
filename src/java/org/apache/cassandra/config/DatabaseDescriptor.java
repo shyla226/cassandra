@@ -2265,7 +2265,6 @@ public class DatabaseDescriptor
 
     public static boolean isSSD()
     {
-        //return getDiskOptimizationStrategy() instanceof SsdDiskOptimizationStrategy;
         return FileUtils.isSSD();
     }
 

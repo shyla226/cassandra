@@ -598,10 +598,24 @@ public final class FileUtils
      */
     public static Map<Path, String> getDiskPartitions() throws IOException
     {
+        try (Reader source = new InputStreamReader(new FileInputStream("/proc/mounts"), "UTF-8"))
+        {
+            return getDiskPartitions(source);
+        }
+    }
+
+    public static Map<Path, String> getDiskPartitions(Reader source) throws IOException
+    {
         assert FBUtilities.isLinux;
 
-        Map<Path, String> dirToDisk = new TreeMap<>();
-        try (BufferedReader bufferedReader =  new BufferedReader(new InputStreamReader(new FileInputStream("/proc/mounts"), "UTF-8")))
+        Map<Path, String> dirToDisk = new TreeMap<>((a,b) ->
+                                                    {
+                                                        int cmp = -Integer.compare(a.getNameCount(), b.getNameCount());
+                                                        if (cmp != 0)
+                                                            return cmp;
+                                                        return a.toString().compareTo(b.toString());
+                                                    });
+        try (BufferedReader bufferedReader =  new BufferedReader(source))
         {
             String line;
             while ((line = bufferedReader.readLine()) != null)
@@ -609,18 +623,27 @@ public final class FileUtils
                 String parts[] = line.split(" +");
                 assert parts.length > 2;
 
-                //Remove any numbers at the end of the disk since they are just partitions
-                String disk =  parts[0].replaceAll("\\d+$", "");
-                int devOffset = disk.lastIndexOf("/");
+                String partition =  parts[0];
 
-                //Ignore stuff like tmpfs
-                if (devOffset < 0)
+                if (partition.indexOf('/') == -1)
+                    // this _should_ be a Linux internal thing (sysfs, procfs, tmpfs, cgroup, whatever)
                     continue;
 
-                disk = disk.substring(devOffset);
+                if (partition.startsWith("/dev/"))
+                {
+                    // we need the full disk partition name here and look up the device later
+                    // possible patterns:
+                    //   /dev/sdb23
+                    //   /dev/nvme0n1p2
+                    partition = partition.substring("/dev/".length());
+                }
+                else
+                {
+                    partition = "WE_DO_NOT_KNOW";
+                }
 
                 // /home, /dev/sda
-                dirToDisk.put(Paths.get(parts[1]), disk);
+                dirToDisk.put(Paths.get(parts[1]), partition);
             }
         }
 
@@ -629,27 +652,32 @@ public final class FileUtils
 
 
     /**
-     * Detects if a given device (i.e. sda) is rotational or ssd
-     * @param device the name of the root device "sdb"
+     * Detects if a given partition (i.e. sda2, nvme0n1p2) is rotational or ssd
      *
      * This only works on Linux
      *
+     * @param partition the name of the partition
      * @return true for ssd
      * @throws IOException
      */
-    public static boolean isSSD(String device) throws IOException
+    public static boolean isPartitionOnSSD(String partition) throws IOException
     {
         assert FBUtilities.isLinux;
 
-        try (BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(new FileInputStream(String.format("/sys/block/%s/queue/rotational", device)), "UTF-8")))
-        {
-            String line = bufferedReader.readLine().trim();
+        Path sysClassBlock = Paths.get("/sys/class/block/" + partition);
+        // not a block device - so can't be an SSD
+        if (!sysClassBlock.toFile().exists())
+            return false;
 
-            if (line.equals("0"))
-                return true;
-        }
+        // read symlink from /sys/class/block/... to /sys/devices/...
+        sysClassBlock = sysClassBlock.toRealPath();
+        Path device = sysClassBlock.getParent();
+        Path queue = device.resolve("queue");
+        Path rotational = queue.resolve("rotational");
 
-        return false;
+        // "rotational" contains 0 for non-rotational
+
+        return "0".equals(Files.lines(rotational).findFirst().orElse("1"));
     }
 
     /**
@@ -668,18 +696,18 @@ public final class FileUtils
         {
             try
             {
-                Map<Path, String> dirToDisk = getDiskPartitions();
+                Map<Path, String> dirToPartition = getDiskPartitions();
 
                 for (String dataDir : DatabaseDescriptor.getAllDataFileLocations())
                 {
                     Path dataPath = Paths.get(dataDir).toAbsolutePath();
                     boolean found = false;
-                    for (Map.Entry<Path, String> entry : dirToDisk.entrySet())
+                    for (Map.Entry<Path, String> entry : dirToPartition.entrySet())
                     {
                         if (dataPath.startsWith(entry.getKey()))
                         {
                             found = true;
-                            if (!isSSD(entry.getValue()))
+                            if (!isPartitionOnSSD(entry.getValue()))
                                 isSSD = false;
 
                             break;
@@ -789,7 +817,7 @@ public final class FileUtils
      * signed long (2^63-1), if the filesystem is any bigger, then the size overflows. {@code SafeFileStore} will
      * return {@code Long.MAX_VALUE} if the size overflow.</p>
      *
-     * @see https://bugs.openjdk.java.net/browse/JDK-8162520.
+     * See {@code https://bugs.openjdk.java.net/browse/JDK-8162520}.
      */
     private static final class SafeFileStore extends FileStore
     {
