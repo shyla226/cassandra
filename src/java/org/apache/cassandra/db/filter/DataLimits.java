@@ -311,7 +311,11 @@ public abstract class DataLimits
      */
     public static Flow<Unfiltered> countUnfilteredRows(Flow<Unfiltered> rows, Counter counter)
     {
-        return rows.map(counter::newUnfiltered);
+        return rows.map(u ->
+                        {
+                            counter.newUnfiltered(u);
+                            return u;
+                        });
     }
 
     private static FlowableUnfilteredPartition countUnfilteredPartition(FlowableUnfilteredPartition partition, Counter counter)
@@ -319,7 +323,11 @@ public abstract class DataLimits
         counter.newPartition(partition.partitionKey(), partition.staticRow());
 
         counter.newStaticRow(partition.staticRow());
-        return partition.mapContent(counter::newUnfiltered);
+        return partition.mapContent(u ->
+                                    {
+                                        counter.newUnfiltered(u);
+                                        return u;
+                                    });
     }
 
     /**
