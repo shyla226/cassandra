@@ -15,7 +15,8 @@ import org.slf4j.LoggerFactory;
 
 import com.datastax.bdp.db.audit.AuditLogger;
 import com.datastax.bdp.db.audit.AuditableEvent;
-import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import io.reactivex.Completable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.BatchQueryOptions;
@@ -86,7 +87,7 @@ public class CqlAuditLogger
             for (AuditableEvent event: events)
             {
                 AuditableEvent.Builder builder = AuditableEvent.Builder.fromEvent(event);
-                builder.type(AuditableEventType.REQUEST_FAILURE);
+                builder.type(CoreAuditableEventType.REQUEST_FAILURE);
                 String operation = event.getOperation();
                 operation = e.getLocalizedMessage() + (operation != null ? " " + operation : "");
                 builder.operation(operation);

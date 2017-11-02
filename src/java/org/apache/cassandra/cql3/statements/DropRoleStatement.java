@@ -18,6 +18,10 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.auth.Roles;
@@ -40,6 +44,12 @@ public class DropRoleStatement extends AuthenticationStatement
     {
         this.role = RoleResource.role(name.getName());
         this.ifExists = ifExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.DROP_ROLE;
     }
 
     public void checkAccess(ClientState state) throws UnauthorizedException

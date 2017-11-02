@@ -20,6 +20,10 @@ package org.apache.cassandra.cql3.statements;
 import java.util.Set;
 
 import io.reactivex.Single;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -34,6 +38,12 @@ public class GrantPermissionsStatement extends PermissionsManagementStatement
     public GrantPermissionsStatement(Set<Permission> permissions, IResource resource, RoleName grantee)
     {
         super(permissions, resource, grantee);
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.GRANT;
     }
 
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException

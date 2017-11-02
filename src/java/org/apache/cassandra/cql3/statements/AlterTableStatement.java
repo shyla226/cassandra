@@ -22,7 +22,9 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 
-import io.reactivex.Completable;
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import io.reactivex.Maybe;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.*;
@@ -73,6 +75,12 @@ public class AlterTableStatement extends SchemaAlteringStatement
         this.attrs = attrs;
         this.renames = renames;
         this.deleteTimestamp = deleteTimestamp;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.UPDATE_CF;
     }
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException

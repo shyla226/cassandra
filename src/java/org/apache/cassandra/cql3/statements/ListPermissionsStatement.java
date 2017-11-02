@@ -22,6 +22,9 @@ import java.util.*;
 
 import io.reactivex.Single;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.PermissionDetails;
@@ -65,6 +68,12 @@ public class ListPermissionsStatement extends AuthorizationStatement
         this.resource = resource;
         this.recursive = recursive;
         this.grantee = grantee.hasName() ? RoleResource.role(grantee.getName()) : null;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.LIST_PERMISSIONS;
     }
 
     public void validate(ClientState state) throws RequestValidationException

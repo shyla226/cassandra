@@ -18,6 +18,10 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.IRoleManager.Option;
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -41,6 +45,12 @@ public class AlterRoleStatement extends AuthenticationStatement
     {
         this.role = RoleResource.role(name.getName());
         this.opts = opts;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.ALTER_ROLE;
     }
 
     public void validate(ClientState state) throws RequestValidationException

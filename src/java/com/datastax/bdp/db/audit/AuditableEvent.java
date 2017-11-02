@@ -261,7 +261,7 @@ public class AuditableEvent
         public static Builder fromUnauthorizedException(AuditableEvent event, UnauthorizedException e)
         {
             AuditableEvent.Builder builder = fromEvent(event);
-            builder.type(AuditableEventType.UNAUTHORIZED_ATTEMPT);
+            builder.type(CoreAuditableEventType.UNAUTHORIZED_ATTEMPT);
             String operation = event.getOperation();
             operation = e.getLocalizedMessage() + (operation != null ? " " + operation : "");
             builder.operation(operation);

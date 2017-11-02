@@ -21,6 +21,9 @@ import javax.annotation.Nullable;
 
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.concurrent.TPCUtils.WouldBlockException;
 import org.apache.cassandra.cql3.functions.Function;
@@ -34,6 +37,12 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 
 public interface CQLStatement
 {
+    /**
+     * Returns the type of Audit events associated to this statement.
+     * @return the type of Audit events associated to this statement.
+     */
+    public AuditableEventType getAuditEventType();
+
     /**
      * Returns the number of bound terms in this statement.
      */

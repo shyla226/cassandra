@@ -22,6 +22,10 @@ import java.util.Collection;
 import java.util.List;
 
 import io.reactivex.Maybe;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.functions.*;
@@ -56,6 +60,12 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
         this.ifExists = ifExists;
     }
 
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.DROP_AGGREGATE;
+    }
+
     public void prepareKeyspace(ClientState state) throws InvalidRequestException
     {
         if (!functionName.hasKeyspace() && state.getRawKeyspace() != null)
@@ -65,6 +75,12 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
             throw new InvalidRequestException("Functions must be fully qualified with a keyspace name if a keyspace is not set for the session");
 
         Schema.validateKeyspaceNotSystem(functionName.keyspace);
+    }
+
+    @Override
+    public String keyspace()
+    {
+        return functionName.keyspace;
     }
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException

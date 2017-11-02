@@ -88,7 +88,7 @@ public class NativeErrorAuditLogTest extends CQLTester
     private static void checkQueryFailureAuditEntry()
     {
         Assert.assertTrue(InProcTestAuditWriter.hasEvents());
-        Assert.assertEquals(AuditableEventType.REQUEST_FAILURE, InProcTestAuditWriter.lastEvent().getType());
+        Assert.assertEquals(CoreAuditableEventType.REQUEST_FAILURE, InProcTestAuditWriter.lastEvent().getType());
     }
 
     @Test

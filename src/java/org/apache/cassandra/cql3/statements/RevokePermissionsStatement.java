@@ -20,7 +20,10 @@ package org.apache.cassandra.cql3.statements;
 import java.util.Set;
 
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -35,6 +38,12 @@ public class RevokePermissionsStatement extends PermissionsManagementStatement
     public RevokePermissionsStatement(Set<Permission> permissions, IResource resource, RoleName grantee)
     {
         super(permissions, resource, grantee);
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.REVOKE;
     }
 
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException

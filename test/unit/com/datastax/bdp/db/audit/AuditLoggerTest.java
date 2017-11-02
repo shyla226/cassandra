@@ -30,7 +30,7 @@ public class AuditLoggerTest extends CQLTester
         Assert.assertFalse(logger.isEnabled());
 
         // shouldn't explode
-        logger.recordEvent(new AuditableEvent.Builder("u", "127.0.0.1").type(AuditableEventType.GET).build());
+        logger.recordEvent(new AuditableEvent.Builder("u", "127.0.0.1").type(CoreAuditableEventType.CQL_SELECT).build());
     }
 
     @Test
@@ -41,7 +41,7 @@ public class AuditLoggerTest extends CQLTester
         InProcTestAuditWriter.reset();
         AuditLogger logger = new AuditLogger(writer, filter);
 
-        AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1").type(AuditableEventType.INSERT);
+        AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1").type(CoreAuditableEventType.INSERT);
         AuditableEvent excluded = builder.keyspace("ks1").build();
         AuditableEvent included = builder.keyspace("ks2").build();
 

@@ -19,6 +19,10 @@ package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Maybe;
 import io.reactivex.Single;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.IndexName;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -46,6 +50,12 @@ public class DropIndexStatement extends SchemaAlteringStatement
         super(indexName.getCfName());
         this.indexName = indexName.getIdx();
         this.ifExists = ifExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.DROP_INDEX;
     }
 
     public String columnFamily()

@@ -77,7 +77,7 @@ public class InProcTestAuditWriter implements IAuditWriter
                             .columnFamily(values.get("columnFamily"))
                             .keyspace(values.get("keyspace"))
                             .operation(values.get("operation"))
-                            .type(AuditableEventType.valueOf(values.get("type")))
+                            .type(CoreAuditableEventType.valueOf(values.get("type")))
                             .build());
         }
         return events;

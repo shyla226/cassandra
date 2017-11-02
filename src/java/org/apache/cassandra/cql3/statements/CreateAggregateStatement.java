@@ -24,6 +24,10 @@ import java.util.Objects;
 import java.util.List;
 
 import io.reactivex.Maybe;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -77,6 +81,12 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         this.ival = ival;
         this.orReplace = orReplace;
         this.ifNotExists = ifNotExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.CREATE_AGGREGATE;
     }
 
     public Prepared prepare()
@@ -160,6 +170,7 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         return type;
     }
 
+    @Override
     public void prepareKeyspace(ClientState state) throws InvalidRequestException
     {
         if (!functionName.hasKeyspace() && state.getRawKeyspace() != null)
@@ -173,6 +184,12 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         stateFunc = new FunctionName(functionName.keyspace, stateFunc.name);
         if (finalFunc != null)
             finalFunc = new FunctionName(functionName.keyspace, finalFunc.name);
+    }
+
+    @Override
+    public String keyspace()
+    {
+        return functionName.keyspace;
     }
 
     protected void grantPermissionsToCreator(QueryState state)

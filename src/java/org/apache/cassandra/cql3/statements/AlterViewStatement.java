@@ -18,6 +18,10 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Maybe;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
@@ -43,6 +47,12 @@ public class AlterViewStatement extends SchemaAlteringStatement
     {
         super(name);
         this.attrs = attrs;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.UPDATE_VIEW;
     }
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException

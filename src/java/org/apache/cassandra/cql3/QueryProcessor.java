@@ -40,6 +40,7 @@ import org.slf4j.LoggerFactory;
 
 import com.datastax.bdp.db.audit.AuditableEvent;
 import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
 import com.datastax.bdp.db.audit.cql3.CqlAuditLogger;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -251,7 +252,7 @@ public class QueryProcessor implements QueryHandler
             catch (RequestValidationException|RequestExecutionException e)
             {
                 AuditableEvent.Builder builder = AuditableEvent.Builder.fromClientState(clientState);
-                builder.type(AuditableEventType.REQUEST_FAILURE);
+                builder.type(CoreAuditableEventType.REQUEST_FAILURE);
                 builder.operation(statement.toString());
                 auditLogger.logFailedQuery(Lists.newArrayList(builder.build()), e);
                 logger.trace("Unexpected exception when trying to process a statement: " + e.getMessage(), e);
@@ -331,7 +332,7 @@ public class QueryProcessor implements QueryHandler
         catch (RequestValidationException e)
         {
             AuditableEvent.Builder builder = AuditableEvent.Builder.fromClientState(queryState.getClientState());
-            builder.type(AuditableEventType.REQUEST_FAILURE);
+            builder.type(CoreAuditableEventType.REQUEST_FAILURE);
             builder.operation(queryString);
             auditLogger.logFailedQuery(Lists.newArrayList(builder.build()), e);
             logger.trace("Unexpected exception when trying to process a statement: " + e.getMessage(), e);
@@ -574,7 +575,7 @@ public class QueryProcessor implements QueryHandler
         {
             // RequestValidationException can come out before the Single gets created, so we need the try/catch still.
             AuditableEvent.Builder builder = AuditableEvent.Builder.fromClientState(clientState);
-            builder.type(AuditableEventType.REQUEST_FAILURE);
+            builder.type(CoreAuditableEventType.REQUEST_FAILURE);
             builder.operation(queryString);
             auditLogger.logFailedQuery(Lists.newArrayList(builder.build()), e);
             logger.trace("Unexpected exception when trying to prepare a statement: " + e.getMessage(), e);

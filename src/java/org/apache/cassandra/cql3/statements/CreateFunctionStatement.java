@@ -22,6 +22,10 @@ import java.util.HashSet;
 import java.util.List;
 
 import io.reactivex.Maybe;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -77,6 +81,12 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
     }
 
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.CREATE_FUNCTION;
+    }
+
     public Prepared prepare() throws InvalidRequestException
     {
         if (new HashSet<>(argNames).size() != argNames.size())
@@ -91,6 +101,7 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
         return super.prepare();
     }
 
+    @Override
     public void prepareKeyspace(ClientState state) throws InvalidRequestException
     {
         if (!functionName.hasKeyspace() && state.getRawKeyspace() != null)
@@ -100,6 +111,13 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
             throw new InvalidRequestException("Functions must be fully qualified with a keyspace name if a keyspace is not set for the session");
 
         Schema.validateKeyspaceNotSystem(functionName.keyspace);
+    }
+
+    @Override
+    public String keyspace()
+    {
+        assert functionName.hasKeyspace() : "The statement hasn't be prepared correctly";
+        return functionName.keyspace;
     }
 
     protected void grantPermissionsToCreator(QueryState state)

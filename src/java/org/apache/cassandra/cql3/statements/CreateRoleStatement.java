@@ -19,6 +19,9 @@ package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.AuthenticatedUser;
@@ -44,6 +47,12 @@ public class CreateRoleStatement extends AuthenticationStatement
         this.role = RoleResource.role(name.getName());
         this.opts = options;
         this.ifNotExists = ifNotExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.CREATE_ROLE;
     }
 
     public void checkAccess(ClientState state) throws UnauthorizedException
