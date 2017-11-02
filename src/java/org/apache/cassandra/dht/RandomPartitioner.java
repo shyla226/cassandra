@@ -22,6 +22,7 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -48,22 +49,7 @@ public class RandomPartitioner implements IPartitioner
      * events involves tokenizing the partition keys. This happens multiple times whilst servicing a ReadCommand,
      * and so can interfere with the stateful digest calculation if the node is a replica producing a digest response.
      */
-    private static final ThreadLocal<MessageDigest> localMD5Digest = new ThreadLocal<MessageDigest>()
-    {
-        @Override
-        protected MessageDigest initialValue()
-        {
-            return HashingUtils.newMessageDigest("MD5");
-        }
-
-        @Override
-        public MessageDigest get()
-        {
-            MessageDigest digest = super.get();
-            digest.reset();
-            return digest;
-        }
-    };
+    private static final Supplier<MessageDigest> localMD5Digest = HashingUtils.newThreadLocalMessageDigest("MD5");
 
     private static final int HEAP_SIZE = (int) ObjectSizes.measureDeep(new BigIntegerToken(hashToBigInteger(ByteBuffer.allocate(1))));
 

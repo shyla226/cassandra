@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.function.Supplier;
 
 /**
  * The result of the computation of an MD5 digest.
@@ -41,22 +42,7 @@ public class MD5Digest
      * digests etc possible, but not regress on performance or bugs in RandomPartitioner's usage of
      * MD5 and MessageDigest.
      */
-    private static final ThreadLocal<MessageDigest> localMD5Digest = new ThreadLocal<MessageDigest>()
-    {
-        @Override
-        protected MessageDigest initialValue()
-        {
-            return HashingUtils.newMessageDigest("MD5");
-        }
-
-        @Override
-        public MessageDigest get()
-        {
-            MessageDigest digest = super.get();
-            digest.reset();
-            return digest;
-        }
-    };
+    private static final Supplier<MessageDigest> localMD5Digest = HashingUtils.newThreadLocalMessageDigest("MD5");
 
     public final byte[] bytes;
     private final int hashCode;

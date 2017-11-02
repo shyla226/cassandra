@@ -21,20 +21,37 @@ package org.apache.cassandra.utils;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.function.Supplier;
 
 import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
 
+import io.netty.util.concurrent.FastThreadLocal;
+
 public class HashingUtils
 {
     public static final HashFunction CURRENT_HASH_FUNCTION = Hashing.md5();
 
-    public static MessageDigest newMessageDigest(String algorithm)
+    public static Supplier<MessageDigest> newThreadLocalMessageDigest(String algorithm)
     {
         try
         {
-            return MessageDigest.getInstance(algorithm);
+            // try the algorithm before continuing and anything bad happens during runtime
+            MessageDigest.getInstance(algorithm);
+
+            FastThreadLocal<MessageDigest> threadLocal = new FastThreadLocal<MessageDigest>()
+            {
+                protected MessageDigest initialValue() throws Exception
+                {
+                    return MessageDigest.getInstance(algorithm);
+                }
+            };
+            return () -> {
+                MessageDigest digest = threadLocal.get();
+                digest.reset();
+                return digest;
+            };
         }
         catch (NoSuchAlgorithmException nsae)
         {
