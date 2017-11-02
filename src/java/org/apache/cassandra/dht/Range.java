@@ -20,7 +20,9 @@ package org.apache.cassandra.dht;
 import java.io.Serializable;
 import java.util.*;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+
 import org.apache.commons.lang3.ObjectUtils;
 
 import org.apache.cassandra.db.PartitionPosition;
@@ -532,6 +534,37 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         return output;
     }
 
+
+    /**
+     * Merges the given list of unwrapped ranges into a list of contiguous non-overlapping ranges. If any provided
+     * range does wrap around, this method will fail.
+     */
+    public static <T extends RingPosition<T>> List<Range<T>> merge(Collection<Range<T>> ranges)
+    {
+        if (ranges.isEmpty())
+            return Collections.emptyList();
+        if (ranges.size() == 1)
+            return ImmutableList.copyOf(ranges);
+        
+        List<Range<T>> sorted = sort(ranges);
+        LinkedList<Range<T>> merged = new LinkedList<>();
+        Range<T> first = sorted.get(0);
+        Preconditions.checkState(!first.isTrulyWrapAround(), String.format("Range %s does wrap around.", first));
+        merged.add(first);
+        for (Range<T> candidate : sorted.subList(1, sorted.size()))
+        {
+            Preconditions.checkState(!candidate.isTrulyWrapAround(), String.format("Range %s does wrap around.", candidate));
+            Range<T> last = merged.getLast();
+            if (last.intersects(candidate))
+            {
+                merged.removeLast();
+                merged.add(new Range<>(last.left, candidate.right));
+            }
+            else if (!last.contains(candidate))
+                merged.add(candidate);
+        }
+        return merged;
+    }
 
     /**
      * Compute a range of keys corresponding to a given range of token.

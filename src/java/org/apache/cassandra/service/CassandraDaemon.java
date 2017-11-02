@@ -31,6 +31,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
+
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
@@ -44,6 +46,7 @@ import com.codahale.metrics.jvm.BufferPoolMetricSet;
 import com.codahale.metrics.jvm.FileDescriptorRatioGauge;
 import com.codahale.metrics.jvm.GarbageCollectorMetricSet;
 import com.codahale.metrics.jvm.MemoryUsageGaugeSet;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Futures;
@@ -51,6 +54,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.apache.commons.lang3.exception.ExceptionUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,6 +70,8 @@ import org.apache.cassandra.cql3.functions.ThreadAwareSecurityManager;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.gms.Gossiper;
@@ -331,6 +337,8 @@ public class CassandraDaemon
             logger.warn("Unable to start GCInspector (currently only supported on the Sun JVM)");
         }
 
+        setDefaultTPCBoundaries();
+
         // Replay any CommitLogSegments found on disk
         try
         {
@@ -435,14 +443,37 @@ public class CassandraDaemon
         // Native transport
         nativeTransportService = new NativeTransportService();
 
+        // Invalidate the cached ring information so that the next call to get the TPC boundaries will find a new
+        // ring version and recompute:
+        StorageService.instance.getTokenMetadata().invalidateCachedRings();
+
         // During initialization memtables do not know the correct token boundaries to use.
-        // Flush all to make sure they get updated and don't get stuck on core 0 (DB-939).
+        // Flush all to make sure they get updated (DB-939).
         // There should be no data in the tables at this time, so this should complete very quickly.
         // Wait for it before signalling we are ready.
         FBUtilities.waitOnFutures(Iterables.concat(Iterables.transform(Keyspace.all(),
                                                                        Keyspace::flush)));
 
         completeSetup();
+    }
+
+    private void setDefaultTPCBoundaries()
+    {
+        // Compute per-keyspace boundaries based on the max token range covering existing sstables:
+        for (Keyspace ks : Keyspace.nonSystem())
+        {
+            List<Range<Token>> ranges = Range.merge(ks.getColumnFamilyStores().stream()
+                .flatMap(cfs -> cfs.getLiveSSTables().stream())
+                .map(sstable -> new Range<>(sstable.first.getToken(), sstable.last.getToken()))
+                .collect(Collectors.toList()));
+
+            logger.info("Computing default TPC core assignments for {} based on ranges {}...", ks.getName(), ranges);
+
+            ks.setDefaultTPCBoundaries(!ranges.isEmpty() ? ranges : null);
+        }
+        
+        // Flush the memtables to have future writes use the new boundaries:
+        FBUtilities.waitOnFutures(Iterables.concat(Iterables.transform(Keyspace.all(), Keyspace::flush)));
     }
 
     /*

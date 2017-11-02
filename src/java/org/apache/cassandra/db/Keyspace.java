@@ -383,6 +383,12 @@ public class Keyspace
         return new Keyspace(metadata);
     }
 
+    public void setDefaultTPCBoundaries(List<Range<Token>> ranges)
+    {
+        boundariesForRingVersion = StorageService.instance.getTokenMetadata().getRingVersion();
+        tpcBoundaries = computeTPCBoundaries(ranges);
+    }
+
     public TPCBoundaries getTPCBoundaries()
     {
         TPCBoundaries boundaries = tpcBoundaries;
@@ -398,7 +404,6 @@ public class Keyspace
                 {
                     boundariesForRingVersion = StorageService.instance.getTokenMetadata().getRingVersion();
                     tpcBoundaries = boundaries = computeTPCBoundaries();
-                    logger.debug("Computed TPC core assignments for {}: {}", getName(), boundaries);
                 }
             }
         }
@@ -409,9 +414,17 @@ public class Keyspace
     {
         if (SchemaConstants.isLocalSystemKeyspace(metadata.name))
             return TPCBoundaries.NONE;
-
+        
         List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(this);
-        return localRanges == null ? TPCBoundaries.NONE : TPCBoundaries.compute(localRanges, TPC.getNumCores());
+        return computeTPCBoundaries(localRanges);
+    }
+
+    private TPCBoundaries computeTPCBoundaries(List<Range<Token>> ranges)
+    {        
+        TPCBoundaries boundaries = ranges == null ? TPCBoundaries.NONE : TPCBoundaries.compute(ranges, TPC.getNumCores());
+        logger.debug("Computed TPC core assignments for {}: {}", getName(), boundaries);
+
+        return boundaries;
     }
 
     private void createReplicationStrategy(KeyspaceMetadata ksm)

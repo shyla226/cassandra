@@ -20,6 +20,7 @@ package org.apache.cassandra.dht;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -27,7 +28,9 @@ import java.util.Random;
 import java.util.Set;
 
 import com.google.common.base.Joiner;
+
 import org.apache.commons.lang3.StringUtils;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -683,5 +686,61 @@ public class RangeTest
         Range<Token> r0 = r(10, -10);
         Range<Token> r1 = r(20, -5);
         assertNotSame(r0.compareTo(r1), r1.compareTo(r0));
+    }
+
+    @Test
+    public void testSingleMerge()
+    {
+        Range<Token> r0 = r(10, 20);
+
+        assertEquals(Arrays.asList(r0), Range.merge(Arrays.asList(r0)));
+    }
+
+    @Test
+    public void testEmptyMerge()
+    {
+        assertEquals(Collections.EMPTY_LIST, Range.merge(Collections.EMPTY_LIST));
+    }
+
+    @Test
+    public void testSimpleMerge()
+    {
+        Range<Token> r0 = r(1, 5);
+        Range<Token> r1 = r(10, 20);
+
+        assertEquals(Arrays.asList(r0, r1), Range.merge(Arrays.asList(r0, r1)));
+    }
+
+    @Test
+    public void testMergeWithIntersected()
+    {
+        Range<Token> r0 = r(5, 30);
+        Range<Token> r1 = r(10, 35);
+        Range<Token> r2 = r(40, 45);
+        Range<Token> r3 = r(50, 55);
+
+        assertEquals(Arrays.asList(r(5, 35), r2, r3), Range.merge(Arrays.asList(r3, r1, r2, r0)));
+    }
+
+    @Test
+    public void testMergeWithContained()
+    {
+        Range<Token> r0 = r(10, 30);
+        Range<Token> r1 = r(10, 35);
+        Range<Token> r2 = r(40, 45);
+        Range<Token> r3 = r(50, 55);
+
+        assertEquals(Arrays.asList(r(10, 35), r2, r3), Range.merge(Arrays.asList(r0, r3, r2, r1)));
+    }
+
+    @Test
+    public void testMergeWithIntersectedAndContained()
+    {
+        Range<Token> r0 = r(10, 20);
+        Range<Token> r1 = r(25, 35);
+        Range<Token> r2 = r(30, 45);
+        Range<Token> r3 = r(40, 45);
+
+        assertEquals(Arrays.asList(r0, r(25, 45)), Range.merge(Arrays.asList(r3, r2, r1, r0)));
     }
 }
