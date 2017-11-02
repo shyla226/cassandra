@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.db.rows;
 
-import java.security.MessageDigest;
+import com.google.common.hash.Hasher;
 
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.schema.TableMetadata;
@@ -41,11 +41,11 @@ public interface Unfiltered extends Clusterable
     public Kind kind();
 
     /**
-     * Digest the atom using the provided {@code MessageDigest}.
+     * Digest the atom using the provided {@link Hasher}.
      *
-     * @param digest the {@code MessageDigest} to use.
+     * @param hasher the {@see Hasher} to use.
      */
-    public void digest(MessageDigest digest);
+    public void digest(Hasher hasher);
 
     /**
      * Validate the data of this atom.

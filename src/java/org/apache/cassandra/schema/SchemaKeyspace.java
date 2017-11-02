@@ -19,8 +19,6 @@ package org.apache.cassandra.schema;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -30,16 +28,18 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.*;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.hash.Hasher;
 
 import io.reactivex.*;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.*;
-import org.apache.cassandra.cql3.statements.CreateTableStatement;
 import org.apache.cassandra.schema.ColumnMetadata.ClusteringOrder;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.*;
+import org.apache.cassandra.cql3.statements.CreateTableStatement;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
@@ -52,6 +52,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.HashingUtils;
 
 import static java.lang.String.format;
 
@@ -320,15 +321,7 @@ public final class SchemaKeyspace
      */
     static UUID calculateSchemaDigest()
     {
-        MessageDigest digest;
-        try
-        {
-            digest = MessageDigest.getInstance("MD5");
-        }
-        catch (NoSuchAlgorithmException e)
-        {
-            throw new RuntimeException(e);
-        }
+        Hasher hasher = HashingUtils.CURRENT_HASH_FUNCTION.newHasher();
 
         for (String table : ALL)
         {
@@ -348,12 +341,12 @@ public final class SchemaKeyspace
                             continue;
 
                         if (!isSystemKeyspaceSchemaPartition(partition.partitionKey()))
-                            RowIterators.digest(partition, digest);
+                            RowIterators.digest(partition, hasher);
                     }
                 }
             }
         }
-        return UUID.nameUUIDFromBytes(digest.digest());
+        return UUID.nameUUIDFromBytes(hasher.hash().asBytes());
     }
 
     /**

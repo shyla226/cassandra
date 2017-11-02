@@ -19,10 +19,10 @@ package org.apache.cassandra.db;
 
 import java.io.*;
 import java.nio.ByteBuffer;
-import java.security.MessageDigest;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.hash.Hasher;
 
 import io.reactivex.Single;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
@@ -35,7 +35,7 @@ import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.FlowSource;
 import org.apache.cassandra.utils.versioning.Versioned;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.HashingUtils;
 
 public abstract class ReadResponse
 {
@@ -133,13 +133,12 @@ public abstract class ReadResponse
 
     protected static Single<ByteBuffer> makeDigest(Flow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
-        MessageDigest digest = FBUtilities.newMessageDigest("MD5");
+        Hasher hasher = HashingUtils.CURRENT_HASH_FUNCTION.newHasher();
         return UnfilteredPartitionIterators.digest(partitions,
-                                                   // TODO perf. - do we need a cache to replace threadLocalMD5Digest()?
-                                                   digest,
+                                                   hasher,
                                                    command.digestVersion())
                                            .processToRxCompletable()
-                                           .toSingle(() -> ByteBuffer.wrap(digest.digest()));
+                                           .toSingle(() -> ByteBuffer.wrap(hasher.hash().asBytes()));
     }
 
     private static class DigestResponse extends ReadResponse

@@ -18,8 +18,8 @@
 package org.apache.cassandra.db.rows;
 
 import java.util.*;
-import java.security.MessageDigest;
 
+import com.google.common.hash.Hasher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,10 +30,10 @@ import org.apache.cassandra.db.transform.MoreRows;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.HashingUtils;
 import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Reducer;
@@ -146,24 +146,24 @@ public abstract class UnfilteredRowIterators
      * Digests the partition represented by the provided iterator.
      *
      * @param iterator the iterator to digest.
-     * @param digest the {@code MessageDigest} to use for the digest.
+     * @param hasher the {@link Hasher} to use for the digest.
      * @param version the version to use when producing the digest.
      */
-    public static void digest(UnfilteredRowIterator iterator, MessageDigest digest, DigestVersion version)
+    public static void digest(UnfilteredRowIterator iterator, Hasher hasher, DigestVersion version)
     {
-        digestPartition(iterator, digest, version);
+        digestPartition(iterator, hasher, version);
         while (iterator.hasNext())
-            digestUnfiltered(iterator.next(), digest);
+            digestUnfiltered(iterator.next(), hasher);
     }
 
     /**
      * Digests the provided partition.
      *
      * @param partition the partition to digest.
-     * @param digest the {@code MessageDigest} to use for the digest.
+     * @param hasher the {@link Hasher} to use for the digest.
      * @param version the version to use when producing the digest.
      */
-    public static Flow<Void> digest(FlowableUnfilteredPartition partition, MessageDigest digest, DigestVersion version)
+    public static Flow<Void> digest(FlowableUnfilteredPartition partition, Hasher hasher, DigestVersion version)
     {
         // We only want to put something in the digest if the partition is not empty.
         // TODO In pre-TPC, FlowableUnfilteredPartition should not contain empty partition. It's a walkaround
@@ -173,27 +173,27 @@ public abstract class UnfilteredRowIterators
             return partition.content().reduce(true,
                                               (first, unfiltered) -> {
                                                   if (first)
-                                                      digestPartition(partition, digest, version);
-                                                  digestUnfiltered(unfiltered, digest);
+                                                      digestPartition(partition, hasher, version);
+                                                  digestUnfiltered(unfiltered, hasher);
                                                   return false;
                                               })
                                       .map(b -> null);
         }
         else
         {
-            digestPartition(partition, digest, version);
-            return partition.content().process(unfiltered -> digestUnfiltered(unfiltered, digest));
+            digestPartition(partition, hasher, version);
+            return partition.content().process(unfiltered -> digestUnfiltered(unfiltered, hasher));
         }
     }
 
     /**
      * Digest the partition common information, excluding its content.
      */
-    public static MessageDigest digestPartition(PartitionTrait partition, MessageDigest digest, DigestVersion version)
+    public static Hasher digestPartition(PartitionTrait partition, Hasher hasher, DigestVersion version)
     {
-        digest.update(partition.partitionKey().getKey().duplicate());
-        partition.partitionLevelDeletion().digest(digest);
-        partition.columns().regulars.digest(digest);
+        HashingUtils.updateBytes(hasher, partition.partitionKey().getKey().duplicate());
+        partition.partitionLevelDeletion().digest(hasher);
+        partition.columns().regulars.digest(hasher);
 
         // When serializing an iterator, we skip the static columns if the iterator has not static row, even if the
         // columns() object itself has some (the columns() is a superset of what the iterator actually contains, and
@@ -206,20 +206,20 @@ public abstract class UnfilteredRowIterators
         // different), but removing them entirely is stricly speaking a breaking change (it would create mismatches on
         // upgrade) so we can only do on the next protocol version bump.
         if (partition.staticRow() != Rows.EMPTY_STATIC_ROW)
-            partition.columns().statics.digest(digest);
-        FBUtilities.updateWithBoolean(digest, partition.isReverseOrder());
-        partition.staticRow().digest(digest);
+            partition.columns().statics.digest(hasher);
+        HashingUtils.updateWithBoolean(hasher, partition.isReverseOrder());
+        partition.staticRow().digest(hasher);
 
-        return digest;
+        return hasher;
     }
 
     /**
      * Digest a single unfiltered.
      */
-    public static MessageDigest digestUnfiltered(Unfiltered unfiltered, MessageDigest digest)
+    public static Hasher digestUnfiltered(Unfiltered unfiltered, Hasher hasher)
     {
-        unfiltered.digest(digest);
-        return digest;
+        unfiltered.digest(hasher);
+        return hasher;
     }
 
     /**

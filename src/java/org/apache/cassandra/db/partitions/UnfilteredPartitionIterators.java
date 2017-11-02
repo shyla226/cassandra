@@ -17,11 +17,12 @@
  */
 package org.apache.cassandra.db.partitions;
 
-import java.security.MessageDigest;
 import java.util.*;
 
 import io.reactivex.Completable;
 import io.reactivex.Single;
+
+import com.google.common.hash.Hasher;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
@@ -259,10 +260,10 @@ public abstract class UnfilteredPartitionIterators
      * Digests the the provided iterator.
      *
      * @param iterator the iterator to digest.
-     * @param digest the {@code MessageDigest} to use for the digest.
+     * @param hasher the {@link Hasher} to use for the digest.
      * @param version the version to use when producing the digest.
      */
-    public static Completable digest(UnfilteredPartitionIterator iterator, MessageDigest digest, DigestVersion version)
+    public static Completable digest(UnfilteredPartitionIterator iterator, Hasher hasher, DigestVersion version)
     {
         return Completable.fromAction(() ->
           {
@@ -272,7 +273,7 @@ public abstract class UnfilteredPartitionIterators
                   {
                       try (UnfilteredRowIterator partition = iter.next())
                       {
-                          UnfilteredRowIterators.digest(partition, digest, version);
+                          UnfilteredRowIterators.digest(partition, hasher, version);
                       }
                   }
               }
@@ -283,12 +284,12 @@ public abstract class UnfilteredPartitionIterators
      * Digests the the provided partition flow.
      *
      * @param partitions the partitions to digest.
-     * @param digest the {@code MessageDigest} to use for the digest.
+     * @param hasher the {@link Hasher} to use for the digest.
      * @param version the version to use when producing the digest.
      */
-    public static Flow<Void> digest(Flow<FlowableUnfilteredPartition> partitions, MessageDigest digest, DigestVersion version)
+    public static Flow<Void> digest(Flow<FlowableUnfilteredPartition> partitions, Hasher hasher, DigestVersion version)
     {
-        return partitions.flatProcess(partition -> UnfilteredRowIterators.digest(partition, digest, version));
+        return partitions.flatProcess(partition -> UnfilteredRowIterators.digest(partition, hasher, version));
     }
 
     /**

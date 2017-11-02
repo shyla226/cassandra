@@ -39,7 +39,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.*;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MD5Digest;
 
 public class ResultSet
@@ -417,7 +416,12 @@ public class ResultSet
 
         public static MD5Digest computeResultMetadataId(List<ColumnSpecification> columnSpecifications)
         {
-            MessageDigest md = FBUtilities.threadLocalMD5Digest();
+            // still using the MD5 MessageDigest thread local here instead of a HashingUtils/Guava
+            // Hasher, as ResultSet will need to be changed alongside other usages of MD5
+            // in the native transport/protocol and it seems to make more sense to do that
+            // then than as part of the Guava Hasher refactor which is focused on non-client
+            // protocol digests
+            MessageDigest md = MD5Digest.threadLocalMD5Digest();
 
             if (columnSpecifications != null)
             {

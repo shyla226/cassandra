@@ -18,13 +18,13 @@
 package org.apache.cassandra.db.rows;
 
 import java.nio.ByteBuffer;
-import java.security.MessageDigest;
 import java.util.Iterator;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.stream.StreamSupport;
 
 import com.google.common.base.Function;
+import com.google.common.hash.Hasher;
 
 import io.reactivex.Single;
 import org.apache.cassandra.db.DeletionPurger;
@@ -142,13 +142,13 @@ public class ComplexColumnData extends ColumnData implements Iterable<Cell>
             cell.validate();
     }
 
-    public void digest(MessageDigest digest)
+    public void digest(Hasher hasher)
     {
         if (!complexDeletion.isLive())
-            complexDeletion.digest(digest);
+            complexDeletion.digest(hasher);
 
         for (Cell cell : this)
-            cell.digest(digest);
+            cell.digest(hasher);
     }
 
     public ComplexColumnData markCounterLocalToBeCleared()
