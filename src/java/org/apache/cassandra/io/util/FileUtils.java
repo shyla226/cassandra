@@ -40,6 +40,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 import sun.nio.ch.DirectBuffer;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -350,7 +351,18 @@ public final class FileUtils
         {
             DirectBuffer db = (DirectBuffer) buffer;
             if (db.cleaner() != null)
+            {
                 db.cleaner().clean();
+            }
+            else
+            {
+                // When dealing with aligned buffers we
+                // attach the root buffer we used to align
+                // so we can properly free it
+                Object attach = MemoryUtil.getAttachment(buffer);
+                if (attach != null && attach instanceof ByteBuffer)
+                    clean((ByteBuffer) attach);
+            }
         }
     }
 

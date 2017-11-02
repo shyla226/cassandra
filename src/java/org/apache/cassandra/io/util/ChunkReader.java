@@ -79,6 +79,7 @@ public interface ChunkReader extends RebuffererFactory
         {
             if (buffer == null || size > buffer.capacity())
             {
+                FileUtils.clean(buffer);
                 buffer = BufferType.OFF_HEAP_ALIGNED.allocate(size);
             }
             return buffer;

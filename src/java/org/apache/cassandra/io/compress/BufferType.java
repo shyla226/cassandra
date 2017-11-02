@@ -19,7 +19,9 @@ package org.apache.cassandra.io.compress;
 
 import java.nio.ByteBuffer;
 
+import io.netty.util.internal.PlatformDependent;
 import org.apache.cassandra.utils.memory.MemoryUtil;
+import org.hyperic.sigar.Mem;
 
 public enum BufferType
 {
@@ -77,6 +79,11 @@ public enum BufferType
             buffer.limit(pos + capacity);
         }
 
-        return buffer.slice();
+        ByteBuffer aligned = buffer.slice();
+
+        //Attach the cleaner version
+        MemoryUtil.setAttachment(aligned, buffer);
+
+        return aligned;
     }
 }
