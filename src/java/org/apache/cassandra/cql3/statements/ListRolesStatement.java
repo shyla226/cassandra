@@ -24,6 +24,9 @@ import java.util.Set;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import io.reactivex.Single;
 
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -68,6 +71,12 @@ public class ListRolesStatement extends AuthorizationStatement
     {
         this.grantee = grantee.hasName() ? RoleResource.role(grantee.getName()) : null;
         this.recursive = recursive;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.LIST_ROLES;
     }
 
     public void validate(ClientState state) throws UnauthorizedException, InvalidRequestException

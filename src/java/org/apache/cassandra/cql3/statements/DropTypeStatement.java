@@ -18,6 +18,10 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Maybe;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
@@ -41,6 +45,12 @@ public class DropTypeStatement extends SchemaAlteringStatement
     {
         this.name = name;
         this.ifExists = ifExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.DROP_TYPE;
     }
 
     @Override

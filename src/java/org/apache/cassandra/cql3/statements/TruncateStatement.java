@@ -22,6 +22,10 @@ import java.util.concurrent.TimeoutException;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.cql3.*;
@@ -39,6 +43,12 @@ public class TruncateStatement extends CFStatement implements CQLStatement
     public TruncateStatement(CFName name)
     {
         super(name);
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.TRUNCATE;
     }
 
     public int getBoundTerms()

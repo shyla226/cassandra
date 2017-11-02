@@ -8,6 +8,8 @@ package com.datastax.bdp.db.audit;
 import org.junit.Assert;
 import org.junit.Test;
 
+import static com.datastax.bdp.db.audit.CoreAuditableEventType.*;
+
 public class AuditFilterTest
 {
     @Test
@@ -15,7 +17,7 @@ public class AuditFilterTest
     {
         AuditFilter filter;
 
-        AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1").type(AuditableEventType.INSERT);
+        AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1").type(INSERT);
 
         AuditableEvent excluded = builder.keyspace("ks1").build();
         AuditableEvent included = builder.keyspace("ks2").build();
@@ -36,7 +38,7 @@ public class AuditFilterTest
     {
         AuditFilter filter;
 
-        AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1").type(AuditableEventType.INSERT);
+        AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1").type(INSERT);
 
         AuditableEvent ks111 = builder.keyspace("ks111").build();
         AuditableEvent ks1_stuff = builder.keyspace("ks1_stuff").build();
@@ -58,7 +60,7 @@ public class AuditFilterTest
     {
         AuditFilter filter;
 
-        AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1").type(AuditableEventType.INSERT);
+        AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1").type(INSERT);
 
         AuditableEvent excluded = builder.keyspace("ks1").build();
         AuditableEvent included = builder.keyspace("ks2").build();
@@ -79,7 +81,7 @@ public class AuditFilterTest
     {
         AuditFilter filter;
 
-        AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1").type(AuditableEventType.INSERT);
+        AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1").type(INSERT);
 
         AuditableEvent ks111 = builder.keyspace("ks111").build();
         AuditableEvent ks1_stuff = builder.keyspace("ks1_stuff").build();
@@ -103,8 +105,8 @@ public class AuditFilterTest
 
         AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1");
 
-        AuditableEvent excluded = builder.type(AuditableEventType.GET).build();
-        AuditableEvent included = builder.type(AuditableEventType.INSERT).build();
+        AuditableEvent excluded = builder.type(CQL_SELECT).build();
+        AuditableEvent included = builder.type(INSERT).build();
 
         // check empty filtering
         filter = AuditFilter.builder().build();
@@ -124,8 +126,8 @@ public class AuditFilterTest
 
         AuditableEvent.Builder builder = new AuditableEvent.Builder("u", "127.0.0.1");
 
-        AuditableEvent excluded = builder.type(AuditableEventType.GET).build();
-        AuditableEvent included = builder.type(AuditableEventType.INSERT).build();
+        AuditableEvent excluded = builder.type(CQL_SELECT).build();
+        AuditableEvent included = builder.type(INSERT).build();
 
         // check empty filtering
         filter = AuditFilter.builder().build();
@@ -170,7 +172,7 @@ public class AuditFilterTest
     {
         AuditFilter filter = AuditFilter.builder().includeKeyspace("dse_system").build();
         AuditableEvent event = new AuditableEvent.Builder("u", "127.0.0.1")
-                .type(AuditableEventType.LOGIN_ERROR).operation("some problem").build();
+                .type(LOGIN_ERROR).operation("some problem").build();
         Assert.assertTrue(filter.shouldFilter(event));
     }
 }

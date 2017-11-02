@@ -18,7 +18,10 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -31,6 +34,12 @@ public class RevokeRoleStatement extends RoleManagementStatement
     public RevokeRoleStatement(RoleName name, RoleName grantee)
     {
         super(name, grantee);
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.REVOKE;
     }
 
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException

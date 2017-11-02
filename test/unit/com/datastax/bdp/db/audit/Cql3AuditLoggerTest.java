@@ -184,7 +184,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "LIST ROLES";
         logStatement(clientState, stmt, null);
-        assertLastEventProperties(AuditableEventType.LIST_ROLES, null, null, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.LIST_ROLES, null, null, stmt, null);
     }
 
     @Test
@@ -193,7 +193,7 @@ public class Cql3AuditLoggerTest extends CQLTester
         String stmt = "CREATE ROLE foo WITH PASSWORD = 'bar' AND LOGIN = true";
         logStatement(clientState, stmt, null);
         String obfuscated = "CREATE ROLE foo WITH PASSWORD = '*****' AND LOGIN = true";
-        assertLastEventProperties(AuditableEventType.CREATE_ROLE, null, null, obfuscated, null);
+        assertLastEventProperties(CoreAuditableEventType.CREATE_ROLE, null, null, obfuscated, null);
     }
 
     @Test
@@ -202,7 +202,7 @@ public class Cql3AuditLoggerTest extends CQLTester
         String stmt = "ALTER ROLE foo WITH PASSWORD = 'baz' AND LOGIN = true";
         logStatement(clientState, stmt, null);
         String obfuscated = "ALTER ROLE foo WITH PASSWORD = '*****' AND LOGIN = true";
-        assertLastEventProperties(AuditableEventType.ALTER_ROLE, null, null, obfuscated, null);
+        assertLastEventProperties(CoreAuditableEventType.ALTER_ROLE, null, null, obfuscated, null);
     }
 
     @Test
@@ -211,7 +211,7 @@ public class Cql3AuditLoggerTest extends CQLTester
         String stmt = "CREATE ROLE foo WITH PASSWORD  =  'bar' AND LOGIN = true";
         logStatement(clientState, stmt, null);
         String obfuscated = "CREATE ROLE foo WITH PASSWORD = '*****' AND LOGIN = true";
-        assertLastEventProperties(AuditableEventType.CREATE_ROLE, null, null, obfuscated, null);
+        assertLastEventProperties(CoreAuditableEventType.CREATE_ROLE, null, null, obfuscated, null);
     }
 
     @Test
@@ -220,7 +220,7 @@ public class Cql3AuditLoggerTest extends CQLTester
         String stmt = "ALTER ROLE foo WITH PASSWORD  =  'baz' AND LOGIN = true";
         logStatement(clientState, stmt, null);
         String obfuscated = "ALTER ROLE foo WITH PASSWORD = '*****' AND LOGIN = true";
-        assertLastEventProperties(AuditableEventType.ALTER_ROLE, null, null, obfuscated, null);
+        assertLastEventProperties(CoreAuditableEventType.ALTER_ROLE, null, null, obfuscated, null);
     }
 
     @Test
@@ -229,7 +229,7 @@ public class Cql3AuditLoggerTest extends CQLTester
         String stmt = "CREATE USER 'foo' WITH  PASSWORD  'bar'";
         logStatement(clientState, stmt, null);
         String obfuscated = "CREATE USER 'foo' WITH  PASSWORD '*****'";
-        assertLastEventProperties(AuditableEventType.CREATE_ROLE, null, null, obfuscated, null);
+        assertLastEventProperties(CoreAuditableEventType.CREATE_ROLE, null, null, obfuscated, null);
     }
 
     @Test
@@ -238,7 +238,7 @@ public class Cql3AuditLoggerTest extends CQLTester
         String stmt = "ALTER USER 'foo' WITH  PASSWORD  'baz'";
         logStatement(clientState, stmt, null);
         String obfuscated = "ALTER USER 'foo' WITH  PASSWORD '*****'";
-        assertLastEventProperties(AuditableEventType.ALTER_ROLE, null, null, obfuscated, null);
+        assertLastEventProperties(CoreAuditableEventType.ALTER_ROLE, null, null, obfuscated, null);
     }
 
     @Test
@@ -246,7 +246,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "DROP ROLE foo";
         logStatement(clientState, stmt, null);
-        assertLastEventProperties(AuditableEventType.DROP_ROLE, null, null, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.DROP_ROLE, null, null, stmt, null);
     }
 
     @Test
@@ -254,7 +254,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "LIST ALL PERMISSIONS OF user";
         logStatement(clientState, stmt, null);
-        assertLastEventProperties(AuditableEventType.LIST_PERMISSIONS, null, null, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.LIST_PERMISSIONS, null, null, stmt, null);
     }
 
     @Test
@@ -262,7 +262,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "GRANT ALL PERMISSIONS ON ks.cf TO user";
         logStatement(clientState, stmt, null);
-        assertLastEventProperties(AuditableEventType.GRANT, null, null, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.GRANT, null, null, stmt, null);
     }
 
     @Test
@@ -270,7 +270,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "REVOKE ALL PERMISSIONS ON ks.cf FROM user";
         logStatement(clientState, stmt, null);
-        assertLastEventProperties(AuditableEventType.REVOKE, null, null, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.REVOKE, null, null, stmt, null);
     }
 
     @Test
@@ -280,7 +280,7 @@ public class Cql3AuditLoggerTest extends CQLTester
                 "CREATE KEYSPACE ks_1 " +
                 " WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };";
         logStatement(clientState, stmt, NONE, null);
-        assertLastEventProperties(AuditableEventType.ADD_KS, "ks_1", null, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.ADD_KS, "ks_1", null, stmt, null);
     }
 
     @Test
@@ -296,9 +296,9 @@ public class Cql3AuditLoggerTest extends CQLTester
         Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
         assertEquals(2, events.size());
         assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_DELETE,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_DELETE,
                 "DELETE field0 FROM test_cf WHERE id = 1 ;", ConsistencyLevel.ONE);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_UPDATE,
                 "INSERT INTO test_cf ( id , field0 ) VALUES ( 0 , 'INSERT' ) ;", ConsistencyLevel.ONE);
     }
 
@@ -317,13 +317,13 @@ public class Cql3AuditLoggerTest extends CQLTester
         Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
         assertEquals(4, events.size());
         assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), ks, counter_cf, AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, counter_cf, CoreAuditableEventType.CQL_UPDATE,
                 "UPDATE test_counter_cf SET field0 = field0 + 1 WHERE id = 2 ;", ConsistencyLevel.ONE);
-        assertEventProperties(events.pop(), ks, counter_cf, AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, counter_cf, CoreAuditableEventType.CQL_UPDATE,
                 "UPDATE test_counter_cf SET field0 = field0 + 1 WHERE id = 1 ;", ConsistencyLevel.ONE);
-        assertEventProperties(events.pop(), ks, counter_cf, AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, counter_cf, CoreAuditableEventType.CQL_UPDATE,
                 "UPDATE test_counter_cf SET field0 = field0 + 1 WHERE id = 0 ;", ConsistencyLevel.ONE);
-        assertEventProperties(events.pop(), ks, counter_cf, AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, counter_cf, CoreAuditableEventType.CQL_UPDATE,
                 "UPDATE test_counter_cf SET field0 = field0 + 1 WHERE id = 0 ;", ConsistencyLevel.ONE);
     }
 
@@ -333,7 +333,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "CREATE TRIGGER test_trigger ON test_cf USING 'some_class'";
         logStatement(clientState, stmt, NONE, null);
-        assertLastEventProperties(AuditableEventType.CREATE_TRIGGER, null, null, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.CREATE_TRIGGER, null, null, stmt, null);
     }
 
     @Test
@@ -341,7 +341,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "DROP TRIGGER test_trigger ON test_cf";
         logStatement(clientState, stmt, NONE, null);
-        assertLastEventProperties(AuditableEventType.DROP_TRIGGER, null, null, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.DROP_TRIGGER, null, null, stmt, null);
     }
 
     @Test
@@ -349,7 +349,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "INSERT INTO test_cf (id, field0) VALUES (0, 'some value');";
         logStatement(clientState, stmt, NONE, ConsistencyLevel.ONE);
-        assertLastEventProperties(AuditableEventType.CQL_UPDATE, ks, cf, stmt, ConsistencyLevel.ONE);
+        assertLastEventProperties(CoreAuditableEventType.CQL_UPDATE, ks, cf, stmt, ConsistencyLevel.ONE);
     }
 
     @Test
@@ -362,7 +362,7 @@ public class Cql3AuditLoggerTest extends CQLTester
         logStatement(clientState, stmt, values, ConsistencyLevel.ONE);
 
         String expected = "INSERT INTO test_cf (id, field0) VALUES (?, ?) [id=0,field0='some value']";
-        assertLastEventProperties(AuditableEventType.CQL_UPDATE, ks, cf, expected, ConsistencyLevel.ONE);
+        assertLastEventProperties(CoreAuditableEventType.CQL_UPDATE, ks, cf, expected, ConsistencyLevel.ONE);
     }
 
     @Test
@@ -370,7 +370,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "UPDATE test_cf SET field0 = 'some value' WHERE id = 0;";
         logStatement(clientState, stmt, NONE, ConsistencyLevel.ONE);
-        assertLastEventProperties(AuditableEventType.CQL_UPDATE, ks, cf, stmt, ConsistencyLevel.ONE);
+        assertLastEventProperties(CoreAuditableEventType.CQL_UPDATE, ks, cf, stmt, ConsistencyLevel.ONE);
     }
 
     @Test
@@ -383,7 +383,7 @@ public class Cql3AuditLoggerTest extends CQLTester
         logStatement(clientState, stmt, values, ConsistencyLevel.ONE);
 
         String expected = "UPDATE test_cf SET field0=? WHERE id=? [field0='some value',id=0]";
-        assertLastEventProperties(AuditableEventType.CQL_UPDATE, ks, cf, expected, ConsistencyLevel.ONE);
+        assertLastEventProperties(CoreAuditableEventType.CQL_UPDATE, ks, cf, expected, ConsistencyLevel.ONE);
     }
 
     @Test
@@ -391,7 +391,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "SELECT * FROM test_cf;";
         logStatement(clientState, stmt, NONE, ConsistencyLevel.ONE);
-        assertLastEventProperties(AuditableEventType.CQL_SELECT, ks, cf, stmt, ConsistencyLevel.ONE);
+        assertLastEventProperties(CoreAuditableEventType.CQL_SELECT, ks, cf, stmt, ConsistencyLevel.ONE);
     }
 
     @Test
@@ -403,7 +403,7 @@ public class Cql3AuditLoggerTest extends CQLTester
         logStatement(clientState, stmt, values, ConsistencyLevel.ONE);
 
         String expected = "SELECT * FROM test_cf WHERE id=? [id=0]";
-        assertLastEventProperties(AuditableEventType.CQL_SELECT, ks, cf, expected, ConsistencyLevel.ONE);
+        assertLastEventProperties(CoreAuditableEventType.CQL_SELECT, ks, cf, expected, ConsistencyLevel.ONE);
     }
 
     @Test
@@ -411,7 +411,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "DELETE field0 FROM test_cf WHERE id = 0;";
         logStatement(clientState, stmt, NONE, ConsistencyLevel.ONE);
-        assertLastEventProperties(AuditableEventType.CQL_DELETE, ks, cf, stmt, ConsistencyLevel.ONE);
+        assertLastEventProperties(CoreAuditableEventType.CQL_DELETE, ks, cf, stmt, ConsistencyLevel.ONE);
     }
 
     @Test
@@ -423,7 +423,7 @@ public class Cql3AuditLoggerTest extends CQLTester
         logStatement(clientState, stmt, values, ConsistencyLevel.ONE);
 
         String expected = "DELETE FROM test_cf WHERE id=? [id=0]";
-        assertLastEventProperties(AuditableEventType.CQL_DELETE, ks, cf, expected, ConsistencyLevel.ONE);
+        assertLastEventProperties(CoreAuditableEventType.CQL_DELETE, ks, cf, expected, ConsistencyLevel.ONE);
     }
 
     @Test
@@ -441,13 +441,13 @@ public class Cql3AuditLoggerTest extends CQLTester
         Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
         assertEquals(4, events.size());
         assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_DELETE,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_DELETE,
                 "DELETE field0 FROM test_cf WHERE id = 2 ;", ConsistencyLevel.QUORUM);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_UPDATE,
                 "INSERT INTO test_cf ( id , field0 ) VALUES ( 1 , 'yet another value' ) ;", ConsistencyLevel.QUORUM);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_UPDATE,
                 "UPDATE test_cf SET field1 = 'some other value' WHERE id = 0 ;", ConsistencyLevel.QUORUM);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_UPDATE,
                 "INSERT INTO test_cf ( id , field0 ) VALUES ( 0 , 'INSERT' ) ;", ConsistencyLevel.QUORUM);
     }
 
@@ -470,13 +470,13 @@ public class Cql3AuditLoggerTest extends CQLTester
         Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
         assertEquals(4, events.size());
         assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), ks, "other_cf", AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, "other_cf", CoreAuditableEventType.CQL_UPDATE,
                 "UPDATE other_cf SET field0 = 'some other value' WHERE id = 0 ;", ConsistencyLevel.QUORUM);
-        assertEventProperties(events.pop(), ks, "other_cf", AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, "other_cf", CoreAuditableEventType.CQL_UPDATE,
                 "INSERT INTO other_cf ( id , field0 ) VALUES ( 0 , 'some value' ) ;", ConsistencyLevel.QUORUM);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_UPDATE,
                 "UPDATE test_cf SET field0 = 'some other value' WHERE id = 0 ;", ConsistencyLevel.QUORUM);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_UPDATE,
                 "INSERT INTO test_cf ( id , field0 ) VALUES ( 0 , 'some value' ) ;", ConsistencyLevel.QUORUM);
     }
 
@@ -499,9 +499,9 @@ public class Cql3AuditLoggerTest extends CQLTester
         Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
         assertEquals(2, events.size());
         assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), "other_ks", "other_cf", AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), "other_ks", "other_cf", CoreAuditableEventType.CQL_UPDATE,
                 "INSERT INTO other_ks.other_cf ( id , field0 ) VALUES ( 0 , 'some value' ) ;", ConsistencyLevel.ONE);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_UPDATE,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_UPDATE,
                 "INSERT INTO test_ks.test_cf ( id , field0 ) VALUES ( 0 , 'some value' ) ;", ConsistencyLevel.ONE);
     }
 
@@ -510,7 +510,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "TRUNCATE test_cf;";
         logStatement(clientState, stmt, NONE, null);
-        assertLastEventProperties(AuditableEventType.TRUNCATE, ks, cf, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.TRUNCATE, ks, cf, stmt, null);
     }
 
     @Test
@@ -518,7 +518,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "TRUNCATE test_ks.test_cf;";
         logStatement(clientState, stmt, NONE, null);
-        assertLastEventProperties(AuditableEventType.TRUNCATE, ks, cf, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.TRUNCATE, ks, cf, stmt, null);
     }
 
     @Test
@@ -526,7 +526,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "DROP KEYSPACE ks_1 ;";
         logStatement(clientState, stmt, NONE, null);
-        assertLastEventProperties(AuditableEventType.DROP_KS, "ks_1", null, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.DROP_KS, "ks_1", null, stmt, null);
     }
 
     @Test
@@ -534,7 +534,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = getCreateTableStatement("table_1");
         logStatement(clientState, stmt, NONE, null);
-        assertLastEventProperties(AuditableEventType.ADD_CF, ks, "table_1", stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.ADD_CF, ks, "table_1", stmt, null);
     }
 
     @Test
@@ -542,7 +542,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "DROP TABLE table_1 ;";
         logStatement(clientState, stmt, NONE, null);
-        assertLastEventProperties(AuditableEventType.DROP_CF, ks, "table_1", stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.DROP_CF, ks, "table_1", stmt, null);
     }
 
     @Test
@@ -550,7 +550,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "ALTER TABLE test_cf ALTER field0 TYPE blob;";
         logStatement(clientState, stmt, NONE, null);
-        assertLastEventProperties(AuditableEventType.UPDATE_CF, ks, cf, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.UPDATE_CF, ks, cf, stmt, null);
     }
 
     @Test
@@ -558,7 +558,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "CREATE INDEX test_idx ON test_cf (field0);";
         logStatement(clientState, stmt, NONE, null);
-        assertLastEventProperties(AuditableEventType.CREATE_INDEX, ks, cf, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.CREATE_INDEX, ks, cf, stmt, null);
     }
 
     @Test
@@ -568,7 +568,7 @@ public class Cql3AuditLoggerTest extends CQLTester
         String stmt = "DROP INDEX test_idx;";
         logStatement(clientState, stmt, NONE, null);
         // Column family name for index isn't accessible
-        assertLastEventProperties(AuditableEventType.DROP_INDEX, ks, null, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.DROP_INDEX, ks, null, stmt, null);
     }
 
     @Test
@@ -576,7 +576,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "USE test_ks";
         logStatement(clientState, stmt, NONE, null);
-        assertLastEventProperties(AuditableEventType.SET_KS, ks, null, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.SET_KS, ks, null, stmt, null);
     }
 
     @Test
@@ -584,7 +584,7 @@ public class Cql3AuditLoggerTest extends CQLTester
     {
         String stmt = "SELECT * FROM test_cf WHERE id=?";
         logPrepareStatement(clientState, stmt);
-        assertLastEventProperties(AuditableEventType.CQL_PREPARE_STATEMENT, ks, cf, stmt, null);
+        assertLastEventProperties(CoreAuditableEventType.CQL_PREPARE_STATEMENT, ks, cf, stmt, null);
     }
 
     @Test
@@ -601,13 +601,13 @@ public class Cql3AuditLoggerTest extends CQLTester
         Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
         assertEquals(4, events.size());
         assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_PREPARE_STATEMENT,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_PREPARE_STATEMENT,
                 "DELETE field0 FROM test_cf WHERE id = 2 ;", null);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_PREPARE_STATEMENT,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_PREPARE_STATEMENT,
                 "INSERT INTO test_cf ( id , field0 ) VALUES ( 1 , 'yet another value' ) ;", null);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_PREPARE_STATEMENT,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_PREPARE_STATEMENT,
                 "UPDATE test_cf SET field1 = 'some other value' WHERE id = 0 ;", null);
-        assertEventProperties(events.pop(), ks, cf, AuditableEventType.CQL_PREPARE_STATEMENT,
+        assertEventProperties(events.pop(), ks, cf, CoreAuditableEventType.CQL_PREPARE_STATEMENT,
                 "INSERT INTO test_cf ( id , field0 ) VALUES ( 0 , 'INSERT' ) ;", null);
     }
 }

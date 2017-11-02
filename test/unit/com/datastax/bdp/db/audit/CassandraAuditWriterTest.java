@@ -38,6 +38,8 @@ import static com.datastax.bdp.db.audit.CassandraAuditWriter.BatchController;
 import static com.datastax.bdp.db.audit.CassandraAuditWriter.BatchControllerFactory;
 import static com.datastax.bdp.db.audit.CassandraAuditWriter.BatchingOptions;
 import static com.datastax.bdp.db.audit.CassandraAuditWriter.DefaultBatchController;
+import static com.datastax.bdp.db.audit.CoreAuditableEventType.*;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -71,7 +73,7 @@ public class CassandraAuditWriterTest extends CQLTester
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
         logger.setup();
-        AuditableEvent event = new AuditableEvent.Builder(AuditableEventType.INSERT, "blake", "127.0.0.1")
+        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl")
                 .consistencyLevel(ConsistencyLevel.SERIAL).build();
 
@@ -109,7 +111,7 @@ public class CassandraAuditWriterTest extends CQLTester
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
         logger.setup();
-        AuditableEvent event = new AuditableEvent.Builder(AuditableEventType.INSERT, "blake", "127.0.0.1")
+        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
 
         logger.recordEvent(event).blockingAwait();
@@ -145,7 +147,7 @@ assertFalse(row.has("consistency"));
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(1, ConsistencyLevel.ONE, BatchingOptions.SYNC);
         logger.setup();
-        AuditableEvent event = new AuditableEvent.Builder(AuditableEventType.INSERT, "blake", "127.0.0.1")
+        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
 
         logger.recordEvent(event).blockingAwait();
@@ -166,7 +168,7 @@ assertFalse(row.has("consistency"));
         // Logging synchronously to avoid sporadic timeouts (DSP-12301)
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
         logger.setup();
-        AuditableEvent event = new AuditableEvent.Builder(AuditableEventType.INSERT, "blake", "127.0.0.1")
+        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
 
         logger.recordEvent(event).blockingAwait();
@@ -182,13 +184,13 @@ assertFalse(row.has("consistency"));
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
         logger.setup();
 
-        AuditableEvent event = new AuditableEvent.Builder(AuditableEventType.INSERT, "blake", "127.0.0.1")
+        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
 
         logger.recordEvent(event).blockingAwait();
         assertEquals(0, getLoggedEventCount());
 
-        event = new AuditableEvent.Builder(AuditableEventType.INSERT, "blake", "127.0.0.1")
+        event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
         logger.recordEvent(event).blockingAwait();
 
@@ -206,7 +208,7 @@ assertFalse(row.has("consistency"));
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
         logger.setup();
 
-        AuditableEvent event = new AuditableEvent.Builder(AuditableEventType.INSERT, "blake", "127.0.0.1")
+        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
 
         logger.recordEvent(event).blockingAwait();
@@ -223,7 +225,7 @@ assertFalse(row.has("consistency"));
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
         logger.setup();
-        AuditableEvent event = new AuditableEvent.Builder(AuditableEventType.INSERT, "blake", "127.0.0.1")
+        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace(null).operation("insert this").columnFamily("tbl").build();
 
         logger.recordEvent(event).blockingAwait();
@@ -240,7 +242,7 @@ assertFalse(row.has("consistency"));
         List<AuditableEvent.Builder> builders = new ArrayList<>();
         for (int i = 0; i < 10; i++)
         {
-            AuditableEvent.Builder builder = new AuditableEvent.Builder(AuditableEventType.INSERT, "blake", "127.0.0.1")
+            AuditableEvent.Builder builder = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                     .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl");
             builders.add(builder);
         }
@@ -332,7 +334,7 @@ assertFalse(row.has("consistency"));
         Assert.assertEquals(0, batches.size());
 
         AuditableEvent event;
-        event = new AuditableEvent.Builder(AuditableEventType.INSERT, "blake", "127.0.0.1")
+        event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl")
                 .uid(UUIDGen.getTimeUUID(new DateTime(2016, 1, 1, 1, 59, 0, 0).getMillis())).build();
 
@@ -340,7 +342,7 @@ assertFalse(row.has("consistency"));
 
         Assert.assertEquals(0, batches.size());
 
-        event = new AuditableEvent.Builder(AuditableEventType.INSERT, "blake", "127.0.0.1")
+        event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl")
                 .uid(UUIDGen.getTimeUUID(new DateTime(2016, 1, 1, 2, 0, 0, 0).getMillis())).build();
 

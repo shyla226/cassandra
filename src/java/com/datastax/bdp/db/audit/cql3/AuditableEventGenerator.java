@@ -8,46 +8,25 @@ package com.datastax.bdp.db.audit.cql3;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import com.google.common.collect.Lists;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.datastax.bdp.db.audit.AuditableEvent;
 import com.datastax.bdp.db.audit.AuditableEventType;
 import com.datastax.bdp.db.audit.BindVariablesFormatter;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
-import org.apache.cassandra.cql3.statements.AlterKeyspaceStatement;
 import org.apache.cassandra.cql3.statements.AlterRoleStatement;
-import org.apache.cassandra.cql3.statements.AlterTableStatement;
 import org.apache.cassandra.cql3.statements.BatchStatement;
-import org.apache.cassandra.cql3.statements.CreateIndexStatement;
-import org.apache.cassandra.cql3.statements.CreateKeyspaceStatement;
 import org.apache.cassandra.cql3.statements.CreateRoleStatement;
-import org.apache.cassandra.cql3.statements.CreateTableStatement;
-import org.apache.cassandra.cql3.statements.CreateTriggerStatement;
-import org.apache.cassandra.cql3.statements.DeleteStatement;
-import org.apache.cassandra.cql3.statements.DropIndexStatement;
-import org.apache.cassandra.cql3.statements.DropKeyspaceStatement;
-import org.apache.cassandra.cql3.statements.DropRoleStatement;
-import org.apache.cassandra.cql3.statements.DropTableStatement;
-import org.apache.cassandra.cql3.statements.DropTriggerStatement;
-import org.apache.cassandra.cql3.statements.GrantPermissionsStatement;
-import org.apache.cassandra.cql3.statements.GrantRoleStatement;
-import org.apache.cassandra.cql3.statements.ListPermissionsStatement;
-import org.apache.cassandra.cql3.statements.ListRolesStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
-import org.apache.cassandra.cql3.statements.RevokePermissionsStatement;
-import org.apache.cassandra.cql3.statements.RevokeRoleStatement;
-import org.apache.cassandra.cql3.statements.SelectStatement;
-import org.apache.cassandra.cql3.statements.TruncateStatement;
-import org.apache.cassandra.cql3.statements.UpdateStatement;
-import org.apache.cassandra.cql3.statements.UseStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
@@ -59,44 +38,12 @@ public class AuditableEventGenerator
 
     private static final List<AuditableEvent> NO_EVENTS = Lists.newArrayList();
 
-    private static final Map<Class<? extends CQLStatement>, AuditableEventType> STATEMENT_TYPES =
-            new HashMap<Class<? extends CQLStatement>, AuditableEventType>()
-            {
-                {
-                    put(UpdateStatement.class, AuditableEventType.CQL_UPDATE);
-                    put(DeleteStatement.class, AuditableEventType.CQL_DELETE);
-                    put(SelectStatement.class, AuditableEventType.CQL_SELECT);
-                    put(AlterTableStatement.class, AuditableEventType.UPDATE_CF);
-                    put(CreateTableStatement.class, AuditableEventType.ADD_CF);
-                    put(DropTableStatement.class, AuditableEventType.DROP_CF);
-                    put(CreateIndexStatement.class, AuditableEventType.CREATE_INDEX);
-                    put(DropIndexStatement.class, AuditableEventType.DROP_INDEX);
-                    put(CreateTriggerStatement.class, AuditableEventType.CREATE_TRIGGER);
-                    put(DropTriggerStatement.class, AuditableEventType.DROP_TRIGGER);
-                    put(CreateKeyspaceStatement.class, AuditableEventType.ADD_KS);
-                    put(DropKeyspaceStatement.class, AuditableEventType.DROP_KS);
-                    put(AlterKeyspaceStatement.class, AuditableEventType.UPDATE_KS);
-                    put(CreateIndexStatement.class, AuditableEventType.CREATE_INDEX);
-                    put(TruncateStatement.class, AuditableEventType.TRUNCATE);
-                    put(UseStatement.class, AuditableEventType.SET_KS);
-                    put(GrantPermissionsStatement.class, AuditableEventType.GRANT);
-                    put(GrantRoleStatement.class, AuditableEventType.GRANT);
-                    put(RevokePermissionsStatement.class, AuditableEventType.REVOKE);
-                    put(RevokeRoleStatement.class, AuditableEventType.REVOKE);
-                    put(CreateRoleStatement.class, AuditableEventType.CREATE_ROLE);
-                    put(AlterRoleStatement.class, AuditableEventType.ALTER_ROLE);
-                    put(DropRoleStatement.class, AuditableEventType.DROP_ROLE);
-                    put(ListRolesStatement.class, AuditableEventType.LIST_ROLES);
-                    put(ListPermissionsStatement.class, AuditableEventType.LIST_PERMISSIONS);
-                }
-            };
-
     public List<AuditableEvent> getEventsForPrepare(CQLStatement statement,
                                                     ClientState clientState,
                                                     String queryString)
     {
         AuditableEvent.Builder builder = AuditableEvent.Builder.fromClientState(clientState);
-        builder.type(AuditableEventType.CQL_PREPARE_STATEMENT);
+        builder.type(CoreAuditableEventType.CQL_PREPARE_STATEMENT);
         if (statement instanceof BatchStatement)
         {
             UUID batchId = UUID.randomUUID();
@@ -192,7 +139,7 @@ public class AuditableEventGenerator
                                     List<ColumnSpecification> boundNames,
                                     ConsistencyLevel cl)
     {
-        AuditableEventType type = STATEMENT_TYPES.get(stmt.getClass());
+        AuditableEventType type = stmt.getAuditEventType();
         if (null == type)
         {
             logger.info("Encountered a CQL statement I don't know how to log : "

@@ -31,6 +31,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
 
+import static com.datastax.bdp.db.audit.CoreAuditableEventType.*;
+
 public class NativeProtocolAuditLoggingTest extends CQLTester
 {
     @BeforeClass
@@ -63,7 +65,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
     {
         createTable("CREATE TABLE %s (k int, v int, PRIMARY KEY(k))");
         executeNet("SELECT * FROM %s");
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_SELECT, KEYSPACE, currentTable(), formatQuery("SELECT * FROM %s"));
+        assertMatchingEventInList(getEvents(), CQL_SELECT, KEYSPACE, currentTable(), formatQuery("SELECT * FROM %s"));
     }
 
     @Test
@@ -84,9 +86,9 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         Stack<AuditableEvent> events = getEvents();
         assertEquals(3, events.size());
         assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_DELETE, KEYSPACE, currentTable(), deleteQuery);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), updateQuery);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), insertQuery);
+        assertEventProperties(events.pop(), CQL_DELETE, KEYSPACE, currentTable(), deleteQuery);
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), updateQuery);
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), insertQuery);
     }
 
     @Test
@@ -95,7 +97,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         createTable("CREATE TABLE %s (k int, v int, PRIMARY KEY(k))");
         String cql = formatQuery("SELECT * FROM %s");
         prepareNet(cql);
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), cql);
+        assertMatchingEventInList(getEvents(), CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), cql);
     }
 
     @Test
@@ -105,7 +107,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         String cql = formatQuery("SELECT * FROM %s");
         PreparedStatement ps = prepareNet(cql);
         executeNet(ps.bind());
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_SELECT, KEYSPACE, currentTable(), cql);
+        assertMatchingEventInList(getEvents(), CQL_SELECT, KEYSPACE, currentTable(), cql);
     }
 
     @Test
@@ -117,7 +119,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         executeNet(ps.bind(0));
 
         String expected = cql + " [k=0]";
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_SELECT, KEYSPACE, currentTable(), expected);
+        assertMatchingEventInList(getEvents(), CQL_SELECT, KEYSPACE, currentTable(), expected);
     }
 
     @Test
@@ -127,7 +129,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         String cql = formatQuery("INSERT INTO %s (k, v) VALUES (1, 1) USING TIMESTAMP 0 AND TTL 100");
         PreparedStatement ps = prepareNet(cql);
         executeNet(ps.bind());
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), cql);
+        assertMatchingEventInList(getEvents(), CQL_UPDATE, KEYSPACE, currentTable(), cql);
     }
 
     @Test
@@ -138,7 +140,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         PreparedStatement ps = prepareNet(cql);
         executeNet(ps.bind(0, 24, 999l, 1));
         String expected = cql + " [k=0,v=24,[timestamp]=999,[ttl]=1]";
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), expected);
+        assertMatchingEventInList(getEvents(), CQL_UPDATE, KEYSPACE, currentTable(), expected);
     }
 
     @Test
@@ -148,7 +150,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         String cql = formatQuery("DELETE FROM %s WHERE k = 1");
         PreparedStatement ps = prepareNet(cql);
         executeNet(ps.bind());
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_DELETE, KEYSPACE, currentTable(), cql);
+        assertMatchingEventInList(getEvents(), CQL_DELETE, KEYSPACE, currentTable(), cql);
     }
 
     @Test
@@ -159,7 +161,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         PreparedStatement ps = prepareNet(cql);
         executeNet(ps.bind(0));
         String expected = cql + " [k=0]";
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_DELETE, KEYSPACE, currentTable(), expected);
+        assertMatchingEventInList(getEvents(), CQL_DELETE, KEYSPACE, currentTable(), expected);
     }
 
     @Test
@@ -170,7 +172,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         PreparedStatement ps = prepareNet(cql);
         executeNet(ps.bind(0, 1));
         String expected = cql + " [k=0,k=1]";
-        assertMatchingEventInList(getEvents(), AuditableEventType.CQL_DELETE, KEYSPACE, currentTable(), expected);
+        assertMatchingEventInList(getEvents(), CQL_DELETE, KEYSPACE, currentTable(), expected);
     }
 
     @Test
@@ -194,12 +196,12 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         Stack<AuditableEvent> events = getEvents();
         assertEquals(6, events.size());
         assertAllEventsInSameBatch(events.subList(3, 5));
-        assertEventProperties(events.pop(), AuditableEventType.CQL_DELETE, KEYSPACE, currentTable(), deleteQuery + " [k=2]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), updateQuery + " [v=48,k=1]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), insertQuery + " [k=0,v=24,[ttl]=3600]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), deleteQuery);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), updateQuery);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), insertQuery);
+        assertEventProperties(events.pop(), CQL_DELETE, KEYSPACE, currentTable(), deleteQuery + " [k=2]");
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), updateQuery + " [v=48,k=1]");
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), insertQuery + " [k=0,v=24,[ttl]=3600]");
+        assertEventProperties(events.pop(), CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), deleteQuery);
+        assertEventProperties(events.pop(), CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), updateQuery);
+        assertEventProperties(events.pop(), CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), insertQuery);
     }
 
     @Test
@@ -213,7 +215,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
             executeNet(new SimpleStatement(cql));
             // altering schema causes java driver to refresh its view, so we
             // don't care about all the queries it issues after that
-            assertMatchingEventInList(getEvents(), AuditableEventType.ADD_KS, "create_test", null, cql);
+            assertMatchingEventInList(getEvents(), ADD_KS, "create_test", null, cql);
         }
         finally
         {
@@ -236,7 +238,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
 
             // altering schema causes java driver to refresh its view, so we
             // don't care about all the queries it issues after that
-            assertMatchingEventInList(getEvents(), AuditableEventType.UPDATE_KS, "alter_test", null, cql);
+            assertMatchingEventInList(getEvents(), UPDATE_KS, "alter_test", null, cql);
         }
         finally
         {
@@ -255,7 +257,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         executeNet(new SimpleStatement(cql));
         // altering schema causes java driver to refresh its view, so we
         // don't care about all the queries it issues after that
-        assertMatchingEventInList(getEvents(), AuditableEventType.DROP_KS, "drop_test", null, cql);
+        assertMatchingEventInList(getEvents(), DROP_KS, "drop_test", null, cql);
     }
 
     @Test
@@ -267,7 +269,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
             executeNet(new SimpleStatement(cql));
             // altering schema causes java driver to refresh its view, so we
             // don't care about all the queries it issues after that
-            assertMatchingEventInList(getEvents(), AuditableEventType.ADD_CF, KEYSPACE, "create_table", cql);
+            assertMatchingEventInList(getEvents(), ADD_CF, KEYSPACE, "create_table", cql);
         }
         finally
         {
@@ -286,7 +288,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
             executeNet(new SimpleStatement(cql));
             // altering schema causes java driver to refresh its view, so we
             // don't care about all the queries it issues after that
-            assertMatchingEventInList(getEvents(), AuditableEventType.UPDATE_CF, KEYSPACE, "alter_table", cql);
+            assertMatchingEventInList(getEvents(), UPDATE_CF, KEYSPACE, "alter_table", cql);
         }
         finally
         {
@@ -303,7 +305,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         executeNet(new SimpleStatement(cql));
         // altering schema causes java driver to refresh its view, so we
         // don't care about all the queries it issues after that
-        assertMatchingEventInList(getEvents(), AuditableEventType.DROP_CF, KEYSPACE, "drop_table", cql);
+        assertMatchingEventInList(getEvents(), DROP_CF, KEYSPACE, "drop_table", cql);
     }
 
     /**
@@ -325,13 +327,83 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         executeNet(create_cql);
 
         // check create logging
-        assertMatchingEventInList(getEvents(), AuditableEventType.CREATE_TRIGGER, KEYSPACE, currentTable(), formatQuery(create_cql));
+        assertMatchingEventInList(getEvents(), CREATE_TRIGGER, KEYSPACE, currentTable(), formatQuery(create_cql));
 
         String drop_cql = "DROP TRIGGER test_trigger ON %s";
         executeNet(drop_cql);
 
         // check drop logging
-        assertMatchingEventInList(getEvents(), AuditableEventType.DROP_TRIGGER, KEYSPACE, currentTable(), formatQuery(drop_cql));
+        assertMatchingEventInList(getEvents(), DROP_TRIGGER, KEYSPACE, currentTable(), formatQuery(drop_cql));
+    }
+
+    @Test
+    public void testLoggingForCreateAndDropUserType() throws Throwable
+    {
+        String createType = String.format("CREATE TYPE %s.test (a int , b int) ;", KEYSPACE);
+        executeNet(createType);
+
+        // check create logging
+        assertMatchingEventInList(getEvents(), CREATE_TYPE, KEYSPACE, currentTable(), createType);
+
+        String dropType = String.format("DROP TYPE %s.test ;", KEYSPACE);
+        executeNet(dropType);
+
+        // check drop logging
+        assertMatchingEventInList(getEvents(), DROP_TYPE, KEYSPACE, currentTable(), dropType);
+    }
+
+    @Test
+    public void testLoggingForCreateAndDropFunction() throws Throwable
+    {
+        String createFunction = String.format("CREATE FUNCTION %s.test() RETURNS NULL ON NULL INPUT RETURNS bigint LANGUAGE JAVA AS 'return 1L;' ;", KEYSPACE);
+        executeNet(createFunction);
+
+        // check create logging
+        assertMatchingEventInList(getEvents(), CREATE_FUNCTION, KEYSPACE, null, createFunction);
+
+        String dropFunction = String.format("DROP FUNCTION %s.test ;", KEYSPACE);
+        executeNet(dropFunction);
+
+        // check drop logging
+        assertMatchingEventInList(getEvents(), DROP_FUNCTION, KEYSPACE, null, dropFunction);
+    }
+
+    @Test
+    public void testLoggingForCreateAndDropAggregate() throws Throwable
+    {
+        String createFunction = String.format("CREATE FUNCTION %s.test(left bigint, right bigint) CALLED ON NULL INPUT  RETURNS bigint LANGUAGE JAVA AS 'return 1L;' ;", KEYSPACE);
+        executeNet(createFunction);
+        String createAggregate = String.format("CREATE AGGREGATE %s.testAggregate(bigint) SFUNC test STYPE bigint", KEYSPACE);
+        executeNet(createAggregate);
+
+        // check create logging
+        assertMatchingEventInList(getEvents(), CREATE_AGGREGATE, KEYSPACE, null, createAggregate);
+
+        String dropAggregate = String.format("DROP AGGREGATE %s.testAggregate ;", KEYSPACE);
+        executeNet(dropAggregate);
+
+        // check drop logging
+        assertMatchingEventInList(getEvents(), DROP_AGGREGATE, KEYSPACE, null, dropAggregate);
+    }
+
+    @Test
+    public void testLoggingForCreateAndDropView() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, c int, v int, PRIMARY KEY(pk, c))");
+        String createView = String.format("CREATE MATERIALIZED VIEW %s.myview AS SELECT v, c, pk FROM %s WHERE pk IS NOT NULL AND c IS NOT NULL AND v IS NOT NULL PRIMARY KEY (v, c, pk);", KEYSPACE, currentTable());
+        executeNet(createView);
+
+        assertMatchingEventInList(getEvents(), CREATE_VIEW, KEYSPACE, "myview", createView);
+
+        String alterView = String.format("ALTER MATERIALIZED VIEW %s.myview WITH comment = 'This my view'", KEYSPACE);
+        executeNet(alterView);
+        assertMatchingEventInList(getEvents(), UPDATE_VIEW, KEYSPACE, "myview", alterView);
+
+        String dropView = String.format("DROP MATERIALIZED VIEW %s.myview ;", KEYSPACE);
+        executeNet(dropView);
+
+        // check drop logging
+        assertMatchingEventInList(getEvents(), DROP_VIEW, KEYSPACE, "myview", dropView);
     }
 
     @Test
@@ -342,7 +414,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         executeNet("INSERT INTO %s (k, v) VALUES (?, ?) ;", 3, 72);
         Stack<AuditableEvent> events = getEvents();
         assertEquals(1, events.size());
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), formatQuery("INSERT INTO %s (k, v) VALUES (?, ?) ; [k=3,v=72]"));
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), formatQuery("INSERT INTO %s (k, v) VALUES (?, ?) ; [k=3,v=72]"));
     }
 
     @Test
@@ -355,8 +427,8 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         executeNet(ps1.bind(3));
         Stack<AuditableEvent> events = getEvents();
         assertEquals(2, events.size());
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), query + " [k=3,v=UNSET]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), query);
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), query + " [k=3,v=UNSET]");
+        assertEventProperties(events.pop(), CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), query);
     }
 
     @Test
@@ -375,9 +447,9 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         Stack<AuditableEvent> events = getEvents();
         assertEquals(3, events.size());
         assertAllEventsInSameBatch(events.subList(1, 2));
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), query + " [k=2,v=48]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), query + " [k=1,v=24]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), query);
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), query + " [k=2,v=48]");
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), query + " [k=1,v=24]");
+        assertEventProperties(events.pop(), CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), query);
     }
 
     @Test
@@ -403,9 +475,9 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         Stack<AuditableEvent> events = getEvents();
         assertEquals(2, events.size());
         assertAllEventsInSameBatch(events);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(),
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(),
                                                       formatQuery("UPDATE %s SET count = count + 1 WHERE column1 = ? AND column2 = ? ; [column1=data1,column2=data2]"));
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(),
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(),
                                                       formatQuery("UPDATE %s SET count = count + 1 WHERE column1 = ? AND column2 = ? ; [column1=data1,column2=data2]"));
     }
 
@@ -427,11 +499,11 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
         Stack<AuditableEvent> events = getEvents();
         assertEquals(5, events.size());
         assertAllEventsInSameBatch(events.subList(1, 4));
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), psQuery + " [bind variable values unavailable]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), query);
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), psQuery + " [k=2,v=48]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_UPDATE, KEYSPACE, currentTable(), psQuery + " [k=1,v=24]");
-        assertEventProperties(events.pop(), AuditableEventType.CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), psQuery);
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), psQuery + " [bind variable values unavailable]");
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), query);
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), psQuery + " [k=2,v=48]");
+        assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(), psQuery + " [k=1,v=24]");
+        assertEventProperties(events.pop(), CQL_PREPARE_STATEMENT, KEYSPACE, currentTable(), psQuery);
     }
 
     @Test
@@ -458,7 +530,7 @@ public class NativeProtocolAuditLoggingTest extends CQLTester
 
         Stack<AuditableEvent> events = getEvents();
         assertEquals(1, events.size());
-        assertEventProperties(events.pop(), AuditableEventType.CQL_SELECT, KEYSPACE, currentTable(), query);
+        assertEventProperties(events.pop(), CQL_SELECT, KEYSPACE, currentTable(), query);
     }
     
     private Stack<AuditableEvent> getEvents() throws Exception

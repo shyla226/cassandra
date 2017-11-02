@@ -21,6 +21,10 @@ import java.util.*;
 
 import io.reactivex.Completable;
 import io.reactivex.Maybe;
+
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.*;
@@ -40,6 +44,12 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
     protected AlterTypeStatement(UTName name)
     {
         this.name = name;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.UPDATE_TYPE;
     }
 
     @Override

@@ -27,6 +27,9 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
@@ -164,6 +167,12 @@ public class SelectStatement implements CQLStatement
         this.parameters = parameters;
         this.limit = limit;
         this.perPartitionLimit = perPartitionLimit;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.CQL_SELECT;
     }
 
     /**

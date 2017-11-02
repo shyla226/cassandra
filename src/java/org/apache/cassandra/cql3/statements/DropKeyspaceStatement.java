@@ -19,6 +19,9 @@ package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Maybe;
 
+import com.datastax.bdp.db.audit.AuditableEventType;
+import com.datastax.bdp.db.audit.CoreAuditableEventType;
+
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -40,6 +43,12 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
         super();
         this.keyspace = keyspace;
         this.ifExists = ifExists;
+    }
+
+    @Override
+    public AuditableEventType getAuditEventType()
+    {
+        return CoreAuditableEventType.DROP_KS;
     }
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
