@@ -29,7 +29,6 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 
-import io.netty.channel.epoll.Aio;
 import io.netty.channel.unix.FileDescriptor;
 
 import org.slf4j.Logger;
@@ -97,7 +96,8 @@ public class StartupChecks
                                                                       checkLegacyAuthTables,
                                                                       checkObsoleteAuthTables,
                                                                       warnOnUnsupportedPlatform,
-                                                                      warnOnLackOfAIO);
+                                                                      warnOnLackOfAIO,
+                                                                      checkClockSource);
 
     public StartupChecks withDefaultTests()
     {
@@ -589,4 +589,77 @@ public class StartupChecks
             return result != null && !result.isEmpty();
         }).collect(Collectors.toList());
     }
+
+    public static final StartupCheck checkClockSource = (logger) ->
+    {
+        if (!FBUtilities.isLinux)
+            return;
+
+        File fClockSource = new File("/sys/devices/system/clocksource/clocksource0/current_clocksource");
+        File fCpuInfo = new File("/proc/cpuinfo");
+
+        if (!fClockSource.exists())
+            logger.warn("Could not find {}", fClockSource);
+        else
+        {
+            // See:
+            // https://0xax.gitbooks.io/linux-insides/content/Timers/timers-6.html
+            // http://pzemtsov.github.io/2017/07/23/the-slow-currenttimemillis.html
+            //
+            // https://github.com/yangoliver/linux/blob/master/Documentation/virtual/kvm/timekeeping.txt
+            // http://oliveryang.net/2015/09/pitfalls-of-TSC-usage/#332-implementations-on-various-hypervisors
+
+            List<String> clocksource = FileUtils.readLines(fClockSource);
+            if (clocksource.size() != 1)
+                logger.warn("Unknown content in {}: {}", fClockSource, clocksource);
+            else
+            {
+                boolean cpuinfo = false;
+                Set<String> flags = new HashSet<>();
+                if (fCpuInfo.exists())
+                {
+                    List<String> cpuinfoLines = FileUtils.readLines(fCpuInfo);
+                    for (String cpuinfoLine : cpuinfoLines)
+                    {
+                        if (cpuinfoLine.matches("^flags\\W.*$"))
+                        {
+                            cpuinfo = true;
+                            for (StringTokenizer st = new StringTokenizer(cpuinfoLine.substring(cpuinfoLine.indexOf(':') + 1), " ");
+                                 st.hasMoreTokens();)
+                                flags.add(st.nextToken());
+                            break;
+                        }
+                    }
+                }
+                if (!cpuinfo)
+                    logger.warn("Could not read /proc/cpuinfo");
+
+                String cs = clocksource.get(0);
+                switch (cs)
+                {
+                    case "tsc":
+                        if (!flags.contains("constant_tsc") || !flags.contains("nonstop_tsc"))
+                            logger.warn("Detected TSC clocksource may perform suboptimal: constant_tsc={}, nonstop_tsc={}", flags.contains("constant_tsc"), flags.contains("nonstop_tsc"));
+                        else
+                            logger.info("Detected TSC clocksource (constant_tsc={}, nonstop_tsc={}).", flags.contains("constant_tsc"), flags.contains("nonstop_tsc"));
+                        break;
+                    case "kvm-clock":
+                        logger.info("Detected KVM clocksource (constant_tsc={}, nonstop_tsc={}).", flags.contains("constant_tsc"), flags.contains("nonstop_tsc"));
+                        break;
+                    case "hpet":
+                        logger.warn("Detected HPET clocksource. Consider using TSC as the clocksource (constant_tsc={}, nonstop_tsc={}).", flags.contains("constant_tsc"), flags.contains("nonstop_tsc"));
+                        break;
+                    case "acpi_pm":
+                        logger.warn("Detected ACPI-power-management clocksource, which is known to cause severe performance issues. Stongly consider configuring TSC or HPET as the clocksource (constant_tsc={}, nonstop_tsc={}).", flags.contains("constant_tsc"), flags.contains("nonstop_tsc"));
+                        break;
+                    case "jiffies":
+                        logger.warn("Detected jiffies clocksource. Consider configuring TSC or HPET as the clocksource.");
+                        break;
+                    default:
+                        logger.warn("Detected unknown clocksource '{}'.", cs);
+                        break;
+                }
+            }
+        }
+    };
 }
