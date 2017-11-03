@@ -123,6 +123,9 @@
 # comment out this entry to enable IPv6 support).
 -Djava.net.preferIPv4Stack=true
 
+# Align direct memory allocations
+-Dsun.nio.PageAlignDirectMemory=true
+
 # Honor user code @Contended annotations
 -XX:-RestrictContended
 

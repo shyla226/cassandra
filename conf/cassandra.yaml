@@ -22,7 +22,7 @@ cluster_name: 'Test Cluster'
 #
 # If you already have a cluster with 1 token per node, and wish to migrate to 
 # multiple tokens per node, see http://wiki.apache.org/cassandra/Operations
-num_tokens: 1
+num_tokens: 256
 
 # Number of cores used by the internal Thread-Per-Core architecture (TPC). This corresponds to the
 # number of event loops that will be created internally.
@@ -429,7 +429,7 @@ seed_provider:
 # per chunk (i.e. 0.2% of the reserved size if the default 64k chunk size is
 # used).
 # Memory is only allocated when needed.
-# file_cache_size_in_mb: 4096
+#file_cache_size_in_mb: 4096
 
 # The strategy for optimizing disk read
 # Possible values are:

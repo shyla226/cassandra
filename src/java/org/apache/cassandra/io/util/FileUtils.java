@@ -356,12 +356,14 @@ public final class FileUtils
             }
             else
             {
-                // When dealing with aligned buffers we
+                // When dealing with sliced buffers we
                 // attach the root buffer we used to align
                 // so we can properly free it
                 Object attach = MemoryUtil.getAttachment(buffer);
-                if (attach != null && attach instanceof ByteBuffer)
+                if (attach != null && attach instanceof ByteBuffer && attach != buffer)
+                {
                     clean((ByteBuffer) attach);
+                }
             }
         }
     }

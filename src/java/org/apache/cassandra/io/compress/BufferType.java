@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import io.netty.util.internal.PlatformDependent;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 import org.hyperic.sigar.Mem;
+import sun.misc.VM;
 
 public enum BufferType
 {
@@ -60,6 +61,9 @@ public enum BufferType
 
     private static ByteBuffer allocateDirectAligned(int capacity)
     {
+        if (VM.isDirectMemoryPageAligned())
+            return ByteBuffer.allocateDirect(capacity);
+
         int align = MemoryUtil.pageSize();
         if (Integer.bitCount(align) != 1)
             throw new IllegalArgumentException("Alignment must be a power of 2");
@@ -79,11 +83,6 @@ public enum BufferType
             buffer.limit(pos + capacity);
         }
 
-        ByteBuffer aligned = buffer.slice();
-
-        //Attach the cleaner version
-        MemoryUtil.setAttachment(aligned, buffer);
-
-        return aligned;
+        return buffer.slice();
     }
 }
