@@ -26,6 +26,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 
 import com.google.common.collect.Lists;
@@ -33,6 +34,7 @@ import com.google.common.collect.Lists;
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics;
 
 import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -157,6 +159,8 @@ public class BootStrapperTest
         return s;
     }
 
+    Random rand = new Random(1);
+
     private void generateFakeEndpoints(int numOldNodes) throws UnknownHostException
     {
         generateFakeEndpoints(StorageService.instance.getTokenMetadata(), numOldNodes, 1);
@@ -178,7 +182,7 @@ public class BootStrapperTest
             InetAddress addr = InetAddress.getByName("127." + dc + "." + rack + "." + (i + 1));
             List<Token> tokens = Lists.newArrayListWithCapacity(numVNodes);
             for (int j = 0; j < numVNodes; ++j)
-                tokens.add(p.getRandomToken());
+                tokens.add(p.getRandomToken(rand));
 
             tmd.updateNormalTokens(tokens, addr);
         }
@@ -262,6 +266,49 @@ public class BootStrapperTest
         if (ns.getStandardDeviation() > os.getStandardDeviation())
         {
             fail(String.format("Token allocation unexpectedly increased standard deviation.\nStats before:\n%s\nStats after:\n%s", os, ns));
+        }
+    }
+
+    @Test
+    public void testAllocateTokensRfEqRacks() throws UnknownHostException
+    {
+        IEndpointSnitch oldSnitch = DatabaseDescriptor.getEndpointSnitch();
+        try
+        {
+            DatabaseDescriptor.setEndpointSnitch(new RackInferringSnitch());
+            int vn = 8;
+            int replicas = 3;
+            int rackCount = replicas;
+            String ks = "BootStrapperTestNTSKeyspaceRfEqRacks";
+            String dc = "1";
+            SchemaLoader.createKeyspace(ks, KeyspaceParams.nts(dc, replicas, "15", 15), SchemaLoader.standardCFMD(ks, "Standard1"));
+            TokenMetadata tm = StorageService.instance.getTokenMetadata();
+            tm.clearUnsafe();
+            int base = 5;
+            for (int i = 0; i < rackCount; ++i)
+                generateFakeEndpoints(tm, base << i, vn, dc, Integer.toString(i));     // unbalanced racks
+
+            int cnt = 3;
+            for (int i = 0; i < cnt; ++i)
+                allocateTokensForNode(vn, ks, tm, InetAddress.getByName("127." + dc + ".0." + (99 + i)));
+
+            double target = 1.0 / (base + cnt);
+
+            Map<InetAddress, Float> ownership = StorageService.instance.effectiveOwnership(ks);
+            boolean failed = false;
+            for (Map.Entry<InetAddress, Float> o : ownership.entrySet())
+            {
+                int rack = o.getKey().getAddress()[2];
+                if (rack != 0)
+                    continue;
+
+                System.out.format("Node %s owns %f\n", o.getKey(), o.getValue());
+                if (o.getValue()/target > 1.1)
+                    failed = true;
+            }
+            Assert.assertFalse("One of the nodes in the rack has over 10% overutilization.", failed);
+        } finally {
+            DatabaseDescriptor.setEndpointSnitch(oldSnitch);
         }
     }
 

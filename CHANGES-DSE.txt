@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Change token allocation to use RF=1 method when RF equals rack count (DB-1253)
  * Skip building views during base table streams on range movements (Backport CASSANDRA-13065) (DB-1311)
  * Memoize seeds (DB-865)
  * Add -Dcassandra.native_transport_startup_delay_seconds to delay startup of native transport, default 0 (DB-1315)
