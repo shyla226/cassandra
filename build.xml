@@ -1457,6 +1457,7 @@
                        exclude="**/*.java" timeout="${test.timeout}" testtag="cdc">
         <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
         <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
+        <jvmarg value="-Dinvalid-sstable-root=${test.data}/invalid-sstables"/>
         <jvmarg value="-Dmigration-sstable-root=${test.data}/migration-sstables"/>
         <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
@@ -1475,6 +1476,7 @@
                        exclude="**/*.java" timeout="${test.timeout}" testtag="nio">
         <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
         <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
+        <jvmarg value="-Dinvalid-sstable-root=${test.data}/invalid-sstables"/>
         <jvmarg value="-Dmigration-sstable-root=${test.data}/migration-sstables"/>
         <jvmarg value="-Dcassandra.native.epoll.enabled=false"/>
         <jvmarg value="-Dcassandra.config.loader=org.apache.cassandra.OffsetAwareConfigurationLoader"/>

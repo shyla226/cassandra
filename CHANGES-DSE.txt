@@ -47,6 +47,7 @@ dse 6.0.0s
  * For TWCS, flush to separate sstables based on write time (DB-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (DB-302)
 Merged from dse5.1:
+ * Add invalid-sstable-root JVM argument to all relevant test entries in build.xml (DB-1133)
  * Ensure that the list and set selectors elements are all of the same type (DB-905)
  * Always define execution_profiles in cqlsh.py (DB-1150)
  * Fix stress-tool not outputting row/s (DB-1123)
