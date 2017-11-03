@@ -15,13 +15,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.dht.tokenallocator;
 
-import java.util.Collection;
+import org.junit.Test;
 
-import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.dht.RandomPartitioner;
 
-public interface TokenAllocator<Unit>
+public class RandomReplicationAwareTokenAllocatorTest extends AbstractReplicationAwareTokenAllocatorTest
 {
-    Collection<Token> addUnit(Unit newUnit, int numTokens);
+    /** The maximum number of vnodes to use in the tests.
+     *  For RandomPartitioner we use a smaller number because
+     *  the tests take much longer and would otherwise timeout,
+     *  see CASSANDRA-12784.
+     * */
+    private static final int MAX_VNODE_COUNT = 16;
+
+    @Test
+    public void testExistingCluster()
+    {
+        testExistingCluster(new RandomPartitioner(), MAX_VNODE_COUNT);
+    }
+
+    @Test
+    public void testNewClusterr()
+    {
+        testNewCluster(new RandomPartitioner(), MAX_VNODE_COUNT);
+    }
+
 }

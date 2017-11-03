@@ -15,13 +15,26 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.dht.tokenallocator;
 
-import java.util.Collection;
+import org.junit.Test;
 
-import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 
-public interface TokenAllocator<Unit>
+public class Murmur3ReplicationAwareTokenAllocatorTest extends AbstractReplicationAwareTokenAllocatorTest
 {
-    Collection<Token> addUnit(Unit newUnit, int numTokens);
+    private static final int MAX_VNODE_COUNT = 64;
+
+    @Test
+    public void testExistingCluster()
+    {
+        super.testExistingCluster(new Murmur3Partitioner(), MAX_VNODE_COUNT);
+    }
+
+    @Test
+    public void testNewCluster()
+    {
+        testNewCluster(new Murmur3Partitioner(), MAX_VNODE_COUNT);
+    }
 }

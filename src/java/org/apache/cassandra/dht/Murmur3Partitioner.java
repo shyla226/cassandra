@@ -301,7 +301,7 @@ public class Murmur3Partitioner implements IPartitioner
         {
             try
             {
-                Long.valueOf(token);
+                fromString(token);
             }
             catch (NumberFormatException e)
             {
