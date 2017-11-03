@@ -412,7 +412,7 @@ public class BufferPool
             Chunk chunk = Chunk.getParentChunk(buffer);
             if (chunk == null)
             {
-                FileUtils.clean(buffer);
+                FileUtils.clean(buffer, true);
                 return;
             }
 
@@ -665,7 +665,7 @@ public class BufferPool
             if (parent != null)
                 parent.free(slab, false);
             else
-                FileUtils.clean(slab);
+                FileUtils.clean(slab, true);
         }
 
         @VisibleForTesting

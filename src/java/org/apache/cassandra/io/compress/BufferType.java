@@ -20,6 +20,7 @@ package org.apache.cassandra.io.compress;
 import java.nio.ByteBuffer;
 
 import io.netty.util.internal.PlatformDependent;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 import org.hyperic.sigar.Mem;
 import sun.misc.VM;

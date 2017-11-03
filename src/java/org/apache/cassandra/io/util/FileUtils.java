@@ -345,6 +345,11 @@ public final class FileUtils
 
     public static void clean(ByteBuffer buffer)
     {
+        clean(buffer, false);
+    }
+
+    public static void clean(ByteBuffer buffer, boolean cleanAttachment)
+    {
         if (buffer == null)
             return;
         if (isCleanerAvailable && buffer.isDirect())
@@ -359,7 +364,7 @@ public final class FileUtils
                 // When dealing with sliced buffers we
                 // attach the root buffer we used to align
                 // so we can properly free it
-                if (buffer.getClass() == MemoryUtil.DIRECT_BYTE_BUFFER_CLASS)
+                if (cleanAttachment && buffer.getClass() == MemoryUtil.DIRECT_BYTE_BUFFER_CLASS)
                 {
                     Object attach = MemoryUtil.getAttachment(buffer);
                     if (attach != null && attach instanceof ByteBuffer && attach != buffer)
