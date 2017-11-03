@@ -18,7 +18,7 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.*;
-import java.util.function.Predicate;
+import java.util.function.LongPredicate;
 
 import com.google.common.collect.Ordering;
 
@@ -275,7 +275,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         private final CompactionController controller;
 
         private DecoratedKey currentKey;
-        private Predicate<Long> purgeEvaluator;
+        private LongPredicate purgeEvaluator;
 
         private long compactedUnfiltered;
 
@@ -315,7 +315,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
          * This is computed lazily on demand as we only need this if there is tombstones and this a bit expensive
          * (see #8914).
          */
-        protected Predicate<Long> getPurgeEvaluator()
+        protected LongPredicate getPurgeEvaluator()
         {
             if (purgeEvaluator == null)
             {

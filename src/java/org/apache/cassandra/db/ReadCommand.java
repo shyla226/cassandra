@@ -18,9 +18,9 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+
 import java.net.InetAddress;
 import java.util.Collection;
-import java.util.Iterator;
 import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
@@ -31,7 +31,6 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.functions.Function;
 import org.apache.cassandra.net.Request;
-import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.flow.Flow;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.Schedulable;

@@ -17,13 +17,8 @@
  */
 package org.apache.cassandra.db.compaction;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Predicate;
+import java.util.*;
+import java.util.function.LongPredicate;
 
 import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -254,7 +249,7 @@ public class CompactionController implements AutoCloseable
      * containing his partition and not participating in the compaction. This means there isn't any data in those
      * sstables that might still need to be suppressed by a tombstone at this timestamp.
      */
-    public Predicate<Long> getPurgeEvaluator(DecoratedKey key)
+    public LongPredicate getPurgeEvaluator(DecoratedKey key)
     {
         if (NEVER_PURGE_TOMBSTONES || !compactingRepaired())
             return time -> false;
