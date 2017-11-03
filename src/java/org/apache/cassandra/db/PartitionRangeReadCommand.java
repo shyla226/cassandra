@@ -97,7 +97,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         this.dataRange = dataRange;
 
-        this.scheduler = TPC.getForKey(Keyspace.open(metadata().keyspace), dataRange.startKey());
+        this.scheduler = TPC.getForBound(Keyspace.open(metadata().keyspace), dataRange.startKey());
         this.operationExecutor = scheduler.forTaskType(TPCTaskType.READ_RANGE);
     }
 

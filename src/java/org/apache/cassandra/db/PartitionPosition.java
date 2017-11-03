@@ -55,7 +55,6 @@ public interface PartitionPosition extends RingPosition<PartitionPosition>
     public Kind kind();
     public boolean isMinimum();
     public ByteSource asByteComparableSource();
-    public Token getTokenForPartitioner(IPartitioner partitioner);
 
     public static class RowPositionSerializer implements IPartitionerDependentSerializer<PartitionPosition, BoundsVersion>
     {
