@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Sets;
+import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.slf4j.Logger;
@@ -113,7 +114,7 @@ class Validator
 
     private final ValidationMetrics metrics = new ValidationMetrics();
     private final RateLimiter limiter;
-    private final long pageSize;
+    private final PageSize pageSize;
 
     private final Observer observer;
     private final int replicationFactor;
@@ -141,9 +142,7 @@ class Validator
         this.segment = segment;
         this.startTime = startTime;
         this.limiter = service.config.rateLimiter;
-        this.pageSize = service.config.getPageSize(SizeUnit.BYTES);
-        // Integer.MAX_VALUE is the max page size in bytes we support:
-        assert pageSize <= Integer.MAX_VALUE : "page size cannot be bigger than Integer.MAX_VALUE";
+        this.pageSize = new PageSize(Ints.checkedCast(service.config.getPageSize(SizeUnit.BYTES)), PageSize.PageUnit.BYTES);
 
         this.observer = new Observer();
         AbstractReplicationStrategy replicationStrategy = Keyspace.open(table().keyspace).getReplicationStrategy();
@@ -233,48 +232,44 @@ class Validator
 
 
         logger.trace("Starting execution of validation on {}", segment);
-        Flow<FlowablePartition> flow = moreContents(executor, pager, context);
-        // Can be null on an exception
-        if (flow != null)
-            flowFuture = flow.lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
-                             .flatProcess(p -> p.content())
-                             .processToFuture()
-                             .handleAsync((v, t) -> {
-                                 if (t == null)
-                                     markFinished();
-                                 else
-                                     handleError(t, executor);
-                                 return null;
-                             }, executor.asExecutor());
-
-        return completionFuture;
-    }
-
-    private Flow<FlowablePartition> moreContents(ValidationExecutor executor, QueryPager pager, ReadContext context)
-    {
-        assert !pager.isExhausted();
         try
         {
-            // Maybe schedule a refresh of the lock.
-            maybeRefreshLock();
-            observer.onNewPage();
-            return pager.fetchPage(new PageSize((int) pageSize, PageSize.PageUnit.BYTES), context)
-                        .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), executor))
-                        .concatWith(() -> isDone(pager)
-                                          ? null :
-                                          moreContents(executor, pager, context.forNewQuery(System.nanoTime())));
-
+            flowFuture = fetchAll(executor, pager, context).lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
+                                                           .flatProcess(FlowablePartition::content)
+                                                           .processToFuture()
+                                                           .handleAsync((v, t) -> {
+                                                               if (t == null)
+                                                                   markFinished();
+                                                               else
+                                                                   handleError(t, executor);
+                                                               return null;
+                                                           }, executor.asExecutor());
         }
         catch (Throwable t)
         {
             // We can typically get UnavailableException here. In any case, delegate to handleError(), which will
-            // always make sure to complete the validator so we can just return null (to stop the flow otherwise).
-            // Side-note: handleError() shouldn't be called on a core thread as it blocks (to write system tables) but
-            // moreContents() can be called on a core-thread, hence we make sure to call it on the executor. Note that
-            // it's possible we're already on the executor, but performance isn't a big concern here, so keep it simple.
-            executor.asExecutor().execute(() -> handleError(t, executor));
-            return null;
+            // always make sure to complete the validator so the returned completed future will finish.
+            handleError(t, executor);
         }
+
+        return completionFuture;
+    }
+
+    private Flow<FlowablePartition> fetchAll(ValidationExecutor executor, QueryPager pager, ReadContext context)
+    {
+        return fetchPage(executor, pager, context).concatWith(() -> isDone(pager)
+                                                                    ? null
+                                                                    : fetchPage(executor, pager, context.forNewQuery(System.nanoTime())));
+    }
+
+    private Flow<FlowablePartition> fetchPage(ValidationExecutor executor, QueryPager pager, ReadContext context)
+    {
+        assert !pager.isExhausted();
+        // Maybe schedule a refresh of the lock.
+        maybeRefreshLock();
+        observer.onNewPage();
+        return pager.fetchPage(pageSize, context)
+                    .doOnComplete(() -> recordPage(ValidationOutcome.completed(!observer.isComplete, observer.hasMismatch), executor));
     }
 
     private boolean isDone(QueryPager pager)
