@@ -20,7 +20,6 @@ package org.apache.cassandra.repair.messages;
 import java.util.Optional;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.RepairJobDesc;
@@ -36,17 +35,11 @@ import org.apache.cassandra.utils.versioning.VersionDependent;
  */
 public abstract class RepairMessage<T extends RepairMessage>
 {
-    public static final RepairVersion MIN_MESSAGING_VERSION = RepairVersion.OSS_40;
-
-    private static final String MIXED_MODE_ERROR = "Some nodes involved in repair are on an incompatible major version. " +
-                                                   "Repair is not supported in mixed major version clusters.";
-
     public abstract static class MessageSerializer<T extends RepairMessage> extends VersionDependent<RepairVersion> implements Serializer<T>
     {
         protected MessageSerializer(RepairVersion version)
         {
             super(version);
-            Preconditions.checkArgument(version.compareTo(MIN_MESSAGING_VERSION) >= 0, MIXED_MODE_ERROR);
         }
     }
 
