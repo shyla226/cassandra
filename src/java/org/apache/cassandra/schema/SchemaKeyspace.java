@@ -368,7 +368,7 @@ public final class SchemaKeyspace
         return PartitionRangeReadCommand.allDataRead(cfs.metadata(), FBUtilities.nowInSeconds());
     }
 
-    static SchemaMigration convertSchemaToMutations()
+    static synchronized SchemaMigration convertSchemaToMutations()
     {
         Map<DecoratedKey, Mutation> mutationMap = new HashMap<>();
 
@@ -1344,7 +1344,7 @@ public final class SchemaKeyspace
 
     static synchronized void applyChanges(Collection<Mutation> mutations)
     {
-        // TODO - schould we merge rather than concat? (merge would process mutations in parallel)
+        // TODO - should we merge rather than concat? (merge would process mutations in parallel)
         Completable.concat(mutations.stream().map(Mutation::applyAsync).collect(toList())).blockingAwait();
 
         if (SchemaKeyspace.FLUSH_SCHEMA_TABLES)

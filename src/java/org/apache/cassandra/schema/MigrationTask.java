@@ -82,6 +82,7 @@ final class MigrationTask extends WrappedRunnable
             @Override
             public void onResponse(Response<SchemaMigration> message)
             {
+                logger.debug("Pulled schema from endpoint {}; applying locally...", endpoint);
                 try
                 {
                     Schema.instance.mergeAndAnnounceVersion(message.payload());
@@ -105,6 +106,7 @@ final class MigrationTask extends WrappedRunnable
         if (monitoringBootstrapStates.contains(SystemKeyspace.getBootstrapState()))
             inflightTasks.offer(completionLatch);
 
+        logger.debug("Pulling schema from endpoint {}", endpoint);
         MessagingService.instance().send(Verbs.SCHEMA.PULL.newRequest(endpoint, EmptyPayload.instance), cb);
     }
 }
