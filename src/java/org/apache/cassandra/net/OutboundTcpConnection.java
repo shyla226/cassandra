@@ -29,11 +29,9 @@ import java.nio.channels.Channels;
 import java.nio.channels.WritableByteChannel;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.Checksum;
 
@@ -47,7 +45,6 @@ import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
 
-import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
@@ -434,6 +431,7 @@ public class OutboundTcpConnection extends Thread
         while (System.nanoTime() - start < timeout)
         {
             targetVersion = MessagingService.instance().getVersion(poolReference.endPoint());
+            boolean success = false;
             try
             {
                 socket = poolReference.newSocket();
@@ -467,7 +465,7 @@ public class OutboundTcpConnection extends Thread
                 out.flush();
 
                 DataInputStream in = new DataInputStream(socket.getInputStream());
-                int maxTargetVersion = handshakeVersion(in);
+                int maxTargetVersion = handshakeVersion(socket, in);
                 if (maxTargetVersion == NO_VERSION)
                 {
                     // no version is returned, so disconnect an try again: we will either get
@@ -498,11 +496,7 @@ public class OutboundTcpConnection extends Thread
                         JVMStabilityInspector.inspectThrowable(e);
                         logger.warn("Configuration error prevented outbound connection: {}", e.getLocalizedMessage());
                     }
-                    finally
-                    {
-                        disconnect();
-                        return false;
-                    }
+                    return false;
                 }
 
                 if (targetVersion < maxTargetVersion && targetVersion < MessagingService.current_version)
@@ -536,67 +530,47 @@ public class OutboundTcpConnection extends Thread
                     }
                 }
 
+                success = true;
                 return true;
             }
             catch (SSLHandshakeException e)
             {
                 logger.error("SSL handshake error for outbound connection to " + socket, e);
-                socket = null;
                 // SSL errors won't be recoverable within timeout period so we'll just abort
                 return false;
             }
             catch (ConnectException e)
             {
-                socket = null;
                 nospamLogger.debug(String.format("Unable to connect to %s (%s)", poolReference.endPoint(), e.toString()));
                 Uninterruptibles.sleepUninterruptibly(OPEN_RETRY_DELAY, TimeUnit.MILLISECONDS);
             }
             catch (IOException e)
             {
-                socket = null;
                 if (logger.isTraceEnabled())
                     logger.trace("unable to connect to " + poolReference.endPoint(), e);
                 Uninterruptibles.sleepUninterruptibly(OPEN_RETRY_DELAY, TimeUnit.MILLISECONDS);
+            }
+            finally
+            {
+                if (!success)
+                    disconnect();
             }
         }
         return false;
     }
 
-    private int handshakeVersion(final DataInputStream inputStream)
+    private int handshakeVersion(Socket socket, DataInputStream in) throws IOException
     {
-        final AtomicInteger version = new AtomicInteger(NO_VERSION);
-        final CountDownLatch versionLatch = new CountDownLatch(1);
-        new Thread(NamedThreadFactory.threadLocalDeallocator(() ->
-        {
-            try
-            {
-                logger.info("Handshaking version with {}", poolReference.endPoint());
-                version.set(inputStream.readInt());
-            }
-            catch (IOException ex)
-            {
-                final String msg = "Cannot handshake version with " + poolReference.endPoint();
-                if (logger.isTraceEnabled())
-                    logger.trace(msg, ex);
-                else
-                    logger.info(msg);
-            }
-            finally
-            {
-                //unblock the waiting thread on either success or fail
-                versionLatch.countDown();
-            }
-        }),"HANDSHAKE-" + poolReference.endPoint()).start();
-
+        int oldTimeout = socket.getSoTimeout();
         try
         {
-            versionLatch.await(WAIT_FOR_VERSION_MAX_TIME, TimeUnit.MILLISECONDS);
+            socket.setSoTimeout(WAIT_FOR_VERSION_MAX_TIME);
+            return in.readInt();
         }
-        catch (InterruptedException ex)
+        finally
         {
-            throw new AssertionError(ex);
+            socket.setSoTimeout(oldTimeout);
         }
-        return version.get();
     }
 
     /**
