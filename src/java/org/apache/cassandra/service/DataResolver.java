@@ -709,10 +709,10 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
                     return null;
 
                 /*
-                 * This is a table with no clustering columns, and has at most one row per partition - with EMPTY clustering.
+                 * This is a table with no clustering columns, and has at most one row per partition.
                  * We already have the row, so there is no point in asking for more from the partition.
                  */
-                if (Clustering.EMPTY == lastClustering || command.metadata().clusteringColumns().isEmpty())
+                if (command.metadata().clusteringColumns().isEmpty())
                     return null;
 
                 lastFetched = countedInCurrentPartition(singleResultCounter) - lastCounted;
