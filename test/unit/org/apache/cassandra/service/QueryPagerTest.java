@@ -195,7 +195,7 @@ public class QueryPagerTest
 
     private static ReadCommand namesQuery(int count, int partitionCount, PageSize paging, ColumnFamilyStore cfs, String key, String... names)
     {
-        AbstractReadCommandBuilder builder = Util.cmd(cfs, key);
+        AbstractReadCommandBuilder builder = Util.cmd(cfs, key).withNowInSeconds(nowInSec);
         for (String name : names)
             builder.includeRow(name);
         if (count > 0)
@@ -220,7 +220,7 @@ public class QueryPagerTest
 
     private static SinglePartitionReadCommand sliceQuery(int count, int partitionCount, PageSize paging, ColumnFamilyStore cfs, String key, String start, String end, boolean reversed)
     {
-        AbstractReadCommandBuilder builder = Util.cmd(cfs, key).fromIncl(start).toIncl(end);
+        AbstractReadCommandBuilder builder = Util.cmd(cfs, key).fromIncl(start).toIncl(end).withNowInSeconds(nowInSec);
         if (reversed)
             builder.reverse();
         if (count > 0)
@@ -237,7 +237,8 @@ public class QueryPagerTest
     {
         AbstractReadCommandBuilder builder = Util.cmd(cfs)
                                                  .fromKeyExcl(keyStart)
-                                                 .toKeyIncl(keyEnd);
+                                                 .toKeyIncl(keyEnd)
+                                                 .withNowInSeconds(nowInSec);
         for (String name : names)
             builder.includeRow(name);
         if (count > 0)
@@ -253,10 +254,11 @@ public class QueryPagerTest
     private static ReadCommand rangeSliceQuery(int count, int partitionCount, PageSize paging, ColumnFamilyStore cfs, String keyStart, String keyEnd, String start, String end)
     {
         AbstractReadCommandBuilder builder = Util.cmd(cfs)
-            .fromKeyExcl(keyStart)
-            .toKeyIncl(keyEnd)
-            .fromIncl(start)
-            .toIncl(end);
+                                                 .fromKeyExcl(keyStart)
+                                                 .toKeyIncl(keyEnd)
+                                                 .fromIncl(start)
+                                                 .toIncl(end)
+                                                 .withNowInSeconds(nowInSec);
         if (count > 0)
             builder.withLimit(count);
         if (partitionCount > 0)
@@ -775,8 +777,8 @@ public class QueryPagerTest
     public void SliceQueryWithTombstoneTest() throws Exception
     {
         // Testing for the bug of #6748
-        String keyspace = "cql_keyspace";
-        String table = "table2";
+        String keyspace = KEYSPACE_CQL;
+        String table = CF_CQL;
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
 
         // Insert rows but with a tombstone as last cell
