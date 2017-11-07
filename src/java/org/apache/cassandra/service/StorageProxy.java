@@ -1040,9 +1040,11 @@ public class StorageProxy implements StorageProxyMBean
     {
         MessageOut<Batch> message = new MessageOut<>(MessagingService.Verb.BATCH_STORE, batch, Batch.serializer);
 
+        boolean isTrace = logger.isTraceEnabled();
         for (InetAddress target : endpoints)
         {
-            logger.trace("Sending batchlog store request {} to {} for {} mutations", batch.id, target, batch.size());
+            if (isTrace)
+                logger.trace("Sending batchlog store request {} to {} for {} mutations", batch.id, target, batch.size());
 
             if (canDoLocalRequest(target))
                 performLocally(Stage.MUTATION, Optional.empty(), () -> BatchlogManager.store(batch), handler);
@@ -1063,9 +1065,10 @@ public class StorageProxy implements StorageProxyMBean
     private static void asyncRemoveFromBatchlog(Collection<InetAddress> endpoints, UUID uuid)
     {
         MessageOut<UUID> message = new MessageOut<>(MessagingService.Verb.BATCH_REMOVE, uuid, UUIDSerializer.serializer);
+        boolean isTrace = logger.isTraceEnabled();
         for (InetAddress target : endpoints)
         {
-            if (logger.isTraceEnabled())
+            if (isTrace)
                 logger.trace("Sending batchlog remove request {} to {}", uuid, target);
 
             if (canDoLocalRequest(target))
