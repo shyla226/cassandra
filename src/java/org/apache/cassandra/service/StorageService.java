@@ -1014,6 +1014,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (dataAvailable)
             {
                 finishJoiningRing(bootstrap, bootstrapTokens);
+                doAuthSetup();
+
                 // remove the existing info about the replaced node.
                 if (!current.isEmpty())
                 {
@@ -1024,11 +1026,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             else
             {
                 logger.warn("Some data streaming failed. Use nodetool to check bootstrap state and resume. For more, see `nodetool help bootstrap`. {}", SystemKeyspace.getBootstrapState());
+                doAuthSetup();
             }
         }
         else
         {
             logger.info("Startup complete, but write survey mode is active, not becoming an active ring member. Use JMX (StorageService->joinRing()) to finalize ring joining.");
+            doAuthSetup();
         }
     }
 
@@ -1083,6 +1087,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.info("Leaving write survey mode and joining ring at operator request");
             finishJoiningRing(resumedBootstrap, SystemKeyspace.getSavedTokens());
             isSurveyMode = false;
+            doAuthSetup();
         }
     }
 
@@ -1100,9 +1105,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.COMPLETED);
         executePreJoinTasks(didBootstrap);
         setTokens(tokens);
-
-        assert tokenMetadata.sortedTokens().size() > 0;
-        doAuthSetup();
     }
 
     private void doAuthSetup()
