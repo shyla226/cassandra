@@ -1,6 +1,7 @@
 DSE 5.1.6
  * Add invalid-sstable-root JVM argument to all relevant test entries in build.xml (DB-1133)
 Merged from dse5.0:
+ * Add -Dcassandra.native_transport_startup_delay_second to delay startup of native transport, default 0(DB-1315)
  * New metrics for batchlog-replays (DB-1314)
  * Failed bootstrap streaming leaves auth uninitialized (DB-1274)
  * Eliminate thread roundtrip for version handshake (DB-1285)
