@@ -54,6 +54,23 @@ Upgrading
      its limitations are addressed. An incremental repair triggered on a base table or
      materialized view run a full repair instead. See CASSANDRA-12888 for details.
 
+Compact Storage (only when upgrading from 5.1.5 or any version lower than 5.0.12)
+---------------
+    - Starting version 4.0, Thrift and COMPACT STORAGE is no longer supported.
+      'ALTER ... DROP COMPACT STORAGE' statement makes Compact Tables CQL-compatible,
+      exposing internal structure of Thrift/Compact Tables. You can find more details
+      on exposed internal structure under: 
+      http://cassandra.apache.org/doc/latest/cql/appendices.html#appendix-c-dropping-compact-storage
+
+      For uninterrupted cluster upgrades, drivers now support 'NO_COMPACT' startup option.
+      Supplying this flag will have same effect as 'DROP COMPACT STORAGE', but only for the
+      current connection.
+
+      In order to upgrade, clients supporting a non-compact schema view can be rolled out
+      gradually. When all the clients are updated 'ALTER ... DROP COMPACT STORAGE' can be
+      executed. After dropping compact storage, ’NO_COMPACT' option will have no effect
+      after that.
+
 Materialized Views (only when upgrading from DSE 5.1.1 or 5.1.2 or any version lower than DSE 5.0.10)
 ---------------------------------------------------------------------------------------
     - Cassandra will no longer allow dropping columns on tables with Materialized Views.

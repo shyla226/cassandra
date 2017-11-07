@@ -533,7 +533,7 @@ public class BatchStatement implements CQLStatement
                 statement.prepareKeyspace(state);
         }
 
-        public ParsedStatement.Prepared prepare() throws InvalidRequestException
+        public ParsedStatement.Prepared prepare(ClientState clientState) throws InvalidRequestException
         {
             VariableSpecifications boundNames = getBoundVariables();
 
@@ -554,7 +554,7 @@ public class BatchStatement implements CQLStatement
                     haveMultipleCFs = !firstKS.equals(parsed.keyspace()) || !firstCF.equals(parsed.columnFamily());
                 }
 
-                statements.add(parsed.prepare(boundNames));
+                statements.add(parsed.prepare(boundNames, clientState));
             }
 
             Attributes prepAttrs = attrs.prepare("[batch]", "[batch]");

@@ -46,7 +46,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
 {
     public enum Type
     {
-        ADD, ALTER, DROP, OPTS, RENAME
+        ADD, ALTER, DROP, DROP_COMPACT_STORAGE, OPTS, RENAME
     }
 
     public final Type oType;
@@ -86,7 +86,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
         if (meta.isView())
             throw new InvalidRequestException("Cannot use ALTER TABLE on Materialized View");
 
-        CFMetaData cfm = meta.copy();
+        CFMetaData cfm;
         ColumnIdentifier columnName = null;
         ColumnDefinition def = null;
         CQL3Type.Raw dataType = null;
@@ -101,8 +101,10 @@ public class AlterTableStatement extends SchemaAlteringStatement
             case ALTER:
                 throw new InvalidRequestException("Altering of types is not allowed");
             case ADD:
-                if (cfm.isDense())
+                if (meta.isDense())
                     throw new InvalidRequestException("Cannot add new column to a COMPACT STORAGE table");
+
+                cfm = meta.copy();
 
                 for (AlterTableStatementColumn colData : colNameList)
                 {
@@ -186,8 +188,10 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 break;
 
             case DROP:
-                if (!cfm.isCQLTable())
+                if (!meta.isCQLTable())
                     throw new InvalidRequestException("Cannot drop columns from a non-CQL3 table");
+
+                cfm = meta.copy();
 
                 for (AlterTableStatementColumn colData : colNameList)
                 {
@@ -241,10 +245,18 @@ public class AlterTableStatement extends SchemaAlteringStatement
                                                                         keyspace()));
                 }
                 break;
+            case DROP_COMPACT_STORAGE:
+                if (!meta.isCompactTable())
+                    throw new InvalidRequestException("Cannot DROP COMPACT STORAGE on table without COMPACT STORAGE");
+
+                cfm = meta.asNonCompact();
+                break;
             case OPTS:
                 if (attrs == null)
                     throw new InvalidRequestException("ALTER TABLE WITH invoked, but no parameters found");
                 attrs.validate();
+
+                cfm = meta.copy();
 
                 TableParams params = attrs.asAlteredTableParams(cfm.params);
                 if (params.compaction.klass().equals(DateTieredCompactionStrategy.class) &&
@@ -269,6 +281,8 @@ public class AlterTableStatement extends SchemaAlteringStatement
 
                 break;
             case RENAME:
+                cfm = meta.copy();
+
                 for (Map.Entry<ColumnDefinition.Raw, ColumnDefinition.Raw> entry : renames.entrySet())
                 {
                     ColumnIdentifier from = entry.getKey().getIdentifier(cfm);
@@ -291,6 +305,8 @@ public class AlterTableStatement extends SchemaAlteringStatement
                     }
                 }
                 break;
+            default:
+                throw new InvalidRequestException("Can not alter table: unknown option type " + oType);
         }
 
         MigrationManager.announceColumnFamilyUpdate(cfm, viewUpdates, isLocalOnly);

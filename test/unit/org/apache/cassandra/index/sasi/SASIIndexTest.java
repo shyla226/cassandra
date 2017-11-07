@@ -69,6 +69,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.thrift.CqlRow;
@@ -2537,7 +2538,7 @@ public class SASIIndexTest
 
     private Set<String> executeCQLWithKeys(String rawStatement) throws Exception
     {
-        SelectStatement statement = (SelectStatement) QueryProcessor.parseStatement(rawStatement).prepare().statement;
+        SelectStatement statement = (SelectStatement) QueryProcessor.parseStatement(rawStatement).prepare(ClientState.forInternalCalls()).statement;
         ResultMessage.Rows cqlRows = statement.executeInternal(QueryState.forInternalCalls(), QueryOptions.DEFAULT);
 
         Set<String> results = new TreeSet<>();
