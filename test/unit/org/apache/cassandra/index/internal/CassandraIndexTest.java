@@ -41,6 +41,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -327,21 +328,6 @@ public class CassandraIndexTest extends CQLTester
     }
 
     @Test
-    public void indexOnRegularColumnWithCompactStorage() throws Throwable
-    {
-        new TestScript().tableDefinition("CREATE TABLE %s (k int, v int, PRIMARY KEY (k)) WITH COMPACT STORAGE;")
-                        .target("v")
-                        .withFirstRow(row(0, 0))
-                        .withSecondRow(row(1,1))
-                        .missingIndexMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE)
-                        .firstQueryExpression("v=0")
-                        .secondQueryExpression("v=1")
-                        .updateExpression("SET v=2")
-                        .postUpdateQueryExpression("v=2")
-                        .run();
-    }
-
-    @Test
     public void indexOnStaticColumn() throws Throwable
     {
         Object[] row1 = row("k0", "c0", "s0");
@@ -522,9 +508,8 @@ public class CassandraIndexTest extends CQLTester
         waitForIndex(KEYSPACE, tableName, indexName);
 
         // check that there are no other rows in the built indexes table
-        indexes = TPCUtils.blockingGet(SystemKeyspace.getBuiltIndexes(KEYSPACE));
-        assertEquals(1, indexes.size());
-        assertEquals(indexName, indexes.get(0));
+        assertRows(execute(String.format("SELECT * FROM %s.\"%s\"", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BUILT_INDEXES)),
+                   row(KEYSPACE, indexName, null ));
     }
 
 

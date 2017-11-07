@@ -96,7 +96,6 @@ public class KeysSearcher extends CassandraIndexSearcher
                                                       int nowInSec)
     throws Exception
     {
-        assert partition.header().metadata.isCompactTable();
         Row data = partition.staticRow();
         if (!index.isStale(data, indexedValue, nowInSec))
             return partition;

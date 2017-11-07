@@ -263,6 +263,10 @@ QUOTED_NAME
     : '\"' (c=~('\"') { b.appendCodePoint(c); } | '\"' '\"' { b.appendCodePoint('\"'); })+ '\"'
     ;
 
+EMPTY_QUOTED_NAME
+    : '\"' '\"'
+    ;
+
 fragment DIGIT
     : '0'..'9'
     ;

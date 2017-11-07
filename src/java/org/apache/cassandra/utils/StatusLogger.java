@@ -20,6 +20,7 @@ package org.apache.cassandra.utils;
 import java.lang.management.ManagementFactory;
 import java.util.Arrays;
 import java.util.TreeSet;
+import java.util.concurrent.locks.ReentrantLock;
 import javax.management.MBeanServer;
 
 import com.google.common.collect.Multimap;
@@ -27,6 +28,7 @@ import com.google.common.collect.Multimap;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.metrics.ThreadPoolMetrics;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,9 +48,30 @@ import org.apache.cassandra.utils.memory.BufferPool;
 public class StatusLogger
 {
     private static final Logger logger = LoggerFactory.getLogger(StatusLogger.class);
-
+    private static final ReentrantLock busyMonitor = new ReentrantLock();
 
     public static void log()
+    {
+        // avoid logging more than once at the same time. throw away any attempts to log concurrently, as it would be
+        // confusing and noisy for operators - and don't bother logging again, immediately as it'll just be the same data
+        if (busyMonitor.tryLock())
+        {
+            try
+            {
+                logStatus();
+            }
+            finally
+            {
+                busyMonitor.unlock();
+            }
+        }
+        else
+        {
+            logger.trace("StatusLogger is busy");
+        }
+    }
+
+    private static void logStatus()
     {
         MBeanServer server = ManagementFactory.getPlatformMBeanServer();
 
