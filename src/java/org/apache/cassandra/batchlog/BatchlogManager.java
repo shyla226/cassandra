@@ -36,7 +36,6 @@ import io.reactivex.Completable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
@@ -59,6 +58,7 @@ import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.net.EmptyPayload;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.net.Response;
@@ -80,8 +80,9 @@ public class BatchlogManager implements BatchlogManagerMBean
     private static final WriteVersion CURRENT_VERSION = Version.last(WriteVersion.class);
 
     public static final String MBEAN_NAME = "org.apache.cassandra.db:type=BatchlogManager";
-    private static final long REPLAY_INTERVAL = 10 * 1000; // milliseconds
-    static final int DEFAULT_PAGE_SIZE = 128;
+    private static final long REPLAY_INITIAL_DELAY = Long.getLong("dse.batchlog.replay_initial_delay_in_ms", StorageService.RING_DELAY); // milliseconds
+    private static final long REPLAY_INTERVAL = Long.getLong("dse.batchlog.replay_interval_in_ms", 10 * 1000); // milliseconds
+    static final int DEFAULT_PAGE_SIZE = Integer.getInteger("dse.batchlog.page_size", 128);
 
     private static final Logger logger = LoggerFactory.getLogger(BatchlogManager.class);
     public static final BatchlogManager instance = new BatchlogManager();
@@ -114,10 +115,16 @@ public class BatchlogManager implements BatchlogManagerMBean
             throw new RuntimeException(e);
         }
 
-        batchlogTasks.scheduleWithFixedDelay(this::replayFailedBatches,
-                                             StorageService.RING_DELAY,
-                                             REPLAY_INTERVAL,
-                                             TimeUnit.MILLISECONDS);
+        if (REPLAY_INTERVAL > 0L)
+        {
+            logger.debug("Scheduling batchlog replay initially after {} ms, then every {} ms", REPLAY_INITIAL_DELAY, REPLAY_INTERVAL);
+            batchlogTasks.scheduleWithFixedDelay(this::replayFailedBatches,
+                                                 REPLAY_INITIAL_DELAY,
+                                                 REPLAY_INTERVAL,
+                                                 TimeUnit.MILLISECONDS);
+        }
+        else
+            logger.warn("Scheduled batchlog replay disabled (dse.batchlog.replay_interval_in_ms)");
     }
 
     public void shutdown() throws InterruptedException
@@ -288,6 +295,11 @@ public class BatchlogManager implements BatchlogManagerMBean
                 }
                 else
                 {
+                    // we get here, if there are no live endpoints for the current batch
+                    StorageMetrics.hintedBatchlogReplays.mark();
+                    if (logger.isTraceEnabled())
+                        logger.trace("Failed to replay batchlog {} of age {} seconds with {} mutations, will write hints. Reason/failure: remote endpoints not alive",
+                                     id, TimeUnit.MILLISECONDS.toSeconds(batch.ageInMillis()), batch.mutations.size());
                     remove(id).blockingAwait(); // no write mutations were sent (either expired or all CFs involved truncated).
                     ++totalBatchesReplayed;
                 }
@@ -311,7 +323,11 @@ public class BatchlogManager implements BatchlogManagerMBean
         finishAndClearBatches(unfinishedBatches, hintedNodes, replayedBatches);
 
         // to preserve batch guarantees, we must ensure that hints (if any) have made it to disk, before deleting the batches
-        HintsService.instance.flushAndFsyncBlockingly(transform(hintedNodes, StorageService.instance::getHostIdForEndpoint));
+        if (!hintedNodes.isEmpty())
+        {
+            logger.trace("Batchlog replay created hints for {} nodes", hintedNodes.size());
+            HintsService.instance.flushAndFsyncBlockingly(transform(hintedNodes, StorageService.instance::getHostIdForEndpoint));
+        }
 
         // once all generated hints are fsynced, actually delete the batches
         replayedBatches.forEach(uuid -> BatchlogManager.remove(uuid).blockingAwait());
@@ -352,6 +368,11 @@ public class BatchlogManager implements BatchlogManagerMBean
             this.replayedBytes = addMutations(version, serializedMutations);
         }
 
+        public long ageInMillis()
+        {
+            return System.currentTimeMillis() - UUIDGen.getAdjustedTimestamp(id);
+        }
+
         public int replay(RateLimiter rateLimiter, Set<InetAddress> hintedNodes) throws IOException
         {
             logger.trace("Replaying batch {}", id);
@@ -379,15 +400,22 @@ public class BatchlogManager implements BatchlogManagerMBean
                 {
                     handler.get();
                 }
-                catch (WriteTimeoutException|WriteFailureException e)
+                catch (WriteTimeoutException | WriteFailureException e)
                 {
-                    logger.trace("Failed replaying a batched mutation to a node, will write a hint");
-                    logger.trace("Failure was : {}", e.getMessage());
                     // writing hints for the rest to hints, starting from i
+                    StorageMetrics.hintedBatchlogReplays.mark();
                     writeHintsForUndeliveredEndpoints(i, hintedNodes);
+                    if (logger.isTraceEnabled())
+                        logger.trace("Failed to replay batchlog {} of age {} seconds with {} mutations, will write hints. Reason/failure: {}",
+                                     id, TimeUnit.MILLISECONDS.toSeconds(ageInMillis()), mutations.size(), e.getMessage());
                     return;
                 }
             }
+
+            if (logger.isTraceEnabled())
+                logger.trace("Finished replay of batchlog {} of age {} seconds with {} mutations",
+                             id, TimeUnit.MILLISECONDS.toSeconds(ageInMillis()), mutations.size());
+            StorageMetrics.batchlogReplays.mark();
         }
 
         private int addMutations(WriteVersion version, List<ByteBuffer> serializedMutations) throws IOException
@@ -469,16 +497,17 @@ public class BatchlogManager implements BatchlogManagerMBean
             if (endpoints.liveCount() == 0)
                 return null;
 
-            ReplayWriteHandler handler = ReplayWriteHandler.create(endpoints, System.nanoTime());
+            ReplayWriteHandler handler = null;
             for (InetAddress live : endpoints.live())
             {
                 if (live.equals(FBUtilities.getBroadcastAddress()))
                 {
                     mutation.apply();
-                    handler.onLocalResponse();
                 }
                 else
                 {
+                    if (handler == null)
+                        handler = ReplayWriteHandler.create(endpoints.withoutLocalhost(), System.nanoTime());
                     MessagingService.instance().send(Verbs.WRITES.WRITE.newRequest(live, mutation), handler);
                 }
             }
@@ -509,8 +538,22 @@ public class BatchlogManager implements BatchlogManagerMBean
 
             static ReplayWriteHandler create(WriteEndpoints endpoints, long queryStartNanos)
             {
+                ConsistencyLevel cl;
+                switch (endpoints.liveCount())
+                {
+                    case 0:
+                        // just fall through - no live endpoints
+                    case 1:
+                        cl = ConsistencyLevel.ONE;
+                        break;
+                    case 2:
+                        cl = ConsistencyLevel.TWO;
+                        break;
+                    default:
+                        throw new AssertionError("Invalid number of live endpoints for batchlog replay: " + endpoints.liveCount());
+                }
                 WriteHandler handler = WriteHandler.create(endpoints,
-                                                           ConsistencyLevel.ALL,
+                                                           cl,
                                                            WriteType.UNLOGGED_BATCH,
                                                            queryStartNanos);
                 return new ReplayWriteHandler(handler);
