@@ -524,7 +524,7 @@ public class QueryProcessor implements QueryHandler
             ((CFStatement)statement).prepareKeyspace(clientState);
 
         Tracing.trace("Preparing statement");
-        return statement.prepare();
+        return statement.prepare(clientState);
     }
 
     public static ParsedStatement parseStatement(String queryStr) throws SyntaxException
