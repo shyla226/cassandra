@@ -985,6 +985,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (dataAvailable)
             {
                 finishJoiningRing(bootstrap, bootstrapTokens);
+
                 // remove the existing info about the replaced node.
                 if (!current.isEmpty())
                 {
@@ -995,11 +996,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             else
             {
                 logger.warn("Some data streaming failed. Use nodetool to check bootstrap state and resume. For more, see `nodetool help bootstrap`. {}", SystemKeyspace.getBootstrapState());
+                TPCUtils.blockingAwait(doAuthSetup());
             }
         }
         else
         {
             logger.info("Startup complete, but write survey mode is active, not becoming an active ring member. Use JMX (StorageService->joinRing()) to finalize ring joining.");
+            TPCUtils.blockingAwait(doAuthSetup());
         }
     }
 
