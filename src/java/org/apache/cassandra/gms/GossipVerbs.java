@@ -29,7 +29,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.net.DroppedMessages;
+import org.apache.cassandra.net.DroppingResponseException;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.Verb.AckedRequest;
 import org.apache.cassandra.net.Verb.OneWay;
@@ -37,6 +39,7 @@ import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.VerbGroup;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.VerbHandlers;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.versioning.Version;
 
 public class GossipVerbs extends VerbGroup<GossipVerbs.GossipVersion>
@@ -72,7 +75,7 @@ public class GossipVerbs extends VerbGroup<GossipVerbs.GossipVersion>
                      .handler(new ShutdownHandler());
         ECHO = helper.ackedRequest("ECHO", EmptyPayload.class)
                      .timeout(DatabaseDescriptor::getRpcTimeout)
-                     .syncHandler((from, x) -> {});
+                     .syncHandler(new EchoHandler());
     }
 
     private static class SynHandler implements VerbHandlers.OneWay<GossipDigestSyn>
@@ -278,6 +281,16 @@ public class GossipVerbs extends VerbGroup<GossipVerbs.GossipVersion>
                 logger.debug("Ignoring shutdown message from {} because gossip is disabled", from);
             else
                 Gossiper.instance.markAsShutdown(from);
+        }
+    }
+
+    private static class EchoHandler implements VerbHandlers.SyncAckedRequest<EmptyPayload>
+    {
+        @Override
+        public void handleSync(InetAddress from, EmptyPayload message)
+        {
+            if (!SystemKeyspace.bootstrapInProgress() && !StorageService.instance.isInitialized())
+                throw new DroppingResponseException();
         }
     }
 }

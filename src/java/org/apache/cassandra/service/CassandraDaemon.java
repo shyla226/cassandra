@@ -452,17 +452,6 @@ public class CassandraDaemon
         // Native transport
         nativeTransportService = new NativeTransportService();
 
-        // Invalidate the cached ring information so that the next call to get the TPC boundaries will find a new
-        // ring version and recompute:
-        StorageService.instance.getTokenMetadata().invalidateCachedRings();
-
-        // During initialization memtables do not know the correct token boundaries to use.
-        // Flush all to make sure they get updated (DB-939).
-        // There should be no data in the tables at this time, so this should complete very quickly.
-        // Wait for it before signalling we are ready.
-        FBUtilities.waitOnFutures(Iterables.concat(Iterables.transform(Keyspace.all(),
-                                                                       Keyspace::flush)));
-
         completeSetup();
     }
 
