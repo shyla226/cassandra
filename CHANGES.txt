@@ -2,7 +2,6 @@
  * Allow only one concurrent call to StatusLogger (CASSANDRA-12182)
  * Refactoring to specialised functional interfaces (CASSANDRA-13982)
  * Speculative retry should allow more friendly params (CASSANDRA-13876)
- * Throw exception if we send/receive repair messages to incompatible nodes (CASSANDRA-13944)
  * Replace usages of MessageDigest with Guava's Hasher (CASSANDRA-13291)
  * Add nodetool cmd to print hinted handoff window (CASSANDRA-13728)
  * Fix some alerts raised by static analysis (CASSANDRA-13799)
