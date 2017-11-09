@@ -26,9 +26,12 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ByteSource;
 
-public interface PartitionPosition extends RingPosition<PartitionPosition>
+public abstract class PartitionPosition implements RingPosition<PartitionPosition>
 {
-    public static enum Kind
+    protected final Token token;
+    protected final Kind kind;
+
+    public enum Kind
     {
         // Only add new values to the end of the enum, the ordinal is used
         // during serialization
@@ -52,9 +55,24 @@ public interface PartitionPosition extends RingPosition<PartitionPosition>
 
     public static final RowPositionSerializer serializer = new RowPositionSerializer();
 
-    public Kind kind();
-    public boolean isMinimum();
-    public ByteSource asByteComparableSource();
+    protected PartitionPosition(Token token, Kind kind)
+    {
+        this.token = token;
+        this.kind = kind;
+    }
+
+    public final Token getToken()
+    {
+        return token;
+    }
+
+    public final Kind kind()
+    {
+        return kind;
+    }
+
+    public abstract boolean isMinimum();
+    public abstract ByteSource asByteComparableSource();
 
     public static class RowPositionSerializer implements IPartitionerDependentSerializer<PartitionPosition, BoundsVersion>
     {

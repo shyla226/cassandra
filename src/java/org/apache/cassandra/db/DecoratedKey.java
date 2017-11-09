@@ -37,7 +37,7 @@ import org.apache.cassandra.utils.IFilter.FilterKey;
  * if this matters, you can subclass RP to use a stronger hash, or use a non-lossy tokenization scheme (as in the
  * OrderPreservingPartitioner classes).
  */
-public abstract class DecoratedKey implements PartitionPosition, FilterKey
+public abstract class DecoratedKey extends PartitionPosition implements FilterKey
 {
     public static final Comparator<DecoratedKey> comparator = new Comparator<DecoratedKey>()
     {
@@ -47,12 +47,10 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         }
     };
 
-    private final Token token;
-
     public DecoratedKey(Token token)
     {
+        super(token, PartitionPosition.Kind.ROW_KEY);
         assert token != null;
-        this.token = token;
     }
 
     @Override
@@ -78,13 +76,15 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         if (this == pos)
             return 0;
 
+        int cmp = token.compareTo(pos.token);
+        if (cmp != 0)
+            return cmp;
+
         // delegate to Token.KeyBound if needed
-        if (!(pos instanceof DecoratedKey))
+        if (pos.kind != Kind.ROW_KEY)
             return -pos.compareTo(this);
 
-        DecoratedKey otherKey = (DecoratedKey) pos;
-        int cmp = getToken().compareTo(otherKey.getToken());
-        return cmp == 0 ? ByteBufferUtil.compareUnsigned(getKey(), otherKey.getKey()) : cmp;
+        return ByteBufferUtil.compareUnsigned(getKey(), ((DecoratedKey) pos).getKey());
     }
 
     public static int compareTo(IPartitioner partitioner, ByteBuffer key, PartitionPosition position)
@@ -100,12 +100,12 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
 
     public ByteSource asByteComparableSource()
     {
-        return ByteSource.of(getToken().asByteComparableSource(), ByteSource.of(getKey()));
+        return ByteSource.of(token.asByteComparableSource(), ByteSource.of(getKey()));
     }
 
     public IPartitioner getPartitioner()
     {
-        return getToken().getPartitioner();
+        return token.getPartitioner();
     }
 
     public KeyBound minValue()
@@ -119,21 +119,11 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         return false;
     }
 
-    public PartitionPosition.Kind kind()
-    {
-        return PartitionPosition.Kind.ROW_KEY;
-    }
-
     @Override
     public String toString()
     {
         String keystring = getKey() == null ? "null" : ByteBufferUtil.bytesToHex(getKey());
         return "DecoratedKey(" + getToken() + ", " + keystring + ")";
-    }
-
-    public Token getToken()
-    {
-        return token;
     }
 
     public abstract ByteBuffer getKey();

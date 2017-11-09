@@ -144,20 +144,11 @@ public abstract class Token implements RingPosition<Token>, Serializable
             return (R)maxKeyBound();
     }
 
-    public static class KeyBound implements PartitionPosition
+    public static class KeyBound extends PartitionPosition
     {
-        private final Token token;
-        public final boolean isMinimumBound;
-
         private KeyBound(Token t, boolean isMinimumBound)
         {
-            this.token = t;
-            this.isMinimumBound = isMinimumBound;
-        }
-
-        public Token getToken()
-        {
-            return token;
+            super(t, isMinimumBound ? PartitionPosition.Kind.MIN_BOUND : PartitionPosition.Kind.MAX_BOUND);
         }
 
         public int compareTo(PartitionPosition pos)
@@ -165,24 +156,24 @@ public abstract class Token implements RingPosition<Token>, Serializable
             if (this == pos)
                 return 0;
 
-            int cmp = getToken().compareTo(pos.getToken());
+            int cmp = token.compareTo(pos.getToken());
             if (cmp != 0)
                 return cmp;
 
-            if (isMinimumBound)
-                return ((pos instanceof KeyBound) && ((KeyBound)pos).isMinimumBound) ? 0 : -1;
+            if (kind == Kind.MIN_BOUND)
+                return pos.kind() == Kind.MIN_BOUND ? 0 : -1;
             else
-                return ((pos instanceof KeyBound) && !((KeyBound)pos).isMinimumBound) ? 0 : 1;
+                return pos.kind() == Kind.MAX_BOUND ? 0 : 1;
         }
 
         public ByteSource asByteComparableSource()
         {
-            return ByteSource.withTerminator(isMinimumBound ? ByteSource.LT_NEXT_COMPONENT : ByteSource.GT_NEXT_COMPONENT, getToken().asByteComparableSource());
+            return ByteSource.withTerminator(kind == Kind.MIN_BOUND ? ByteSource.LT_NEXT_COMPONENT : ByteSource.GT_NEXT_COMPONENT, token.asByteComparableSource());
         }
 
         public IPartitioner getPartitioner()
         {
-            return getToken().getPartitioner();
+            return token.getPartitioner();
         }
 
         public KeyBound minValue()
@@ -192,12 +183,7 @@ public abstract class Token implements RingPosition<Token>, Serializable
 
         public boolean isMinimum()
         {
-            return getToken().isMinimum();
-        }
-
-        public PartitionPosition.Kind kind()
-        {
-            return isMinimumBound ? PartitionPosition.Kind.MIN_BOUND : PartitionPosition.Kind.MAX_BOUND;
+            return token.isMinimum();
         }
 
         @Override
@@ -209,19 +195,19 @@ public abstract class Token implements RingPosition<Token>, Serializable
                 return false;
 
             KeyBound other = (KeyBound)obj;
-            return token.equals(other.token) && isMinimumBound == other.isMinimumBound;
+            return token.equals(other.token) && kind == other.kind;
         }
 
         @Override
         public int hashCode()
         {
-            return getToken().hashCode() + (isMinimumBound ? 0 : 1);
+            return token.hashCode() + (kind == Kind.MIN_BOUND ? 0 : 1);
         }
 
         @Override
         public String toString()
         {
-            return String.format("%s(%s)", isMinimumBound ? "min" : "max", getToken().toString());
+            return String.format("%s(%s)", kind == Kind.MIN_BOUND ? "min" : "max", token.toString());
         }
     }
 }

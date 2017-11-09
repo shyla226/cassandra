@@ -115,7 +115,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
 
-        this.scheduler = TPC.getForKey(Keyspace.open(metadata().keyspace), partitionKey);
+        this.scheduler = TPC.bestTPCScheduler();
         this.operationExecutor = scheduler.forTaskType(TPCTaskType.READ);
     }
 
