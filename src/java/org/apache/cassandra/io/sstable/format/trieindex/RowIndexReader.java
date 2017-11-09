@@ -66,9 +66,9 @@ class RowIndexReader extends Walker<RowIndexReader>
         super(file.rebuffererFactory().instantiateRebufferer(), root, rc);
     }
 
-    public RowIndexReader(FileHandle file, RowIndexEntry entry, Rebufferer.ReaderConstraint rc)
+    public RowIndexReader(FileHandle file, TrieIndexEntry entry, Rebufferer.ReaderConstraint rc)
     {
-        this(file, ((TrieIndexEntry) entry).indexTrieRoot, rc);
+        this(file, entry.indexTrieRoot, rc);
     }
 
     /**

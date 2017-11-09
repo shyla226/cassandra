@@ -38,9 +38,9 @@ class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterat
         super(file.rebuffererFactory().instantiateRebufferer(), root, start, end, true, rc);
     }
 
-    public RowIndexReverseIterator(FileHandle file, RowIndexEntry entry, ByteSource end, Rebufferer.ReaderConstraint rc)
+    public RowIndexReverseIterator(FileHandle file, TrieIndexEntry entry, ByteSource end, Rebufferer.ReaderConstraint rc)
     {
-        this(file, ((TrieIndexEntry) entry).indexTrieRoot, ByteSource.empty(), end, rc);
+        this(file, entry.indexTrieRoot, ByteSource.empty(), end, rc);
     }
 
     /**

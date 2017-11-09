@@ -107,7 +107,6 @@ public class KeysSearcher extends CassandraIndexSearcher
                                writeOp)
              .subscribe();    // We don't need to wait for the deletion to complete, and we don't care too much if it fails.
 
-        partition.unused();
         return null;
     }
 }

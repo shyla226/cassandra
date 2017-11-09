@@ -299,14 +299,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                            .map(val -> val == partitionLevelExpressions.size()) //all true
                            .skippingMap(allSatisfied -> {
                                if (allSatisfied)
-                               {
                                    return partition;
-                               }
                                else
-                               {
-                                   partition.unused();
                                    return null;
-                               }
                            });
 
             }).flatMap(

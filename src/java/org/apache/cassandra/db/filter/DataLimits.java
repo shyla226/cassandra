@@ -493,8 +493,6 @@ public abstract class DataLimits
                 counter.endOfPartition();
                 if (source != null)
                     source.close();
-                else
-                    partition.unused();
             }
         }
 
@@ -670,8 +668,6 @@ public abstract class DataLimits
                 counter.endOfPartition();
                 if (source != null)
                     source.close();
-                else
-                    partition.unused();
             }
         }
 

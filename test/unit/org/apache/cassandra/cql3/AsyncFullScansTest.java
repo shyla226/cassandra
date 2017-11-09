@@ -30,9 +30,9 @@ import org.junit.Test;
 import org.apache.cassandra.cache.ChunkCacheMocks;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.Throwables;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
 
 
 /**
@@ -116,7 +116,7 @@ public class AsyncFullScansTest extends CQLTester
         }
 
         latch.await(1, TimeUnit.MINUTES);
-        assertNull(error.get());
+        Throwables.maybeFail(error.get());
     }
 
     public void interceptCache()

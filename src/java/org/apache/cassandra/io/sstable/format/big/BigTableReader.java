@@ -39,14 +39,10 @@ import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
-import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.rows.Rows;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Component;
@@ -56,16 +52,16 @@ import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.IndexFileEntry;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
+import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileDataInput;
-import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.CacheService;
@@ -270,29 +266,22 @@ public class BigTableReader extends SSTableReader
         indexSummary.addTo(identities);
     }
 
-    public UnfilteredRowIterator iterator(DecoratedKey key,
-                                          Slices slices,
-                                          ColumnFilter selectedColumns,
-                                          boolean reversed,
-                                          SSTableReadsListener listener)
+    public PartitionReader reader(FileDataInput file,
+                                  boolean shouldCloseFile,
+                                  RowIndexEntry indexEntry,
+                                  SerializationHelper helper,
+                                  Slices slices,
+                                  boolean reversed,
+                                  Rebufferer.ReaderConstraint readerConstraint)
+    throws IOException
     {
-        BigRowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ, listener, Rebufferer.ReaderConstraint.NONE);
-        return iterator(null, key, rie, slices, selectedColumns, reversed, Rebufferer.ReaderConstraint.NONE);
-    }
-
-    public UnfilteredRowIterator iterator(FileDataInput file,
-                                          DecoratedKey key,
-                                          RowIndexEntry indexEntry,
-                                          Slices slices,
-                                          ColumnFilter selectedColumns,
-                                          boolean reversed,
-                                          Rebufferer.ReaderConstraint readerConstraint)
-    {
-        if (indexEntry == null)
-            return UnfilteredRowIterators.noRowsIterator(metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, reversed);
-        return reversed
-             ? new SSTableReversedIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns, readerConstraint)
-             : new SSTableIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns, readerConstraint);
+        return indexEntry.isIndexed()
+               ? reversed
+                 ? new ReverseIndexedReader(this, (BigRowIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, readerConstraint)
+                 : new ForwardIndexedReader(this, (BigRowIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, readerConstraint)
+               : reversed
+                 ? new ReverseReader(this, slices, file, shouldCloseFile, helper)
+                 : new ForwardReader(this, slices, file, shouldCloseFile, helper);
     }
 
     /**
@@ -712,15 +701,15 @@ public class BigTableReader extends SSTableReader
     }
     
     @Override
-    public RowIndexEntry getExactPosition(DecoratedKey key, Rebufferer.ReaderConstraint rc)
+    public RowIndexEntry getExactPosition(DecoratedKey key, SSTableReadsListener listener, Rebufferer.ReaderConstraint rc)
     {
-        return getPosition(key, Operator.EQ, rc);
+        return getPosition(key, Operator.EQ, listener, rc);
     }
 
     @Override
     public boolean contains(DecoratedKey key, Rebufferer.ReaderConstraint rc)
     {
-        return getExactPosition(key, rc) != null;
+        return getExactPosition(key, SSTableReadsListener.NOOP_LISTENER, rc) != null;
     }
 
     @Override

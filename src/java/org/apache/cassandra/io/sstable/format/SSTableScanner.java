@@ -303,7 +303,7 @@ public class SSTableScanner implements ISSTableScanner
                             else
                             {
                                 ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(partitionKey());
-                                return sstable.iterator(dfile, partitionKey(), currentEntry, filter.getSlices(SSTableScanner.this.metadata()), columns, filter.isReversed(), Rebufferer.ReaderConstraint.NONE);
+                                return sstable.iterator(dfile, partitionKey(), currentEntry, filter.getSlices(SSTableScanner.this.metadata()), columns, filter.isReversed());
                             }
                         }
                         catch (CorruptSSTableException e)

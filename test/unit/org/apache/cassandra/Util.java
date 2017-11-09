@@ -446,10 +446,8 @@ public class Util
     public static Flow<DecoratedKey> nonEmptyKeys(FlowablePartitionBase partition) throws Exception
     {
         if (!partition.staticRow().isEmpty() || !partition.partitionLevelDeletion().isLive())
-        {
-            partition.unused();
             return Flow.just(partition.partitionKey());
-        }
+
         return partition.content().take(1).map(x -> partition.partitionKey());
     }
 

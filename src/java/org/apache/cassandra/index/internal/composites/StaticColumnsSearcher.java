@@ -110,7 +110,6 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
                                    entry.indexClustering,
                                    new DeletionTime(entry.timestamp, nowInSec),
                                    writeOp).subscribe();    // We don't need to wait for completion.
-            dataIter.unused();
             return null;  // tpc TODO was empty partition. why?
         }
 

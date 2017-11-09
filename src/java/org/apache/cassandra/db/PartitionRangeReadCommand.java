@@ -352,12 +352,7 @@ public class PartitionRangeReadCommand extends ReadCommand
                                               ClusteringIndexFilter filter = dataRange().clusteringIndexFilter(dk);
 
                                               if (cached != null && cfs.isFilterFullyCoveredBy(filter, limits(), cached, nowInSec(), metadata().enforceStrictLiveness()))
-                                              {
-                                                  // The partition will not be used, so abort it.
-                                                  partition.unused();
-
                                                   return filter.getFlowableUnfilteredPartition(columnFilter(), cached);
-                                              }
 
                                               return partition;
                                           });

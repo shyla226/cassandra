@@ -23,14 +23,15 @@ import java.util.Comparator;
 import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ClusteringPrefix;
-import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator.Reader;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.io.sstable.format.AbstractReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.Rebufferer;
 
 // Used by indexed readers to store where they are of the index.
 public class IndexState implements AutoCloseable
 {
-    private final Reader reader;
+    private final AbstractReader reader;
 
     private final BigRowIndexEntry indexEntry;
     private final BigRowIndexEntry.IndexInfoRetriever indexInfoRetriever;
@@ -43,7 +44,7 @@ public class IndexState implements AutoCloseable
     private long startOfBlock;
     private Comparator<IndexInfo> indexComparator;
 
-    public IndexState(Reader reader, ClusteringComparator comparator, BigRowIndexEntry indexEntry, boolean reversed, FileHandle indexFile, Rebufferer.ReaderConstraint rc)
+    public IndexState(AbstractReader reader, ClusteringComparator comparator, BigRowIndexEntry indexEntry, boolean reversed, FileHandle indexFile, Rebufferer.ReaderConstraint rc)
     {
         this.reader = reader;
         this.indexEntry = indexEntry;
@@ -111,7 +112,6 @@ public class IndexState implements AutoCloseable
 
         while (currentIndexIdx + 1 < indexEntry.rowIndexCount() && isPastCurrentBlock())
         {
-            reader.openMarker = currentIndex().endOpenMarker;
             ++currentIndexIdx;
 
             startOfBlock = columnOffset(currentIndexIdx);

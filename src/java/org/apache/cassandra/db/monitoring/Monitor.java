@@ -246,16 +246,8 @@ public class Monitor
 
         return partitions.map(partition ->
                               {
-                                  try
-                                  {
-                                      check();
-                                      return partition.mapContent(checkForAbort);
-                                  }
-                                  catch (Throwable t)
-                                  {
-                                      partition.unused();
-                                      throw t;
-                                  }
+                                  check();
+                                  return partition.mapContent(checkForAbort);
                               });
     }
 }

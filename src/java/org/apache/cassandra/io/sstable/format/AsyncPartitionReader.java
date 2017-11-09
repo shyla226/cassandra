@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,12 +41,13 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.Rebufferer.NotInCacheException;
 import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.FlowSource;
 import org.apache.cassandra.utils.flow.FlowSubscriber;
@@ -62,7 +64,7 @@ import org.apache.cassandra.utils.flow.FlowSubscriptionRecipient;
  * All reads proceed optimistically, i.e. they first proceed as if all data is already in the chunk cache. If this is the
  * case, the read can complete without delay and the requested data is passed on immediately. Otherwise the read will
  * trigger a {@link NotInCacheException} which is caught, and a retry is registered once the data is fetched
- * from disk.  This requires, on retry, first calling the {@link AbstractSSTableIterator#resetReaderState()}
+ * from disk.  This requires, on retry, first calling the {@link AbstractReader#resetReaderState()}
  * In order to start from the last finished item.
  *
  * The state logic is very straight fwd since Flow gives us guarantees that
@@ -80,14 +82,29 @@ class AsyncPartitionReader
     final SSTableReader table;
     final boolean reverse;
     final SerializationHelper helper;
-    final boolean closeDataFile;
     final boolean lowerBoundAllowed;
     Slices slices;
 
+    // We want to avoid separately opening and closing the data file for the partition and content readers and thus
+    // we try to pass control of which reader is responsible for closing it. To make sure we don't double-close
+    // when the partition reader is closed concurrently with the row reader being opened, we track the ownership
+    // changes atomically using the enum below.
+    enum DataFileOwner
+    {
+        EXTERNAL,
+        PARTITION_READER,
+        PARTITION_SUBSCRIPTION,
+        NONE
+    }
+    final AtomicReference<DataFileOwner> dataFileOwner;
+
     volatile RowIndexEntry indexEntry = null;
     volatile FileDataInput dfile = null;
-    volatile UnfilteredRowIterator ssTableIterator = null;
     volatile long filePos = -1;
+    volatile State state;
+    Row staticRow = Rows.EMPTY_STATIC_ROW;
+    DeletionTime partitionLevelDeletion = DeletionTime.LIVE;
+
 
     private AsyncPartitionReader(SSTableReader table,
                                  SSTableReadsListener listener,
@@ -108,8 +125,51 @@ class AsyncPartitionReader
         this.slices = slices;
         this.reverse = reverse;
         this.helper = new SerializationHelper(table.metadata(), table.descriptor.version.encodingVersion(), SerializationHelper.Flag.LOCAL, selectedColumns);
-        this.closeDataFile = (dfile == null);
         this.lowerBoundAllowed = lowerBoundAllowed;
+        this.dataFileOwner = new AtomicReference<>(dfile != null
+                                                   ? DataFileOwner.EXTERNAL
+                                                   : DataFileOwner.NONE);
+        this.state = indexEntry == null ? State.STARTING : State.HAVE_INDEX_ENTRY;
+    }
+
+    /**
+     * Creates a FUP from a AsyncPartitionReader
+     *
+     */
+    public static Flow<FlowableUnfilteredPartition> create(SSTableReader table,
+                                                           SSTableReadsListener listener,
+                                                           DecoratedKey key,
+                                                           Slices slices,
+                                                           ColumnFilter selectedColumns,
+                                                           boolean reverse,
+                                                           boolean lowerBoundAllowed)
+    {
+        return new AsyncPartitionReader(table, listener, key, null, null, slices, selectedColumns, reverse, lowerBoundAllowed).partitions();
+    }
+
+    /**
+     * Create a FUP from the given index entry with no other constraint.
+     */
+    public static Flow<FlowableUnfilteredPartition> create(SSTableReader table,
+                                                           FileDataInput dfile,
+                                                           SSTableReadsListener listener,
+                                                           IndexFileEntry indexEntry)
+    {
+        return new AsyncPartitionReader(table, listener, indexEntry.key, indexEntry.entry, dfile, Slices.ALL, ColumnFilter.all(table.metadata()), false, false).partitions();
+    }
+
+    /**
+     * Create a FUP from the given index entry with the given constraints.
+     */
+    public static Flow<FlowableUnfilteredPartition> create(SSTableReader table,
+                                                           FileDataInput dfile,
+                                                           SSTableReadsListener listener,
+                                                           IndexFileEntry indexEntry,
+                                                           Slices slices,
+                                                           ColumnFilter selectedColumns,
+                                                           boolean reversed)
+    {
+        return new AsyncPartitionReader(table, listener, indexEntry.key, indexEntry.entry, dfile, slices, selectedColumns, reversed, false).partitions();
     }
 
     /**
@@ -131,78 +191,7 @@ class AsyncPartitionReader
     {
         final StatsMetadata m = table.getSSTableMetadata();
         List<ByteBuffer> vals = reverse ? m.maxClusteringValues : m.minClusteringValues;
-        return ClusteringBound.inclusiveOpen(reverse, vals.toArray(new ByteBuffer[0]));
-    }
-
-    /**
-     * Initializes iterator lazily.
-     * @return null if table index entry is empty and partition is not present.
-     */
-    UnfilteredRowIterator initializeIterator() throws IOException
-    {
-        // If this is a retry the indexEntry may be already read.
-        if (indexEntry == null)
-        {
-            indexEntry = table.getPosition(key, SSTableReader.Operator.EQ, listener, ReaderConstraint.ASYNC);
-
-            if (indexEntry == null)
-                return null;
-        }
-
-        assert ssTableIterator == null;
-
-        if (dfile == null)
-            dfile = table.getFileDataInput(indexEntry.position, ReaderConstraint.ASYNC);
-        else
-            dfile.seek(indexEntry.position);
-
-        UnfilteredRowIterator ret;
-        if (slices == null && selectedColumns == null)
-            ret = table.simpleIterator(dfile, key, indexEntry, false);
-        else
-            ret = table.iterator(dfile, key, indexEntry, slices, selectedColumns, reverse, ReaderConstraint.ASYNC);
-        filePos = dfile.getFilePointer();
-
-        return ret;
-    }
-
-    /**
-     * Creates a FUP from a AsyncPartitionReader
-     */
-    public static Flow<FlowableUnfilteredPartition> create(SSTableReader table,
-                                                           SSTableReadsListener listener,
-                                                           DecoratedKey key,
-                                                           Slices slices,
-                                                           ColumnFilter selectedColumns,
-                                                           boolean reverse,
-                                                           boolean lowerBoundAllowed)
-    {
-        return new AsyncPartitionReader(table, listener, key, null, null, slices, selectedColumns, reverse, lowerBoundAllowed).partitions();
-    }
-
-    /**
-     * Create a FUP from the given index entry with no other constraint.
-     */
-    public static Flow<FlowableUnfilteredPartition> create(SSTableReader table,
-                                                           FileDataInput dfile,
-                                                           SSTableReadsListener listener,
-                                                           IndexFileEntry indexEntry)
-    {
-        return new AsyncPartitionReader(table, listener, indexEntry.key, indexEntry.entry, dfile, null, null, false, false).partitions();
-    }
-
-    /**
-     * Create a FUP from the given index entry with the given constraints.
-     */
-    public static Flow<FlowableUnfilteredPartition> create(SSTableReader table,
-                                                           FileDataInput dfile,
-                                                           SSTableReadsListener listener,
-                                                           IndexFileEntry indexEntry,
-                                                           Slices slices,
-                                                           ColumnFilter selectedColumns,
-                                                           boolean reversed)
-    {
-        return new AsyncPartitionReader(table, listener, indexEntry.key, indexEntry.entry, dfile, slices, selectedColumns, reversed, false).partitions();
+        return ClusteringBound.inclusiveOpen(reverse, vals.toArray(new ByteBuffer[vals.size()]));
     }
 
     public Flow<FlowableUnfilteredPartition> partitions()
@@ -245,6 +234,11 @@ class AsyncPartitionReader
                      },
                      onReadyExecutor);
         }
+        catch (IOException | IndexOutOfBoundsException e)
+        {
+            reader.table().markSuspect();
+            reader.onError(new CorruptSSTableException(e, reader.table().getFilename()));
+        }
         catch (Throwable t)
         {
             reader.onError(t);
@@ -255,36 +249,104 @@ class AsyncPartitionReader
     {
         void performRead(boolean isRetry) throws Exception;
         void onError(Throwable t);
+        SSTableReader table();
+    }
+
+    enum State
+    {
+        STARTING,
+        HAVE_INDEX_ENTRY,
+        HAVE_DFILE,
+        HAVE_SKIPPED_KEY,
+        HAVE_DELETION_TIME,
+        PREPARED
+    }
+
+    /**
+     * Called (and continued after NotInCacheException) to prepare the partition-level data and to seek to the
+     * first row in non-indexed partitions.
+     * Returns false if row isn't present.
+     */
+    public boolean prepareRow() throws Exception
+    {
+        if (filePos != -1)
+            dfile.seek(filePos);
+
+        switch (state)
+        {
+        case STARTING:
+            assert indexEntry == null;
+            indexEntry = table.getExactPosition(key, listener, ReaderConstraint.ASYNC);
+
+            if (indexEntry == null)
+            {
+                state = State.PREPARED;
+                return false;
+            }
+            state = State.HAVE_INDEX_ENTRY;
+            // else fall through
+        case HAVE_INDEX_ENTRY:
+            boolean needSeekAtPartitionStart = !indexEntry.isIndexed() || !selectedColumns.fetchedColumns().statics.isEmpty();
+            if (!needSeekAtPartitionStart)
+            {
+                partitionLevelDeletion = indexEntry.deletionTime();
+                staticRow = Rows.EMPTY_STATIC_ROW;
+                state = State.PREPARED;
+                return true;  // no need to open or read data file, issue directly
+            }
+
+            if (dataFileOwner.compareAndSet(DataFileOwner.NONE, DataFileOwner.PARTITION_READER))
+                dfile = table.openDataReader(ReaderConstraint.ASYNC);   // This does not include a read and can't throw
+
+            filePos = indexEntry.position;
+            state = State.HAVE_DFILE;
+            dfile.seek(filePos);
+            // fall through
+        case HAVE_DFILE:
+            ByteBufferUtil.skipShortLength(dfile); // Skip partition key
+            filePos = dfile.getFilePointer();
+            state = State.HAVE_SKIPPED_KEY;
+            // fall through
+        case HAVE_SKIPPED_KEY:
+            partitionLevelDeletion = DeletionTime.serializer.deserialize(dfile);
+            filePos = dfile.getFilePointer();
+            state = State.HAVE_DELETION_TIME;
+            // fall through
+        case HAVE_DELETION_TIME:
+            staticRow = SSTableReader.readStaticRow(table, dfile, helper, selectedColumns.fetchedColumns().statics);
+            filePos = dfile.getFilePointer();
+            state = State.PREPARED;
+            // we're done
+            return true;
+        case PREPARED:
+        default:
+            throw new AssertionError();
+        }
     }
 
     class PartitionReader extends FlowSource<FlowableUnfilteredPartition> implements Reader
     {
         final TPCScheduler onReadyExecutor = TPC.bestTPCScheduler();
-        boolean issued = false;
 
         /**
          * This method must be async-read-safe.
          */
         public void performRead(boolean isRetry) throws Exception
         {
-            assert !issued;
-
-            // Short-circuit the empty partition case
-            if ((ssTableIterator = initializeIterator()) == null)
+            if (!prepareRow())
             {
                 subscriber.onComplete();
                 return;
             }
 
-            PartitionHeader header = new PartitionHeader(ssTableIterator.metadata(),
-                                                         ssTableIterator.partitionKey(),
-                                                         ssTableIterator.partitionLevelDeletion(),
-                                                         ssTableIterator.columns(),
-                                                         ssTableIterator.isReverseOrder(),
-                                                         ssTableIterator.stats());
-            PartitionSubscription partitionContent = new PartitionSubscription(header, ssTableIterator.staticRow(), false);
+            PartitionHeader header = new PartitionHeader(table.metadata(),
+                                                         key,
+                                                         partitionLevelDeletion,
+                                                         selectedColumns.fetchedColumns(),
+                                                         reverse,
+                                                         table.stats());
 
-            issued = true;
+            PartitionSubscription partitionContent = new PartitionSubscription(header, staticRow, false);
             subscriber.onFinal(partitionContent);
         }
 
@@ -293,6 +355,11 @@ class AsyncPartitionReader
             subscriber.onError(t);
         }
 
+        public SSTableReader table()
+        {
+            return table;
+        }
+
         public void requestNext()
         {
             readWithRetry(this, false, onReadyExecutor);
@@ -300,91 +367,89 @@ class AsyncPartitionReader
 
         public void close() throws Exception
         {
-            // If we have issued a FUP, we have passed control over the opened dfile and sstableIterator to it.
-            // If didn't get around to issuing, we need to close anything partially open.
-            if (issued || dfile == null)
-                return;
-
-            if (closeDataFile)
+            // If partition hasn't been opened, we need to close the data file
+            if (dataFileOwner.compareAndSet(DataFileOwner.PARTITION_READER, DataFileOwner.NONE))
                 dfile.close();
-            assert ssTableIterator == null;
         }
+
 
         public String toString()
         {
-            return Flow.formatTrace("PartitionReader:" + table, subscriber);
+            return Flow.formatTrace("PartitionReader:" + table);
         }
     }
 
-    class PartitionSubscription extends FlowableUnfilteredPartition.FlowSource
-    implements FlowableUnfilteredPartition, Reader
+    class PartitionSubscription extends FlowableUnfilteredPartition.FlowSource implements Reader
     {
         final TPCScheduler onReadyExecutor = TPC.bestTPCScheduler();
-
-        //Used to track the work done iterating (hasNext vs next)
-        //Since we could have an async break in either place
-        volatile boolean needsHasNextCheck = true;
+        SSTableReader.PartitionReader sstableReader;
         boolean provideLowerBound;
 
         protected PartitionSubscription(PartitionHeader header, Row staticRow, boolean provideLowerBound)
         {
+            // The constructor is not allowed to throw
             super(header, staticRow);
             this.provideLowerBound = provideLowerBound;
+        }
+
+        private FileDataInput openFile()
+        {
+            // Normally the partition reader will still be open and we can transfer the dfile's ownership from it.
+            if (dataFileOwner.compareAndSet(DataFileOwner.PARTITION_READER, DataFileOwner.PARTITION_SUBSCRIPTION))
+                return dfile;
+
+            // If not, identify what situation we are in.
+            switch (dataFileOwner.get())
+            {
+            case EXTERNAL:
+                return dfile;         // we are good, no need to close
+            case PARTITION_SUBSCRIPTION:
+                return dfile;         // already ours, possibly needed async seek to content
+            case NONE:
+                // partition reader closed, we need to reopen file
+                dataFileOwner.set(DataFileOwner.PARTITION_SUBSCRIPTION);
+                return dfile = table.openDataReader(ReaderConstraint.ASYNC);
+            default:
+                throw new AssertionError(); // if it was this, compareAndSet should have worked
+            }
         }
 
         /**
          * This method must be async-read-safe.
          */
-        public void performRead(boolean isRetry)
+        public void performRead(boolean isRetry) throws Exception
         {
-            try
+            if (sstableReader == null)
             {
-                if (ssTableIterator == null)
+                if (state != State.PREPARED)
                 {
-                    // Short-circuit empty partition
-                    if ((ssTableIterator = initializeIterator()) == null)
+                    // This is a delayed initialization.
+                    if (!prepareRow())
                     {
+                        // Partition not found in this table.
                         subscriber.onComplete();
                         return;
                     }
                 }
 
+                openFile();
+                if (filePos != -1)
+                    dfile.seek(filePos);
+
+                sstableReader = table.reader(dfile,  false, indexEntry, helper, slices, reverse, ReaderConstraint.ASYNC);
+            }
+            else if (isRetry)
+            {
                 //If this was an async response
                 //Make sure the state is reset
-                if (isRetry)
-                {
-                    ssTableIterator.resetReaderState();
-                    dfile.seek(filePos);
-                }
+                sstableReader.resetReaderState();
+            }
 
-                if (needsHasNextCheck)
-                {
-                    filePos = dfile.getFilePointer();
-
-                    boolean hasNext = ssTableIterator.hasNext();
-                    if (!hasNext)
-                    {
-                        subscriber.onComplete();
-                        return;
-                    }
-
-                    needsHasNextCheck = false;
-                }
-
-                filePos = dfile.getFilePointer();
-                Unfiltered next = ssTableIterator.next();
-                needsHasNextCheck = true;
-
+            Unfiltered next = sstableReader.next();
+            if (next != null)
                 subscriber.onNext(next);
-            }
-            catch (NotInCacheException nice)
-            {
-                throw nice;
-            }
-            catch(Throwable t)
-            {
-                subscriber.onError(t);
-            }
+            else
+                subscriber.onComplete();
         }
 
         public void onError(Throwable t)
@@ -392,6 +457,12 @@ class AsyncPartitionReader
             subscriber.onError(t);
         }
 
+        public SSTableReader table()
+        {
+            return table;
+        }
+
+        @Override
         public void requestNext()
         {
             readWithRetry(this, false, onReadyExecutor);
@@ -401,12 +472,12 @@ class AsyncPartitionReader
         {
             try
             {
-                if (ssTableIterator != null)
-                    ssTableIterator.close();
+                if (sstableReader != null)
+                    sstableReader.close();
             }
             finally
             {
-                if (closeDataFile && dfile != null)
+                if (dataFileOwner.compareAndSet(DataFileOwner.PARTITION_SUBSCRIPTION, DataFileOwner.NONE))
                     dfile.close();
             }
         }
@@ -424,6 +495,7 @@ class AsyncPartitionReader
             return this;
         }
 
+        @Override
         public void requestFirst(FlowSubscriber<Unfiltered> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
         {
             subscribe(subscriber, subscriptionRecipient);

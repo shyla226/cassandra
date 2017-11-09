@@ -125,7 +125,7 @@ public class SecondaryIndexTest
         try (ReadExecutionController executionController = rc.executionController())
         {
             Flow<FlowableUnfilteredPartition> pi = searcher.search(executionController);
-            pi.take(1).blockingSingle().unused();    // has to have at least one partition
+            pi.take(1).blockingSingle();    // has to have at least one partition
         }
 
         // Verify gt on idx scan

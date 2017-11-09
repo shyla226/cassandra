@@ -480,9 +480,13 @@ public class Merge
 
         private AssertionError onOurError(AssertionError e)
         {
+
+            Throwable t = Throwables.merge(error, e); // If we have an error, it's probably the main reason for the
+                                                      // invalid state. Use that as main cause.
+
             // We are in a bad state. We can't expect to pass this error through the merge, so pass on to subscriber
             // directly and abort everything we can.
-            merger.onError(Flow.wrapException(e, this));
+            merger.onError(Flow.wrapException(t, this));
             return e;
         }
 

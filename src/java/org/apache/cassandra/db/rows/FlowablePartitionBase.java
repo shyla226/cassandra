@@ -107,13 +107,4 @@ public interface FlowablePartitionBase<T> extends PartitionTrait
     {
         return header().stats;
     }
-
-    /**
-     * Only to be called on requested but unused partitions (e.g. when aborting).
-     * Since we usually verify one use only, this will throw if the partition was already used.
-     */
-    default void unused() throws Exception
-    {
-        // Nothing by default
-    }
 }

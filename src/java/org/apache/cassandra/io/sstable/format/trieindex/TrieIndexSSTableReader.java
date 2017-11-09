@@ -23,18 +23,15 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Set;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
-import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.rows.Rows;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -47,14 +44,13 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
-import org.apache.cassandra.io.sstable.format.big.Downsampling;
-import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosIterator;
 import org.apache.cassandra.io.sstable.format.SSTableScanner;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
+import org.apache.cassandra.io.sstable.format.big.Downsampling;
+import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosIterator;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.MmapRebufferer;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
@@ -190,29 +186,22 @@ class TrieIndexSSTableReader extends SSTableReader
         return partitionIndex.size();
     }
 
-    public UnfilteredRowIterator iterator(DecoratedKey key,
-                                          Slices slices,
-                                          ColumnFilter selectedColumns,
-                                          boolean reversed,
-                                          SSTableReadsListener listener)
+    public PartitionReader reader(FileDataInput file,
+                                  boolean shouldCloseFile,
+                                  RowIndexEntry indexEntry,
+                                  SerializationHelper helper,
+                                  Slices slices,
+                                  boolean reversed,
+                                  Rebufferer.ReaderConstraint readerConstraint)
+    throws IOException
     {
-        RowIndexEntry rie = getExactPosition(key, listener, Rebufferer.ReaderConstraint.NONE);
-        return iterator(null, key, rie, slices, selectedColumns, reversed, Rebufferer.ReaderConstraint.NONE);
-    }
-
-    public UnfilteredRowIterator iterator(FileDataInput file,
-                                          DecoratedKey key,
-                                          RowIndexEntry indexEntry,
-                                          Slices slices,
-                                          ColumnFilter selectedColumns,
-                                          boolean reversed,
-                                          Rebufferer.ReaderConstraint readerConstraint)
-    {
-        if (indexEntry == null)
-            return UnfilteredRowIterators.noRowsIterator(metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, reversed);
-        return reversed
-             ? new SSTableReversedIterator(this, file, key, indexEntry, slices, selectedColumns, readerConstraint)
-             : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns, readerConstraint);
+        return indexEntry.isIndexed()
+               ? reversed
+                 ? new ReverseIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, readerConstraint)
+                 : new ForwardIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, readerConstraint)
+               : reversed
+                 ? new ReverseReader(this, slices, file, shouldCloseFile, helper)
+                 : new ForwardReader(this, slices, file, shouldCloseFile, helper);
     }
 
     @Override
@@ -335,12 +324,7 @@ class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public RowIndexEntry getExactPosition(DecoratedKey dk, Rebufferer.ReaderConstraint rc)
-    {
-        return getExactPosition(dk, SSTableReadsListener.NOOP_LISTENER, rc);
-    }
-
-    private RowIndexEntry getExactPosition(DecoratedKey dk, SSTableReadsListener listener, Rebufferer.ReaderConstraint rc)
+    public RowIndexEntry getExactPosition(DecoratedKey dk, SSTableReadsListener listener, Rebufferer.ReaderConstraint rc)
     {
         if (!bf.isPresent(dk))
         {
