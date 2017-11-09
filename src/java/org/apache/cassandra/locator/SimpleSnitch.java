@@ -24,6 +24,8 @@ import java.util.List;
  * A simple endpoint snitch implementation that treats Strategy order as proximity,
  * allowing non-read-repaired reads to prefer a single endpoint, which improves
  * cache locality.
+ *
+ * {@link DynamicEndpointSnitch}-by-proximity should preserve the proximity ordering of the underlying snitch.
  */
 public class SimpleSnitch extends AbstractEndpointSnitch
 {

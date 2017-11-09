@@ -22,6 +22,11 @@ import java.net.InetAddress;
 /**
  * An endpoint snitch tells Cassandra information about network topology that it can use to route
  * requests more efficiently.
+ *
+ * For any {@code AbstractNetworkTopologySnitch}, the ordering of the nodes should be the local node,
+ * then the local rack, then the local DC, then the rest of the DCs grouped by rack.
+ *
+ * {@link DynamicEndpointSnitch}-by-proximity should preserve the proximity ordering of the underlying snitch.
  */
 public abstract class AbstractNetworkTopologySnitch extends AbstractEndpointSnitch
 {
