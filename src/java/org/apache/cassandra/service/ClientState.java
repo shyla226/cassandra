@@ -370,9 +370,20 @@ public class ClientState
     {
         // Login privilege is not inherited via granted roles, so just
         // verify that the role with the credentials that were actually
-        // supplied has it
+        // supplied has it. Attention: DSE w/ LDAP allows to inherit the
+        // login privilege.
         if (user.isAnonymous() || DatabaseDescriptor.getRoleManager().canLogin(user))
+        {
+            if (CassandraRoleManager.DEFAULT_SUPERUSER_NAME.equals(user.getName()))
+            {
+                logger.warn("User '{}' logged in from {}. It is strongly recommended to create and use " +
+                            "another user and grant it superuser capabilities and remove the default one. " +
+                            "See https://docs.datastax.com/en/dse/6.0/dse-admin/datastax_enterprise/security/Auth/secCreateRootAccount.html",
+                            CassandraRoleManager.DEFAULT_SUPERUSER_NAME,
+                            remoteAddress);
+            }
             this.user = user;
+        }
         else
             throw new AuthenticationException(String.format("%s is not permitted to log in", user.getName()));
     }
