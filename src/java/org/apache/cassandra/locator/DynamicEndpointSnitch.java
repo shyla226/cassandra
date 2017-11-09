@@ -49,7 +49,10 @@ import org.apache.cassandra.utils.FBUtilities;
 
 
 /**
- * A dynamic snitch that sorts endpoints by latency with an adapted phi failure detector
+ * A dynamic snitch that sorts endpoints by latency with an adapted phi failure detector.
+ *
+ * See {@link AbstractNetworkTopologySnitch} and {@link SimpleSnitch} for information about
+ * the ordering of those.
  */
 public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILatencySubscriber, DynamicEndpointSnitchMBean
 {
