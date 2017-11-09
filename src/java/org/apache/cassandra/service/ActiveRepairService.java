@@ -377,8 +377,13 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
 
         if (!parentRepairSessions.containsKey(parentRepairSession))
         {
-            parentRepairSessions.put(parentRepairSession,
-                                     new ParentRepairSession(coordinator, columnFamilyStores, ranges, isIncremental, timestamp, isGlobal, parentRepairSession));
+            parentRepairSessions.put(parentRepairSession, new ParentRepairSession(coordinator,
+                                                                                  columnFamilyStores,
+                                                                                  ranges,
+                                                                                  isIncremental,
+                                                                                  timestamp,
+                                                                                  isGlobal,
+                                                                                  parentRepairSession));
         }
     }
 
