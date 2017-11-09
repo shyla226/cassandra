@@ -24,11 +24,11 @@ import java.util.*;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -187,14 +187,22 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             this.params = params;
         }
 
+        /**
+         * @return the number of rows in this result set. Caution: if the page size is in bytes, then this is just an estimate.
+         */
         public int size()
         {
-            throw new UnsupportedOperationException();
+            return pageSize.isInRows()
+                   ? pageSize.rawSize()
+                   : pageSize.inEstimatedRows(ResultSet.estimatedRowSize(select.table, select.getSelection().getColumnMapping()));
         }
 
+        /**
+         * @return The next element (if available). Caution: this method is blocking.
+         */
         public Row one()
         {
-            throw new UnsupportedOperationException();
+            return iterator().next();
         }
 
         public Flow<Row> rows()
