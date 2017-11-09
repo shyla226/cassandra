@@ -463,6 +463,7 @@
           <dependency groupId="org.gridkit.jvmtool" artifactId="mxdump" version="0.5.1"/>
           <dependency groupId="org.gridkit.lab" artifactId="jvm-attach-api" version="1.2"/>
           <dependency groupId="com.beust" artifactId="jcommander" version="1.30"/>
+          <dependency groupId="org.ow2.asm" artifactId="asm" version="5.0.4" />
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
         <developer id="alakshman" name="Avinash Lakshman"/>
@@ -657,6 +658,7 @@
         <dependency groupId="org.gridkit.jvmtool" artifactId="mxdump"/>
         <dependency groupId="org.gridkit.lab" artifactId="jvm-attach-api"/>
         <dependency groupId="com.beust" artifactId="jcommander"/>
+        <dependency groupId="org.ow2.asm" artifactId="asm" />
       </artifact:pom>
       <artifact:pom id="thrift-pom"
                     artifactId="cassandra-thrift"
