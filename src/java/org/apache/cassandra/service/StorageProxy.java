@@ -1162,7 +1162,7 @@ public class StorageProxy implements StorageProxyMBean
                 // We already wrote locally
                 handler.onLocalResponse();
 
-                WriteEndpoints remainingEndpoints = handler.endpoints().withoutLocalhost();
+                WriteEndpoints remainingEndpoints = handler.endpoints().withoutLocalhost(true);
                 if (!remainingEndpoints.isEmpty())
                     sendToHintedEndpoints(result, remainingEndpoints, handler, localDataCenter, Verbs.WRITES.WRITE);
 

@@ -48,6 +48,7 @@ abstract class AbstractWriteHandler extends WriteHandler
 
     AbstractWriteHandler(WriteEndpoints endpoints,
                          ConsistencyLevel consistency,
+                         int blockFor,
                          WriteType writeType,
                          long queryStartNanos)
     {
@@ -56,8 +57,9 @@ abstract class AbstractWriteHandler extends WriteHandler
         this.writeType = writeType;
         this.queryStartNanos = queryStartNanos;
 
-        this.blockFor = consistency.blockFor(endpoints.keyspace())
-                        + pendingToBlockFor();
+        this.blockFor = blockFor < 0
+                        ? consistency.blockFor(endpoints.keyspace()) + pendingToBlockFor()
+                        : blockFor;
     }
 
     public WriteEndpoints endpoints()

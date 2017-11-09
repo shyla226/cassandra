@@ -203,13 +203,13 @@ public class WriteEndpoints implements Iterable<InetAddress>
     /**
      * Returns a copy of this object that doesn't contains the localhost.
      * <p>
-     * <b>WARNING:</b> this methods assumes that the localhost is part of the
-     * <i>natural</i> endpoints (<i>not</i> the pending ones).
+     * @param requireLocalhost {@code true} to assert that the localhost is part of the
+     *                         <i>natural</i> endpoints (<i>not</i> the pending ones).
      */
-    public WriteEndpoints withoutLocalhost()
+    public WriteEndpoints withoutLocalhost(boolean requireLocalhost)
     {
         InetAddress localhost = FBUtilities.getBroadcastAddress();
-        if (natural.size() == 1 && pending.isEmpty())
+        if (requireLocalhost && natural.size() == 1 && pending.isEmpty())
         {
             assert natural.get(0).equals(localhost);
             return new WriteEndpoints(keyspace,

@@ -106,6 +106,7 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
         private final WriteType writeType;
         private final long queryStartNanos;
 
+        private int blockFor = -1;
         private ConsistencyLevel idealConsistencyLevel;
 
         private List<Consumer<Response<EmptyPayload>>> onResponseTasks;
@@ -221,6 +222,12 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
             });
         }
 
+        public Builder blockFor(int blockFor)
+        {
+            this.blockFor = blockFor;
+            return this;
+        }
+
         Builder withIdealConsistencyLevel(ConsistencyLevel idealConsistencyLevel)
         {
             this.idealConsistencyLevel = idealConsistencyLevel;
@@ -230,11 +237,11 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
         private WriteHandler makeHandler()
         {
             if (consistencyLevel.isDatacenterLocal())
-                return new WriteHandlers.DatacenterLocalHandler(endpoints, consistencyLevel, writeType, queryStartNanos);
+                return new WriteHandlers.DatacenterLocalHandler(endpoints, consistencyLevel, blockFor, writeType, queryStartNanos);
             else if (consistencyLevel == ConsistencyLevel.EACH_QUORUM && (endpoints.keyspace().getReplicationStrategy() instanceof NetworkTopologyStrategy))
-                return new WriteHandlers.DatacenterSyncHandler(endpoints, consistencyLevel, writeType, queryStartNanos);
+                return new WriteHandlers.DatacenterSyncHandler(endpoints, consistencyLevel, blockFor, writeType, queryStartNanos);
             else
-                return new WriteHandlers.SimpleHandler(endpoints, consistencyLevel, writeType, queryStartNanos);
+                return new WriteHandlers.SimpleHandler(endpoints, consistencyLevel, blockFor, writeType, queryStartNanos);
         }
 
         private static <T> List<T> freeze(List<T> l)

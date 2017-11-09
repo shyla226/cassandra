@@ -44,10 +44,11 @@ abstract class WriteHandlers
 
         SimpleHandler(WriteEndpoints endpoints,
                       ConsistencyLevel consistency,
+                      int blockFor,
                       WriteType writeType,
                       long queryStartNanos)
         {
-            super(endpoints, consistency, writeType, queryStartNanos);
+            super(endpoints, consistency, blockFor, writeType, queryStartNanos);
         }
 
         public void onResponse(Response<EmptyPayload> response)
@@ -79,10 +80,11 @@ abstract class WriteHandlers
     {
         DatacenterLocalHandler(WriteEndpoints endpoints,
                                ConsistencyLevel consistency,
+                               int blockFor,
                                WriteType writeType,
                                long queryStartNanos)
         {
-            super(endpoints, consistency, writeType, queryStartNanos);
+            super(endpoints, consistency, blockFor, writeType, queryStartNanos);
         }
 
         protected int pendingToBlockFor()
@@ -111,10 +113,11 @@ abstract class WriteHandlers
 
         DatacenterSyncHandler(WriteEndpoints endpoints,
                               ConsistencyLevel consistency,
+                              int blockFor,
                               WriteType writeType,
                               long queryStartNanos)
         {
-            super(endpoints, consistency, writeType, queryStartNanos);
+            super(endpoints, consistency, blockFor, writeType, queryStartNanos);
             assert consistency == ConsistencyLevel.EACH_QUORUM;
 
             NetworkTopologyStrategy strategy = (NetworkTopologyStrategy) endpoints.keyspace().getReplicationStrategy();

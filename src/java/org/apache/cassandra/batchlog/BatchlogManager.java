@@ -507,7 +507,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 else
                 {
                     if (handler == null)
-                        handler = ReplayWriteHandler.create(endpoints.withoutLocalhost(), System.nanoTime());
+                        handler = ReplayWriteHandler.create(endpoints.withoutLocalhost(false), System.nanoTime());
                     MessagingService.instance().send(Verbs.WRITES.WRITE.newRequest(live, mutation), handler);
                 }
             }
@@ -538,24 +538,12 @@ public class BatchlogManager implements BatchlogManagerMBean
 
             static ReplayWriteHandler create(WriteEndpoints endpoints, long queryStartNanos)
             {
-                ConsistencyLevel cl;
-                switch (endpoints.liveCount())
-                {
-                    case 0:
-                        // just fall through - no live endpoints
-                    case 1:
-                        cl = ConsistencyLevel.ONE;
-                        break;
-                    case 2:
-                        cl = ConsistencyLevel.TWO;
-                        break;
-                    default:
-                        throw new AssertionError("Invalid number of live endpoints for batchlog replay: " + endpoints.liveCount());
-                }
-                WriteHandler handler = WriteHandler.create(endpoints,
-                                                           cl,
-                                                           WriteType.UNLOGGED_BATCH,
-                                                           queryStartNanos);
+                WriteHandler handler = WriteHandler.builder(endpoints,
+                                                            ConsistencyLevel.ALL,
+                                                            WriteType.UNLOGGED_BATCH,
+                                                            queryStartNanos)
+                                                   .blockFor(endpoints.liveCount())
+                                                   .build();
                 return new ReplayWriteHandler(handler);
             }
 
@@ -563,7 +551,7 @@ public class BatchlogManager implements BatchlogManagerMBean
             public void onResponse(Response<EmptyPayload> m)
             {
                 boolean removed = undelivered.remove(m.from());
-                assert removed;
+                assert removed : "did not expect a response from " + m.from() + " / expected are " + endpoints().live();
                 super.onResponse(m);
             }
         }
