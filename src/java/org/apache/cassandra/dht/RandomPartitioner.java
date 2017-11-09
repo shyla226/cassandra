@@ -224,6 +224,7 @@ public class RandomPartitioner implements IPartitioner
     {
         if (key.remaining() == 0)
             return MINIMUM;
+
         return new BigIntegerToken(hashToBigInteger(key));
     }
 
@@ -261,17 +262,6 @@ public class RandomPartitioner implements IPartitioner
         return ownerships;
     }
 
-    private static BigInteger hashToBigInteger(ByteBuffer data)
-    {
-        MessageDigest messageDigest = localMD5Digest.get();
-        if (data.hasArray())
-            messageDigest.update(data.array(), data.arrayOffset() + data.position(), data.remaining());
-        else
-            messageDigest.update(data.duplicate());
-
-        return new BigInteger(messageDigest.digest()).abs();
-    }
-
     public Token getMaximumToken()
     {
         return new BigIntegerToken(MAXIMUM);
@@ -300,5 +290,16 @@ public class RandomPartitioner implements IPartitioner
     public BigInteger valueForToken(Token token)
     {
         return ((BigIntegerToken)token).token;
+    }
+
+    private static BigInteger hashToBigInteger(ByteBuffer data)
+    {
+        MessageDigest messageDigest = localMD5Digest.get();
+        if (data.hasArray())
+            messageDigest.update(data.array(), data.arrayOffset() + data.position(), data.remaining());
+        else
+            messageDigest.update(data.duplicate());
+
+        return new BigInteger(messageDigest.digest()).abs();
     }
 }
