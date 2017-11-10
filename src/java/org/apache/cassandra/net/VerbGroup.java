@@ -206,6 +206,11 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
         }
     }
 
+    protected String getUnsupportedVersionMessage(MessagingVersion version)
+    {
+        return String.format("Group %s does not support messaging version %s.", this, version);
+    }
+
     /**
      * An helper to create and register the verb of a group (see {@link #helper()} for how and when this should be used).
      * <p>

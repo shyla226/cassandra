@@ -40,10 +40,10 @@ import static org.apache.cassandra.net.ProtocolVersion.oss;
  */
 public enum MessagingVersion
 {
-    OSS_30   (oss(10), ReadVersion.OSS_30, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30, null),
-    OSS_3014 (oss(11), ReadVersion.OSS_3014, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30, null),
-    OSS_40   (oss(12), ReadVersion.OSS_40, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30, null),
-    DSE_60   (dse(1), ReadVersion.DSE_60, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.DSE_60, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30, AuthVersion.DSE_60);
+    OSS_30   (oss(10), ReadVersion.OSS_30, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, null, SchemaVersion.OSS_30, null),
+    OSS_3014 (oss(11), ReadVersion.OSS_3014, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, null, SchemaVersion.OSS_30, null),
+    OSS_40   (oss(12), ReadVersion.OSS_40, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_40, SchemaVersion.OSS_30, null),
+    DSE_60   (dse(1), ReadVersion.DSE_60, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.DSE_60, GossipVersion.OSS_30, RepairVersion.OSS_40, SchemaVersion.OSS_30, AuthVersion.DSE_60);
 
     private final ProtocolVersion protocolVersion;
     private final EnumMap<Verbs.Group, Version<?>> groupVersions;
@@ -135,15 +135,21 @@ public enum MessagingVersion
     public <P, Q, V extends Enum<V> & Version<V>> VerbSerializer<P, Q> serializer(Verb<P, Q> verb)
     {
         VerbGroup<V> group = verb.group();
-        V version = groupVersion(group.id());
-        if (group.forVersion(version) == null)
-            throw new NullPointerException(String.format("No group for version %s for verb %s in group %s", version, verb, group));
+        V version = groupVersion(verb.group().id());
+        if (version == null)
+        {
+            throw new IllegalArgumentException(group.getUnsupportedVersionMessage(this));
+        }
         return group.forVersion(version).getByVerb(verb);
     }
 
     public <P, Q, V extends Enum<V> & Version<V>> VerbSerializer<P, Q> serializerByVerbCode(VerbGroup<V> group, int code)
     {
         V version = groupVersion(group.id());
+        if (version == null)
+        {
+            throw new IllegalArgumentException(group.getUnsupportedVersionMessage(this));
+        }
         VerbSerializer<P, Q> serializer = group.forVersion(version).getByCode(code);
         if (serializer == null)
             throw new IllegalArgumentException(String.format("Invalid verb code %d for group %s at version %s", code, group, this));

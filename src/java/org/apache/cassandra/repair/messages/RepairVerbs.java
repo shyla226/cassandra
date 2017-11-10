@@ -24,13 +24,11 @@ import java.util.function.Function;
 import com.google.common.base.Throwables;
 import com.google.common.primitives.Ints;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.BoundsVersion;
 import org.apache.cassandra.net.DroppedMessages;
+import org.apache.cassandra.net.MessagingVersion;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.Verb.AckedRequest;
 import org.apache.cassandra.net.Verb.OneWay;
@@ -46,6 +44,9 @@ import org.apache.cassandra.utils.versioning.Versioned;
 
 public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
 {
+    private static final String MIXED_MODE_ERROR = "Some nodes involved in repair are on an incompatible major version. " +
+                                                   "Repair is not supported in mixed major version clusters.";
+
     /**
      * Amount of time the coordinator will wait for all participants to ack a finalize commit message
      */
@@ -53,11 +54,13 @@ public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
         "cassandra.finalize_commit_timeout_seconds",
         Ints.checkedCast(TimeUnit.MINUTES.toSeconds(10)));
 
-    private static final Logger logger = LoggerFactory.getLogger(RepairVerbs.class);
-
     public enum RepairVersion implements Version<RepairVersion>
     {
-        OSS_30(BoundsVersion.OSS_30, StreamMessage.StreamVersion.OSS_30),
+        /**
+         * Currently only a single version of repair is supported at a time.
+         * When adding support to multiple versions make sure to add the
+         * previously supported version to {@link MessagingVersion}
+         */
         OSS_40(BoundsVersion.OSS_30, StreamMessage.StreamVersion.OSS_40); // Adds session summary to repair messages
 
         public final BoundsVersion boundsVersion;
@@ -134,6 +137,11 @@ public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
         STATUS_REQUEST = helper.requestResponse("STATUS_REQUEST", StatusRequest.class, StatusResponse.class)
                                .timeout(DatabaseDescriptor::getRpcTimeout)
                                .syncHandler(ActiveRepairService.instance.consistent.local::handleStatusRequest);
+    }
+
+    public String getUnsupportedVersionMessage(MessagingVersion version)
+    {
+        return MIXED_MODE_ERROR;
     }
 
     private static <P extends RepairMessage> VerbHandlers.OneWay<P> decoratedOneWay(VerbHandlers.OneWay<P> handler)
