@@ -23,10 +23,7 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
 import java.lang.reflect.Constructor;
 import java.net.*;
-import java.nio.file.FileStore;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -39,25 +36,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.sun.management.OperatingSystemMXBean;
-import org.apache.cassandra.auth.AllowAllInternodeAuthenticator;
-import org.apache.cassandra.auth.AuthConfig;
-import org.apache.cassandra.auth.IAuthenticator;
-import org.apache.cassandra.auth.IAuthorizer;
-import org.apache.cassandra.auth.IInternodeAuthenticator;
-import org.apache.cassandra.auth.IRoleManager;
+import org.apache.cassandra.auth.*;
 import org.apache.cassandra.config.Config.CommitLogSync;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.util.DiskOptimizationStrategy;
-import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.SpinningDiskOptimizationStrategy;
-import org.apache.cassandra.io.util.SsdDiskOptimizationStrategy;
-import org.apache.cassandra.locator.DynamicEndpointSnitch;
-import org.apache.cassandra.locator.EndpointSnitchInfo;
-import org.apache.cassandra.locator.IEndpointSnitch;
-import org.apache.cassandra.locator.SeedProvider;
+import org.apache.cassandra.io.util.*;
+import org.apache.cassandra.locator.*;
 import org.apache.cassandra.net.BackPressureStrategy;
 import org.apache.cassandra.net.RateBasedBackPressure;
 import org.apache.cassandra.security.EncryptionContext;
@@ -77,7 +63,9 @@ public class DatabaseDescriptor
      */
     private static final int MAX_NUM_TOKENS = 1536;
 
+    private static ConfigurationLoader configLoader;
     private static Config conf;
+    private static boolean hasLoggedConfig;
 
     /**
      * Request timeouts can not be less than below defined value (see CASSANDRA-9375)
@@ -118,7 +106,6 @@ public class DatabaseDescriptor
     private static String localDC;
     private static Comparator<InetAddress> localComparator;
     private static EncryptionContext encryptionContext;
-    private static boolean hasLoggedConfig;
 
     private static BackPressureStrategy backPressureStrategy;
     private static DiskOptimizationStrategy diskOptimizationStrategy;
@@ -261,22 +248,29 @@ public class DatabaseDescriptor
         return conf;
     }
 
-    @VisibleForTesting
     public static Config loadConfig() throws ConfigurationException
     {
-        String loaderClass = System.getProperty(Config.PROPERTY_PREFIX + "config.loader");
-        ConfigurationLoader loader = loaderClass == null
-                                   ? new YamlConfigurationLoader()
-                                   : FBUtilities.<ConfigurationLoader>construct(loaderClass, "configuration loading");
-        Config config = loader.loadConfig();
+        Config conf = configLoader().loadConfig();
 
         if (!hasLoggedConfig)
         {
             hasLoggedConfig = true;
-            Config.log(config);
+            conf.log();
         }
 
-        return config;
+        return conf;
+    }
+
+    private static ConfigurationLoader configLoader()
+    {
+        if (configLoader == null)
+        {
+            String loaderClass = System.getProperty(Config.PROPERTY_PREFIX + "config.loader");
+            configLoader = loaderClass == null
+                           ? new YamlConfigurationLoader()
+                           : FBUtilities.construct(loaderClass, "configuration loading");
+        }
+        return configLoader;
     }
 
     private static InetAddress getNetworkInterfaceAddress(String intf, String configName, boolean preferIPv6) throws ConfigurationException

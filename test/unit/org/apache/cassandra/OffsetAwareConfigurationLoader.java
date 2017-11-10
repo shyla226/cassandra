@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -23,10 +23,8 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 
 import java.io.File;
 
-
 public class OffsetAwareConfigurationLoader extends YamlConfigurationLoader
 {
-
     static final String OFFSET_PROPERTY = "cassandra.test.offsetseed";
     int offset = 0;
 
@@ -35,32 +33,38 @@ public class OffsetAwareConfigurationLoader extends YamlConfigurationLoader
         String offsetStr = System.getProperty(OFFSET_PROPERTY);
 
         if (offsetStr == null)
-            throw new RuntimeException("offset property is not set: "+OFFSET_PROPERTY);
+            throw new RuntimeException("offset property is not set: " + OFFSET_PROPERTY);
 
         offset = Integer.valueOf(offsetStr);
 
         assert offset >= 0;
     }
 
+    private Config lastConfig;
+
     @Override
     public Config loadConfig() throws ConfigurationException
     {
         Config config = super.loadConfig();
+        if (config != lastConfig)
+        {
 
-        String sep = File.pathSeparator;
+            String sep = File.pathSeparator;
 
-        config.native_transport_port += offset;
-        config.storage_port += offset;
+            config.native_transport_port += offset;
+            config.storage_port += offset;
 
-        config.commitlog_directory += sep + offset;
-        config.saved_caches_directory += sep + offset;
-        config.hints_directory += sep + offset;
+            config.commitlog_directory += sep + offset;
+            config.saved_caches_directory += sep + offset;
+            config.hints_directory += sep + offset;
 
-        config.cdc_raw_directory += sep + offset;
+            config.cdc_raw_directory += sep + offset;
 
-        for (int i = 0; i < config.data_file_directories.length; i++)
-            config.data_file_directories[i] += sep + offset;
+            for (int i = 0; i < config.data_file_directories.length; i++)
+                config.data_file_directories[i] += sep + offset;
 
+            lastConfig = config;
+        }
         return config;
     }
 }
