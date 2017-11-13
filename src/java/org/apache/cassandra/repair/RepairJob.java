@@ -201,8 +201,11 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
         {
             //this will throw exception if any sync task fails
             List<SyncStat> stats = Futures.allAsList(syncTasks).get();
-            logger.info("[repair #{}] {} is fully synced", session.getId(), desc.columnFamily);
-            SystemDistributedKeyspace.successfulRepairJob(session.getId(), desc.keyspace, desc.columnFamily);
+            if (!previewKind.isPreview())
+            {
+                logger.info("[repair #{}] {} is fully synced", session.getId(), desc.columnFamily);
+                SystemDistributedKeyspace.successfulRepairJob(session.getId(), desc.keyspace, desc.columnFamily);
+            }
             cfs.metric.repairsCompleted.inc();
             set(new RepairResult(desc, stats));
         }
@@ -235,25 +238,29 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
     private <T> void waitForRemainingTasksAndFail(String phase, Iterable<? extends ListenableFuture<? extends T>> tasks,
                                                   Throwable t)
     {
-        logger.warn("[{}] [repair #{}] {} {} failed. Will wait a maximum of {} hours for remaining tasks to finish.",
-                    session.parentRepairSession, session.getId(), desc.columnFamily, phase, MAX_WAIT_FOR_REMAINING_TASKS_IN_HOURS, t);
+        if (!previewKind.isPreview())
+            logger.warn("[{}] [repair #{}] {} {} failed. Will wait a maximum of {} hours for remaining tasks to finish.",
+                        session.parentRepairSession, session.getId(), desc.columnFamily, phase, MAX_WAIT_FOR_REMAINING_TASKS_IN_HOURS, t);
         //wait for remaining tasks to complete
         try
         {
             Futures.successfulAsList(tasks).get(MAX_WAIT_FOR_REMAINING_TASKS_IN_HOURS, TimeUnit.HOURS);
-            logger.debug("[{}][{}] All remaining repair tasks finished.", session.parentRepairSession, session.getId());
+            if (!previewKind.isPreview())
+                logger.debug("[{}][{}] All remaining repair tasks finished.", session.parentRepairSession, session.getId());
         }
         catch (Throwable t2)
         {
             JVMStabilityInspector.inspectThrowable(t2);
-            logger.warn("[{}] Exception while waiting for remaining repair tasks to complete.", session.parentRepairSession, t2);
+            if (!previewKind.isPreview())
+                logger.warn("[{}] Exception while waiting for remaining repair tasks to complete.", session.parentRepairSession, t2);
         }
         failJob(t);
     }
 
     private void failJob(Throwable t)
     {
-        SystemDistributedKeyspace.failedRepairJob(session.getId(), desc.keyspace, desc.columnFamily, t);
+        if (!previewKind.isPreview())
+            SystemDistributedKeyspace.failedRepairJob(session.getId(), desc.keyspace, desc.columnFamily, t);
         setException(t);
     }
 
