@@ -25,13 +25,19 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Duration;
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.transport.Message;
+import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.transport.SimpleClient;
+import org.apache.cassandra.transport.messages.QueryMessage;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BYTE_BUFFER;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 
@@ -3097,5 +3103,83 @@ public class SelectTest extends CQLTester
         execute("INSERT INTO %s (k, v) VALUES (2, 1) USING TIMESTAMP 0;");
         assertRowsIgnoringOrder(execute("select * from %s"),
                                 row(2, 2));
+    }
+
+    /**
+     * Originally introduced in CASSANDRA-8180, lower bound optimisation filters helps to avoid hitting SSTables if it is
+     * guaranteed we don't need to access this sstable, i.e. due to the LIMIT conditon.
+     */
+    @Test
+    public void testLowerBoundOptimisation() throws Throwable
+    {
+        requireNetwork();
+
+        createTable("CREATE TABLE %s(id int, col int, val text, PRIMARY KEY(id,col)) WITH CLUSTERING ORDER BY (col DESC);");
+        execute("INSERT INTO %s(id, col , val ) VALUES ( 1, 10, '10');");
+        flush(true);
+        execute("INSERT INTO %s(id, col , val ) VALUES ( 1, 20, '20');");
+        flush(true);
+        execute("INSERT INTO %s(id, col , val ) VALUES ( 1, 30, '30');");
+        flush(true);
+
+        boolean found = false;
+        for (UntypedResultSet.Row row : runWithTracing("select * from %s.%s where id = 1 limit 1"))
+        {
+            if (row.getString("activity").equals("Merged data from memtables and 1 sstables"))
+            {
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found);
+
+        assertRows(execute("select * from %s where id = 1 limit 1"),
+                   row(1, 30, "30"));
+    }
+
+    @Test
+    public void testLowerBoundOptimisationWithMemtable() throws Throwable
+    {
+        requireNetwork();
+
+        createTable("CREATE TABLE %s(id int, col int, val text, PRIMARY KEY(id,col)) WITH CLUSTERING ORDER BY (col DESC);");
+        execute("INSERT INTO %s(id, col , val ) VALUES ( 1, 20, '20');");
+        flush(true);
+        execute("INSERT INTO %s(id, col , val ) VALUES ( 1, 30, '30');");
+
+        boolean found = false;
+        for (UntypedResultSet.Row row : runWithTracing("select * from %s.%s where id = 1 limit 1"))
+        {
+            if (row.getString("activity").equals("Merged data from memtables and 0 sstables"))
+            {
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found);
+
+        assertRows(execute("select * from %s where id = 1 limit 1"),
+                   row(1, 30, "30"));
+    }
+
+    /**
+     * Runs the query, returninig it's trace
+     */
+    private UntypedResultSet runWithTracing(String q) throws Throwable
+    {
+        UUID id;
+        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort, ProtocolVersion.CURRENT))
+        {
+            client.connect(false);
+            QueryMessage query = new QueryMessage(String.format(q, KEYSPACE, currentTable()),
+                                                  QueryOptions.DEFAULT);
+            query.setTracingRequested();
+            Message.Response resp = client.execute(query);
+            id = resp.getTracingId();
+            waitForTracingEvents();
+        }
+        assertNotNull(id);
+
+        return execute("SELECT * from system_traces.events where session_id = ?", id);
     }
 }

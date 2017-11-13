@@ -1007,7 +1007,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public Flow<FlowableUnfilteredPartition> flow(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
     {
-        return AsyncPartitionReader.create(this, listener, key, slices, selectedColumns, reversed);
+        return AsyncPartitionReader.create(this, listener, key, slices, selectedColumns, reversed, false);
     }
 
     public Flow<FlowableUnfilteredPartition> flow(IndexFileEntry indexEntry, FileDataInput dfile, SSTableReadsListener listener)
@@ -1018,6 +1018,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public Flow<FlowableUnfilteredPartition> flow(IndexFileEntry indexEntry, FileDataInput dfile, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
     {
         return AsyncPartitionReader.create(this, dfile, listener, indexEntry, slices, selectedColumns, reversed);
+    }
+
+    /**
+     * Creates a FUP Flow that allows use a Lower Bound optimisation
+     */
+    public Flow<FlowableUnfilteredPartition> flowWithLowerBound(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
+    {
+        return AsyncPartitionReader.create(this, listener, key, slices, selectedColumns, reversed, true);
     }
 
     public abstract Flow<IndexFileEntry> coveredKeysFlow(RandomAccessReader dfile,

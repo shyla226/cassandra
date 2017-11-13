@@ -87,6 +87,13 @@ public interface FlowableUnfilteredPartition extends FlowablePartitionBase<Unfil
                       content);
     }
 
+    default FlowableUnfilteredPartition skipLowerBound()
+    {
+        // No lower bound provided by default.
+        // AsyncPartitionReader.PartitionSubscription will override this method.
+        return this;
+    }
+
     abstract class FlowTransformNext extends org.apache.cassandra.utils.flow.FlowTransformNext<Unfiltered, Unfiltered>
     implements FlowableUnfilteredPartition
     {

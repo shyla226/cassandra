@@ -34,7 +34,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 /**
  * Tests for checking how many sstables we access during cql queries.
  */
-@Ignore // TODO TPC - 8180 optimization currently disabled in SinglePartitionReadCommand
 public class SSTablesIteratedTest extends CQLTester
 {
     private static int defaultMetricsHistogramUpdateInterval;

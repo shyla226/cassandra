@@ -2412,8 +2412,17 @@ public abstract class Flow<T>
 
     public static String withLineNumber(Object obj)
     {
-        LINE_NUMBERS.maybeProcessClass(obj.getClass());
-        LineNumberInference.Descriptor lineNumber = LINE_NUMBERS.getLine(obj.getClass());
+        LineNumberInference.Descriptor lineNumber;
+        if (obj == null)
+        {
+            lineNumber = LineNumberInference.UNKNOWN_SOURCE;
+        }
+        else
+        {
+            LINE_NUMBERS.maybeProcessClass(obj.getClass());
+            lineNumber = LINE_NUMBERS.getLine(obj.getClass());
+        }
+
         return obj + "(" + lineNumber.source() + ":" + lineNumber.line() + ")";
     }
 

@@ -714,7 +714,6 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         // Operating over this flow executes the operations in each takeWhile below only after the preceding items have
         // been processed, which ensures that the relevant fields are properly set.
-
         iterators.add(Flow.fromIterable(filteredSSTables)
                           .takeWhile(sstable -> sstable.getMaxTimestamp() >= state.mostRecentPartitionTombstone)
                           .flatMap(sstable ->
@@ -725,7 +724,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                   oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone,
                                                                        sstable.getMinLocalDeletionTime());
 
-                              return makeFlowable(sstable, metricsCollector);
+                              return makeFlowableWithLowerBound(sstable, metricsCollector);
                           })
                           .map(fup ->
                           {
@@ -750,7 +749,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                       oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone,
                                                                            sstable.getMinLocalDeletionTime());
 
-                                  return makeFlowable(sstable, metricsCollector);
+                                  return makeFlowableWithLowerBound(sstable, metricsCollector);
                               }));
         }
 
@@ -778,7 +777,6 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         StorageHook.instance.reportRead(metadata().id, partitionKey());
         cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(partitionKey.getKey(), partitionKey.hashCode(), 1);
-
         return FlowablePartitions.merge(fups, nowInSec(), null);
     }
 
@@ -800,10 +798,10 @@ public class SinglePartitionReadCommand extends ReadCommand
         return sstable.flow(partitionKey(), clusterFilter.getSlices(metadata()), columnFilter(), isReversed(), metricsCollector);
     }
 
-    private Flow<FlowableUnfilteredPartition> makeFlowable(final SSTableReader sstable,
-                                                           SSTableReadMetricsCollector metricsCollector)
+    private Flow<FlowableUnfilteredPartition> makeFlowableWithLowerBound(final SSTableReader sstable,
+                                                                         SSTableReadMetricsCollector metricsCollector)
     {
-        return sstable.flow(partitionKey(), clusteringIndexFilter().getSlices(metadata()), columnFilter(), isReversed(), metricsCollector);
+        return sstable.flowWithLowerBound(partitionKey(), clusteringIndexFilter().getSlices(metadata()), columnFilter(), isReversed(), metricsCollector);
     }
 
     private boolean queriesMulticellType(TableMetadata table)
@@ -1322,9 +1320,8 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         /**
          * Returns the number of SSTables that need to be merged.
-         * @return the number of SSTables that need to be merged.
          */
-        public int getMergedSSTables()
+        private int getMergedSSTables()
         {
             return mergedSSTables;
         }

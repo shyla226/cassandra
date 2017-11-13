@@ -352,7 +352,6 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
         private final Comparator<? super In> comp;
         private final int idx;
         private In item;
-        private In lowerBound;
         boolean equalParent;
 
         public Candidate(int idx, Iterator<? extends In> iter, Comparator<? super In> comp)
@@ -360,18 +359,11 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
             this.iter = iter;
             this.comp = comp;
             this.idx = idx;
-            this.lowerBound = iter instanceof IteratorWithLowerBound ? ((IteratorWithLowerBound<In>)iter).lowerBound() : null;
         }
 
         /** @return this if our iterator had an item, and it is now available, otherwise null */
         protected Candidate<In> advance()
         {
-            if (lowerBound != null)
-            {
-                item = lowerBound;
-                return this;
-            }
-
             if (!iter.hasNext())
                 return null;
 
@@ -382,33 +374,13 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
         public int compareTo(Candidate<In> that)
         {
             assert this.item != null && that.item != null;
-            int ret = comp.compare(this.item, that.item);
-            if (ret == 0 && (this.isLowerBound() ^ that.isLowerBound()))
-            {   // if the items are equal and one of them is a lower bound (but not the other one)
-                // then ensure the lower bound is less than the real item so we can safely
-                // skip lower bounds when consuming
-                return this.isLowerBound() ? -1 : 1;
-            }
-            return ret;
-        }
-
-        private boolean isLowerBound()
-        {
-            return item == lowerBound;
+            return comp.compare(this.item, that.item);
         }
 
         public void consume(Reducer reducer)
         {
-            if (isLowerBound())
-            {
-                item = null;
-                lowerBound = null;
-            }
-            else
-            {
-                reducer.reduce(idx, item);
-                item = null;
-            }
+            reducer.reduce(idx, item);
+            item = null;
         }
 
         public boolean needsAdvance()

@@ -287,7 +287,7 @@ public class FlowablePartitions
         assert !flowables.isEmpty();
         FlowableUnfilteredPartition first = flowables.get(0);
         if (flowables.size() == 1 && listener == null)
-            return first;
+            return first.skipLowerBound();
 
         List<PartitionHeader> headers = new ArrayList<>(flowables.size());
         List<Flow<Unfiltered>> contents = new ArrayList<>(flowables.size());
