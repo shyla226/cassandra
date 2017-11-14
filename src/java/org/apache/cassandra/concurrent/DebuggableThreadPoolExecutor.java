@@ -124,6 +124,11 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
         return createWithMaximumPoolSize(threadPoolName, size, Integer.MAX_VALUE, TimeUnit.SECONDS);
     }
 
+    public static DebuggableThreadPoolExecutor createWithFixedPoolSize(ThreadFactory threadFactory, int size)
+    {
+        return new DebuggableThreadPoolExecutor(size, Integer.MAX_VALUE, Integer.MAX_VALUE, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), threadFactory);
+    }
+
     /**
      * Returns a ThreadPoolExecutor with a fixed maximum number of threads, but whose
      * threads are terminated when idle for too long.

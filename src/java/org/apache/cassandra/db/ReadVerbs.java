@@ -104,15 +104,12 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                      .droppedGroup(DroppedMessages.Group.RANGE_SLICE)
                      .handler(readHandler());
         // Nodesync mainly use vanilla range queries so this is very similar to RANGE_READ, but we use a separate verb
-        // so we can force responses to be executed on the NodeSync executor. Also allow us to count dropped messages
-        // separately for increasing clarity. And it may prove useful in the future to know is for NodeSync or not, so
-        // that's a good way to do so.
+        // as a way to identify NodeSync reads.
         // TODO: it might also make sense to have a specific timeout, not that the default one for ranges is not appropriate,
         // but rather so that it's not impacted if user sets that later timeout to very or very small value. Unclear if
         // benefits are worth the trouble at that point though.
         NODESYNC = helper.monitoredRequestResponse("NODESYNC", NodeSyncReadCommand.class, ReadResponse.class)
                          .timeout(DatabaseDescriptor::getRangeRpcTimeout)
-                         .responseExecutor(NodeSyncReadCommand::nodeSyncExecutor)
                          .droppedGroup(DroppedMessages.Group.NODESYNC)
                          .handler(readHandler());
     }

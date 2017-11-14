@@ -81,30 +81,33 @@ public class PartitionRangeReadCommand extends ReadCommand
     // We access the scheduler/operationExecutor multiple times for each command (at least twice for every replica
     // involved in the request and response executor in Messaging) and re-doing their computation is unnecessary so
     // caching their value here. Note that we don't serialize those in any way, they are just recomputed in the ctor.
-    private final transient TPCScheduler scheduler;
+    private final transient StagedScheduler scheduler;
     private final transient TracingAwareExecutor operationExecutor;
 
     // Note: non static methods of this class should not use this ctor directly, but use the copy() method instead.
     protected PartitionRangeReadCommand(DigestVersion digestVersion,
-                                      TableMetadata metadata,
-                                      int nowInSec,
-                                      ColumnFilter columnFilter,
-                                      RowFilter rowFilter,
-                                      DataLimits limits,
-                                      DataRange dataRange,
-                                      IndexMetadata index)
+                                        TableMetadata metadata,
+                                        int nowInSec,
+                                        ColumnFilter columnFilter,
+                                        RowFilter rowFilter,
+                                        DataLimits limits,
+                                        DataRange dataRange,
+                                        IndexMetadata index,
+                                        StagedScheduler scheduler)
     {
         super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         this.dataRange = dataRange;
 
-        this.scheduler = TPC.getForBound(Keyspace.open(metadata().keyspace), dataRange.startKey());
-        this.operationExecutor = scheduler.forTaskType(TPCTaskType.READ_RANGE);
+        this.scheduler = scheduler == null ? TPC.getForBound(Keyspace.open(metadata.keyspace), dataRange.startKey()) : scheduler;
+        this.operationExecutor = this.scheduler.forTaskType(TPCTaskType.READ_RANGE);
     }
 
     /**
      * Should be used by any methods that needs to generate a new command derived from this one. This allows
      * inheriting class (typically {@link NodeSyncReadCommand}) to override this, making it a lot easier than to
      * override all other methods.
+     * Note that the {@code scheduler} argument is optional: if it is null, the default appropriate scheduler will be
+     * re-build.
      */
     protected PartitionRangeReadCommand copy(DigestVersion digestVersion,
                                              TableMetadata metadata,
@@ -113,9 +116,10 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              RowFilter rowFilter,
                                              DataLimits limits,
                                              DataRange dataRange,
-                                             IndexMetadata index)
+                                             IndexMetadata index,
+                                             StagedScheduler scheduler)
     {
-        return new PartitionRangeReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index);
+        return new PartitionRangeReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index, scheduler);
     }
 
     public static PartitionRangeReadCommand create(TableMetadata metadata,
@@ -132,7 +136,8 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              rowFilter,
                                              limits,
                                              dataRange,
-                                             findIndex(metadata, rowFilter));
+                                             findIndex(metadata, rowFilter),
+                                             null);
     }
 
     /**
@@ -152,6 +157,7 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              RowFilter.NONE,
                                              DataLimits.NONE,
                                              DataRange.allData(metadata.partitioner),
+                                             null,
                                              null);
     }
 
@@ -164,6 +170,7 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              RowFilter.NONE,
                                              DataLimits.NONE,
                                              range,
+                                             null,
                                              null);
     }
 
@@ -217,7 +224,8 @@ public class PartitionRangeReadCommand extends ReadCommand
                     rowFilter(),
                     isRangeContinuation ? limits() : limits().withoutState(),
                     newRange,
-                    indexMetadata());
+                    indexMetadata(),
+                    null); // The ranges have changed, so we should re-compute which scheduler to use
     }
 
     public PartitionRangeReadCommand createDigestCommand(DigestVersion digestVersion)
@@ -229,7 +237,8 @@ public class PartitionRangeReadCommand extends ReadCommand
                     rowFilter(),
                     limits(),
                     dataRange(),
-                    indexMetadata());
+                    indexMetadata(),
+                    scheduler);
     }
 
     public PartitionRangeReadCommand withUpdatedLimit(DataLimits newLimits)
@@ -241,7 +250,8 @@ public class PartitionRangeReadCommand extends ReadCommand
                     rowFilter(),
                     newLimits,
                     dataRange(),
-                    indexMetadata());
+                    indexMetadata(),
+                    scheduler);
     }
 
     public PartitionRangeReadCommand withUpdatedLimitsAndDataRange(DataLimits newLimits, DataRange newDataRange)
@@ -253,7 +263,8 @@ public class PartitionRangeReadCommand extends ReadCommand
                     rowFilter(),
                     newLimits,
                     newDataRange,
-                    indexMetadata());
+                    indexMetadata(),
+                    null); // The ranges have changed, so we should re-compute which scheduler to use
     }
 
     public long getTimeout()
@@ -483,7 +494,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         throws IOException
         {
             DataRange range = DataRange.serializers.get(version).deserialize(in, metadata);
-            return new PartitionRangeReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, range, index);
+            return new PartitionRangeReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, range, index, null);
         }
     }
 }

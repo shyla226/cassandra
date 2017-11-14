@@ -23,12 +23,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.disposables.Disposable;
-import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCTaskType;
 
 /**
  * Implementation of {@link DeferredFlow}.
@@ -53,6 +53,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
     private final AtomicReference<Flow<T>> source;
     private final long deadlineNanos;
     private final Supplier<Flow<T>> timeoutSupplier;
+    private final StagedScheduler scheduler;
 
     private volatile FlowSubscriber<T> subscriber;
     private volatile FlowSubscriptionRecipient subscriptionRecipient;
@@ -61,11 +62,13 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
 
     private final AtomicBoolean subscribed = new AtomicBoolean(false);
 
-    DeferredFlowImpl(long deadlineNanos, Supplier<Flow<T>> timeoutSupplier)
+    DeferredFlowImpl(long deadlineNanos, StagedScheduler scheduler, Supplier<Flow<T>> timeoutSupplier)
     {
+        assert scheduler != null;
         this.source = new AtomicReference<>(null);
         this.deadlineNanos = deadlineNanos;
         this.timeoutSupplier = timeoutSupplier;
+        this.scheduler = scheduler;
     }
 
     public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
@@ -122,12 +125,10 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
             return;
         }
 
-        timeoutTask = TPC.bestTPCScheduler().scheduleDirect(() -> {
-
+        timeoutTask = scheduler.scheduleDirect(() -> {
             timeoutTask = null;
             if (!hasSource()) // important to check because it is expensive to create an exception, due to the callstack
                 onSource(timeoutSupplier.get());
-
         }, TPCTaskType.TIMED_TIMEOUT, timeoutNanos, TimeUnit.NANOSECONDS);
     }
 

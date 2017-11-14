@@ -11,6 +11,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -20,14 +21,22 @@ import com.google.common.math.DoubleMath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.util.concurrent.FastThreadLocalThread;
 import io.reactivex.Scheduler;
+import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCRunnable;
+import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.concurrent.TracingAwareExecutorService;
 import org.apache.cassandra.config.NodeSyncConfig;
 import org.apache.cassandra.utils.collection.History;
+import org.apache.cassandra.utils.flow.TaggedRunnable;
 import org.apache.cassandra.utils.units.RateUnit;
 import org.apache.cassandra.utils.units.Units;
 
@@ -95,7 +104,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     /** The thread pool at the heart of this executor. */
     private final DebuggableThreadPoolExecutor validationExecutor;
 
-    private final Scheduler wrappingScheduler; // Rx Scheduler on top of validationExecutor because that's what Flow use for now
+    private final StagedScheduler wrappingScheduler; // Rx Scheduler on top of validationExecutor because that's what Flow use for now
     /** Executor used to schedule the {@link Controller} at regular intervals. */
     private final ScheduledExecutorService updaterExecutor = Executors.newSingleThreadScheduledExecutor(new NamedThreadFactory("NodeSyncController"));
 
@@ -120,13 +129,13 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     ValidationExecutor(ValidationScheduler scheduler, NodeSyncConfig config)
     {
         this.scheduler = scheduler;
-        this.validationExecutor = DebuggableThreadPoolExecutor.createWithFixedPoolSize("NodeSync", config.getMinThreads());
-        this.wrappingScheduler = Schedulers.from(validationExecutor);
+        this.validationExecutor = DebuggableThreadPoolExecutor.createWithFixedPoolSize(new ValidationThread.Factory(), config.getMinThreads());
+        this.wrappingScheduler = new NodeSyncStagedExecutor();
         this.config = config;
         this.maxInFlightValidations = config.getMinInflightValidations();
     }
 
-    Scheduler asScheduler()
+    StagedScheduler asScheduler()
     {
         return wrappingScheduler;
     }
@@ -628,6 +637,78 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         private long currentDiff()
         {
             return currentDiff;
+        }
+    }
+
+    private class NodeSyncStagedExecutor extends StagedScheduler
+    {
+        private final Scheduler scheduler;
+
+        private NodeSyncStagedExecutor()
+        {
+            this.scheduler = Schedulers.from(validationExecutor);
+        }
+
+        @Override
+        public Disposable scheduleDirect(Runnable run, TPCTaskType stage, long delay, TimeUnit unit)
+        {
+            return scheduler.scheduleDirect(new TaggedRunnable.Base(stage, scheduler)
+            {
+                @Override
+                public void run()
+                {
+                    run.run();
+                }
+            }, delay, unit);
+        }
+
+        @Override
+        public boolean isOnScheduler(Thread thread)
+        {
+            return thread instanceof ValidationThread;
+        }
+
+        @Override
+        public int metricsCoreId()
+        {
+            return TPC.getNumCores(); // with IOScheduler, Unknown, etc..
+        }
+
+        @Override
+        public void enqueue(TPCRunnable runnable)
+        {
+            validationExecutor.execute(runnable);
+        }
+
+        @Override
+        public Worker createWorker()
+        {
+            return scheduler.createWorker();
+        }
+
+        @Override
+        public TracingAwareExecutor forTaskType(TPCTaskType type)
+        {
+            return validationExecutor;
+        }
+    }
+
+    private static class ValidationThread extends FastThreadLocalThread
+    {
+        private ValidationThread(String name, Runnable runnable)
+        {
+            super(null, NamedThreadFactory.threadLocalDeallocator(runnable), name);
+            setDaemon(true);
+        }
+
+        private static class Factory implements ThreadFactory
+        {
+            private final AtomicInteger n = new AtomicInteger(1);
+
+            public Thread newThread(Runnable runnable)
+            {
+                return new ValidationThread("NodeSync-" + n.getAndIncrement(), runnable);
+            }
         }
     }
 }

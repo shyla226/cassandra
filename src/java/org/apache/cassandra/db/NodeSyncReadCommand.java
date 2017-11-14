@@ -20,10 +20,9 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.Collection;
-
 import javax.annotation.Nullable;
 
-import org.apache.cassandra.concurrent.TracingAwareExecutor;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -51,8 +50,10 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
     private static final SelectionDeserializer<NodeSyncReadCommand> selectionDeserializer = new Deserializer();
     public static final Versioned<ReadVersion, Serializer<NodeSyncReadCommand>> serializers = ReadVersion.versioned(v -> new ReadCommandSerializer<>(v, selectionDeserializer));
 
+    // Only here to be able to easily distinguish if we are coordinator side and a scheduler has been passed in the
+    // ctor, or if we are replica side and we don't have one.
     @Nullable
-    private final transient TracingAwareExecutor nodeSyncExecutor;
+    private final StagedScheduler nodeSyncScheduler;
 
     private NodeSyncReadCommand(DigestVersion digestVersion,
                                 TableMetadata table,
@@ -62,7 +63,7 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
                                 DataLimits limits,
                                 DataRange range,
                                 IndexMetadata index,
-                                TracingAwareExecutor nodeSyncExecutor)
+                                StagedScheduler nodeSyncScheduler)
     {
         super(digestVersion,
               table,
@@ -71,13 +72,14 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
               rowFilter,
               limits,
               range,
-              index);
-        this.nodeSyncExecutor = nodeSyncExecutor;
+              index,
+              nodeSyncScheduler);
+        this.nodeSyncScheduler = nodeSyncScheduler;
     }
 
     public NodeSyncReadCommand(Segment segment,
                                int nowInSec,
-                               TracingAwareExecutor nodeSyncExecutor)
+                               StagedScheduler nodeSyncScheduler)
     {
         this(null,
              segment.table,
@@ -87,9 +89,10 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
              DataLimits.NONE,
              DataRange.forTokenRange(segment.range),
              null,
-             nodeSyncExecutor);
+             nodeSyncScheduler);
     }
 
+    @Override
     protected PartitionRangeReadCommand copy(DigestVersion digestVersion,
                                              TableMetadata metadata,
                                              int nowInSec,
@@ -97,22 +100,18 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
                                              RowFilter rowFilter,
                                              DataLimits limits,
                                              DataRange dataRange,
-                                             IndexMetadata index)
+                                             IndexMetadata index,
+                                             StagedScheduler scheduler)
     {
-        return new NodeSyncReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index, nodeSyncExecutor);
-    }
-
-    /**
-     * The NodeSync executor that should be used to handle response to this request.
-     *
-     * @return the NodeSync executor, or {@code null} if this command has been serialized/deserialized. The later is
-     * due to the fact that the executor value is lost through serialization, which is ok because we only need the
-     * executor in practice on the NodeSync coordinator where this won't be {@code null}.
-     */
-    @Nullable
-    TracingAwareExecutor nodeSyncExecutor()
-    {
-        return nodeSyncExecutor;
+        return new NodeSyncReadCommand(digestVersion,
+                                       metadata,
+                                       nowInSec,
+                                       columnFilter,
+                                       rowFilter,
+                                       limits,
+                                       dataRange,
+                                       index,
+                                       nodeSyncScheduler == null ? scheduler : nodeSyncScheduler);
     }
 
     @Override
@@ -137,11 +136,18 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
                                                ColumnFilter columnFilter,
                                                RowFilter rowFilter,
                                                DataLimits limits,
-                                               IndexMetadata index)
-        throws IOException
+                                               IndexMetadata index) throws IOException
         {
             DataRange range = DataRange.serializers.get(version).deserialize(in, metadata);
-            return new NodeSyncReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, range, null, null);
+            return new NodeSyncReadCommand(digestVersion,
+                                           metadata,
+                                           nowInSec,
+                                           columnFilter,
+                                           rowFilter,
+                                           limits,
+                                           range,
+                                           null,
+                                           null);
         }
     }
 }

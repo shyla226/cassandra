@@ -21,6 +21,10 @@ package org.apache.cassandra.utils.flow;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
+import com.google.common.annotations.VisibleForTesting;
+
 /**
  * This class is a bridge between the Flow<T> that we return to clients and the one
  * that we receive when {@link #onSource(Flow)} is called. It converts
@@ -51,9 +55,10 @@ public abstract class DeferredFlow<T> extends Flow<T>
      *
      * @return a deferred flow implementation
      */
+    @VisibleForTesting
     static <T> DeferredFlow<T> createWithTimeout(long timeoutNanos)
     {
-        return create(System.nanoTime() + timeoutNanos, () -> Flow.error(new TimeoutException()));
+        return create(System.nanoTime() + timeoutNanos, TPC.bestTPCScheduler(), () -> Flow.error(new TimeoutException()));
     }
 
     /**
@@ -61,13 +66,14 @@ public abstract class DeferredFlow<T> extends Flow<T>
      * the flow returned by the provided supplier as source.
      *
      * @param deadlineNanos - the deadline in nano seconds (corresponding to System.nanoTime)
+     * @param scheduler - the scheduler to run timeout task
      * @param timeoutSupplier - a function that will supply a source when and if required.
      * @param <T> - the type of flow items
      *
      * @return a deferred flow implementation
      */
-    public static <T> DeferredFlow<T> create(long deadlineNanos, Supplier<Flow<T>> timeoutSupplier)
+    public static <T> DeferredFlow<T> create(long deadlineNanos, StagedScheduler scheduler, Supplier<Flow<T>> timeoutSupplier)
     {
-        return new DeferredFlowImpl<>(deadlineNanos, timeoutSupplier);
+        return new DeferredFlowImpl<>(deadlineNanos, scheduler, timeoutSupplier);
     }
 }

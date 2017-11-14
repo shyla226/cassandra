@@ -78,7 +78,9 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
 
         long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(command().getTimeout());
-        this.result = DeferredFlow.create(queryStartNanos() + timeoutNanos, this::generateFlowOnTimeout);
+        this.result = DeferredFlow.create(queryStartNanos() + timeoutNanos,
+                                          resolver.command.getScheduler(),
+                                          this::generateFlowOnTimeout);
 
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockfor, StringUtils.join(this.endpoints, ","));

@@ -216,7 +216,9 @@ class Validator
             throw new IllegalStateException("Cannot call executeOn multiple times");
         }
 
-        ReadCommand command = new NodeSyncReadCommand(segment, FBUtilities.nowInSeconds(), executor.asExecutor());
+        ReadCommand command = new NodeSyncReadCommand(segment,
+                                                      FBUtilities.nowInSeconds(),
+                                                      executor.asScheduler());
         QueryPager pager = command.getPager(null, ProtocolVersion.CURRENT);
         // We don't want to use CL.ALL, because that would throw Unavailable unless all nodes are up. Instead, we want
         // read to proceed as soon as at least 2 nodes are up (hence CL.TWO), but we still want to block in the resolver
@@ -229,7 +231,6 @@ class Validator
                                          .observer(observer)
                                          .readRepairDecision(ReadRepairDecision.GLOBAL)
                                          .build(System.nanoTime());
-
 
         logger.trace("Starting execution of validation on {}", segment);
         try
@@ -520,6 +521,9 @@ class Validator
 
         private void onData(int size, boolean isConsistent)
         {
+            // We're running on a specific executor (ValidationExecutor) explicitly because of the limiter, because
+            // it is blocking. So make double sure we haven't introduced a bug by mistake by running on a TPC thread.
+            assert !TPC.isTPCThread();
             // We want to track how much work received for a page/validator sits idle due to a lack of processing
             // resources (threads): this is used in ValidationExecutor to understand if we may be bottle-necking
             // on threads.
@@ -535,9 +539,6 @@ class Validator
             // Save some calls to System.nanoTime if we're not blocking at all
             if (!limiter.tryAcquire(size))
             {
-                // We're running on a specific executor (ValidationExecutor) explicitly because of the limiter, because
-                // it is blocking. So make double sure we haven't introduced a bug by mistake by running on a TPC thread.
-                assert !TPC.isTPCThread();
                 long start = System.nanoTime();
                 limiter.acquire(size);
                 limiterWaitTimeNanosForPage += System.nanoTime() - start;
