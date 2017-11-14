@@ -1,4 +1,5 @@
 DSE 5.1.6
+ * Skip building views during base table streams on range movements (Backport CASSANDRA-13065) (DB-1311)
  * Add invalid-sstable-root JVM argument to all relevant test entries in build.xml (DB-1133)
 Merged from dse5.0:
  * Memoize seeds (DB-865)

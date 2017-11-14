@@ -8,6 +8,7 @@ import java.net.UnknownHostException;
 import java.util.*;
 
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.streaming.StreamOperation;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 import org.junit.BeforeClass;
@@ -208,7 +209,7 @@ public class RangeStreamerBootstrapTest
         RangeStreamer streamer = new RangeStreamer(tokenMetadata,
                                                    tokens(2, vnodes),
                                                    addr(3),
-                                                   "Bootstrap",
+                                                   StreamOperation.BOOTSTRAP,
                                                    consistentRangeMovement,
                                                    RangeStreamer.StreamConsistency.ONE,
                                                    snitch,

@@ -24,6 +24,7 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.TabularData;
@@ -60,6 +61,7 @@ import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
+import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.thrift.cassandraConstants;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.*;
@@ -1315,13 +1317,13 @@ public final class SystemKeyspace
         availableRanges.truncateBlocking();
     }
 
-    public static synchronized void updateTransferredRanges(String description,
+    public static synchronized void updateTransferredRanges(StreamOperation operation,
                                                          InetAddress peer,
                                                          String keyspace,
                                                          Collection<Range<Token>> streamedRanges)
     {
         String cql = "UPDATE system.%s SET ranges = ranges + ? WHERE operation = ? AND peer = ? AND keyspace_name = ?";
-        executeInternal(format(cql, TRANSFERRED_RANGES), rangesToUpdate(streamedRanges), description, peer, keyspace);
+        executeInternal(format(cql, TRANSFERRED_RANGES), rangesToUpdate(streamedRanges), operation.getDescription(), peer, keyspace);
     }
 
     private static Set<ByteBuffer> rangesToUpdate(Collection<Range<Token>> ranges)

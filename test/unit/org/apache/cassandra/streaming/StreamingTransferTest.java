@@ -111,14 +111,14 @@ public class StreamingTransferTest
     @Test
     public void testEmptyStreamPlan() throws Exception
     {
-        StreamResultFuture futureResult = new StreamPlan("StreamingTransferTest").execute();
+        StreamResultFuture futureResult = new StreamPlan(StreamOperation.OTHER).execute();
         final UUID planId = futureResult.planId;
         Futures.addCallback(futureResult, new FutureCallback<StreamState>()
         {
             public void onSuccess(StreamState result)
             {
                 assertEquals(planId, result.planId);
-                assertEquals(result.description, "StreamingTransferTest");
+                assertEquals(result.streamOperation, StreamOperation.OTHER);
                 assertTrue(result.sessions.isEmpty());
             }
 
@@ -140,14 +140,14 @@ public class StreamingTransferTest
         ranges.add(new Range<>(p.getMinimumToken(), p.getToken(ByteBufferUtil.bytes("key1"))));
         ranges.add(new Range<>(p.getToken(ByteBufferUtil.bytes("key2")), p.getMinimumToken()));
 
-        StreamResultFuture futureResult = new StreamPlan("StreamingTransferTest")
+        StreamResultFuture futureResult = new StreamPlan(StreamOperation.OTHER)
                                                   .requestRanges(LOCAL, LOCAL, KEYSPACE2, ranges)
                                                   .execute();
 
         UUID planId = futureResult.planId;
         StreamState result = futureResult.get();
         assertEquals(planId, result.planId);
-        assertEquals(result.description, "StreamingTransferTest");
+        assertEquals(result.streamOperation, StreamOperation.OTHER);
 
         // we should have completed session with empty transfer
         assertEquals(result.sessions.size(),1);
@@ -236,7 +236,7 @@ public class StreamingTransferTest
         List<Range<Token>> ranges = new ArrayList<>();
         // wrapped range
         ranges.add(new Range<Token>(p.getToken(ByteBufferUtil.bytes("key1")), p.getToken(ByteBufferUtil.bytes("key0"))));
-        StreamPlan streamPlan = new StreamPlan("StreamingTransferTest").transferRanges(LOCAL, cfs.keyspace.getName(), ranges, cfs.getColumnFamilyName());
+        StreamPlan streamPlan = new StreamPlan(StreamOperation.OTHER).transferRanges(LOCAL, cfs.keyspace.getName(), ranges, cfs.getColumnFamilyName());
         StreamState state = streamPlan.execute().get();
         verifyConnectionsAreClosed();
 
@@ -265,7 +265,7 @@ public class StreamingTransferTest
 
     private void transfer(SSTableReader sstable, List<Range<Token>> ranges) throws Exception
     {
-        StreamPlan streamPlan = new StreamPlan("StreamingTransferTest").transferFiles(LOCAL, makeStreamingDetails(ranges, Refs.tryRef(Arrays.asList(sstable))));
+        StreamPlan streamPlan = new StreamPlan(StreamOperation.OTHER).transferFiles(LOCAL, makeStreamingDetails(ranges, Refs.tryRef(Arrays.asList(sstable))));
         StreamState state = streamPlan.execute().get();
         verifyConnectionsAreClosed();
 

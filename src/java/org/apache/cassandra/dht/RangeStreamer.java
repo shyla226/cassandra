@@ -37,6 +37,7 @@ import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.streaming.StreamPlan;
 import org.apache.cassandra.streaming.StreamResultFuture;
 import org.apache.cassandra.utils.FBUtilities;
@@ -78,7 +79,7 @@ public class RangeStreamer
     public RangeStreamer(TokenMetadata metadata,
                          Collection<Token> tokens,
                          InetAddress address,
-                         String description,
+                         StreamOperation streamOperation,
                          boolean useStrictConsistency,
                          StreamConsistency streamConsistency,
                          IEndpointSnitch snitch,
@@ -89,8 +90,8 @@ public class RangeStreamer
         this.metadata = metadata;
         this.tokens = tokens;
         this.address = address;
-        this.description = description;
-        this.streamPlan = new StreamPlan(description, true, connectSequentially);
+        this.description = streamOperation.getDescription();
+        this.streamPlan = new StreamPlan(streamOperation, true, connectSequentially);
         this.useStrictConsistency = useStrictConsistency;
         this.streamConsistency = streamConsistency;
         this.snitch = snitch;

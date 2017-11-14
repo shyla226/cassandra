@@ -120,7 +120,7 @@ public class StreamTransferTaskTest
     {
         InetAddress peer = FBUtilities.getBroadcastAddress();
         StreamCoordinator streamCoordinator = new StreamCoordinator(1, true, false, null, false);
-        StreamResultFuture future = StreamResultFuture.init(UUID.randomUUID(), "", Collections.<StreamEventHandler>emptyList(), streamCoordinator);
+        StreamResultFuture future = StreamResultFuture.init(UUID.randomUUID(), StreamOperation.OTHER, Collections.<StreamEventHandler>emptyList(), streamCoordinator);
         StreamSession session = new StreamSession(peer, peer, null, 0, true, false);
         session.init(future, true);
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD);
