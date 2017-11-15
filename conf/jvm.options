@@ -215,6 +215,8 @@
 ### G1 Settings 
 ## Use the Hotspot garbage-first collector.
 -XX:+UseG1GC
+-XX:+ParallelRefProcEnabled
+
 #
 ## Have the JVM do less remembered set work during STW, instead
 ## preferring concurrent GC. Reduces p99.9 latency.
