@@ -208,16 +208,23 @@ public class CompactionManager implements CompactionManagerMBean
 
     public boolean isCompacting(Iterable<ColumnFamilyStore> cfses)
     {
-        return isCompacting(cfses, Predicates.alwaysTrue());
+        return isCompacting(cfses, Predicates.alwaysTrue(), Predicates.alwaysTrue());
     }
 
-    public boolean isCompacting(Iterable<ColumnFamilyStore> cfses, Predicate<SSTableReader> predicate)
+    public boolean isCompacting(Iterable<ColumnFamilyStore> cfses,
+                                Predicate<OperationType> opPredicate,
+                                Predicate<SSTableReader> readerPredicate)
     {
         for (ColumnFamilyStore cfs : cfses)
         {
-            Set<SSTableReader> compacting = cfs.getTracker().getCompacting();
-            if (compacting.stream().anyMatch(s -> predicate.apply(s)))
+            if (cfs.getTracker().getTransactions()
+                   .stream().anyMatch(txn -> opPredicate.apply(txn.opType())
+                                             && txn.compactingSet()
+                                                   .stream()
+                                                   .anyMatch(s -> readerPredicate.apply(s))))
+            {
                 return true;
+            }
         }
         return false;
     }
@@ -2041,7 +2048,7 @@ public class CompactionManager implements CompactionManagerMBean
     @Deprecated
     public boolean interruptCompactionFor(Iterable<TableMetadata> tables, boolean interruptValidation)
     {
-        return interruptCompactionFor(tables, 
+        return interruptCompactionFor(tables,
                                       interruptValidation ? Predicates.alwaysTrue() : OperationType.EXCEPT_VALIDATIONS,
                                       Predicates.alwaysTrue());
     }
@@ -2088,7 +2095,7 @@ public class CompactionManager implements CompactionManagerMBean
     @Deprecated
     public boolean interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, boolean interruptValidation)
     {
-        return interruptCompactionForCFs(cfss, 
+        return interruptCompactionForCFs(cfss,
                                          interruptValidation ? Predicates.alwaysTrue() : OperationType.EXCEPT_VALIDATIONS,
                                          Predicates.alwaysTrue());
     }
@@ -2098,7 +2105,8 @@ public class CompactionManager implements CompactionManagerMBean
         return interruptCompactionForCFs(cfss, Predicates.alwaysTrue(), Predicates.alwaysTrue());
     }
 
-    public boolean interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, Predicate<OperationType> opPredicate, Predicate<SSTableReader> readerPredicate)
+    public boolean interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, Predicate<OperationType> opPredicate,
+                                             Predicate<SSTableReader> readerPredicate)
     {
         List<TableMetadata> metadata = new ArrayList<>();
         for (ColumnFamilyStore cfs : cfss)
@@ -2109,16 +2117,17 @@ public class CompactionManager implements CompactionManagerMBean
 
     public void waitForCessation(Iterable<ColumnFamilyStore> cfss)
     {
-        waitForCessation(cfss, Predicates.alwaysTrue());
+        waitForCessation(cfss, Predicates.alwaysTrue(), Predicates.alwaysTrue());
     }
 
-    public void waitForCessation(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> predicate)
+    public void waitForCessation(Iterable<ColumnFamilyStore> cfss, Predicate<OperationType> opPredicate,
+                                 Predicate<SSTableReader> readerPredicate)
     {
         long start = System.nanoTime();
         long delay = TimeUnit.MINUTES.toNanos(5);
         while (System.nanoTime() - start < delay)
         {
-            if (CompactionManager.instance.isCompacting(cfss, predicate))
+            if (CompactionManager.instance.isCompacting(cfss, opPredicate, readerPredicate))
                 Uninterruptibles.sleepUninterruptibly(1, TimeUnit.MILLISECONDS);
             else
                 break;

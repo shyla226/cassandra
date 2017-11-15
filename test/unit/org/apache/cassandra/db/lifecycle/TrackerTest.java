@@ -34,8 +34,7 @@ import com.google.common.collect.Iterables;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import junit.framework.Assert;
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.junit.Assert;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Memtable;
@@ -90,18 +89,26 @@ public class TrackerTest
         List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, true, cfs), MockSchema.sstable(1, cfs), MockSchema.sstable(2, cfs));
         tracker.addInitialSSTables(copyOf(readers));
         Assert.assertNull(tracker.tryModify(ImmutableList.of(MockSchema.sstable(0, cfs)), OperationType.COMPACTION));
-        try (LifecycleTransaction txn = tracker.tryModify(readers.get(0), OperationType.COMPACTION);)
+        LifecycleTransaction txnRef;
+        try (LifecycleTransaction txn = tracker.tryModify(readers.get(0), OperationType.COMPACTION))
         {
+            txnRef = txn;
             Assert.assertNotNull(txn);
+            Assert.assertTrue(tracker.getTransactions().contains(txn));
             Assert.assertNull(tracker.tryModify(readers.get(0), OperationType.COMPACTION));
             Assert.assertEquals(1, txn.originals().size());
             Assert.assertTrue(txn.originals().contains(readers.get(0)));
         }
-        try (LifecycleTransaction txn = tracker.tryModify(Collections.<SSTableReader>emptyList(), OperationType.COMPACTION);)
+        Assert.assertFalse(tracker.getTransactions().contains(txnRef));
+        Assert.assertTrue(tracker.getTransactions().isEmpty());
+        try (LifecycleTransaction txn = tracker.tryModify(Collections.<SSTableReader>emptyList(), OperationType.COMPACTION))
         {
+            txnRef = txn;
             Assert.assertNotNull(txn);
             Assert.assertEquals(0, txn.originals().size());
         }
+        Assert.assertFalse(tracker.getTransactions().contains(txnRef));
+        Assert.assertTrue(tracker.getTransactions().isEmpty());
         readers.get(0).selfRef().release();
     }
 
