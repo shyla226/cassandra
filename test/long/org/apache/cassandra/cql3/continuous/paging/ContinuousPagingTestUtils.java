@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.cql3.continuous.paging;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -294,6 +295,119 @@ class ContinuousPagingTestUtils
         public Object[][] expectedRows()
         {
             return Arrays.copyOfRange(rows, 0, numSelectPartitions * numClusterings);
+        }
+    }
+
+    /**
+     * This is the same as FixedSizeSchema except we insert no clustering values,
+     * only PKs and static values.
+     */
+    static class StaticContentSchema extends FixedSizeSchema
+    {
+        StaticContentSchema(int numPartitions)
+        {
+            this(numPartitions, false);
+        }
+
+        StaticContentSchema(int numPartitions, boolean compression)
+        {
+            super(numPartitions, 1, 1, compression);
+        }
+
+        /** Create the rows that will be used in create() to insert data. */
+        protected void createRows()
+        {
+            for (int i = 0; i < numPartitions; i++)
+                rows[i] = row(i, i);
+        }
+
+        protected String insertStatement()
+        {
+            return "INSERT INTO %s (k, s) VALUES (?, ?)";
+        }
+
+        public String getQuery()
+        {
+            return "SELECT k, s FROM %s";
+        }
+    }
+
+
+    /**
+     * A schema similar to what is used by cassandra-stress
+     */
+    static class StressSchema implements TestSchema
+    {
+        final int numRows;
+        final int blobSize;
+        final Object[][] rows;
+        final boolean compression;
+
+        StressSchema(int numRows, int partitionSize)
+        {
+            this(numRows, partitionSize, false);
+        }
+
+        StressSchema(int numRows, int partitionSize, boolean compression)
+        {
+            this.numRows = numRows;
+            this.blobSize = partitionSize / 4; // the number of blobs
+            this.rows = new Object[numRows][];
+            this.compression = compression;
+        }
+
+        ByteBuffer generateBlob(Random rnd)
+        {
+            byte[] ret = new byte[blobSize];
+            rnd.nextBytes(ret);
+            return ByteBuffer.wrap(ret);
+        }
+
+        /** Create the rows that will be used in create() to insert data. */
+        protected void createRows()
+        {
+            Random rnd = new Random();
+            for (int i = 0; i < numRows; i++)
+                rows[i] = row(generateBlob(rnd), generateBlob(rnd), generateBlob(rnd), generateBlob(rnd));
+        }
+
+        public void create(CQLTester tester) throws Throwable
+        {
+            createRows();
+
+            tester.createTable(createStatement());
+
+            for (Object[] row : insertRows())
+                tester.execute(insertStatement(), row);
+        }
+
+        protected String createStatement()
+        {
+            String ret = "CREATE TABLE %s (key blob PRIMARY KEY, " +
+                         "C0 blob, C1 blob, C2 blob) WITH COMPACT STORAGE";
+            if (!compression)
+                ret += " AND compression = {'sstable_compression' : ''}";
+            return ret;
+        }
+
+        protected String insertStatement()
+        {
+            return "INSERT INTO %s (key, C0, C1, C2) VALUES (?, ?, ?, ?)";
+        }
+
+        protected Object[][] insertRows()
+        {
+            return rows;
+        }
+
+        public String getQuery()
+        {
+            return "SELECT key, C0, C1, C2 FROM %s";
+        }
+
+        public Object[][] expectedRows()
+        {
+            return rows;
         }
     }
 

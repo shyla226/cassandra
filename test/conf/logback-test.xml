@@ -60,6 +60,8 @@
   <logger name="org.apache.hadoop" level="WARN"/>
 
   <logger name="org.apache.cassandra.db.monitoring" level="DEBUG"/>
+  <!--<logger name="org.apache.cassandra.cql3.continuous.paging.ContinuousPagingService" level="TRACE"/>-->
+  <!--<logger name="org.apache.cassandra.service.pager.AbstractQueryPager" level="TRACE"/>-->
 
   <!-- Do not change the name of this appender. LogbackStatusListener uses the thread name
        tied to the appender name to know when to write to real stdout/stderr vs forwarding to logback -->

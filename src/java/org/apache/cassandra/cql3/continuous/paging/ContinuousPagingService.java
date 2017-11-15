@@ -642,13 +642,14 @@ public class ContinuousPagingService
             avgRowSize = currentPage.avgRowSize(avgRowSize);
 
             boolean hasMorePages = !last && !stopped;
-            if (logger.isTraceEnabled())
-                logger.trace("Sending page with {} rows, average row size: {}, last: {}, hasMorePages: {}",
-                             currentPage.numRows, avgRowSize, last, hasMorePages);
-
             PagingResult pagingResult = new PagingResult(pagingExecutor.state(nextRowPending),
                                                          currentPage.seqNo,
                                                          last);
+
+            if (logger.isTraceEnabled())
+                logger.trace("Sending page with {} rows, average row size: {}, last: {}, hasMorePages: {}, paging state {}",
+                             currentPage.numRows, avgRowSize, last, hasMorePages, pagingResult.state);
+
             pageWriter.sendPage(currentPage.makeFrame(pagingResult), hasMorePages);
             numSentPages++;
         }

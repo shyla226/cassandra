@@ -102,7 +102,10 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
         {
             // We want to include the last returned key only if we haven't achieved our per-partition limit, otherwise, don't bother.
             boolean includeLastKey = remainingInPartition() > 0 && lastReturnedRow != null;
-            AbstractBounds<PartitionPosition> bounds = makeKeyBounds(lastReturnedKey, includeLastKey);
+            // If inclusive was set to true then we know there was a row for this partition that should have been returned. It can
+            // happen that lastReturnedRow == null for empty partitions with static rows, in this case we need to include the
+            // previous key again
+            AbstractBounds<PartitionPosition> bounds = makeKeyBounds(lastReturnedKey, includeLastKey || inclusive);
             if (includeLastKey)
             {
                 pageRange = fullRange.forPaging(bounds, command.metadata().comparator, lastReturnedRow.clustering(command.metadata()), inclusive);

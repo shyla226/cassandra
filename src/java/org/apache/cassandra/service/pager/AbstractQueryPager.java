@@ -19,6 +19,9 @@ package org.apache.cassandra.service.pager;
 
 import java.util.function.Function;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
@@ -27,9 +30,12 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 {
+    private static final Logger logger = LoggerFactory.getLogger(AbstractQueryPager.class);
+
     protected final T command;
     protected final DataLimits limits;
     protected final ProtocolVersion protocolVersion;
@@ -45,7 +51,13 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     /** The total number of rows remaining to be fetched*/
     private int remaining;
 
-    /** This is set to true when we want the last returned row to be also part of the query used when fetching a page */
+    /** This is set to true when we want the last row returned by the previous pager to be also part of the query
+     * used when fetching the next page. This is the case when the previous pager returned the row but the consumer
+     * never had a chance to use it. Currently this is only true when
+     * {@link org.apache.cassandra.cql3.continuous.paging.ContinuousPagingService.PageBuilder} needs to send
+     * a page to the client. It basically means that the client never received the last row written in the paging state.
+     * This row can also be a static row of an empty partition or a static compact table.
+     */
     protected boolean inclusive;
 
     /** This is the last key we've been reading from (or can still be reading within). This is the key for
@@ -68,6 +80,9 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         this.remaining = limits.count();
         this.remainingInPartition = limits.perPartitionCount();
+
+        if (logger.isTraceEnabled())
+            logger.trace("{} - created with {}/{}/{}", hashCode(), command.limits(), remaining, remainingInPartition);
     }
 
     public ReadExecutionController executionController()
@@ -164,17 +179,24 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         @Override
         public BaseRowIterator<T> applyToPartition(BaseRowIterator<T> partition)
         {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - applyToPartition {}",
+                             AbstractQueryPager.this.hashCode(),
+                             ByteBufferUtil.bytesToHex(partition.partitionKey().getKey()));
+
             currentKey = partition.partitionKey();
 
             // If this is the first partition of this page, this could be the continuation of a partition we've started
             // on the previous page. In which case, we could have the problem that the partition has no more "regular"
             // rows (but the page size is such we didn't knew before) but it does have a static row. We should then skip
             // the partition as returning it would means to the upper layer that the partition has "only" static columns,
-            // which is not the case (and we know the static results have been sent on the previous page).
+            // which is not the case (and we know the static results have been sent on the previous page). If inclusive
+            // is true however, then we know at least one row was not sent in the previous page, it could well be the
+            // static row of an empty partition that was not sent.
             if (isFirstPartition)
             {
                 isFirstPartition = false;
-                if (isPreviouslyReturnedPartition(currentKey) && !partition.hasNext())
+                if (isPreviouslyReturnedPartition(currentKey) && !partition.hasNext() && !inclusive)
                 {
                     partition.close();
                     return null;
@@ -189,6 +211,9 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         @Override
         public void onClose()
         {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - onClose called with {}/{}", AbstractQueryPager.this.hashCode(), lastKey, lastRow);
+
             // In some case like GROUP BY a counter need to know when the processing is completed.
             counter.onClose();
 
@@ -200,6 +225,10 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             // if the page command was not aborted and if the counter did not count
             // up to the page limits, then the iteration must have reached the end
             exhausted = !pageCommand.aborted() && pageLimits.isExhausted(counter);
+
+            if (logger.isTraceEnabled())
+                logger.trace("{} - exhausted {}, counter: {}, remaining: {}/{}",
+                             AbstractQueryPager.this.hashCode(), exhausted, counter, remaining, remainingInPartition);
 
             // remove the internal page so that we know that the iteration is finished
             internalPager = null;
@@ -229,6 +258,9 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         public Row applyToStatic(Row row)
         {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - applyToStaticRow {}", AbstractQueryPager.this.hashCode(), !row.isEmpty());
+
             if (!row.isEmpty())
             {
                 remainingInPartition = limits.perPartitionCount();
@@ -241,6 +273,11 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         @Override
         public Row applyToRow(Row row)
         {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - applyToRow {}",
+                             AbstractQueryPager.this.hashCode(),
+                             row.clustering() == null ? "null" : row.clustering().toBinaryString());
+
             if (!currentKey.equals(lastKey))
             {
                 remainingInPartition = limits.perPartitionCount();
@@ -253,6 +290,9 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
     void restoreState(DecoratedKey lastKey, int remaining, int remainingInPartition, boolean inclusive)
     {
+        if (logger.isTraceEnabled())
+            logger.trace("{} - restoring state: {}/{}/{}/{}", hashCode(), lastKey, remaining, remainingInPartition, inclusive);
+
         this.lastKey = lastKey;
         this.remaining = remaining;
         this.remainingInPartition = remainingInPartition;
