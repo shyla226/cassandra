@@ -1001,18 +1001,8 @@ public class DatabaseDescriptor
         {
             if (conf.system_info_encryption.isKmipKeyProvider())
             {
-                if (conf.system_info_encryption.kmip_host == null)
+                if (conf.system_info_encryption.kmip_host == null || conf.system_info_encryption.kmip_host.isEmpty())
                     throw new ConfigurationException("system_info_encryption.kmip_host must be specified for KMIP key provider");
-                try
-                {
-                    InetAddress.getByName(conf.system_info_encryption.kmip_host);
-                }
-                catch (Throwable t)
-                {
-                    throw new ConfigurationException(String.format("system_info_encryption.kmip_host '%s' is not a valid, " +
-                                                                   "resolvable host name: %s",
-                                                                   conf.system_info_encryption.kmip_host, t));
-                }
             }
             else // local file system provider
             {

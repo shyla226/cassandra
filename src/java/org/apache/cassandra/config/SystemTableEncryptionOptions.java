@@ -21,6 +21,7 @@ public class SystemTableEncryptionOptions
     public String key_name = "system_table_keytab";
 
     public String key_provider = "com.datastax.bdp.cassandra.crypto.LocalFileSystemKeyProviderFactory";
+    // The kmip host config to use from the dse.yaml, this is not an actual hostname.
     public String kmip_host = null;
 
     public boolean isKmipKeyProvider()
