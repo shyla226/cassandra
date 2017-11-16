@@ -35,9 +35,6 @@ import org.apache.cassandra.dht.Token;
  */
 class ReplicationAwareTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
 {
-    static final double MIN_INITIAL_SPLITS_RATIO = 1.0 - 1.0 / Math.sqrt(5.0);
-    static final double MAX_INITIAL_SPLITS_RATIO = MIN_INITIAL_SPLITS_RATIO + 0.075;
-
     final Multimap<Unit, Token> unitToTokens;
     final int replicas;
 
@@ -63,11 +60,11 @@ class ReplicationAwareTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
             // Allocation does not matter for now; everything replicates everywhere. However, at this point it is
             // important to start the cluster/datacenter with suitably varied token range sizes so that the algorithm
             // can maintain good balance for any number of nodes.
-            return generateSplits(newUnit, numTokens, MIN_INITIAL_SPLITS_RATIO, MAX_INITIAL_SPLITS_RATIO);
+            return generateSplits(newUnit, numTokens);
         if (numTokens > sortedTokens.size())
             // Some of the heuristics below can't deal with this very unlikely case. Use splits for now, later
             // allocations can fix any problems this may cause.
-            return generateSplits(newUnit, numTokens, MIN_INITIAL_SPLITS_RATIO, MAX_INITIAL_SPLITS_RATIO);
+            return generateSplits(newUnit, numTokens);
 
         // ============= construct our initial token ring state =============
 
@@ -80,7 +77,7 @@ class ReplicationAwareTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
             // use splits as above.
             // This part of the code should only be reached via the RATATest. StrategyAdapter should disallow
             // token allocation in this case as the algorithm is not able to cover the behavior of NetworkTopologyStrategy.
-            return generateSplits(newUnit, numTokens, MIN_INITIAL_SPLITS_RATIO, MAX_INITIAL_SPLITS_RATIO);
+            return generateSplits(newUnit, numTokens);
         }
 
         // initialise our new unit's state (with an idealised ownership)
@@ -145,47 +142,10 @@ class ReplicationAwareTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
      * number of nodes < RF). It generates a reasonably chaotic initial token split, after which the algorithm behaves
      * well for an unbounded number of nodes.
      */
-    private Collection<Token> generateSplits(Unit newUnit, int numTokens, double minRatio, double maxRatio)
+    Collection<Token> generateSplits(Unit newUnit, int numTokens)
     {
-        Random random = new Random(sortedTokens.size());
-
-        double potentialRatioGrowth = maxRatio - minRatio;
-
-        List<Token> tokens = Lists.newArrayListWithExpectedSize(numTokens);
-
-        if (sortedTokens.isEmpty())
-        {
-            // Select a random start token. This has no effect on distribution, only on where the local ring is "centered".
-            // Using a random start decreases the chances of clash with the tokens of other datacenters in the ring.
-            Token t = partitioner.getRandomToken();
-            tokens.add(t);
-            sortedTokens.put(t, newUnit);
-            unitToTokens.put(newUnit, t);
-        }
-
-        while (tokens.size() < numTokens)
-        {
-            // split max span using given ratio
-            Token prev = sortedTokens.lastKey();
-            double maxsz = 0;
-            Token t1 = null;
-            Token t2 = null;
-            for (Token curr : sortedTokens.keySet())
-            {
-                double sz = prev.size(curr);
-                if (sz > maxsz)
-                {
-                    maxsz = sz;
-                    t1 = prev; t2 = curr;
-                }
-                prev = curr;
-            }
-            assert t1 != null;
-            Token t = partitioner.split(t1, t2, minRatio + potentialRatioGrowth * random.nextDouble());
-            tokens.add(t);
-            sortedTokens.put(t, newUnit);
-            unitToTokens.put(newUnit, t);
-        }
+        Collection<Token> tokens = super.generateSplits(newUnit, numTokens);
+        unitToTokens.putAll(newUnit, tokens);
         return tokens;
     }
 
