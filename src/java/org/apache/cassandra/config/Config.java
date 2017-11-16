@@ -466,11 +466,9 @@ public class Config
     private static final List<String> SENSITIVE_KEYS = new ArrayList<String>() {{
         add("client_encryption_options");
         add("server_encryption_options");
-        add("transparent_data_encryption_options");
-        add("encryption_options");
     }};
 
-    public void log()
+    public static void log(Config config)
     {
         Map<String, String> configMap = new TreeMap<>();
         for (Field field : Config.class.getFields())
@@ -490,7 +488,7 @@ public class Config
             try
             {
                 // Field.get() can throw NPE if the value of the field is null
-                value = field.get(this).toString();
+                value = field.get(config).toString();
             }
             catch (NullPointerException | IllegalAccessException npe)
             {

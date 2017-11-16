@@ -61,8 +61,6 @@ public class DatabaseDescriptor
      */
     private static final int MAX_NUM_TOKENS = 1536;
 
-    private static ConfigurationLoader configLoader;
-    private static Config conf;
     private static boolean hasLoggedConfig;
 
     private static IEndpointSnitch snitch;
@@ -79,8 +77,10 @@ public class DatabaseDescriptor
 
     private static Config.DiskAccessMode indexAccessMode;
 
-    private static IAuthenticator authenticator;
-    private static IAuthorizer authorizer;
+    private static Config conf;
+
+    private static IAuthenticator authenticator = new AllowAllAuthenticator();
+    private static IAuthorizer authorizer = new AllowAllAuthorizer();
     // Don't initialize the role manager until applying config. The options supported by CassandraRoleManager
     // depend on the configured IAuthenticator, so defer creating it until that's been set.
     private static IRoleManager roleManager;
@@ -238,29 +238,22 @@ public class DatabaseDescriptor
         return conf;
     }
 
+    @VisibleForTesting
     public static Config loadConfig() throws ConfigurationException
     {
-        Config conf = configLoader().loadConfig();
+        String loaderClass = System.getProperty("cassandra.config.loader");
+        ConfigurationLoader loader = loaderClass == null
+                                   ? new YamlConfigurationLoader()
+                                   : FBUtilities.<ConfigurationLoader>construct(loaderClass, "configuration loading");
+        Config config = loader.loadConfig();
 
         if (!hasLoggedConfig)
         {
             hasLoggedConfig = true;
-            conf.log();
+            Config.log(config);
         }
 
-        return conf;
-    }
-
-    private static ConfigurationLoader configLoader()
-    {
-        if (configLoader == null)
-        {
-            String loaderClass = System.getProperty(Config.PROPERTY_PREFIX + "config.loader");
-            configLoader = loaderClass == null
-                           ? new YamlConfigurationLoader()
-                           : FBUtilities.construct(loaderClass, "configuration loading");
-        }
-        return configLoader;
+        return config;
     }
 
     private static InetAddress getNetworkInterfaceAddress(String intf, String configName, boolean preferIPv6) throws ConfigurationException
