@@ -18,15 +18,17 @@
 package org.apache.cassandra.config;
 
 import java.beans.IntrospectionException;
-import java.io.*;
-import java.net.*;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.InputStream;
+import java.io.IOException;
+import java.net.URL;
 import java.util.HashSet;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -38,7 +40,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.utils.Pair;
 import org.yaml.snakeyaml.TypeDescription;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.Constructor;
@@ -52,10 +53,6 @@ public class YamlConfigurationLoader implements ConfigurationLoader
     private static final Logger logger = LoggerFactory.getLogger(YamlConfigurationLoader.class);
 
     private final static String DEFAULT_CONFIGURATION = "cassandra.yaml";
-
-    private static URL storageConfigURL;
-    private long lastModified;
-    private Config currentConfig;
 
     /**
      * Inspect the classpath to find storage configuration file
@@ -94,60 +91,22 @@ public class YamlConfigurationLoader implements ConfigurationLoader
         return url;
     }
 
-    @VisibleForTesting
-    static URL storageConfigURL()
-    {
-        if (storageConfigURL == null)
-            storageConfigURL = getStorageConfigURL();
-        return storageConfigURL;
-    }
+    private static final URL storageConfigURL = getStorageConfigURL();
 
     @Override
     public Config loadConfig() throws ConfigurationException
     {
-        Pair<Config, Long> pair = loadConfig(storageConfigURL(), lastModified);
-        if (pair == null)
-            return currentConfig;
-        currentConfig = pair.left;
-        lastModified = pair.right;
-        return currentConfig;
+        return loadConfig(storageConfigURL);
     }
 
-    public Config loadConfig(URL url)
-    {
-        return loadConfig(url, 0L).left;
-    }
-
-    @VisibleForTesting
-    Pair<Config, Long> loadConfig(URL url, long ifModifiedSince) throws ConfigurationException
+    public Config loadConfig(URL url) throws ConfigurationException
     {
         try
         {
-            long lastModified;
-
-            URLConnection urlConnection;
-            try
-            {
-                urlConnection = url.openConnection();
-            }
-            catch (IOException e)
-            {
-                throw new ConfigurationException("could not access URL " + url, e);
-            }
-
-            if (ifModifiedSince > 0L)
-                urlConnection.setIfModifiedSince(ifModifiedSince);
-            lastModified = urlConnection.getLastModified();
-            if (ifModifiedSince > 0L && lastModified <= ifModifiedSince)
-            {
-                logger.debug("Not loading settings from {} - not modified", url);
-                return null;
-            }
-
+            logger.debug("Loading settings from {}", url);
             byte[] configBytes;
-            try (InputStream is = urlConnection.getInputStream())
+            try (InputStream is = url.openStream())
             {
-                logger.debug("loading settings from {}", url);
                 configBytes = ByteStreams.toByteArray(is);
             }
             catch (IOException e)
@@ -162,8 +121,7 @@ public class YamlConfigurationLoader implements ConfigurationLoader
             Yaml yaml = new Yaml(constructor);
             Config result = loadConfig(yaml, configBytes);
             propertiesChecker.check();
-
-            return Pair.create(result, lastModified);
+            return result;
         }
         catch (YAMLException e)
         {

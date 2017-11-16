@@ -19,7 +19,6 @@
 package org.apache.cassandra.config;
 
 import java.io.File;
-import java.lang.reflect.Field;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -61,19 +60,11 @@ public class DatabaseDescriptorTest
         Keyspace.setInitialized();
 
         // Now try custom loader
-        resetCachedConfigLoader();
         ConfigurationLoader testLoader = new TestLoader();
         System.setProperty("cassandra.config.loader", testLoader.getClass().getName());
 
         config = DatabaseDescriptor.loadConfig();
         assertEquals("ConfigurationLoader Test", config.cluster_name);
-    }
-
-    private void resetCachedConfigLoader() throws NoSuchFieldException, IllegalAccessException
-    {
-        Field clField = DatabaseDescriptor.class.getDeclaredField("configLoader");
-        clField.setAccessible(true);
-        clField.set(null, null);
     }
 
     public static class TestLoader implements ConfigurationLoader
