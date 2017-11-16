@@ -27,7 +27,6 @@ public enum TPCTaskType
     UNKNOWN,
     READ(true, false),
     READ_RANGE(true, false),
-    READ_SWITCH_FOR_MEMTABLE,
     READ_FROM_ITERATOR,
     READ_SECONDARY_INDEX,
     READ_DISK_ASYNC(false, true),

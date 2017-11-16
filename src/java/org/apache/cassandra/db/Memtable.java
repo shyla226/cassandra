@@ -542,7 +542,7 @@ public class Memtable implements Comparable<Memtable>
             {
                 // nothing to close
             }
-        }.lift(Threads.requestOnCore(coreId, TPCTaskType.READ_SWITCH_FOR_MEMTABLE));
+        };
     }
 
     /**
@@ -693,7 +693,7 @@ public class Memtable implements Comparable<Memtable>
     public Flow<Partition> getPartition(DecoratedKey key)
     {
         int coreId = getCoreFor(key);
-        return Threads.evaluateOnCore(() -> subranges[coreId].get(key), coreId, TPCTaskType.READ_SWITCH_FOR_MEMTABLE);
+        return Flow.just(subranges[coreId].get(key));
     }
 
     /**
@@ -966,7 +966,12 @@ public class Memtable implements Comparable<Memtable>
 
         private volatile long currentOperations = 0;
 
-        private final TreeMap<PartitionPosition, AtomicBTreePartition> data = new TreeMap<>();
+        // This map is used in a single-producer, multi-consumer fashion: only one thread will insert items but
+        // several threads may read from it and iterate over it. Iterators are created when a the first item of
+        // a flow is requested for example, and then used asynchronously when sub-sequent items are requested.
+        // Therefore, iterators should not throw ConcurrentModificationExceptions if the underlying map is modified
+        // during iteration, they should provide a weekly consistent view of the map instead.
+        private final NavigableMap<PartitionPosition, AtomicBTreePartition> data = new ConcurrentSkipListMap<>();
 
         private final ColumnsCollector columnsCollector = new ColumnsCollector(metadata.regularAndStaticColumns());
         private final StatsCollector statsCollector = new StatsCollector();
