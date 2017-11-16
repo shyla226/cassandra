@@ -385,15 +385,15 @@ public class FrozenCollectionsTest extends CQLTester
         // overwrite with update
         execute("UPDATE %s SET b=? WHERE a=?", map(set(), list(1, 2, 3)), 1);
 
-            assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
                 row(0, map(), set()),
                 row(1, map(set(), list(1, 2, 3)), set()),
                 row(2, map(set(1, 2, 3), list(1, 2, 3)), set(1, 2, 3)),
                 row(3, map(set(4, 5, 6), list(1, 2, 3)), set(1, 2, 3)),
                 row(4, map(set(7, 8, 9), list(1, 2, 3)), set(1, 2, 3))
-            );
+        );
 
-        assertRows(execute("SELECT b FROM %s"),
+        assertRowsIgnoringOrder(execute("SELECT b FROM %s"),
                    row(map()),
                    row(map(set(), list(1, 2, 3))),
                    row(map(set(1, 2, 3), list(1, 2, 3))),
