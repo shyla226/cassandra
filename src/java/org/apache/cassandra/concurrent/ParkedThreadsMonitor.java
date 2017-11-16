@@ -49,7 +49,7 @@ public class ParkedThreadsMonitor
     public static final Supplier<ParkedThreadsMonitor> instance = Suppliers.memoize(ParkedThreadsMonitor::new);
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ParkedThreadsMonitor.class);
-    private static final long WATCHER_SLEEP_NANOS = Long.getLong("cassandra.thread.monitor.sleep.nanos", 50000);
+    private static final long SLEEP_INTERVAL = Long.getLong("dse.thread_monitor_sleep_nanos", 50000);
 
     private final MpscUnboundedArrayQueue<Runnable> commands = new MpscUnboundedArrayQueue<>(128);
     private final ArrayList<MonitorableThread> monitoredThreads = new ArrayList<>(Runtime.getRuntime().availableProcessors() * 2);
@@ -61,7 +61,7 @@ public class ParkedThreadsMonitor
 
     private ParkedThreadsMonitor()
     {
-        this.shutdown = false;
+        shutdown = false;
         watcherThread = new Thread(this::run);
         watcherThread.setName("ParkedThreadsMonitor");
         watcherThread.setPriority(Thread.MAX_PRIORITY);
@@ -73,6 +73,7 @@ public class ParkedThreadsMonitor
     {
         final ArrayList<Runnable> loopActions = this.loopActions;
         final ArrayList<MonitorableThread> monitoredThreads = this.monitoredThreads;
+        final MpscUnboundedArrayQueue<Runnable> commands = this.commands;
         while (!shutdown)
         {
             try
@@ -100,7 +101,7 @@ public class ParkedThreadsMonitor
                 JVMStabilityInspector.inspectThrowable(t);
                 LOGGER.error("ParkedThreadsMonitor exception: ", t);
             }
-            LockSupport.parkNanos(WATCHER_SLEEP_NANOS);
+            LockSupport.parkNanos(SLEEP_INTERVAL);
         }
 
         for (MonitorableThread thread : monitoredThreads)
