@@ -65,6 +65,7 @@ public abstract class Verb<P, Q>
         private final ExecutorSupplier<P> responseExecutor;
         private final boolean supportsBackPressure;
         private final DroppedMessages.Group droppedGroup;
+        private final ErrorHandler errorHandler;
 
         Info(VerbGroup<?> group,
              int groupIdx,
@@ -72,9 +73,10 @@ public abstract class Verb<P, Q>
              ExecutorSupplier<P> requestExecutor,
              ExecutorSupplier<P> responseExecutor,
              boolean supportsBackPressure,
-             DroppedMessages.Group droppedGroup)
+             DroppedMessages.Group droppedGroup,
+             ErrorHandler errorHandler)
         {
-            assert group != null && name != null && requestExecutor != null;
+            assert group != null && name != null && requestExecutor != null && errorHandler != null;
             this.group = group;
             this.groupIdx = groupIdx;
             this.name = name;
@@ -82,6 +84,7 @@ public abstract class Verb<P, Q>
             this.responseExecutor = responseExecutor;
             this.supportsBackPressure = supportsBackPressure;
             this.droppedGroup = droppedGroup;
+            this.errorHandler = errorHandler;
         }
 
         @Override
@@ -175,6 +178,14 @@ public abstract class Verb<P, Q>
     VerbHandler<P, Q> handler()
     {
         return handler;
+    }
+
+    /**
+     * Handler for handling known errors during a request execution.
+     */
+    ErrorHandler errorHandler()
+    {
+        return info.errorHandler;
     }
 
     /**

@@ -41,6 +41,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.io.util.NIODataInputStream;
+import org.apache.cassandra.io.util.TrackedDataInputPlus;
 
 public class IncomingTcpConnection extends FastThreadLocalThread implements Closeable
 {
@@ -181,20 +182,30 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
 
         while (true)
         {
-            receiveMessage(in);
+            receiveMessage(new TrackedDataInputPlus(in));
         }
     }
 
-    private void receiveMessage(DataInputPlus input) throws IOException
+    private void receiveMessage(TrackedDataInputPlus input) throws IOException
     {
-        messageSerializer.readSerializedSize(input);
-        Message message = messageSerializer.deserialize(input, from);
-        if (message == null)
+        int size = messageSerializer.readSerializedSize(input);
+        try
         {
-            // callback expired; nothing to do
-            return;
-        }
+            Message message = messageSerializer.deserialize(input, size, from);
+            if (message == null)
+            {
+                // callback expired; nothing to do
+                return;
+            }
 
-        MessagingService.instance().receive(message);
+            MessagingService.instance().receive(message);
+        }
+        catch (MessageDeserializationException e)
+        {
+            if (e.isRecoverable())
+                e.recover(input);
+            else
+                throw e;
+        }
     }
 }

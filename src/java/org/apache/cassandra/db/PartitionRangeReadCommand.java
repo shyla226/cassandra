@@ -480,6 +480,16 @@ public class PartitionRangeReadCommand extends ReadCommand
         return operationExecutor;
     }
 
+    @Override
+    public boolean equals(Object other)
+    {
+        if (!isSame(other))
+            return false;
+
+        PartitionRangeReadCommand that = (PartitionRangeReadCommand)other;
+        return this.dataRange.equals(that.dataRange);
+    }
+
     private static class Deserializer extends SelectionDeserializer<PartitionRangeReadCommand>
     {
         public PartitionRangeReadCommand deserialize(DataInputPlus in,

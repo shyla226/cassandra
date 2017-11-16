@@ -26,6 +26,7 @@ import java.util.concurrent.*;
 
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.Request;
@@ -81,7 +82,7 @@ public class MutationBench
 
     private ByteBuffer buffer;
     private DataOutputBuffer outputBuffer;
-    private DataInputBuffer inputBuffer;
+    private TrackedDataInputPlus inputBuffer;
 
 
     @State(Scope.Thread)
@@ -111,7 +112,7 @@ public class MutationBench
         serializer = Message.createSerializer(MessagingService.current_version, System.currentTimeMillis());
         buffer = ByteBuffer.allocate(Math.toIntExact(serializer.serializedSize(messageOut)));
         outputBuffer = new DataOutputBufferFixed(buffer);
-        inputBuffer = new DataInputBuffer(buffer, false);
+        inputBuffer = new TrackedDataInputPlus(new DataInputBuffer(buffer, false));
 
         serializer.serialize(messageOut, outputBuffer);
     }
@@ -128,7 +129,7 @@ public class MutationBench
     public void deserialize(ThreadState state) throws IOException
     {
         buffer.rewind();
-        state.in = serializer.deserialize(inputBuffer, FBUtilities.getBroadcastAddress());
+        state.in = serializer.deserialize(inputBuffer, -1, FBUtilities.getBroadcastAddress());
         state.counter++;
     }
 

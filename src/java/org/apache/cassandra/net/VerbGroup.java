@@ -284,6 +284,8 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
 
             private DroppedMessages.Group droppedGroup;
 
+            private ErrorHandler errorHandler = ErrorHandler.DEFAULT;
+
             private V sinceVersion;
             private V untilVersion;
 
@@ -383,6 +385,12 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
                 return us();
             }
 
+            public T withErrorHandler(ErrorHandler handler)
+            {
+                this.errorHandler = handler;
+                return us();
+            }
+
             /**
              * First version of which the verb is part of (inclusive).
              */
@@ -414,7 +422,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
                 if (!isOneWay && droppedGroup == null)
                     throw new IllegalStateException("Missing 'dropped group', should be indicated either at the RegistrationHelper lever or at the VerbBuilder one");
 
-                return new Verb.Info<>(VerbGroup.this, groupIdx, name, requestExecutor, responseExecutor, supportsBackPressure, isOneWay ? null : droppedGroup);
+                return new Verb.Info<>(VerbGroup.this, groupIdx, name, requestExecutor, responseExecutor, supportsBackPressure, isOneWay ? null : droppedGroup, errorHandler);
             }
 
             TimeoutSupplier<P> timeoutSupplier()

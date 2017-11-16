@@ -21,6 +21,7 @@ import java.io.IOException;
 
 import java.net.InetAddress;
 import java.util.Collection;
+import java.util.Objects;
 import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
@@ -600,6 +601,22 @@ public abstract class ReadCommand implements ReadQuery, Schedulable
         return sb.toString();
     }
 
+    // Here to make sub-classes equals() method avoid repetition
+    protected boolean isSame(Object other)
+    {
+        if (other == null || !this.getClass().equals(other.getClass()))
+            return false;
+
+        ReadCommand that = (ReadCommand)other;
+        return this.metadata.id.equals(that.metadata.id)
+               && this.nowInSec == that.nowInSec
+               && this.columnFilter.equals(that.columnFilter)
+               && this.rowFilter.equals(that.rowFilter)
+               && this.limits.equals(that.limits)
+               && Objects.equals(this.index, that.index)
+               && Objects.equals(this.digestVersion, that.digestVersion);
+    }
+
     protected static class ReadCommandSerializer<T extends ReadCommand> extends VersionDependent<ReadVersion> implements Serializer<T>
     {
         private final SelectionDeserializer<T> selectionDeserializer;
@@ -735,8 +752,8 @@ public abstract class ReadCommand implements ReadQuery, Schedulable
                    + ColumnFilter.serializers.get(version).serializedSize(command.columnFilter())
                    + RowFilter.serializers.get(version).serializedSize(command.rowFilter())
                    + DataLimits.serializers.get(version).serializedSize(command.limits(), command.metadata().comparator)
-                   + command.selectionSerializedSize(version)
-                   + command.indexSerializedSize();
+                   + command.indexSerializedSize()
+                   + command.selectionSerializedSize(version);
         }
     }
 }

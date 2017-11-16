@@ -18,7 +18,6 @@
  */
 package org.apache.cassandra.service;
 
-import java.io.IOException;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.net.UnknownHostException;
@@ -44,6 +43,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
+import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.Verbs;
@@ -139,7 +139,7 @@ public class SerializationsTest extends AbstractSerializationsTester
             ValidationRequest message = ValidationRequest.serializers.get(getRepairVersion()).deserialize(in);
             assert DESC.equals(message.desc);
             assert message.nowInSec == 1234;
-            assert serializer.deserialize(in, inet) != null;
+            assert serializer.deserialize(new TrackedDataInputPlus(in), -1, inet) != null;
         }
     }
 
@@ -199,7 +199,7 @@ public class SerializationsTest extends AbstractSerializationsTester
 
             // MessageOuts
             for (int i = 0; i < 3; i++)
-                assert serializer.deserialize(in, inet) != null;
+                assert serializer.deserialize(new TrackedDataInputPlus(in), -1, inet) != null;
         }
     }
 
@@ -232,7 +232,7 @@ public class SerializationsTest extends AbstractSerializationsTester
             assert dest.equals(message.dst);
             assert message.ranges.size() == 1 && message.ranges.contains(FULL_RANGE);
 
-            assert serializer.deserialize(in, inet) != null;
+            assert serializer.deserialize(new TrackedDataInputPlus(in), -1, inet) != null;
         }
     }
 
@@ -281,7 +281,7 @@ public class SerializationsTest extends AbstractSerializationsTester
 
             // MessageOuts
             for (int i = 0; i < 2; i++)
-                assert serializer.deserialize(in, inet) != null;
+                assert serializer.deserialize(new TrackedDataInputPlus(in), -1, inet) != null;
         }
     }
 }

@@ -17,13 +17,13 @@
  */
 package org.apache.cassandra.exceptions;
 
-public class UnknownKeyspaceException extends IllegalArgumentException
+public class UnknownKeyspaceException extends InternalRequestExecutionException
 {
     public final String keyspaceName;
 
     public UnknownKeyspaceException(String keyspaceName)
     {
-        super("Unknown (possibly just dropped) keypspace " + keyspaceName);
+        super(RequestFailureReason.UNKNOWN_KEYSPACE, "Unknown (possibly just dropped) keypspace " + keyspaceName);
         this.keyspaceName = keyspaceName;
     }
 }

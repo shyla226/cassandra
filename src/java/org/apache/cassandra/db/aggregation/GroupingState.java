@@ -19,6 +19,7 @@ package org.apache.cassandra.db.aggregation;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Objects;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -94,6 +95,17 @@ public final class GroupingState
     public boolean hasClustering()
     {
         return clustering != null;
+    }
+
+    @Override
+    public boolean equals(Object other)
+    {
+        if (!(other instanceof GroupingState))
+            return false;
+
+        GroupingState that = (GroupingState)other;
+        return Objects.equals(this.partitionKey, that.partitionKey)
+               && Objects.equals(this.clustering, that.clustering);
     }
 
     public static class Serializer extends VersionDependent<ReadVersion>

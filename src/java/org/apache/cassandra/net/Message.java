@@ -19,15 +19,16 @@ package org.apache.cassandra.net;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.util.Objects;
 
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
-import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.net.interceptors.Interceptor;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -150,6 +151,21 @@ public abstract class Message<P>
         Data<P> withAddedParameters(MessageParameters newParameters)
         {
             return new Data<>(payload, payloadSize, createdAtMillis, timeoutMillis, parameters.unionWith(newParameters), tracingInfo);
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if (!(other instanceof Data))
+                return false;
+
+            Data that = (Data)other;
+            // Note: this exists mostly for testing proper serialization/deserialization of messages, and there is a
+            // few things here that at not (always) preserved, like the payloadSize or createdAtMillis, so we don't
+            // include them on purpose. Arguably slightly dodgy, but there is decently good reason for this.
+            return Objects.equals(this.payload, that.payload)
+                   && this.parameters.equals(that.parameters)
+                   && Objects.equals(this.tracingInfo, that.tracingInfo);
         }
     }
 
@@ -393,6 +409,21 @@ public abstract class Message<P>
     }
 
     @Override
+    // Mostly implemented for testing, not that useful otherwise
+    public boolean equals(Object other)
+    {
+        if (!(other instanceof Message))
+            return false;
+
+        Message<?> that = (Message<?>)other;
+        return this.from.equals(that.from)
+               && this.to.equals(that.to)
+               && this.id == that.id
+               && this.verb().equals(that.verb())
+               && this.messageData.equals(that.messageData);
+    }
+
+    @Override
     public String toString()
     {
         return String.format("%s (%d): %s",
@@ -406,7 +437,7 @@ public abstract class Message<P>
     {
         public <P> void serialize(Message<P> message, DataOutputPlus out) throws IOException;
         public <P> long serializedSize(Message<P> message);
-        public <P> Message<P> deserialize(DataInputPlus in, InetAddress from) throws IOException;
+        public <P> Message<P> deserialize(TrackedDataInputPlus in, int size, InetAddress from) throws IOException;
 
         // Only abstracted here because the OSS side doesn't write the fully message serialized size (and so override this)
         default public void writeSerializedSize(int serializedSize, DataOutputPlus out) throws IOException

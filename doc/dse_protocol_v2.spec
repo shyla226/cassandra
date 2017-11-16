@@ -1252,6 +1252,12 @@ Table of Contents
                                        is simply the node reporting it due to how counter writes
                                        work; the initial reason for the failure should have been
                                        logged on the actual replica on which the problem occured).
+                                0x0005 The table used by the query was not found on at least one
+                                       of the replica. This strongly suggest a query was done on
+                                       either a newly created or newly dropped table with having
+                                       waited for schema agreement first.
+                                0x0006 The keyspace used by the query was not found on at least
+                                       one replica. Same likely cause as for tables above.
                             Any other value for <failurecode> must be considered as an
                             Unknown reason (but drivers should not fail) as new <failurecode>
                             may be added without a bump of the protocol version.
@@ -1346,3 +1352,4 @@ Table of Contents
     application information.
   * Added [next_pages] to continuous paging QUERY messages (section 4.1.4)
   * Renamed CANCEL to REVISE_REQUEST and added revision type 2 for updating [next_pages] (section 4.1.9)
+  * Add two new reasons for read failures (section 9, 'reasonmap' of the 'Read_failure' case).

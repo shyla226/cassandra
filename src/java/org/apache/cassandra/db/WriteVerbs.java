@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db;
 
-import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
 
@@ -28,18 +27,17 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.batchlog.Batch;
 import org.apache.cassandra.batchlog.BatchRemove;
 import org.apache.cassandra.batchlog.BatchlogManager;
-import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.InternalRequestExecutionException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.net.Verb.AckedRequest;
 import org.apache.cassandra.net.Verb.OneWay;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.versioning.Version;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -132,6 +130,15 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
                                    .timeout(DatabaseDescriptor::getCounterWriteRpcTimeout)
                                    .droppedGroup(DroppedMessages.Group.COUNTER_MUTATION)
                                    .withBackPressure()
+                                   .withErrorHandler(err -> {
+                                       // If a failure happened on the node we forward to, it will have logged a
+                                       // warning already, so no point in doing it again (but log at debug for good
+                                       // measure).
+                                       if (err.reason == RequestFailureReason.COUNTER_FORWARDING_FAILURE)
+                                           ErrorHandler.noSpamLogger.debug(err.getMessage());
+                                       else
+                                           ErrorHandler.DEFAULT.handleError(err);
+                                   })
                                    .handler(COUNTER_FORWARDING_HANDLER);
         READ_REPAIR = helper.ackedRequest("READ_REPAIR", Mutation.class)
                             .timeout(DatabaseDescriptor::getWriteRpcTimeout)

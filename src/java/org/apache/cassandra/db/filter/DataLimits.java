@@ -19,6 +19,7 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Objects;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -954,6 +955,23 @@ public abstract class DataLimits
             }
         }
 
+        protected boolean isSame(CQLLimits that)
+        {
+            return this.bytesLimit == that.bytesLimit
+                   && this.rowLimit == that.rowLimit
+                   && this.perPartitionLimit == that.perPartitionLimit
+                   && this.isDistinct == that.isDistinct;
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if (other == null || !this.getClass().equals(other.getClass()))
+                return false;
+
+            return isSame((CQLLimits)other);
+        }
+
         @Override
         public String toString()
         {
@@ -1032,6 +1050,18 @@ public abstract class DataLimits
         public Counter newCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
         {
             return new PagingAwareCounter(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if (!(other instanceof CQLPagingLimits))
+                return false;
+
+            CQLPagingLimits that = (CQLPagingLimits) other;
+            return this.isSame(that)
+                   && Objects.equals(this.lastReturnedKey, that.lastReturnedKey)
+                   && this.lastReturnedKeyRemaining == that.lastReturnedKeyRemaining;
         }
 
         private class PagingAwareCounter extends CQLCounter
@@ -1263,6 +1293,28 @@ public abstract class DataLimits
                      rowLimit,
                      groupBySpec,
                      state);
+        }
+
+        @Override
+        protected boolean isSame(CQLLimits other)
+        {
+            if (!(other instanceof CQLGroupByLimits))
+                return false;
+            CQLGroupByLimits that = (CQLGroupByLimits)other;
+            return super.isSame(that)
+                   && this.state.equals(that.state)
+                   && this.groupBySpec.equals(that.groupBySpec)
+                   && this.groupLimit == that.groupLimit
+                   && this.groupPerPartitionLimit == that.groupPerPartitionLimit;
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if (other == null || !this.getClass().equals(other.getClass()))
+                return false;
+
+            return this.isSame((CQLGroupByLimits)other);
         }
 
         @Override
@@ -1659,6 +1711,18 @@ public abstract class DataLimits
         public DataLimits duplicate()
         {
             return new CQLGroupByPagingLimits(groupLimit, groupPerPartitionLimit, bytesLimit, rowLimit, groupBySpec, state, lastReturnedKey, lastReturnedKeyRemaining);
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if (!(other instanceof CQLGroupByPagingLimits))
+                return false;
+
+            CQLGroupByPagingLimits that = (CQLGroupByPagingLimits)other;
+            return this.isSame(that)
+                   && Objects.equals(this.lastReturnedKey, that.lastReturnedKey)
+                   && this.lastReturnedKeyRemaining == that.lastReturnedKeyRemaining;
         }
 
         private class PagingGroupByAwareCounter extends GroupByAwareCounter

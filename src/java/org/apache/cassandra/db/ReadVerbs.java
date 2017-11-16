@@ -111,6 +111,21 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
         NODESYNC = helper.monitoredRequestResponse("NODESYNC", NodeSyncReadCommand.class, ReadResponse.class)
                          .timeout(DatabaseDescriptor::getRangeRpcTimeout)
                          .droppedGroup(DroppedMessages.Group.NODESYNC)
+                         .withErrorHandler(err -> {
+                             switch (err.reason)
+                             {
+                                 // By definition, NodeSync queries run all the time, which makes it particularly prone
+                                 // to race with keyspace/table drop. So we don't want to log a warning, as that makes
+                                 // it sound like this is a bug, which it's not (at least not in the current code).
+                                 case UNKNOWN_TABLE:
+                                 case UNKNOWN_KEYSPACE:
+                                     ErrorHandler.noSpamLogger.debug(err.getMessage());
+                                     break;
+                                 default:
+                                     ErrorHandler.DEFAULT.handleError(err);
+                                     break;
+                             }
+                         })
                          .handler(readHandler());
     }
 }

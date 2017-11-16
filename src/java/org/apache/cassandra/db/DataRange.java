@@ -328,6 +328,17 @@ public class DataRange
         }
     }
 
+    @Override
+    public boolean equals(Object other)
+    {
+        if (other == null || !this.getClass().equals(other.getClass()))
+            return false;
+
+        DataRange that = (DataRange)other;
+        return this.keyRange.equals(that.keyRange)
+               && this.clusteringIndexFilter.equals(that.clusteringIndexFilter);
+    }
+
     /**
      * Specialized {@code DataRange} used for the paging case.
      * <p>
@@ -395,6 +406,19 @@ public class DataRange
         public boolean isUnrestricted()
         {
             return false;
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if (other == null || !this.getClass().equals(other.getClass()))
+                return false;
+
+            Paging that = (Paging)other;
+            return this.keyRange.equals(that.keyRange)
+                   && this.clusteringIndexFilter.equals(that.clusteringIndexFilter)
+                   && this.lastReturned.equals(that.lastReturned)
+                   && this.inclusive == that.inclusive;
         }
 
         @Override

@@ -25,53 +25,50 @@ public enum RequestFailureReason
     /**
      * The reason for the failure was none of the below reasons or was not recorded by the data node.
      */
-    UNKNOWN                  (0x0000, true),
+    UNKNOWN (0x0000),
 
     /**
      * The data node read too many tombstones when attempting to execute a read query (see tombstone_failure_threshold).
      */
-    READ_TOO_MANY_TOMBSTONES (0x0001, true),
+    READ_TOO_MANY_TOMBSTONES (0x0001),
 
     /**
      * The request queried an index but that index wasn't build on the data node.
      */
-    INDEX_NOT_AVAILABLE (0x0002, true),
+    INDEX_NOT_AVAILABLE (0x0002),
 
     /**
      * The request was writing some data on a CDC enabled table but the CDC commit log segment doesn't have space
      * anymore (slow CDC consumer).
      */
-    CDC_SEGMENT_FULL (0x0003, true),
+    CDC_SEGMENT_FULL (0x0003),
 
     /**
      * We executed a forwarded counter write but got a failure (any {@link RequestExecutionException} that is not a
      * timeout or an unavailable exception; typically a {@link WriteFailureException} or the like).
      */
-    COUNTER_FORWARDING_FAILURE(0x0004, false);
+    COUNTER_FORWARDING_FAILURE(0x0004),
+
+    /**
+     * We didn't find the table for an operation on a replica. This almost surely imply a race between the operation
+     * and either creation or drop of the table.
+     */
+    UNKNOWN_TABLE(0x0005),
+
+    /**
+     * We didn't find the keyspace for an operation on a replica. This almost surely imply a race between the operation
+     * and either creation or drop of the keyspace.
+     */
+    UNKNOWN_KEYSPACE(0x0006);
 
     /** The code to be serialized as an unsigned 16 bit integer */
     private final int code;
 
-    private final boolean shouldLogWarning;
-
     public static final RequestFailureReason[] VALUES = values();
 
-    RequestFailureReason(int code, boolean shouldLogWarning)
+    RequestFailureReason(int code)
     {
         this.code = code;
-        this.shouldLogWarning = shouldLogWarning;
-    }
-
-    /**
-     * Whether the replica on which the failure happened, should log it as a warning.
-     * <p>
-     * As such failure will be propagated back to the client if necessary, we may not always want to log it server side
-     * (at least not loudly -- at WARN), but when this is likely a rare error and having it log at WARN provides useful
-     * information to operators, we still do it.
-     */
-    public boolean shouldLogWarning()
-    {
-        return shouldLogWarning;
     }
 
     public int codeForInternodeProtocol(MessagingVersion version)
@@ -86,7 +83,7 @@ public enum RequestFailureReason
 
     public int codeForNativeProtocol()
     {
-        // We explicitely indicated in the protocol spec that drivers should not
+        // We explicitly indicated in the protocol spec that drivers should not
         // error on unknown code so we don't have to worry about the version.
         return code;
     }

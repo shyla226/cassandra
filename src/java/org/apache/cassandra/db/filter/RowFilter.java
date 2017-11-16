@@ -238,6 +238,16 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     }
 
     @Override
+    public boolean equals(Object other)
+    {
+        if (!(other instanceof RowFilter))
+            return false;
+
+        RowFilter that = (RowFilter)other;
+        return this.expressions.equals(that.expressions);
+    }
+
+    @Override
     public String toString()
     {
         StringBuilder sb = new StringBuilder();

@@ -42,7 +42,6 @@ import org.apache.cassandra.utils.NoSpamLogger;
 public abstract class VerbHandlers
 {
     private static final Logger logger = LoggerFactory.getLogger(VerbHandlers.class);
-    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 5L, TimeUnit.MINUTES);
 
     private VerbHandlers()
     {
@@ -65,13 +64,9 @@ public abstract class VerbHandlers
         RequestFailureReason reason;
         if (t instanceof InternalRequestExecutionException)
         {
-            // This is an error we know can happen. Log it for operators but don't include the strack trace as it would
-            // make it sound like it's a bug, which it's not.
-            reason = ((InternalRequestExecutionException)t).reason;
-            if (reason.shouldLogWarning())
-                noSpamLogger.warn(t.getMessage());
-            else
-                noSpamLogger.debug(t.getMessage());
+            InternalRequestExecutionException err = (InternalRequestExecutionException)t;
+            reason = err.reason;
+            request.verb().errorHandler().handleError(err);
         }
         else
         {

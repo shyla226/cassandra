@@ -40,6 +40,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FastByteArrayInputStream;
+import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.repair.messages.RepairVerbs;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -358,7 +359,7 @@ public class OSSMessageSerializer implements Message.Serializer
     }
 
     @SuppressWarnings("unchecked")
-    public Message deserialize(DataInputPlus in, InetAddress from) throws IOException
+    public Message deserialize(TrackedDataInputPlus in, int size, InetAddress from) throws IOException
     {
         MessagingService.validateMagic(in.readInt());
         int id = in.readInt();
@@ -383,6 +384,7 @@ public class OSSMessageSerializer implements Message.Serializer
         Tracing.SessionInfo tracingInfo = extractAndRemoveTracingInfo(rawParameters);
 
         int payloadSize = in.readInt();
+        long startBytes = in.getBytesRead();
 
         boolean isResponse = ossVerb == OSSVerb.INTERNAL_RESPONSE || ossVerb == OSSVerb.REQUEST_RESPONSE;
         if (isResponse)
@@ -429,20 +431,27 @@ public class OSSMessageSerializer implements Message.Serializer
                                            data);
             }
 
-            Object payload = version.serializer(verb).responseSerializer.deserialize(in);
+            try
+            {
+                Object payload = version.serializer(verb).responseSerializer.deserialize(in);
 
-            Message.Data data = new Message.Data(payload,
-                                                 payloadSize,
-                                                 timestamp,
-                                                 timeoutMillis,
-                                                 MessageParameters.from(rawParameters),
-                                                 tracingInfo);
+                Message.Data data = new Message.Data(payload,
+                                                     payloadSize,
+                                                     timestamp,
+                                                     timeoutMillis,
+                                                     MessageParameters.from(rawParameters),
+                                                     tracingInfo);
 
-            return new Response(from,
-                                FBUtilities.getBroadcastAddress(),
-                                id,
-                                verb,
-                                data);
+                return new Response(from,
+                                    FBUtilities.getBroadcastAddress(),
+                                    id,
+                                    verb,
+                                    data);
+            }
+            catch (Exception e)
+            {
+                throw MessageDeserializationException.forPayloadDeserializationException(e, verb, payloadSize - (int)(in.getBytesRead() - startBytes));
+            }
         }
         else
         {
@@ -454,39 +463,46 @@ public class OSSMessageSerializer implements Message.Serializer
                               : ossVerb.verb;
             assert verb != null : "Unknown definition for verb " + ossVerb;
 
-            Object payload = version.serializer(verb).requestSerializer.deserialize(in);
-
-            long timeoutMillis = verb.isOneWay() ? -1 : ((TimeoutSupplier<Object>)verb.timeoutSupplier()).get(payload);
-
-            if (rawParameters.containsKey(FORWARD_FROM))
+            try
             {
-                InetAddress replyTo = InetAddress.getByAddress(rawParameters.remove(FORWARD_FROM));
+                Object payload = version.serializer(verb).requestSerializer.deserialize(in);
+
+                long timeoutMillis = verb.isOneWay() ? -1 : ((TimeoutSupplier<Object>) verb.timeoutSupplier()).get(payload);
+
+                if (rawParameters.containsKey(FORWARD_FROM))
+                {
+                    InetAddress replyTo = InetAddress.getByAddress(rawParameters.remove(FORWARD_FROM));
+                    Message.Data data = new Message.Data(payload,
+                                                         payloadSize,
+                                                         timestamp,
+                                                         timeoutMillis,
+                                                         MessageParameters.from(rawParameters),
+                                                         tracingInfo);
+                    return new ForwardRequest(from,
+                                              FBUtilities.getBroadcastAddress(),
+                                              replyTo,
+                                              id,
+                                              verb,
+                                              data);
+                }
+
+                List<Request.Forward> forwards = extractAndRemoveForwards(rawParameters);
+
                 Message.Data data = new Message.Data(payload,
                                                      payloadSize,
                                                      timestamp,
                                                      timeoutMillis,
                                                      MessageParameters.from(rawParameters),
                                                      tracingInfo);
-                return new ForwardRequest(from,
-                                          FBUtilities.getBroadcastAddress(),
-                                          replyTo,
-                                          id,
-                                          verb,
-                                          data);
+
+                return verb.isOneWay()
+                       ? new OneWayRequest<>(from, Request.local, (Verb.OneWay) verb, data, forwards)
+                       : new Request(from, Request.local, id, verb, data, forwards);
             }
-
-            List<Request.Forward> forwards = extractAndRemoveForwards(rawParameters);
-
-            Message.Data data = new Message.Data(payload,
-                                                 payloadSize,
-                                                 timestamp,
-                                                 timeoutMillis,
-                                                 MessageParameters.from(rawParameters),
-                                                 tracingInfo);
-
-            return verb.isOneWay()
-                   ? new OneWayRequest<>(from, Request.local, (Verb.OneWay) verb, data, forwards)
-                   : new Request(from, Request.local, id, verb, data, forwards);
+            catch (Exception e)
+            {
+                throw MessageDeserializationException.forPayloadDeserializationException(e, verb, payloadSize - (int)(in.getBytesRead() - startBytes));
+            }
         }
     }
 

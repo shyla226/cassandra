@@ -16,7 +16,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.Nullable;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.RateLimiter;
@@ -42,6 +41,8 @@ import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.RequestFailureException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.UnknownKeyspaceException;
@@ -52,7 +53,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ReadRepairDecision;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.units.SizeUnit;
@@ -271,13 +271,13 @@ class Validator
         if (t instanceof CancellationException)
             return;
 
-        if (t instanceof UnknownKeyspaceException)
+        if (isException(t, UnknownKeyspaceException.class, RequestFailureReason.UNKNOWN_KEYSPACE))
         {
             // This means the keyspace has been dropped concurrently from us.
             logger.trace("Keyspace {} has been dropped while validating segment for table {}", table().keyspace, table());
             cancel();
         }
-        else if (t instanceof UnknownTableException)
+        else if (isException(t, UnknownTableException.class, RequestFailureReason.UNKNOWN_TABLE))
         {
             // This means the table has been dropped concurrently from us.
             logger.trace("Table {} has been dropped while validating one of its segment", table());
@@ -295,11 +295,27 @@ class Validator
         }
         else
         {
-            logger.error(String.format("Unexpected error during synchronization of table %s on range %s", table(), range()), t);
+            logger.error("Unexpected error during synchronization of table {} on range {}", table(), range(), t);
             // If we don't know what happens, we can't assume anything so marking the whole segment failed.
             recordPage(ValidationOutcome.FAILED, listener);
             markFinished();
         }
+    }
+
+    /**
+     * Some exception can either happen locally directly, or be send by a replica, without us particularly wanting to
+     * act differently. This makes this easier.
+     */
+    private static boolean isException(Throwable t, Class<?> localExceptionClass, RequestFailureReason remoteFailureReason)
+    {
+        if (localExceptionClass.isInstance(t))
+            return true;
+
+        if (!(t instanceof RequestFailureException))
+            return false;
+
+        RequestFailureException rfe = (RequestFailureException) t;
+        return rfe.failureReasonByEndpoint.values().stream().anyMatch(r -> r == remoteFailureReason);
     }
 
     /**

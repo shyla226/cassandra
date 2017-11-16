@@ -19,7 +19,7 @@ package org.apache.cassandra.exceptions;
 
 import org.apache.cassandra.schema.TableId;
 
-public class UnknownTableException extends IllegalArgumentException
+public class UnknownTableException extends InternalRequestExecutionException
 {
     public final TableId id;
 
@@ -30,7 +30,7 @@ public class UnknownTableException extends IllegalArgumentException
 
     public UnknownTableException(String msg, TableId id)
     {
-        super(msg);
+        super(RequestFailureReason.UNKNOWN_TABLE, msg);
         this.id = id;
     }
 }

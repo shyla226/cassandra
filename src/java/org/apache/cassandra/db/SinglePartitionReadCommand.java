@@ -1109,6 +1109,17 @@ public class SinglePartitionReadCommand extends ReadCommand
         return operationExecutor;
     }
 
+    @Override
+    public boolean equals(Object other)
+    {
+        if (!isSame(other))
+            return false;
+
+        SinglePartitionReadCommand that = (SinglePartitionReadCommand) other;
+        return this.partitionKey.equals(that.partitionKey)
+               && this.clusteringIndexFilter.equals(that.clusteringIndexFilter);
+    }
+
     /**
      * Groups multiple single partition read commands.
      */

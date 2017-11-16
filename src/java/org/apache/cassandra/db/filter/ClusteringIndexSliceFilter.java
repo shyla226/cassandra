@@ -163,6 +163,16 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
         return Kind.SLICE;
     }
 
+    @Override
+    public boolean equals(Object other)
+    {
+        if (!(other instanceof ClusteringIndexSliceFilter))
+            return false;
+
+        ClusteringIndexSliceFilter that = (ClusteringIndexSliceFilter) other;
+        return this.slices.equals(that.slices);
+    }
+
     protected void serializeInternal(DataOutputPlus out, ReadVersion version) throws IOException
     {
         Slices.serializer.serialize(slices, out, version.encodingVersion.clusteringVersion);

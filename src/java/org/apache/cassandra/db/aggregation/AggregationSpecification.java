@@ -205,6 +205,16 @@ public abstract class AggregationSpecification
         {
             return GroupMaker.newPkPrefixGroupMaker(comparator, clusteringPrefixSize, state);
         }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if (!(other instanceof AggregateByPkPrefix))
+                return false;
+
+            AggregateByPkPrefix that = (AggregateByPkPrefix) other;
+            return this.clusteringPrefixSize == that.clusteringPrefixSize;
+        }
     }
 
     /**

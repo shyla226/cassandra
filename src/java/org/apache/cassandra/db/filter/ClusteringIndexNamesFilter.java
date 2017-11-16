@@ -251,6 +251,16 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         return Kind.NAMES;
     }
 
+    @Override
+    public boolean equals(Object other)
+    {
+        if (!(other instanceof ClusteringIndexNamesFilter))
+            return false;
+
+        ClusteringIndexNamesFilter that = (ClusteringIndexNamesFilter) other;
+        return this.clusterings.equals(that.clusterings);
+    }
+
     protected void serializeInternal(DataOutputPlus out, ReadVersion version) throws IOException
     {
         ClusteringComparator comparator = (ClusteringComparator)clusterings.comparator();

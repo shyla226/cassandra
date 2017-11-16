@@ -28,6 +28,7 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.tracing.Tracing;
 
 /**
@@ -200,8 +201,10 @@ class MessageSerializer implements Message.Serializer
     }
 
     @SuppressWarnings("unchecked")
-    public <P> Message<P> deserialize(DataInputPlus in, InetAddress from) throws IOException
+    public <P> Message<P> deserialize(TrackedDataInputPlus in, int size, InetAddress from) throws IOException
     {
+        long startBytes = in.getBytesRead();
+
         int groupCode = in.readUnsignedByte();
         int verbCode = in.readUnsignedByte();
         int flags = in.readUnsignedByte();
@@ -259,20 +262,27 @@ class MessageSerializer implements Message.Serializer
                 replyTo = CompactEndpointSerializationHelper.deserialize(in);
             }
 
-            P payload = ((VerbSerializer<P, ?>)serializer).requestSerializer.deserialize(in);
+            try
+            {
+                P payload = ((VerbSerializer<P, ?>) serializer).requestSerializer.deserialize(in);
 
-            Message.Data<P> data = new Message.Data<>(payload,
-                                                      -1,
-                                                      createdAtMillis,
-                                                      timeoutMillis,
-                                                      parameters,
-                                                      tracingInfo);
+                Message.Data<P> data = new Message.Data<>(payload,
+                                                          -1,
+                                                          createdAtMillis,
+                                                          timeoutMillis,
+                                                          parameters,
+                                                          tracingInfo);
 
-            return replyTo == null
-                   ? (verb.isOneWay()
-                      ? new OneWayRequest<>(from, Request.local, (Verb.OneWay<P>) verb, data, forwards)
-                      : new Request<>(from, Request.local, messageId, verb, data, forwards))
-                   : new ForwardRequest<>(from, Request.local, replyTo, messageId, verb, data);
+                return replyTo == null
+                       ? (verb.isOneWay()
+                          ? new OneWayRequest<>(from, Request.local, (Verb.OneWay<P>) verb, data, forwards)
+                          : new Request<>(from, Request.local, messageId, verb, data, forwards))
+                       : new ForwardRequest<>(from, Request.local, replyTo, messageId, verb, data);
+            }
+            catch (Exception e)
+            {
+                throw MessageDeserializationException.forPayloadDeserializationException(e, verb, size - (int)(in.getBytesRead() - startBytes));
+            }
         }
         else
         {
@@ -292,15 +302,22 @@ class MessageSerializer implements Message.Serializer
                 return new FailureResponse<>(from, Request.local, messageId, verb, reason, data);
             }
 
-            P payload = ((VerbSerializer<?, P>) serializer).responseSerializer.deserialize(in);
-            Message.Data<P> data = new Message.Data<>(payload,
-                                                      -1,
-                                                      createdAtMillis,
-                                                      timeoutMillis,
-                                                      parameters,
-                                                      tracingInfo);
+            try
+            {
+                P payload = ((VerbSerializer<?, P>) serializer).responseSerializer.deserialize(in);
+                Message.Data<P> data = new Message.Data<>(payload,
+                                                          -1,
+                                                          createdAtMillis,
+                                                          timeoutMillis,
+                                                          parameters,
+                                                          tracingInfo);
 
-            return new Response<>(from, Request.local, messageId, verb, data);
+                return new Response<>(from, Request.local, messageId, verb, data);
+            }
+            catch (Exception e)
+            {
+                throw MessageDeserializationException.forPayloadDeserializationException(e, verb, size - (int)(in.getBytesRead() - startBytes));
+            }
         }
     }
 }
