@@ -113,23 +113,6 @@ public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
         unitTokens.add(new Weighted<TokenInfo<Unit>>(token.replicatedOwnership, token));
     }
 
-    private Collection<Token> generateRandomTokens(UnitInfo<Unit> newUnit, int numTokens, Map<Unit, UnitInfo<Unit>> unitInfos)
-    {
-        Set<Token> tokens = new HashSet<>(numTokens);
-        while (tokens.size() < numTokens)
-        {
-            Token token = partitioner.getRandomToken();
-            if (!sortedTokens.containsKey(token))
-            {
-                tokens.add(token);
-                sortedTokens.put(token, newUnit.unit);
-            }
-        }
-        unitInfos.put(newUnit.unit, newUnit);
-        createTokenInfos(unitInfos);
-        return tokens;
-    }
-
     public Collection<Token> addUnit(Unit newUnit, int numTokens)
     {
         assert !tokensInUnits.containsKey(newUnit);
@@ -139,10 +122,10 @@ public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
         Map<Unit, UnitInfo<Unit>> unitInfos = createUnitInfos(groups);
 
         if (unitInfos.isEmpty())
-            return generateRandomTokens(newUnitInfo, numTokens, unitInfos);
+            return generateSplits(newUnit, numTokens);
 
         if (numTokens > sortedTokens.size())
-            return generateRandomTokens(newUnitInfo, numTokens, unitInfos);
+            return generateSplits(newUnit, numTokens);
 
         TokenInfo<Unit> head = createTokenInfos(unitInfos);
 
