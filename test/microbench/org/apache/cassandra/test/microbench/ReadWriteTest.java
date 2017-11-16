@@ -23,7 +23,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Collectors;
 
 import com.datastax.driver.core.PreparedStatement;
@@ -36,6 +39,7 @@ import org.apache.cassandra.concurrent.IOScheduler;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCMetrics;
 import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -75,17 +79,25 @@ public class ReadWriteTest extends CQLTester
 
     long numReads = 0;
 
-    @Param("100000")
+    @Param("1000000")
     int numRows;
 
-    @Param("64")
+    @Param("1000")
     int inflight;
+
+    /** setting this to 0 is a bad idea usually, but in this case the granularity of the ops makes it ok */
+    @Param("100")
+    int throttleMs;
+
     List<ResultSetFuture> futures;
     ColumnFamilyStore cfs;
+    private long lastValue;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
+        System.out.println("tpc_cores=" + DatabaseDescriptor.getTPCCores());
+        System.out.println("tpc_cores=" + DatabaseDescriptor.loadConfig().tpc_cores);
         Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(IOScheduler.MAX_POOL_SIZE));
         RxJavaPlugins.setComputationSchedulerHandler((s) -> TPC.bestTPCScheduler());
         RxJavaPlugins.initIoScheduler(() -> ioScheduler);
@@ -93,7 +105,6 @@ public class ReadWriteTest extends CQLTester
 
         CQLTester.setUpClass();
         CQLTester.requireNetwork();
-
         keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
         table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))");
         executeNet(ProtocolVersion.CURRENT, "use " + keyspace + ";");
@@ -149,6 +160,14 @@ public class ReadWriteTest extends CQLTester
         CQLTester.cleanup();
     }
 
+    @Setup(Level.Invocation)
+    public void throttle()
+    {
+        if (throttleMs == 0)
+            return;
+        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(throttleMs));
+    }
+
     @Benchmark
     public Object read() throws Throwable
     {
@@ -162,6 +181,23 @@ public class ReadWriteTest extends CQLTester
 
         if (rows.size() == 0)
             System.err.println("EMPTY");
+        return rows;
+    }
+
+    @Benchmark
+    public Object write() throws Throwable
+    {
+        for (int j = 0; j < inflight; ++j)
+        {
+            long v = lastValue + j;
+            futures.add(executeNetAsync(ProtocolVersion.CURRENT, writeStatement.bind(v, v, v)));
+        }
+        lastValue += inflight;
+        FBUtilities.waitOnFutures(futures);
+
+        List<Row> rows = futures.stream().map(f -> f.getUninterruptibly().one()).collect(Collectors.toList());
+        futures.clear();
+
         return rows;
     }
 
