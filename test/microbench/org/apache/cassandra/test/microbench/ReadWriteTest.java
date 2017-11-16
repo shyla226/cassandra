@@ -96,8 +96,6 @@ public class ReadWriteTest extends CQLTester
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
-        System.out.println("tpc_cores=" + DatabaseDescriptor.getTPCCores());
-        System.out.println("tpc_cores=" + DatabaseDescriptor.loadConfig().tpc_cores);
         Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(IOScheduler.MAX_POOL_SIZE));
         RxJavaPlugins.setComputationSchedulerHandler((s) -> TPC.bestTPCScheduler());
         RxJavaPlugins.initIoScheduler(() -> ioScheduler);
