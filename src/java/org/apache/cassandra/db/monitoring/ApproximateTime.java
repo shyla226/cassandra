@@ -20,15 +20,13 @@ package org.apache.cassandra.db.monitoring;
 
 import java.util.concurrent.TimeUnit;
 
-import io.netty.channel.EventLoop;
-import org.apache.cassandra.concurrent.EpollTPCEventLoopGroup;
-import org.apache.cassandra.concurrent.WatcherThread;
+import org.apache.cassandra.concurrent.ParkedThreadsMonitor;
 
 /**
  * This is an approximation of System.currentTimeInMillis() and System.nanoTime(),
  * to be used as a faster alternative when we can sacrifice precision.
  *
- * The current nanoTime is updated by the Watcher thread of {@link org.apache.cassandra.concurrent.WatcherThread},
+ * The current nanoTime is updated by the Watcher thread of {@link ParkedThreadsMonitor},
  * which calls {@link java.util.concurrent.locks.LockSupport#parkNanos(long)} with a parameter of 1
  * nanoSecond, and then checks the queues of the single-threaded executors, so the precision should be
  * of approximately 50 to 100 microseconds. To be on the safe side, we set the precision to 200 microseconds.
@@ -39,14 +37,16 @@ public class ApproximateTime
     private static final long initialNanoTime = System.nanoTime();
     private static volatile long currentNanoTime = initialNanoTime;
 
-    /** register class with the {@link WatcherThread}
+    /**
+     * register class with the {@link ParkedThreadsMonitor}
      */
     static
     {
-        WatcherThread.instance.get().addAction(ApproximateTime::tick);
+        ParkedThreadsMonitor.instance.get().addAction(ApproximateTime::tick);
     }
 
-    /** The precision when called by the {@link WatcherThread}
+    /**
+     * The precision when called by the {@link ParkedThreadsMonitor}
      */
     private static final long precisionMicros = 200; // see comment in class description
 

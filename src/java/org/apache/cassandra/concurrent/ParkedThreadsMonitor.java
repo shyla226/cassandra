@@ -20,7 +20,6 @@ package org.apache.cassandra.concurrent;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
@@ -45,12 +44,12 @@ import org.jctools.queues.MpscUnboundedArrayQueue;
  * It's upto the {@link MonitorableThread#shouldUnpark(long)} implementation to track its own state.
  *
  */
-public class WatcherThread
+public class ParkedThreadsMonitor
 {
-    public static final Supplier<WatcherThread> instance = Suppliers.memoize(WatcherThread::new);
+    public static final Supplier<ParkedThreadsMonitor> instance = Suppliers.memoize(ParkedThreadsMonitor::new);
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(WatcherThread.class);
-    private static final long WATCHER_SLEEP_NANOS = Long.getLong("apollo.watcher.sleep.nanos", 1);
+    private static final Logger LOGGER = LoggerFactory.getLogger(ParkedThreadsMonitor.class);
+    private static final long WATCHER_SLEEP_NANOS = Long.getLong("cassandra.thread.monitor.sleep.nanos", 50000);
 
     private final MpscUnboundedArrayQueue<Runnable> commands = new MpscUnboundedArrayQueue<>(128);
     private final ArrayList<MonitorableThread> monitoredThreads = new ArrayList<>(Runtime.getRuntime().availableProcessors() * 2);
@@ -60,11 +59,11 @@ public class WatcherThread
     private volatile boolean shutdown;
 
 
-    private WatcherThread()
+    private ParkedThreadsMonitor()
     {
         this.shutdown = false;
         watcherThread = new Thread(this::run);
-        watcherThread.setName("ThreadWatcher");
+        watcherThread.setName("ParkedThreadsMonitor");
         watcherThread.setPriority(Thread.MAX_PRIORITY);
         watcherThread.setDaemon(true);
         watcherThread.start();
@@ -99,7 +98,7 @@ public class WatcherThread
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t);
-                LOGGER.error("WatcherThread exception: ", t);
+                LOGGER.error("ParkedThreadsMonitor exception: ", t);
             }
             LockSupport.parkNanos(WATCHER_SLEEP_NANOS);
         }
@@ -163,7 +162,7 @@ public class WatcherThread
 
     /**
      * Interface for threads that take their work from a non-blocking queue and
-     * wish to be watched by the {@link WatcherThread}
+     * wish to be watched by the {@link ParkedThreadsMonitor}
      *
      * When a Thread has no work todo it should park itself and
      */
@@ -180,12 +179,12 @@ public class WatcherThread
 
         /**
          * Will unpark a thread in a parked state.
-         * Called by {@link WatcherThread}
+         * Called by {@link ParkedThreadsMonitor}
          */
         void unpark();
 
         /**
-         * Called continuously by the {@link WatcherThread}
+         * Called continuously by the {@link ParkedThreadsMonitor}
          * to decide if unpark() should be called on a Thread
          *
          * Should return true IFF the thread is parked and there is work
