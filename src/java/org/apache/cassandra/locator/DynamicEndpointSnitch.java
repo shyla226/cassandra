@@ -28,10 +28,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
-import javax.management.MBeanServer;
-import javax.management.ObjectName;
-
 import com.google.common.annotations.VisibleForTesting;
+
+import javax.management.*;
 
 import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -169,6 +168,10 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         {
             mbs.unregisterMBean(new ObjectName(mbeanName));
         }
+        catch (InstanceNotFoundException e)
+        {
+            // nothing to unregister
+        }
         catch (Exception e)
         {
             throw new RuntimeException(e);
@@ -299,7 +302,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
      * or directly by the unit tests.
      */
     @VisibleForTesting
-    void updateScores() // this is expensive
+    public void updateScores() // this is expensive
     {
         if (!StorageService.instance.isGossipActive())
             return;

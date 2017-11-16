@@ -18,6 +18,9 @@ DSE 6.0
 
 Operations
 ----------
+   - Added batchlog_endpoint_strategy option and 2 new strategies to cassandra.yaml. The default is
+     "random_remote", which works as in previous versions. Two new strategies help to choose better
+     endpoints and improve batchlog write latency. See cassandra.yaml for details. (DB-1367)
    - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
      The command must be executed on the node where the rebuild operation is running. Streams
      may continue until they finish or timeout.

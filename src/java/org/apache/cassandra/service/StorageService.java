@@ -66,6 +66,7 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.concurrent.ParkedThreadsMonitor;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -5138,6 +5139,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
 
         updateTopology();
+    }
+
+    public String getBatchlogEndpointStrategy()
+    {
+        return DatabaseDescriptor.getBatchlogEndpointStrategy().name();
+    }
+
+    public void setBatchlogEndpointStrategy(String batchlogEndpointStrategy)
+    {
+        DatabaseDescriptor.setBatchlogEndpointStrategy(Config.BatchlogEndpointStrategy.valueOf(batchlogEndpointStrategy));
     }
 
     /**

@@ -1,4 +1,5 @@
 dse 6.0.0:
+ * Added batchlog_endpoint_strategy config to improve batchlog endpoint selection (DB-1367)
  * Batchlog replays do not leverage remote coordinators (DB-1337)
  * Avoid copying EMPTY_STATIC_ROW to heap again with offheap memtable (DB-1375)
  * Emit client warning when a GRANT/REVOKE/RESTRICT/UNRESTRICT has no effect (DB-1083)

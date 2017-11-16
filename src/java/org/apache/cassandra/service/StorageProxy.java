@@ -48,7 +48,6 @@ import org.apache.cassandra.batchlog.BatchRemove;
 import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
@@ -80,7 +79,6 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.concurrent.AsyncLatch;
 import org.apache.cassandra.utils.flow.Flow;
-import org.apache.cassandra.utils.flow.RxThreads;
 
 public class StorageProxy implements StorageProxyMBean
 {
@@ -984,15 +982,9 @@ public class StorageProxy implements StorageProxyMBean
         String localRack = DatabaseDescriptor.getEndpointSnitch().getRack(FBUtilities.getBroadcastAddress());
 
         Keyspace keyspace = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME);
-        Collection<InetAddress> chosenEndpoints = new BatchlogManager.EndpointFilter(localRack, localEndpoints).filter();
-        if (chosenEndpoints.isEmpty())
-        {
-            if (consistencyLevel == ConsistencyLevel.ANY)
-                return WriteEndpoints.withLive(keyspace, Collections.singleton(FBUtilities.getBroadcastAddress()));
+        Collection<InetAddress> chosenEndpoints = BatchlogManager.filterEndpoints(consistencyLevel, localRack, localEndpoints);
 
-            throw new UnavailableException(ConsistencyLevel.ONE, 1, 0);
-        }
-
+        assert chosenEndpoints.size() > 0;
         return WriteEndpoints.withLive(keyspace, chosenEndpoints);
     }
 
