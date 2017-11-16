@@ -121,7 +121,6 @@ public class DatabaseDescriptor
     private static final boolean disableSTCSInL0 = Boolean.getBoolean(Config.PROPERTY_PREFIX + "disable_stcs_in_l0");
     private static final boolean unsafeSystem = Boolean.getBoolean(Config.PROPERTY_PREFIX + "unsafesystem");
     private static AuditLogger auditLogger;
-    private static AuditLoggingOptions auditLoggerConfig = new AuditLoggingOptions();
 
     public static void daemonInitialization() throws ConfigurationException
     {
@@ -2751,6 +2750,6 @@ public class DatabaseDescriptor
 
     public static AuditLoggingOptions getAuditLoggingOptions()
     {
-        return auditLoggerConfig;
+        return conf.audit_logging_options;
     }
 }
