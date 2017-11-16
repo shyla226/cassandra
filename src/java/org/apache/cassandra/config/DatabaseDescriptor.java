@@ -20,13 +20,17 @@ package org.apache.cassandra.config;
 import java.io.File;
 import java.io.IOException;
 import java.net.*;
-import java.nio.file.*;
+import java.nio.file.FileStore;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,10 +68,6 @@ public class DatabaseDescriptor
      */
     private static final int MAX_NUM_TOKENS = 1536;
 
-    private static ConfigurationLoader configLoader;
-    private static Config conf;
-    private static boolean hasLoggedConfig;
-
     private static IEndpointSnitch snitch;
     private static InetAddress listenAddress; // leave null so we can fall through to getLocalHost
     private static InetAddress broadcastAddress;
@@ -81,6 +81,8 @@ public class DatabaseDescriptor
     private static String paritionerName;
 
     private static Config.DiskAccessMode indexAccessMode;
+
+    private static Config conf;
 
     private static SSTableFormat.Type sstable_format = SSTableFormat.Type.BIG;
 
@@ -100,6 +102,7 @@ public class DatabaseDescriptor
 
     private static String localDC;
     private static Comparator<InetAddress> localComparator;
+    private static boolean hasLoggedConfig;
 
     private static boolean daemonInitialized;
 
@@ -136,29 +139,22 @@ public class DatabaseDescriptor
         }
     }
 
+    @VisibleForTesting
     public static Config loadConfig() throws ConfigurationException
     {
-        Config conf = configLoader().loadConfig();
+        String loaderClass = System.getProperty("cassandra.config.loader");
+        ConfigurationLoader loader = loaderClass == null
+                                   ? new YamlConfigurationLoader()
+                                   : FBUtilities.<ConfigurationLoader>construct(loaderClass, "configuration loading");
+        Config config = loader.loadConfig();
 
         if (!hasLoggedConfig)
         {
             hasLoggedConfig = true;
-            conf.log();
+            Config.log(config);
         }
 
-        return conf;
-    }
-
-    private static ConfigurationLoader configLoader()
-    {
-        if (configLoader == null)
-        {
-            String loaderClass = System.getProperty(Config.PROPERTY_PREFIX + "config.loader");
-            configLoader = loaderClass == null
-                           ? new YamlConfigurationLoader()
-                           : FBUtilities.construct(loaderClass, "configuration loading");
-        }
-        return configLoader;
+        return config;
     }
 
     private static InetAddress getNetworkInterfaceAddress(String intf, String configName, boolean preferIPv6) throws ConfigurationException
