@@ -43,7 +43,7 @@ import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
 
-import org.apache.cassandra.concurrent.WatcherThread;
+import org.apache.cassandra.concurrent.ParkedThreadsMonitor;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
@@ -64,7 +64,7 @@ import org.jctools.queues.MpscGrowableArrayQueue;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-public class OutboundTcpConnection extends FastThreadLocalThread implements WatcherThread.MonitorableThread
+public class OutboundTcpConnection extends FastThreadLocalThread implements ParkedThreadsMonitor.MonitorableThread
 {
     private static final Logger logger = LoggerFactory.getLogger(OutboundTcpConnection.class);
     private static final NoSpamLogger nospamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
@@ -247,7 +247,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Watc
             thread = Thread.currentThread();
 
         //Register self with Monitor
-        WatcherThread.instance.get().addThreadToMonitor(this);
+        ParkedThreadsMonitor.instance.get().addThreadToMonitor(this);
 
         final int drainedMessageSize = MAX_COALESCED_MESSAGES;
         // keeping list (batch) size small for now; that way we don't have an unbounded array (that we never resize)
@@ -318,7 +318,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Watc
         }
 
         //Register self with Monitor
-        WatcherThread.instance.get().removeThreadToMonitor(this);
+        ParkedThreadsMonitor.instance.get().removeThreadToMonitor(this);
     }
 
     public int getPendingMessages()

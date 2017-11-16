@@ -115,7 +115,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         this.eventLoops = ImmutableList.copyOf(Iterables.transform(this, e -> (SingleCoreEventLoop) e));
 
         //Register these loop threads with the Watcher
-        WatcherThread.instance.get().addThreadsToMonitor(new ArrayList<>(eventLoops));
+        ParkedThreadsMonitor.instance.get().addThreadsToMonitor(new ArrayList<>(eventLoops));
     }
 
     public ImmutableList<? extends TPCEventLoop> eventLoops()
@@ -128,7 +128,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
     {
         super.shutdown();
 
-        WatcherThread.instance.get().removeThreadsToMonitor(new ArrayList<>(eventLoops));
+        ParkedThreadsMonitor.instance.get().removeThreadsToMonitor(new ArrayList<>(eventLoops));
         shutdown = true;
     }
 
@@ -138,7 +138,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         return new SingleCoreEventLoop(this, (TPCThread.TPCThreadsCreator)executor);
     }
 
-    public static class SingleCoreEventLoop extends EpollEventLoop implements TPCEventLoop, WatcherThread.MonitorableThread
+    public static class SingleCoreEventLoop extends EpollEventLoop implements TPCEventLoop, ParkedThreadsMonitor.MonitorableThread
     {
         /**
          * debug purposes only.
@@ -227,7 +227,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         }
 
         /**
-         * Called from {@link WatcherThread} if {@link #shouldUnpark(long)} returns true. Note that an epoll event
+         * Called from {@link ParkedThreadsMonitor} if {@link #shouldUnpark(long)} returns true. Note that an epoll event
          * will wake this thread up independently from this.
          */
         @Override
@@ -241,7 +241,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         }
 
         /**
-         * Called regularly from {@link WatcherThread}.
+         * Called regularly from {@link ParkedThreadsMonitor}.
          */
         @Override
         public boolean shouldUnpark(long nanoTimeSinceStartup)
