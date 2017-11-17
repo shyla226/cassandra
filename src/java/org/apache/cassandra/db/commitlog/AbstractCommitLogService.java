@@ -21,13 +21,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 
-import io.reactivex.*;
-import io.reactivex.subjects.BehaviorSubject;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
+import io.reactivex.subjects.BehaviorSubject;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.TimeSource;
@@ -164,12 +164,12 @@ public abstract class AbstractCommitLogService
     /**
      * Block for @param alloc to be sync'd as necessary, and handle bookkeeping
      */
-    public Completable finishWriteFor(Allocation alloc, Scheduler observeOn)
+    public Completable finishWriteFor(Allocation alloc, StagedScheduler observeOn)
     {
         return maybeWaitForSync(alloc, observeOn).doOnComplete(() -> written.incrementAndGet());
     }
 
-    protected abstract Completable maybeWaitForSync(Allocation alloc, Scheduler observeOn);
+    protected abstract Completable maybeWaitForSync(Allocation alloc, StagedScheduler observeOn);
 
     /**
      * Request an additional sync cycle without blocking.

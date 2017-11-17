@@ -117,7 +117,7 @@ public class IOScheduler extends StagedScheduler
     }
 
     @Override
-    public Disposable scheduleDirect(Runnable run, TPCTaskType stage, long delay, TimeUnit unit)
+    public Disposable schedule(Runnable run, TPCTaskType stage, long delay, TimeUnit unit)
     {
         return super.scheduleDirect(TPCRunnable.wrap(run, stage, TPC.getNextCore()), delay, unit);
     }

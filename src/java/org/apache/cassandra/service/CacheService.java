@@ -39,6 +39,8 @@ import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.cache.*;
 import org.apache.cassandra.cache.AutoSavingCache.CacheSerializer;
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -379,13 +381,13 @@ public class CacheService implements CacheServiceMBean
             if (!cfs.metadata().isCounter() || !cfs.isCounterCacheEnabled())
                 return null;
 
-            return TPCUtils.toFuture(RxThreads.subscribeOnBackgroundIo(Single.fromCallable(() ->
-                                                         {
-                                                             ByteBuffer value = cacheKey.readCounterValue(cfs);
-                                                             return value == null
-                                                                  ? null
-                                                                  : Pair.create(cacheKey, CounterContext.instance().getLocalClockAndCount(value));
-                                                         }), TPCTaskType.COUNTER_CACHE_LOAD));
+            return StageManager.getStage(Stage.BACKGROUND_IO).submit(() ->
+            {
+                ByteBuffer value = cacheKey.readCounterValue(cfs);
+                return value == null
+                       ? null
+                       : Pair.create(cacheKey, CounterContext.instance().getLocalClockAndCount(value));
+            });
         }
     }
 
@@ -411,7 +413,7 @@ public class CacheService implements CacheServiceMBean
             assert(!cfs.isIndex());//Shouldn't have row cache entries for indexes
 
 
-            return TPCUtils.toFuture(RxThreads.subscribeOnBackgroundIo(Single.fromCallable((Callable<Pair<RowCacheKey, IRowCacheEntry>>) () ->
+            return StageManager.getStage(Stage.BACKGROUND_IO).submit(() ->
             {
                 DecoratedKey key = cfs.decorateKey(buffer);
                 int nowInSec = FBUtilities.nowInSeconds();
@@ -430,7 +432,7 @@ public class CacheService implements CacheServiceMBean
                         return Pair.create(new RowCacheKey(cfs.metadata(), key), toCache);
                     }
                 }
-            }), TPCTaskType.ROW_CACHE_LOAD));
+            });
         }
     }
 

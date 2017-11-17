@@ -96,7 +96,7 @@ public final class Batch implements Schedulable
 
     public TracingAwareExecutor getOperationExecutor()
     {
-        return getScheduler().forTaskType(TPCTaskType.BATCH_WRITE);
+        return getScheduler().forTaskType(TPCTaskType.BATCH_STORE);
     }
 
     static final class BatchSerializer extends VersionDependent<WriteVersion> implements Serializer<Batch>

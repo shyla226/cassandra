@@ -21,12 +21,10 @@ package org.apache.cassandra.utils.flow;
 import java.util.EnumMap;
 import java.util.concurrent.Callable;
 
-import io.reactivex.Scheduler;
 import org.apache.cassandra.concurrent.StagedScheduler;
-import org.apache.cassandra.concurrent.ExecutorLocals;
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPCTaskType;
 
 public class Threads
 {
@@ -54,28 +52,22 @@ public class Threads
         return (Flow.Operator<T, T>) req[coreId];
     }
 
-    static class RequestOn implements FlowSubscription, TaggedRunnable, FlowSubscriptionRecipient
+    static class RequestOn implements FlowSubscription, Runnable, FlowSubscriptionRecipient
     {
-        final Scheduler scheduler;
-        final TPCTaskType stage;
+        final StagedScheduler scheduler;
+        final TPCTaskType taskType;
         FlowSubscription source;
 
-        <T> RequestOn(Flow<T> source, FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient, Scheduler scheduler, TPCTaskType stage)
+        <T> RequestOn(Flow<T> source, FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient, StagedScheduler scheduler, TPCTaskType taskType)
         {
             this.scheduler = scheduler;
-            this.stage = stage;
+            this.taskType = taskType;
             subscriptionRecipient.onSubscribe(this);
 
-            if (TPC.isOnScheduler(scheduler))
+            if (scheduler.canRunDirectly(taskType))
                 source.requestFirst(subscriber, this);
             else
-                scheduler.scheduleDirect(new TaggedRunnable.Base(stage, scheduler)
-                {
-                    public void run()
-                    {
-                        source.requestFirst(subscriber, RequestOn.this);
-                    }
-                });
+                scheduler.execute(() -> source.requestFirst(subscriber, this), taskType);
         }
 
         public void onSubscribe(FlowSubscription source)
@@ -85,25 +77,12 @@ public class Threads
 
         public void requestNext()
         {
-            if (TPC.isOnScheduler(scheduler))
-                run();
-            else
-                scheduler.scheduleDirect(this);
+            scheduler.execute(this, taskType);
         }
 
         public void close() throws Exception
         {
             source.close();
-        }
-
-        public TPCTaskType getStage()
-        {
-            return stage;
-        }
-
-        public Scheduler scheduledOn()
-        {
-            return scheduler;
         }
 
         public void run()
@@ -117,7 +96,7 @@ public class Threads
      * If we are already on that scheduler, whether the request is called directly or scheduled depends on the specific
      * scheduler.
      */
-    public static <T> Flow.Operator<T, T> requestOn(Scheduler scheduler, TPCTaskType stage)
+    public static <T> Flow.Operator<T, T> requestOn(StagedScheduler scheduler, TPCTaskType stage)
     {
         if (scheduler instanceof TPCScheduler)
             return requestOnCore(((TPCScheduler) scheduler).coreId(), stage);
@@ -127,7 +106,7 @@ public class Threads
             return createRequestOn(scheduler, stage);
     }
 
-    private static <T> Flow.Operator<T, T> createRequestOn(Scheduler scheduler, TPCTaskType stage)
+    private static <T> Flow.Operator<T, T> createRequestOn(StagedScheduler scheduler, TPCTaskType stage)
     {
         return (source, subscriber, subscriptionRecipient) -> new RequestOn(source, subscriber, subscriptionRecipient, scheduler, stage);
     }
@@ -155,28 +134,24 @@ public class Threads
         }
     }
 
-    static class EvaluateOn<T> extends FlowSource<T> implements TaggedRunnable
+    static class EvaluateOn<T> extends FlowSource<T> implements Runnable
     {
         final Callable<T> source;
-        final TPCTaskType stage;
+        final TPCTaskType taskType;
         final StagedScheduler scheduler;
 
-        EvaluateOn(Callable<T> source, StagedScheduler scheduler, TPCTaskType stage)
+        EvaluateOn(Callable<T> source, StagedScheduler scheduler, TPCTaskType taskType)
         {
             this.source = source;
             this.scheduler = scheduler;
-            this.stage = stage;
+            this.taskType = taskType;
         }
 
         @Override
         public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
         {
             subscribe(subscriber, subscriptionRecipient);
-
-            if (TPC.isOnScheduler(scheduler))
-                run();
-            else
-                scheduler.execute(this, ExecutorLocals.create(), stage);
+            scheduler.execute(this, taskType);
         }
 
         public void requestNext()
@@ -203,34 +178,24 @@ public class Threads
 
         public String toString()
         {
-            return Flow.formatTrace("evaluateOn [" + scheduler + "] stage " + stage, source);
-        }
-
-        public TPCTaskType getStage()
-        {
-            return stage;
-        }
-
-        public Scheduler scheduledOn()
-        {
-            return scheduler;
+            return Flow.formatTrace("evaluateOn [" + scheduler + "] taskType " + taskType, source);
         }
     }
 
-    static class DeferOn<T> extends Flow<T> implements TaggedRunnable
+    static class DeferOn<T> extends Flow<T> implements Runnable
     {
         final Callable<Flow<T>> flowSupplier;
-        final TPCTaskType stage;
-        final Scheduler scheduler;
+        final TPCTaskType taskType;
+        final StagedScheduler scheduler;
         FlowSubscriber<T> subscriber;
         FlowSubscriptionRecipient subscriptionRecipient;
         Flow<T> sourceFlow;
 
-        DeferOn(Callable<Flow<T>> source, Scheduler scheduler, TPCTaskType stage)
+        DeferOn(Callable<Flow<T>> source, StagedScheduler scheduler, TPCTaskType taskType)
         {
             this.flowSupplier = source;
             this.scheduler = scheduler;
-            this.stage = stage;
+            this.taskType = taskType;
         }
 
         public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
@@ -238,10 +203,7 @@ public class Threads
             this.subscriber = subscriber;
             this.subscriptionRecipient = subscriptionRecipient;
 
-            if (TPC.isOnScheduler(scheduler))
-                run();
-            else
-                scheduler.scheduleDirect(this);
+            scheduler.execute(this, taskType);
         }
 
         public void run()
@@ -262,17 +224,7 @@ public class Threads
 
         public String toString()
         {
-            return Flow.formatTrace("deferOn [" + scheduler + "] stage " + stage, flowSupplier, sourceFlow);
-        }
-
-        public TPCTaskType getStage()
-        {
-            return stage;
-        }
-
-        public Scheduler scheduledOn()
-        {
-            return scheduler;
+            return Flow.formatTrace("deferOn [" + scheduler + "] taskType " + taskType, flowSupplier, sourceFlow);
         }
     }
 
@@ -308,7 +260,6 @@ public class Threads
     {
         final StagedScheduler scheduler;
         final TPCTaskType taskType;
-        final ExecutorLocals locals = ExecutorLocals.create();
 
         public SchedulingTransformer(Flow<I> source, StagedScheduler scheduler, TPCTaskType taskType)
         {
@@ -320,26 +271,20 @@ public class Threads
         @Override
         public void onNext(I next)
         {
-            if (TPC.isOnScheduler(scheduler))
+            if (scheduler.canRunDirectly(taskType))
                 subscriber.onNext(next);
             else
-                scheduler.execute(() -> subscriber.onNext(next), locals, taskType);
+                scheduler.execute(() -> subscriber.onNext(next), taskType);
         }
 
 
         @Override
         public void onFinal(I next)
         {
-            if (TPC.isOnScheduler(scheduler))
+            if (scheduler.canRunDirectly(taskType))
                 subscriber.onFinal(next);
             else
-                scheduler.scheduleDirect(new TaggedRunnable.Base(taskType, scheduler)
-                {
-                    public void run()
-                    {
-                        subscriber.onFinal(next);
-                    }
-                });
+                scheduler.execute(() -> subscriber.onFinal(next), taskType);
         }
 
         public String toString()

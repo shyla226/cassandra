@@ -173,6 +173,14 @@ public class NioTPCEventLoopGroup extends NioEventLoopGroup implements TPCEventL
             return nettyLoop.inEventLoop();
         }
 
+        @Override
+        public boolean canExecuteImmediately(TPCTaskType taskType)
+        {
+            if (coreId() != TPC.getCoreId())
+                return false;
+            return true;
+        }
+
         public void execute(Runnable runnable)
         {
             nettyLoop.execute(runnable);

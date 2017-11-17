@@ -40,10 +40,7 @@ public interface TPCEventLoop extends EventLoop
         return thread().coreId();
     }
 
-    default boolean canExecuteImmediately(TPCRunnable runnable)
-    {
-        return false;
-    }
+    boolean canExecuteImmediately(TPCTaskType runnable);
 
     @Override
     public TPCEventLoopGroup parent();

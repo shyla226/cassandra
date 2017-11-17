@@ -20,7 +20,7 @@ package org.apache.cassandra.db.commitlog;
 import java.util.concurrent.TimeUnit;
 
 import io.reactivex.Completable;
-import io.reactivex.Scheduler;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.TimeSource;
@@ -33,7 +33,7 @@ class BatchCommitLogService extends AbstractCommitLogService
         super(commitLog, "COMMIT-LOG-WRITER", (int) DatabaseDescriptor.getCommitLogSyncBatchWindow(), timeSource);
     }
 
-    protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc, Scheduler observeOn)
+    protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc, StagedScheduler observeOn)
     {
         // wait until record has been safely persisted to disk
         pending.incrementAndGet();
@@ -46,6 +46,7 @@ class BatchCommitLogService extends AbstractCommitLogService
                                              commitLog.metrics.waitingOnCommit.update(timeSource.nanoTime() - startTime, TimeUnit.NANOSECONDS);
                                              pending.decrementAndGet();
                                          });
-        return RxThreads.observeOn(sync, observeOn, TPCTaskType.WRITE_POST_COMMIT_LOG_SYNC);
+
+        return RxThreads.awaitAndContinueOn(sync, observeOn, TPCTaskType.WRITE_POST_COMMIT_LOG_SYNC);
     }
 }

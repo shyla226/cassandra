@@ -19,13 +19,17 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.concurrent.TimeoutException;
 
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
-import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.cql3.CFName;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.TruncateException;
+import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.QueryState;
@@ -89,8 +93,8 @@ public class TruncateStatement extends CFStatement implements CQLStatement
             TPCTaskType.TRUNCATE);
     }
 
-    public Scheduler getScheduler()
+    public StagedScheduler getScheduler()
     {
-        return Schedulers.io();
+        return TPC.ioScheduler();
     }
 }

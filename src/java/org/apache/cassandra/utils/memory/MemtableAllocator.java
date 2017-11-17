@@ -112,7 +112,7 @@ public abstract class MemtableAllocator
 
                         if (opGroup.isBlocking() || onHeap.parent.belowLimit() && offHeap.parent.belowLimit())
                         {
-                            observeOnScheduler.execute(this::subscribeChild, ExecutorLocals.create(), nextTaskType);
+                            observeOnScheduler.execute(this::subscribeChild, nextTaskType);
                             timerContext = null;
                             return;
                         }
@@ -122,7 +122,7 @@ public abstract class MemtableAllocator
                         // Create a TPC task which tracks current locals and the number of tasks blocked by this.
                         task.set(TPCRunnable.wrap(this::subscribeChild,
                                                   ExecutorLocals.create(),
-                                                  TPCTaskType.WRITE_MEMTABLE_FULL,
+                                                  TPCTaskType.WRITE_POST_MEMTABLE_FULL,
                                                   observeOnScheduler));
 
                         opGroup.whenBlocking().thenRun(this::complete);

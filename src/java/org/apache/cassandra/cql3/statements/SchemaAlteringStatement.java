@@ -22,6 +22,8 @@ import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.AuthenticatedUser;
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -126,9 +128,9 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
                                              .toSingle(new ResultMessage.Void());
     }
 
-    public Scheduler getScheduler()
+    public StagedScheduler getScheduler()
     {
-        return Schedulers.io();
+        return TPC.ioScheduler();
     }
 
     protected Maybe<Event.SchemaChange> error(String msg)

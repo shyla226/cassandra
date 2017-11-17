@@ -90,8 +90,8 @@ public class EventLoopBench {
 
             ((EpollEventLoopGroup)loops).setIoRatio(100);
 
-            EventLoopBasedScheduler<?> scheduler1 = new EventLoopBasedScheduler<>((EventLoop)loops.next());
-            EventLoopBasedScheduler<?> scheduler2 = new EventLoopBasedScheduler<>((EventLoop)loops.next());
+            EventLoopBasedScheduler<?> scheduler1 = new Scheduler((EventLoop)loops.next());
+            EventLoopBasedScheduler<?> scheduler2 = new Scheduler((EventLoop)loops.next());
 
             rx2 = Observable.fromArray(arr).subscribeOn(scheduler1).observeOn(scheduler2);
         }
@@ -199,6 +199,24 @@ public class EventLoopBench {
         public void onNext(T t)
         {
             bh.consume(t);
+        }
+    }
+
+    static class Scheduler extends EventLoopBasedScheduler<EventLoop>
+    {
+        public Scheduler(EventLoop eventLoop)
+        {
+            super(eventLoop);
+        }
+
+        public boolean isOnScheduler(Thread thread)
+        {
+            return false;
+        }
+
+        public int metricsCoreId()
+        {
+            return 0;
         }
     }
 }

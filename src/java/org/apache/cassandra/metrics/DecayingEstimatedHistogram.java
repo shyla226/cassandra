@@ -411,13 +411,13 @@ final class DecayingEstimatedHistogram extends Histogram
                 return;
 
             if (scheduled.compareAndSet(false, true))
-                TPC.bestTPCScheduler().scheduleDirect(this::aggregate, TPCTaskType.TIMED_HISTOGRAM_AGGREGATE, updateIntervalMillis, TimeUnit.MILLISECONDS);
+                TPC.bestTPCScheduler().schedule(this::aggregate, TPCTaskType.TIMED_HISTOGRAM_AGGREGATE, updateIntervalMillis, TimeUnit.MILLISECONDS);
         }
 
         void scheduleIfComposite()
         {
             if (updateIntervalMillis > 0 && isComposite)
-                TPC.bestTPCScheduler().scheduleDirect(this::aggregate, TPCTaskType.TIMED_HISTOGRAM_AGGREGATE, updateIntervalMillis, TimeUnit.MILLISECONDS);
+                TPC.bestTPCScheduler().schedule(this::aggregate, TPCTaskType.TIMED_HISTOGRAM_AGGREGATE, updateIntervalMillis, TimeUnit.MILLISECONDS);
         }
 
         @Override

@@ -18,38 +18,37 @@
 
 package org.apache.cassandra.concurrent;
 
-import org.apache.cassandra.utils.flow.TaggedRunnable;
-
 /**
- * Runnable wrapping TPC scheduled tasks.
+ * Runnable used to wrap TPC scheduled tasks.
+ *
  * Takes care of setting up local context (ExecutorLocals) and keeping track of scheduled and completed tasks for
  * metrics.
+ *
+ * The TPCRunnable is usually constructed when a task is passed on to an executor which cannot execute it immediately,
+ * but sometimes needs to be created explicitly to capture the current thread context (ExecutorLocals) when the task is
+ * going to be executed by a shared signal (for example, see MemtableAllocator.whenBelowLimits), or when a request
+ * is first initiated with specific ExecutorLocals.
  */
 public class TPCRunnable implements Runnable
 {
     private final Runnable runnable;
     private final ExecutorLocals locals;
-    private final TPCTaskType stage;
+    private final TPCTaskType taskType;
     private final TPCMetrics metrics;
 
-    public TPCRunnable(TaggedRunnable runnable)
-    {
-        this(runnable, ExecutorLocals.create(), runnable.getStage(), TaggedRunnable.scheduledOnCore(runnable));
-    }
-
-    public TPCRunnable(Runnable runnable, ExecutorLocals locals, TPCTaskType stage, int scheduledOn)
+    public TPCRunnable(Runnable runnable, ExecutorLocals locals, TPCTaskType taskType, int scheduledOn)
     {
         this.runnable = runnable;
         this.locals = locals;
-        this.stage = stage;
+        this.taskType = taskType;
         this.metrics = TPC.metrics(scheduledOn);
 
-        metrics.scheduled(stage);
+        metrics.scheduled(taskType);
     }
 
     public void run()
     {
-        metrics.starting(stage);
+        metrics.starting(taskType);
 
         ExecutorLocals.set(locals);
 
@@ -61,38 +60,43 @@ public class TPCRunnable implements Runnable
         }
         catch (Throwable t)
         {
-            metrics.failed(stage, t);
+            metrics.failed(taskType, t);
             throw t;
         }
         finally
         {
-            metrics.completed(stage);
+            metrics.completed(taskType);
         }
     }
 
     public void cancelled()
     {
-        metrics.cancelled(stage);
+        metrics.cancelled(taskType);
     }
 
     public void setPending()
     {
-        metrics.pending(stage, +1);
+        metrics.pending(taskType, +1);
     }
 
     public void unsetPending()
     {
-        metrics.pending(stage, -1);
+        metrics.pending(taskType, -1);
     }
 
     public boolean isPendable()
     {
-        return stage.pendable;
+        return taskType.pendable();
+    }
+
+    public TPCTaskType taskType()
+    {
+        return taskType;
     }
 
     public void blocked()
     {
-        metrics.blocked(stage);
+        metrics.blocked(taskType);
     }
 
     public static TPCRunnable wrap(Runnable runnable)
@@ -111,6 +115,13 @@ public class TPCRunnable implements Runnable
     }
 
     public static TPCRunnable wrap(Runnable runnable,
+                                   TPCTaskType defaultStage,
+                                   StagedScheduler scheduler)
+    {
+        return wrap(runnable, ExecutorLocals.create(), defaultStage, scheduler.metricsCoreId());
+    }
+
+    public static TPCRunnable wrap(Runnable runnable,
                                    ExecutorLocals locals,
                                    TPCTaskType defaultStage,
                                    StagedScheduler scheduler)
@@ -125,8 +136,6 @@ public class TPCRunnable implements Runnable
     {
         if (runnable instanceof TPCRunnable)
             return (TPCRunnable) runnable;
-        if (runnable instanceof TaggedRunnable)
-            return new TPCRunnable((TaggedRunnable) runnable);
 
         return new TPCRunnable(runnable, locals, defaultStage, defaultCore);
     }

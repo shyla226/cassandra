@@ -24,7 +24,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.concurrent.StagedScheduler;
-import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -126,7 +125,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
             return;
         }
 
-        timeoutTask = schedulerSupplier.get().scheduleDirect(() -> {
+        timeoutTask = schedulerSupplier.get().schedule(() -> {
             timeoutTask = null;
             if (!hasSource()) // important to check because it is expensive to create an exception, due to the callstack
                 onSource(timeoutSupplier.get());

@@ -41,7 +41,6 @@ import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.metrics.ReadCoordinationMetrics;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.SpeculativeRetryParam;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
@@ -270,16 +269,16 @@ public abstract class AbstractReadExecutor
                 if (!shouldSpeculate() || !logFailedSpeculation)
                     return CompletableObserver::onComplete;
 
-                command.getScheduler().scheduleDirect(() ->
+                command.getScheduler().schedule(() ->
                                                            {
                                                                if (!handler.hasValue())
 
                                                                    cfs.metric.speculativeInsufficientReplicas.inc();
 
                                                            },
-                                                      TPCTaskType.TIMED_SPECULATE,
-                                                      cfs.sampleLatencyNanos,
-                                                      TimeUnit.NANOSECONDS);
+                                                TPCTaskType.TIMED_SPECULATE,
+                                                cfs.sampleLatencyNanos,
+                                                TimeUnit.NANOSECONDS);
 
                 return CompletableObserver::onComplete;
             });
@@ -332,7 +331,7 @@ public abstract class AbstractReadExecutor
                 if (!shouldSpeculate())
                     return CompletableObserver::onComplete;
 
-                command.getScheduler().scheduleDirect(() -> {
+                command.getScheduler().schedule(() -> {
                        if (!handler.hasValue())
                        {
                            //Handle speculation stats first in case the callback fires immediately

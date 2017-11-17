@@ -61,7 +61,7 @@ public class TPCMetricsAndLimits implements TPCMetrics
     {
         TaskStats stat = stats.get(stage);
         stat.scheduledTasks.add(1);
-        if (stage.counted)
+        if (stage.externalQueue())
             activeCountedTasks.incrementAndGet();
     }
 
@@ -74,7 +74,7 @@ public class TPCMetricsAndLimits implements TPCMetrics
     {
         TaskStats stat = stats.get(stage);
         stat.failedTasks.add(1);
-        if (stage.counted)
+        if (stage.externalQueue())
             activeCountedTasks.decrementAndGet();
     }
 
@@ -82,7 +82,7 @@ public class TPCMetricsAndLimits implements TPCMetrics
     {
         TaskStats stat = stats.get(stage);
         stat.completedTasks.add(1);
-        if (stage.counted)
+        if (stage.externalQueue())
             activeCountedTasks.decrementAndGet();
     }
 

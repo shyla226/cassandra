@@ -229,10 +229,10 @@ public class CounterMutation implements IMutation, Schedulable
                     Tracing.trace("Failed to acquire counter locks, scheduling retry");
                     // TODO: 1 microsecond is an arbitrary value that was chosen to avoid spinning the CPU too much, we
                     // should perform some tests to see if there is an impact in changing this value (DB-799)
-                    mutation.getScheduler().scheduleDirect(() -> acquireLocks(source, locks, startTime),
-                                                           TPCTaskType.COUNTER_ACQUIRE_LOCK,
-                                                           1,
-                                                           TimeUnit.MICROSECONDS);
+                    mutation.getScheduler().schedule(() -> acquireLocks(source, locks, startTime),
+                                                     TPCTaskType.COUNTER_ACQUIRE_LOCK,
+                                                     1,
+                                                     TimeUnit.MICROSECONDS);
                 }
                 return;
             }

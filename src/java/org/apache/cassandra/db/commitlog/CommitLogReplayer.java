@@ -235,8 +235,10 @@ public class CommitLogReplayer implements CommitLogReadHandler
                 }
                 return Completable.complete();
             });
-            RxThreads.subscribeOnBackgroundIo(completable, TPCTaskType.COMMIT_LOG_REPLAY);
-            return TPCUtils.toFuture(completable.toSingle(() -> serializedSize));
+            // The call below initiates the mutation processing.
+            // FIXME: If the mutation is a schema mutation, we need to wait for completion of all others before it and
+            // for it to complete before initiating others.
+            return TPCUtils.toFuture(completable.toSingleDefault(serializedSize));
         }
     }
 

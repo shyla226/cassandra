@@ -20,7 +20,7 @@ package org.apache.cassandra.db.commitlog;
 import java.util.concurrent.TimeUnit;
 
 import io.reactivex.Completable;
-import io.reactivex.Scheduler;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.TimeSource;
@@ -35,7 +35,7 @@ class PeriodicCommitLogService extends AbstractCommitLogService
         super(commitLog, "PERIODIC-COMMIT-LOG-SYNCER", DatabaseDescriptor.getCommitLogSyncPeriod(), timeSource);
     }
 
-    protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc, Scheduler observeOn)
+    protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc, StagedScheduler observeOn)
     {
         long expectedSyncTime = timeSource.nanoTime() - blockWhenSyncLagsNanos;
         if (lastSyncedAt < expectedSyncTime)
@@ -49,7 +49,8 @@ class PeriodicCommitLogService extends AbstractCommitLogService
                                                  commitLog.metrics.waitingOnCommit.update(timeSource.nanoTime() - startTime, TimeUnit.NANOSECONDS);
                                                  pending.decrementAndGet();
                                              });
-            return RxThreads.observeOn(sync, observeOn, TPCTaskType.WRITE_POST_COMMIT_LOG_SYNC);
+
+            return RxThreads.awaitAndContinueOn(sync, observeOn, TPCTaskType.WRITE_POST_COMMIT_LOG_SYNC);
         }
         else
         {

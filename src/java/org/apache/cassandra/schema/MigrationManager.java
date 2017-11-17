@@ -27,7 +27,6 @@ import io.reactivex.Completable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.internal.schedulers.ImmediateThinScheduler;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
@@ -463,7 +462,8 @@ public class MigrationManager
             Completable migrationCompletable =
                 Completable.fromRunnable(() -> Schema.instance.merge(migration));
             if (TPC.isTPCThread())
-                migrationCompletable = RxThreads.subscribeOn(migrationCompletable, StageManager.getScheduler(Stage.MIGRATION), TPCTaskType.MIGRATION);
+                migrationCompletable = migrationCompletable.subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
+            // Note: above uses Rx subscribeOn as this task is scheduled on a stage and there's no point track it in TPC metrics as well.
             return migrationCompletable;
         }
         else
@@ -494,7 +494,8 @@ public class MigrationManager
                                          }
                                      });
         if (TPC.isTPCThread())
-            migration = RxThreads.subscribeOn(migration, StageManager.getScheduler(Stage.MIGRATION), TPCTaskType.MIGRATION);
+            migration = migration.subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
+        // Note: above uses Rx subscribeOn as this task is scheduled on a stage and there's no point track it in TPC metrics as well.
         return migration;
     }
 

@@ -2275,13 +2275,14 @@ public class StorageProxy implements StorageProxyMBean
         StorageMetrics.totalHintsInProgress.inc(targets.size());
         for (InetAddress target : targets)
             getHintsInProgressFor(target).incrementAndGet();
-        hintsCompletable.doOnTerminate(() ->
-                                       {
-                                           StorageMetrics.totalHintsInProgress.dec(targets.size());
-                                           for (InetAddress target : targets)
-                                               getHintsInProgressFor(target).decrementAndGet();
-                                       });
-        RxThreads.subscribeOn(hintsCompletable, StageManager.getScheduler(Stage.HINTS), TPCTaskType.HINT_SUBMIT);
+        hintsCompletable = hintsCompletable.doOnTerminate(() ->
+                                                          {
+                                                              StorageMetrics.totalHintsInProgress.dec(targets.size());
+                                                              for (InetAddress target : targets)
+                                                                  getHintsInProgressFor(target).decrementAndGet();
+                                                          });
+        hintsCompletable = hintsCompletable.subscribeOn(StageManager.getScheduler(Stage.HINTS));
+        // Note: above uses Rx subscribeOn as this task is scheduled on a stage and there's no point track it in TPC metrics as well.
         return TPCUtils.toFuture(hintsCompletable);
     }
 

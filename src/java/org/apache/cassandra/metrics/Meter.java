@@ -102,7 +102,7 @@ public class Meter extends com.codahale.metrics.Meter implements Metered, Compos
     private void scheduleIfComposite()
     {
         if (count.getType() == Type.COMPOSITE)
-            TPC.getForCore(this.coreId).scheduleDirect(this::scheduledTick, TPCTaskType.TIMED_METER_TICK, TICK_INTERVAL, TimeUnit.NANOSECONDS);
+            TPC.getForCore(this.coreId).schedule(this::scheduledTick, TPCTaskType.TIMED_METER_TICK, TICK_INTERVAL, TimeUnit.NANOSECONDS);
     }
 
     private void maybeScheduleTick()
@@ -111,7 +111,7 @@ public class Meter extends com.codahale.metrics.Meter implements Metered, Compos
             return;
 
         if (scheduled.compareAndSet(false, true))
-            TPC.getForCore(this.coreId).scheduleDirect(this::scheduledTick, TPCTaskType.TIMED_METER_TICK, TICK_INTERVAL, TimeUnit.NANOSECONDS);
+            TPC.getForCore(this.coreId).schedule(this::scheduledTick, TPCTaskType.TIMED_METER_TICK, TICK_INTERVAL, TimeUnit.NANOSECONDS);
     }
 
     /**

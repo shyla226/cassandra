@@ -171,7 +171,7 @@ public class NativeAllocatorTest
                     // check not ready
                     Assert.assertFalse(completed.get());
                     Throwables.maybeFail(error.get());
-                    Assert.assertEquals(1, TPC.metrics().activeTaskCount(TPCTaskType.WRITE_MEMTABLE_FULL));
+                    Assert.assertEquals(1, TPC.metrics().activeTaskCount(TPCTaskType.WRITE_POST_MEMTABLE_FULL));
 
                     // mark barrier blocking, which should allow the completable to continue
                     exec.schedule(markBlocking, 17L, TimeUnit.MILLISECONDS);
@@ -186,8 +186,8 @@ public class NativeAllocatorTest
 
                     // Wait a little to let the whenBelowLimit task complete
                     Uninterruptibles.sleepUninterruptibly(10L, TimeUnit.MILLISECONDS);
-                    Assert.assertEquals(0, TPC.metrics().activeTaskCount(TPCTaskType.WRITE_MEMTABLE_FULL));
-                    Assert.assertEquals(1, TPC.metrics().completedTaskCount(TPCTaskType.WRITE_MEMTABLE_FULL));
+                    Assert.assertEquals(0, TPC.metrics().activeTaskCount(TPCTaskType.WRITE_POST_MEMTABLE_FULL));
+                    Assert.assertEquals(1, TPC.metrics().completedTaskCount(TPCTaskType.WRITE_POST_MEMTABLE_FULL));
 
                     // Check time measured in blockedOnAllocating stats
                     Uninterruptibles.sleepUninterruptibly(DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis(), TimeUnit.MILLISECONDS); // wait for histograms to aggregate
@@ -215,7 +215,7 @@ public class NativeAllocatorTest
                     // check not ready
                     Assert.assertFalse(completed.get());
                     Throwables.maybeFail(error.get());
-                    Assert.assertEquals(1, TPC.metrics().activeTaskCount(TPCTaskType.WRITE_MEMTABLE_FULL));
+                    Assert.assertEquals(1, TPC.metrics().activeTaskCount(TPCTaskType.WRITE_POST_MEMTABLE_FULL));
 
                     Uninterruptibles.sleepUninterruptibly(34L, TimeUnit.MILLISECONDS);
 
@@ -233,8 +233,8 @@ public class NativeAllocatorTest
 
                     // Wait a little to let the whenBelowLimit task complete
                     Uninterruptibles.sleepUninterruptibly(10L, TimeUnit.MILLISECONDS);
-                    Assert.assertEquals(0, TPC.metrics().activeTaskCount(TPCTaskType.WRITE_MEMTABLE_FULL));
-                    Assert.assertEquals(2, TPC.metrics().completedTaskCount(TPCTaskType.WRITE_MEMTABLE_FULL));
+                    Assert.assertEquals(0, TPC.metrics().activeTaskCount(TPCTaskType.WRITE_POST_MEMTABLE_FULL));
+                    Assert.assertEquals(2, TPC.metrics().completedTaskCount(TPCTaskType.WRITE_POST_MEMTABLE_FULL));
 
                     Assert.assertEquals(30, allocator.offHeap().owns());
 
@@ -247,7 +247,7 @@ public class NativeAllocatorTest
                     Assert.assertTrue(currBlockedAverage > TimeUnit.MILLISECONDS.toNanos(24)); // leave a little leeway to avoid flakes
                 }
             };
-            scheduler.scheduleDirect(run, 0, null);
+            scheduler.execute(run, TPCTaskType.UNKNOWN);
             finished.join();
         }
     }

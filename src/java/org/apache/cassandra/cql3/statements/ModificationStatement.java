@@ -37,6 +37,7 @@ import com.google.common.collect.Iterables;
 import io.reactivex.Completable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.*;
 import org.slf4j.Logger;
@@ -283,7 +284,7 @@ public abstract class ModificationStatement implements CQLStatement
         checkFalse(isView(), "Cannot directly modify a materialized view");
     }
 
-    public Scheduler getScheduler()
+    public StagedScheduler getScheduler()
     {
         return null;
     }

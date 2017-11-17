@@ -23,20 +23,10 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocalThread;
 import io.reactivex.Scheduler;
-import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
-import org.apache.cassandra.concurrent.NamedThreadFactory;
-import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.concurrent.StagedScheduler;
-import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCRunnable;
-import org.apache.cassandra.concurrent.TPCTaskType;
-import org.apache.cassandra.concurrent.TracingAwareExecutor;
-import org.apache.cassandra.concurrent.TracingAwareExecutorService;
+import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.NodeSyncConfig;
 import org.apache.cassandra.utils.collection.History;
-import org.apache.cassandra.utils.flow.TaggedRunnable;
 import org.apache.cassandra.utils.units.RateUnit;
 import org.apache.cassandra.utils.units.Units;
 
@@ -647,19 +637,6 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         private NodeSyncStagedExecutor()
         {
             this.scheduler = Schedulers.from(validationExecutor);
-        }
-
-        @Override
-        public Disposable scheduleDirect(Runnable run, TPCTaskType stage, long delay, TimeUnit unit)
-        {
-            return scheduler.scheduleDirect(new TaggedRunnable.Base(stage, scheduler)
-            {
-                @Override
-                public void run()
-                {
-                    run.run();
-                }
-            }, delay, unit);
         }
 
         @Override

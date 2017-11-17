@@ -22,6 +22,8 @@ import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.auth.RoleResource;
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -57,9 +59,9 @@ public abstract class AuthenticationStatement extends ParsedStatement implements
         throw new UnsupportedOperationException();
     }
 
-    public Scheduler getScheduler()
+    public StagedScheduler getScheduler()
     {
-        return Schedulers.io();
+        return TPC.ioScheduler();
     }
 
     public void checkPermission(QueryState state, Permission required, RoleResource resource) throws UnauthorizedException

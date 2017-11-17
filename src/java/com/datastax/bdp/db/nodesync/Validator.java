@@ -218,7 +218,7 @@ class Validator
         logger.trace("Starting execution of validation on {}", segment());
         try
         {
-            flowFuture = fetchAll(executor, pager, context).lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.VALIDATION))
+            flowFuture = fetchAll(executor, pager, context).lift(Threads.requestOn(executor.asScheduler(), TPCTaskType.NODESYNC_VALIDATION))
                                                            .flatProcess(FlowablePartition::content)
                                                            .processToFuture()
                                                            .handleAsync((v, t) -> {

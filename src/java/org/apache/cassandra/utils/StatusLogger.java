@@ -18,14 +18,12 @@
 package org.apache.cassandra.utils;
 
 import java.lang.management.ManagementFactory;
-import java.util.Arrays;
 import java.util.TreeSet;
 import java.util.concurrent.locks.ReentrantLock;
 import javax.management.MBeanServer;
 
 import com.google.common.collect.Multimap;
 
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.metrics.ThreadPoolMetrics;
 
@@ -76,7 +74,7 @@ public class StatusLogger
         MBeanServer server = ManagementFactory.getPlatformMBeanServer();
 
         // everything from o.a.c.concurrent
-        String headerFormat = "%-" + (TpStatsPrinter.longestStrLength(Arrays.asList((Object[])TPCTaskType.values())) + 5) + "s%10s%10s%15s%10s%18s%n";
+        String headerFormat = "%-" + TpStatsPrinter.longestTPCStatNameLength() + "s%10s%10s%15s%10s%18s%n";
         logger.info(String.format(headerFormat, "Pool Name", "Active", "Pending", "Completed", "Blocked", "All Time Blocked"));
 
         Multimap<String, String> jmxThreadPools = ThreadPoolMetrics.getJmxThreadPools(server);

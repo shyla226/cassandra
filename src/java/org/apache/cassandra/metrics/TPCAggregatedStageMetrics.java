@@ -56,7 +56,7 @@ public class TPCAggregatedStageMetrics
     {
         this.metrics = metrics;
         this.stage = stage;
-        String poolName = poolPrefix + "/" + stage.name();
+        String poolName = poolPrefix + "/" + stage.loggedEventName;
 
         this.factory = new ThreadPoolMetricNameFactory("ThreadPools", path, poolName);
 
@@ -80,7 +80,7 @@ public class TPCAggregatedStageMetrics
                 return v;
             }
         });
-        if (stage.pendable)
+        if (stage.pendable())
         {
             pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), new Gauge<Integer>()
             {

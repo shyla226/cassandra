@@ -17,13 +17,11 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
-
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.SystemKeyspacesFilteringRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -68,8 +66,8 @@ public class UseStatement extends ParsedStatement implements CQLStatement
         return execute(state, options, System.nanoTime());
     }
 
-    public Scheduler getScheduler()
+    public StagedScheduler getScheduler()
     {
-        return Schedulers.io();
+        return TPC.ioScheduler();
     }
 }

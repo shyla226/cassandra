@@ -382,7 +382,7 @@ public class Memtable implements Comparable<Memtable>
         // We should block the write if there is no space in the memtable memory to let flushes catch up. For
         // efficiency's sake we can't know the exact size this mutation requires; instead we let the limits slip a
         // little and only block _after_ the used space is above the limit.
-        return partitionMap.allocator.whenBelowLimits(write, opGroup, TPC.getForCore(coreId), TPCTaskType.WRITE_SWITCH_FOR_MEMTABLE);
+        return partitionMap.allocator.whenBelowLimits(write, opGroup, TPC.getForCore(coreId), TPCTaskType.WRITE_MEMTABLE);
     }
 
     /**

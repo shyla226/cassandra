@@ -86,13 +86,12 @@ public class IOSchedulerTest
                                  1,
                                  TimeUnit.MILLISECONDS);
 
-        scheduler.scheduleDirect(() -> check(() -> assertTrue(scheduler.isOnScheduler(Thread.currentThread()))),
-                                 TPCTaskType.UNKNOWN,
-                                 1,
-                                 TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> check(() -> assertTrue(scheduler.isOnScheduler(Thread.currentThread()))),
+                           TPCTaskType.UNKNOWN,
+                           1,
+                           TimeUnit.MILLISECONDS);
 
         scheduler.execute(() -> check(() -> assertTrue(scheduler.isOnScheduler(Thread.currentThread()))),
-                          ExecutorLocals.create(),
                           TPCTaskType.UNKNOWN);
 
         Scheduler.Worker worker = scheduler.createWorker();
@@ -155,7 +154,7 @@ public class IOSchedulerTest
         TestWorker testWorker = new TestWorker();
         scheduler = new IOScheduler(threadFactory -> testWorker, 25);
 
-        scheduler.execute(() -> numChecks++, ExecutorLocals.create(), TPCTaskType.UNKNOWN);
+        scheduler.execute(() -> numChecks++, TPCTaskType.UNKNOWN);
         assertEquals(1, testWorker.tasks.size());
         testWorker.tasks.remove(0).run(); // the second task is the user action
         assertEquals(1, scheduler.numCachedWorkers());
@@ -195,7 +194,7 @@ public class IOSchedulerTest
 
         try
         {
-            scheduler.execute(() -> {}, null, TPCTaskType.UNKNOWN);
+            scheduler.execute(() -> {}, TPCTaskType.UNKNOWN);
             fail("Scheduler is shut down, expected exception.");
         }
         catch (RejectedExecutionException e)
@@ -251,7 +250,7 @@ public class IOSchedulerTest
                                   AtomicReference<CountDownLatch> latch = new AtomicReference<>();
                                   latch.set(new CountDownLatch(1));
                                   scheduler.execute(() -> latch.get().countDown(),
-                                                    null, TPCTaskType.UNKNOWN);
+                                                    TPCTaskType.UNKNOWN);
 
                                   // The latch should be released.
                                   assertTrue(latch.get().await(1, TimeUnit.SECONDS));
@@ -260,7 +259,6 @@ public class IOSchedulerTest
                                   // executed
                                   latch.set(new CountDownLatch(1));
                                   executor.schedule(() -> scheduler.execute(() -> latch.get().countDown(),
-                                                                            null,
                                                                             TPCTaskType.UNKNOWN),
                                                     10,
                                                     TimeUnit.MILLISECONDS);
@@ -274,7 +272,7 @@ public class IOSchedulerTest
                               {
                                   completed.completeExceptionally(t);
                               }
-                          }, null, TPCTaskType.UNKNOWN);
+                          }, TPCTaskType.UNKNOWN);
 
         completed.get(10, TimeUnit.SECONDS);
     }
@@ -292,7 +290,7 @@ public class IOSchedulerTest
             executor.execute(() -> {
                 scheduler.execute(() -> {
                     latch.countDown();
-                }, null, TPCTaskType.UNKNOWN);
+                }, TPCTaskType.UNKNOWN);
             });
         }
         assertTrue(latch.await(1, TimeUnit.MINUTES));

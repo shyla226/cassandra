@@ -46,6 +46,7 @@ import io.reactivex.SingleSource;
 import org.antlr.runtime.RecognitionException;
 import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -231,7 +232,7 @@ public class QueryProcessor implements QueryHandler
         if (logger.isTraceEnabled())
             logger.trace("Process {} @CL.{}", statement, options.getConsistency());
 
-        final Scheduler scheduler = statement.getScheduler();
+        final StagedScheduler scheduler = statement.getScheduler();
 
         Single<ResultMessage> ret = Single.defer(() -> {
             try
@@ -455,7 +456,7 @@ public class QueryProcessor implements QueryHandler
     public static Single<UntypedResultSet> executeOnceInternal(String query, Object... values)
     {
         final ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
-        final Scheduler scheduler = prepared.statement.getScheduler();
+        final StagedScheduler scheduler = prepared.statement.getScheduler();
 
         Single<? extends ResultMessage> observable = Single.defer(() -> {
             prepared.statement.validate(internalQueryState());
@@ -463,7 +464,7 @@ public class QueryProcessor implements QueryHandler
         });
 
         if (scheduler != null)
-            observable = RxThreads.subscribeOn(observable, scheduler, TPCTaskType.EXECUTE_STATEMENT_INTERNAL);
+            observable = RxThreads.subscribeOn(observable, scheduler, TPCTaskType.EXECUTE_STATEMENT);
 
         return observable.map(result -> {
             if (result instanceof ResultMessage.Rows)

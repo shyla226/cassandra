@@ -30,6 +30,7 @@ import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
 import io.reactivex.Scheduler;
 import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.schedulers.Schedulers;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -231,15 +232,6 @@ public class TPC
     }
 
     /**
-     * The background IO scheduler should be used for background tasks (commitlog, hints, , etc),
-     * since it's bounded, to prevent overloading the system with background tasks on the unbounded IO Scheduler.
-     */
-    public static Scheduler backgroundIOScheduler()
-    {
-        return StageManager.getScheduler(Stage.BACKGROUND_IO);
-    }
-
-    /**
      * Creates a new {@link OpOrder} suitable for synchronizing operations that mostly execute on TPC threads.
      * <p>
      * More precisely, the returned {@link OpOrder} reduces contentions between operations calling
@@ -314,23 +306,6 @@ public class TPC
     private static boolean isIOThread(Thread thread)
     {
         return thread instanceof IOThread;
-    }
-
-    /**
-     * Return true if the current thread belongs to the specified scheduler, that is the current thread is part
-     * of the thread pool that supports the scheduler.
-     * <p>
-     * This functionality is currently only supported for {@link StagedScheduler}.
-     *
-     * @param scheduler - the scheduler to which the current thread should belong
-     *
-     * @return true if the current thread is part of the thread pool for the specified scheduler, false otherwise.
-     */
-    public static boolean isOnScheduler(Scheduler scheduler)
-    {
-        return scheduler instanceof StagedScheduler
-               ? ((StagedScheduler)scheduler).isOnScheduler(Thread.currentThread())
-               : false;
     }
 
     public static int getNumCores()

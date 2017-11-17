@@ -30,7 +30,9 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.continuous.paging.ContinuousBackPressureException;
@@ -310,7 +312,7 @@ public class SelectStatement implements CQLStatement
         return execute(state, options, FBUtilities.nowInSeconds(), queryStartNanoTime);
     }
 
-    public Scheduler getScheduler()
+    public StagedScheduler getScheduler()
     {
         return null;
     }
@@ -781,7 +783,7 @@ public class SelectStatement implements CQLStatement
             }
         }
 
-        public Scheduler getScheduler()
+        public StagedScheduler getScheduler()
         {
             return TPC.getForCore(coreId);
         }
@@ -797,7 +799,7 @@ public class SelectStatement implements CQLStatement
             pager = null;
 
             schedulingTimeNanos = System.nanoTime();
-            getScheduler().scheduleDirect(() -> retrieveMultiplePages(pagingState, builder));
+            getScheduler().execute(() -> retrieveMultiplePages(pagingState, builder), TPCTaskType.EXECUTE_STATEMENT);   // TODO: Right type?
         }
     }
 

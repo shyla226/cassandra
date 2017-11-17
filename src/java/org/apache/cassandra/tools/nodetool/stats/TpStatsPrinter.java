@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.concurrent.TPCTaskType;
 
@@ -49,7 +50,7 @@ public class TpStatsPrinter
         {
             Map<String, Object> convertData = data.convert2Map();
 
-            String headerFormat = "%-" + (longestStrLength(Arrays.asList((Object[])TPCTaskType.values())) + 5) + "s%10s%10s%15s%10s%18s%n";
+            String headerFormat = "%-" + longestTPCStatNameLength() + "s%10s%10s%15s%10s%18s%n";
             out.printf(headerFormat, "Pool Name", "Active", "Pending", "Completed", "Blocked", "All time blocked");
 
             Map<Object, Object> threadPools = convertData.get("ThreadPools") instanceof Map<?, ?> ? (Map)convertData.get("ThreadPools") : Collections.emptyMap();
@@ -87,6 +88,14 @@ public class TpStatsPrinter
                 out.printf("%n");
             }
         }
+    }
+
+    public static int longestTPCStatNameLength()
+    {
+        return longestStrLength(Arrays.stream(TPCTaskType.values())
+                                      .map(t -> t.loggedEventName)
+                                      .collect(Collectors.toList()))
+                + 10; // or "TPC/other/".length
     }
 
     public static int longestStrLength(Collection<Object> coll)

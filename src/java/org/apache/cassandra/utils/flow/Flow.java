@@ -2133,18 +2133,18 @@ public abstract class Flow<T>
         {
             public void onNext(T item)
             {
-                TPC.bestTPCScheduler().scheduleDirect(() -> subscriber.onNext(item),
-                                                      taskType,
-                                                      sleepFor,
-                                                      timeUnit);
+                TPC.bestTPCScheduler().schedule(() -> subscriber.onNext(item),
+                                                taskType,
+                                                sleepFor,
+                                                timeUnit);
             }
 
             public void onFinal(T item)
             {
-                TPC.bestTPCScheduler().scheduleDirect(() -> subscriber.onFinal(item),
-                                                      taskType,
-                                                      sleepFor,
-                                                      timeUnit);
+                TPC.bestTPCScheduler().schedule(() -> subscriber.onFinal(item),
+                                                taskType,
+                                                sleepFor,
+                                                timeUnit);
             }
         };
     }

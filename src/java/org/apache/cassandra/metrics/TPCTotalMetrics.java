@@ -97,7 +97,8 @@ public class TPCTotalMetrics
     {
         long active = 0;
         for (TPCTaskType s : TPCTaskType.values())
-            active += metrics.activeTaskCount(s);
+            if (s.includedInTotals())
+                active += metrics.activeTaskCount(s);
         return (int) active;
     }
 
@@ -105,7 +106,8 @@ public class TPCTotalMetrics
     {
         long completed = 0;
         for (TPCTaskType s : TPCTaskType.values())
-            completed += metrics.completedTaskCount(s);
+            if (s.includedInTotals())
+                completed += metrics.completedTaskCount(s);
         return completed;
     }
 
@@ -113,7 +115,8 @@ public class TPCTotalMetrics
     {
         long pending = 0;
         for (TPCTaskType s : TPCTaskType.values())
-            pending += metrics.pendingTaskCount(s);
+            if (s.includedInTotals())
+                pending += metrics.pendingTaskCount(s);
         return (int) pending;
     }
 
@@ -121,7 +124,8 @@ public class TPCTotalMetrics
     {
         long blocked = 0;
         for (TPCTaskType s : TPCTaskType.values())
-            blocked += metrics.blockedTaskCount(s);
+            if (s.includedInTotals())
+                blocked += metrics.blockedTaskCount(s);
         return blocked;
     }
 

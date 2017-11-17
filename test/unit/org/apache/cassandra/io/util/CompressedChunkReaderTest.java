@@ -183,7 +183,7 @@ public class CompressedChunkReaderTest
 
     private static Executor tpcExecutor()
     {
-        return (runnable) -> TPC.bestTPCScheduler().execute(runnable, ExecutorLocals.create(), TPCTaskType.UNKNOWN);
+        return (runnable) -> TPC.bestTPCScheduler().execute(runnable, TPCTaskType.UNKNOWN);
     }
 
     private File createCompressedFile(CompressionParams params, String message, boolean corruptData) throws IOException

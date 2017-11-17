@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.CompletionHandler;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Supplier;
@@ -32,7 +31,6 @@ import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPCUtils;
@@ -100,11 +98,6 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         return new BufferManagingRebufferer.Aligned(this);
     }
 
-    private static Executor ioExecutor()
-    {
-        return (runnable) -> TPC.ioScheduler().execute(runnable, ExecutorLocals.create(), TPCTaskType.UNKNOWN);
-    }
-
     public static class Standard extends CompressedChunkReader
     {
         final Supplier<Integer> bufferSize;
@@ -144,7 +137,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             catch (Throwable t)
             {
                 if (TPCUtils.isWouldBlockException(t))
-                    ioExecutor().execute(() -> {
+                    TPC.ioScheduler().execute(() -> {
                         try
                         {
                             doReadChunk(position, uncompressed, ret, bufferHandle);
@@ -153,7 +146,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                         {
                             error(tt, uncompressed, ret, bufferHandle);
                         }
-                    });
+                    }, TPCTaskType.READ_DISK_ASYNC);
                 else
                     error(t, uncompressed, ret, bufferHandle);
             }
@@ -231,7 +224,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                     catch (Throwable t)
                     {
                         if (TPCUtils.isWouldBlockException(t))
-                            ioExecutor().execute(() -> completed(result, attachment));
+                            TPC.ioScheduler().execute(() -> completed(result, attachment), TPCTaskType.READ_DISK_ASYNC);
                         else
                             error(t, uncompressed, futureBuffer, bufferHandle);
 
@@ -283,7 +276,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 if (TPCUtils.isWouldBlockException(t))
                 {
                     // we use this instead of CompletableFuture.supplyAsync() to avoid wrapping exceptions into CompletionException
-                    ioExecutor().execute(() -> {
+                    TPC.ioScheduler().execute(() -> {
                         try
                         {
                             future.complete(doReadChunk(position, uncompressed));
@@ -292,7 +285,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                         {
                             future.completeExceptionally(tt);
                         }
-                    });
+                    }, TPCTaskType.READ_DISK_ASYNC);
                 }
                 else
                 {

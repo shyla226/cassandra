@@ -22,6 +22,8 @@ import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.IResource;
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -63,8 +65,8 @@ public abstract class AuthorizationStatement extends ParsedStatement implements 
         return resource.qualifyWithKeyspace(state::getKeyspace);
     }
 
-    public Scheduler getScheduler()
+    public StagedScheduler getScheduler()
     {
-        return Schedulers.io();
+        return TPC.ioScheduler();
     }
 }

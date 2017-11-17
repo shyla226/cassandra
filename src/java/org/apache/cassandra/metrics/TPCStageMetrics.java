@@ -49,14 +49,14 @@ public class TPCStageMetrics
      * Create metrics for given ThreadPoolExecutor.
      *
      * @param metrics The TPCMetrics to report
-     * @param stage The execution stage to report on
+     * @param taskType The execution stage to report on
      * @param path Type of thread pool
      */
-    public TPCStageMetrics(TPCMetrics metrics, TPCTaskType stage, String path, String poolPrefix)
+    public TPCStageMetrics(TPCMetrics metrics, TPCTaskType taskType, String path, String poolPrefix)
     {
         this.metrics = metrics;
-        this.stage = stage;
-        String poolName = poolPrefix + "/" + stage.name();
+        this.stage = taskType;
+        String poolName = poolPrefix + "/" + taskType.loggedEventName;
 
         this.factory = new ThreadPoolMetricNameFactory("ThreadPools", path, poolName);
 
@@ -64,30 +64,30 @@ public class TPCStageMetrics
         {
             public Integer getValue()
             {
-                return (int) (metrics.activeTaskCount(stage));
+                return (int) (metrics.activeTaskCount(taskType));
             }
         });
         completedTasks = Metrics.register(factory.createMetricName("CompletedTasks"), new Gauge<Long>()
         {
             public Long getValue()
             {
-                return metrics.completedTaskCount(stage);
+                return metrics.completedTaskCount(taskType);
             }
         });
-        if (stage.pendable)
+        if (taskType.pendable())
         {
             pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), new Gauge<Integer>()
             {
                 public Integer getValue()
                 {
-                    return (int) (metrics.pendingTaskCount(stage));
+                    return (int) (metrics.pendingTaskCount(taskType));
                 }
             });
             blockedTasks = Metrics.register(factory.createMetricName("TotalBlockedTasksGauge"), new Gauge<Long>()
             {
                 public Long getValue()
                 {
-                    return metrics.blockedTaskCount(stage);
+                    return metrics.blockedTaskCount(taskType);
                 }
             });
         }

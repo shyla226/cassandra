@@ -246,10 +246,10 @@ public class FlowablePartitions
 
         public void requestNext()
         {
-            if (callOn == null || callOn.isOnScheduler(Thread.currentThread()))
+            if (callOn == null)
                 run();
             else
-                callOn.scheduleDirect(this, TPCTaskType.READ_FROM_ITERATOR, 0, null);
+                callOn.execute(this, TPCTaskType.READ_FROM_ITERATOR);
         }
 
         public void run()

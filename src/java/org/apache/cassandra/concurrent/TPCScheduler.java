@@ -22,7 +22,6 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
 
 /**
@@ -42,13 +41,9 @@ public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
     }
 
     @Override
-    public void execute(TPCRunnable runnable)
+    public boolean canExecuteImmediately(TPCTaskType taskType)
     {
-        // we can't immediately execute pendable tasks if we are at the queue limit
-        if (eventLoop.canExecuteImmediately(runnable))
-            runnable.run();
-        else
-            eventLoop.execute(runnable);
+        return eventLoop.canExecuteImmediately(taskType);
     }
 
     @Override
@@ -57,7 +52,7 @@ public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
         return super.scheduleDirect(TPCRunnable.wrap(run, delay != 0 ? TPCTaskType.TIMED_UNKNOWN : TPCTaskType.UNKNOWN, coreId()), delay, unit);
     }
 
-    public Disposable scheduleDirect(Runnable run, TPCTaskType stage, long delay, TimeUnit unit)
+    public Disposable schedule(Runnable run, TPCTaskType stage, long delay, TimeUnit unit)
     {
         return super.scheduleDirect(TPCRunnable.wrap(run, stage, coreId()), delay, unit);
     }
@@ -90,14 +85,6 @@ public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
     public int metricsCoreId()
     {
         return coreId();
-    }
-
-    public static int coreIdOf(Scheduler scheduler)
-    {
-        if (scheduler instanceof TPCScheduler)
-            return ((TPCScheduler) scheduler).coreId();
-
-        return TPC.getNumCores();
     }
 
     @Override

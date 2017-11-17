@@ -112,7 +112,7 @@ public class ReadExecutorTest
         // to increment the metrics. Schedule another event on the same scheduler and wait for it to complete so we are
         // sure that the metrics have been updated
         final CompletableFuture fut = new CompletableFuture();
-        command.getScheduler().scheduleDirect(() -> fut.complete(true));
+        command.getScheduler().execute(() -> fut.complete(true), TPCTaskType.UNKNOWN);
         fut.get();
 
         assertEquals(1, cfs.metric.speculativeInsufficientReplicas.getCount());
@@ -153,7 +153,7 @@ public class ReadExecutorTest
 
         // make sure that we send the failures after having executed the task scheduled in AbstractReadExecutor.SpeculatingReadExecutor.maybeTryAdditionalReplicas(),
         // hence the cfs.sampleLatencyNanos + 10 nanoseconds delay
-        command.getScheduler().scheduleDirect(() -> {
+        command.getScheduler().schedule(() -> {
             //Failures end the read promptly but don't require mock data to be supplied
             Request<SinglePartitionReadCommand, ReadResponse> request0 = Request.fakeTestRequest(targets.get(0), -1, Verbs.READS.SINGLE_READ, command);
             executor.handler.onFailure(request0.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));

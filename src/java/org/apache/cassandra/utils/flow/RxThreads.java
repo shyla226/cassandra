@@ -24,28 +24,26 @@ import io.reactivex.CompletableOperator;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.SingleObserver;
-import io.reactivex.SingleOperator;
 import io.reactivex.disposables.Disposable;
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCRunnable;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 
 public class RxThreads
 {
-    public static <T> Single<T> subscribeOn(Single<T> source, Scheduler scheduler, TPCTaskType taskType)
+    public static <T> Single<T> subscribeOn(Single<T> source, StagedScheduler scheduler, TPCTaskType taskType)
     {
         class SubscribeOn extends Single<T>
         {
             protected void subscribeActual(SingleObserver<? super T> subscriber)
             {
-                if (TPC.isOnScheduler(scheduler))
+                if (scheduler.canRunDirectly(taskType))
                     source.subscribe(subscriber);
                 else
-                    scheduler.scheduleDirect(TPCRunnable.wrap(() -> source.subscribe(subscriber),
-                                                              taskType,
-                                                              TPCScheduler.coreIdOf(scheduler)));
+                    scheduler.execute(() -> source.subscribe(subscriber),
+                                      taskType);
             }
         }
         return new SubscribeOn();
@@ -56,40 +54,22 @@ public class RxThreads
         return subscribeOn(source, TPC.ioScheduler(), taskType);
     }
 
-    public static <T> Single<T> subscribeOnBackgroundIo(Single<T> source, TPCTaskType taskType)
-    {
-        return subscribeOn(source, TPC.backgroundIOScheduler(), taskType);
-    }
-
     public static <T> Single<T> subscribeOnCore(Single<T> source, int coreId, TPCTaskType taskType)
     {
-        class SubscribeOn extends Single<T>
-        {
-            protected void subscribeActual(SingleObserver<? super T> subscriber)
-            {
-                if (TPC.isOnCore(coreId))
-                    source.subscribe(subscriber);
-                else
-                    TPC.getForCore(coreId).scheduleDirect(TPCRunnable.wrap(() -> source.subscribe(subscriber),
-                                                          taskType,
-                                                          coreId));
-            }
-        }
-        return new SubscribeOn();
+        return subscribeOn(source, TPC.getForCore(coreId), taskType);
     }
 
-    public static Completable subscribeOn(Completable source, Scheduler scheduler, TPCTaskType taskType)
+    public static Completable subscribeOn(Completable source, StagedScheduler scheduler, TPCTaskType taskType)
     {
         class SubscribeOn extends Completable
         {
             protected void subscribeActual(CompletableObserver subscriber)
             {
-                if (TPC.isOnScheduler(scheduler))
+                if (scheduler.canRunDirectly(taskType))
                     source.subscribe(subscriber);
                 else
-                    scheduler.scheduleDirect(TPCRunnable.wrap(() -> source.subscribe(subscriber),
-                                                              taskType,
-                                                              TPCScheduler.coreIdOf(scheduler)));
+                    scheduler.execute(() -> source.subscribe(subscriber),
+                                      taskType);
             }
         }
         return new SubscribeOn();
@@ -100,70 +80,19 @@ public class RxThreads
         return subscribeOn(source, TPC.ioScheduler(), taskType);
     }
 
-    public static Completable subscribeOnBackgroundIo(Completable source, TPCTaskType taskType)
+    private static CompletableOperator awaitAndContinueOnCompletable(StagedScheduler scheduler, TPCTaskType taskType)
     {
-        return subscribeOn(source, TPC.backgroundIOScheduler(), taskType);
-    }
-
-    public static <T> SingleOperator<T, T> observeOnSingle(Scheduler scheduler, TPCTaskType taskType)
-    {
-        class ObserveOn implements SingleObserver<T>
-        {
-            final SingleObserver<? super T> subscriber;
-            final ExecutorLocals locals = ExecutorLocals.create();
-
-            ObserveOn(SingleObserver<? super T> subscriber)
-            {
-                this.subscriber = subscriber;
-            }
-
-            public void onSubscribe(Disposable disposable)
-            {
-                subscriber.onSubscribe(disposable);
-            }
-
-            public void onSuccess(T value)
-            {
-                if (TPC.isOnScheduler(scheduler))
-                    subscriber.onSuccess(value);
-                else
-                    scheduler.scheduleDirect(new TPCRunnable(() -> subscriber.onSuccess(value),
-                                                             locals,
-                                                             taskType,
-                                                             TPCScheduler.coreIdOf(scheduler)));
-            }
-
-            public void onError(Throwable throwable)
-            {
-                subscriber.onError(throwable);
-            }
-        }
-        return subscriber -> new ObserveOn(subscriber);
-    }
-
-    public static <T> Single<T> observeOn(Single<T> source, Scheduler scheduler, TPCTaskType taskType)
-    {
-        return source.lift(observeOnSingle(scheduler, taskType));
-    }
-
-    public static <T> Single<T> observeOnIo(Single<T> source, TPCTaskType taskType)
-    {
-        return observeOn(source, TPC.ioScheduler(), taskType);
-    }
-
-    public static CompletableOperator observeOnCompletable(Scheduler scheduler, TPCTaskType taskType)
-    {
-        class ObserveOn extends TPCRunnable implements CompletableObserver
+        class AwaitAndContinueOn extends TPCRunnable implements CompletableObserver
         {
             final CompletableObserver subscriber;
 
-            ObserveOn(CompletableObserver subscriber)
+            AwaitAndContinueOn(CompletableObserver subscriber)
             {
-                // Create TPCRunnable on subscription so that we track the waiting task.
+                // Create TPCRunnable on subscription so that we track the waiting task and executor locals.
                 super(subscriber::onComplete,
                       ExecutorLocals.create(),
                       taskType,
-                      TPCScheduler.coreIdOf(scheduler));
+                      scheduler.metricsCoreId());
                 this.subscriber = subscriber;
             }
 
@@ -174,10 +103,7 @@ public class RxThreads
 
             public void onComplete()
             {
-                if (TPC.isOnScheduler(scheduler))
-                    run();
-                else
-                    scheduler.scheduleDirect(this);
+                scheduler.execute(this);
             }
 
             public void onError(Throwable throwable)
@@ -185,11 +111,17 @@ public class RxThreads
                 subscriber.onError(throwable);
             }
         }
-        return subscriber -> new ObserveOn(subscriber);
+        return subscriber -> new AwaitAndContinueOn(subscriber);
     }
 
-    public static Completable observeOn(Completable source, Scheduler scheduler, TPCTaskType taskType)
+    /**
+     * Create a completable which waits for a signal given on a separate shared thread.
+     * Captures the context (executorLocals) of the task on subscription and passes control to it on the given
+     * scheduler when the signal is given.
+     * See BatchCommitLogService.maybeWaitForSync for usage example.
+     */
+    public static Completable awaitAndContinueOn(Completable source, StagedScheduler scheduler, TPCTaskType taskType)
     {
-        return source.lift(observeOnCompletable(scheduler, taskType));
+        return source.lift(awaitAndContinueOnCompletable(scheduler, taskType));
     }
 }

@@ -126,9 +126,7 @@ public class TableBackedCustomIndex implements Index
     {
         this.metadata = indexDef;
         this.indexCfm = buildIndexCFMetadata();
-        RxThreads.observeOn(MigrationManager.announceNewTable(this.indexCfm, true),
-                            Schedulers.io(),
-                            TPCTaskType.ANNOUNCE_TABLE).blockingAwait();
+        TPCUtils.blockingAwait(MigrationManager.announceNewTable(this.indexCfm, true));
         indexCfs = Keyspace.openAndGetStore(this.indexCfm);
     }
 

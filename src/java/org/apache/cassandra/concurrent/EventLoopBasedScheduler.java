@@ -34,7 +34,7 @@ import io.reactivex.disposables.Disposable;
  * with the metrics.
  */
 @VisibleForTesting
-public class EventLoopBasedScheduler<E extends EventLoop> extends StagedScheduler
+public abstract class EventLoopBasedScheduler<E extends EventLoop> extends StagedScheduler
 {
     /**
      * The wrapped event loop.
@@ -49,26 +49,9 @@ public class EventLoopBasedScheduler<E extends EventLoop> extends StagedSchedule
     }
 
     @Override
-    public int metricsCoreId()
-    {
-        return TPCScheduler.coreIdOf(this);
-    }
-
-    @Override
     public void enqueue(TPCRunnable runnable)
     {
         eventLoop.execute(runnable);
-    }
-
-    @Override
-    public Disposable scheduleDirect(Runnable run, long delay, TimeUnit unit)
-    {
-        return createWorker().scheduleDirect(run, delay, unit);
-    }
-
-    public Disposable scheduleDirect(Runnable run, TPCTaskType stage, long delay, TimeUnit unit)
-    {
-        throw new UnsupportedOperationException("Should not be called");
     }
 
     /**
@@ -77,12 +60,6 @@ public class EventLoopBasedScheduler<E extends EventLoop> extends StagedSchedule
     public Executor getExecutor()
     {
         return eventLoop;
-    }
-
-    @Override
-    public boolean isOnScheduler(Thread thread)
-    {
-        return false; // no information
     }
 
     @Override

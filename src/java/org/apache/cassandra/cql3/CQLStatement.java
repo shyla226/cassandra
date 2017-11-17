@@ -19,7 +19,7 @@ package org.apache.cassandra.cql3;
 
 import javax.annotation.Nullable;
 
-import org.apache.cassandra.auth.user.UserRolesAndPermissions;
+import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCUtils.WouldBlockException;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -27,7 +27,6 @@ import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
 
 public interface CQLStatement
@@ -98,7 +97,7 @@ public interface CQLStatement
      *
      * @return the scheduler for this statement, or null, if no specific scheduler is required because the operations are non blocking.
      */
-    @Nullable public Scheduler getScheduler();
+    @Nullable public StagedScheduler getScheduler();
 
     /**
      * Whether or not this CQL Statement has LWT conditions
