@@ -25,17 +25,18 @@ import org.openjdk.jmh.annotations.*;
 import org.xerial.snappy.Snappy;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
-@Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 5, time = 2, timeUnit = TimeUnit.SECONDS)
-@Fork(value = 1,jvmArgsAppend = "-Xmx512M")
+@Warmup(iterations = 5, time = 1)
+@Measurement(iterations = 5, time = 1)
+@Fork(value = 1)
 @Threads(1)
 @State(Scope.Benchmark)
-public class Sample
+public class CompressorsBenchmark
 {
     @Param({"65536"})
     private int pageSize;
@@ -63,7 +64,12 @@ public class Sample
     @State(Scope.Thread)
     public static class ThreadState
     {
-        byte[] bytes;
+        byte[] outArray;
+        @Setup
+        public void setup(CompressorsBenchmark b)
+        {
+            outArray = new byte[b.pageSize];
+        }
     }
 
     @Setup
@@ -113,18 +119,16 @@ public class Sample
     }
 
     @Benchmark
-    public void lz4(ThreadState state)
+    public int lz4(ThreadState state)
     {
-        if (state.bytes == null)
-            state.bytes = new byte[this.pageSize];
         byte[] in = lz4Bytes[ThreadLocalRandom.current().nextInt(lz4Bytes.length)];
-        lz4Decompressor.decompress(in, state.bytes);
+        return lz4Decompressor.decompress(in, state.outArray);
     }
 
     @Benchmark
-    public void snappy(ThreadState state) throws IOException
+    public int snappy(ThreadState state) throws IOException
     {
         byte[] in = snappyBytes[ThreadLocalRandom.current().nextInt(snappyBytes.length)];
-        state.bytes = Snappy.uncompress(in);
+        return Snappy.uncompress(in,0, in.length, state.outArray,0);
     }
 }
