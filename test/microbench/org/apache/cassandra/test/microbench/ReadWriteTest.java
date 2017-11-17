@@ -54,6 +54,8 @@ import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
+import static org.apache.cassandra.test.microbench.Util.printTPCStats;
+
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @Warmup(iterations = 20, time = 1, timeUnit = TimeUnit.SECONDS)
@@ -140,19 +142,7 @@ public class ReadWriteTest extends CQLTester
     @TearDown(Level.Trial)
     public void teardown() throws IOException, ExecutionException, InterruptedException
     {
-        for (TPCTaskType stage : TPCTaskType.values())
-        {
-            String v = "";
-            for (int i = 0; i < TPC.perCoreMetrics.length; ++i)
-            {
-                TPCMetrics metrics = TPC.perCoreMetrics[i];
-                if (metrics.completedTaskCount(stage) > 0)
-                    v += String.format(" %d: %,d(%,d)", i, metrics.completedTaskCount(stage), metrics.blockedTaskCount(stage));
-            }
-            if (!v.isEmpty())
-                System.out.println(stage + ":" + v);
-        }
-
+        printTPCStats();
         JVMStabilityInspector.removeShutdownHooks();
         CQLTester.tearDownClass();
         CQLTester.cleanup();

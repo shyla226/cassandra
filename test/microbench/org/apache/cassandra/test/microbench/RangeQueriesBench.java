@@ -36,10 +36,12 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.LineNumberInference;
 import org.openjdk.jmh.annotations.*;
 
+import static org.apache.cassandra.test.microbench.Util.printTPCStats;
+
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 15, time = 2, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 15, time = 1, timeUnit = TimeUnit.SECONDS)
 //@Fork(value = 1, jvmArgsPrepend = {"-Xmx4G", "-Xms4G", "-Xmn2G",
 //                                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder",
 //                                   "-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",
@@ -110,33 +112,17 @@ public class RangeQueriesBench extends CQLTester
             cfs.forceBlockingFlush();
         }
 
-        dumpMetrics(); // dump the metrics so we can compare before and after the benchmark, excluding write metrics
+        printTPCStats(); // dump the metrics so we can compare before and after the benchmark, excluding write metrics
         System.err.println("Done. ");
     }
 
     @TearDown(Level.Trial)
     public void teardown() throws IOException, ExecutionException, InterruptedException
     {
-        dumpMetrics();
+        printTPCStats();
         JVMStabilityInspector.removeShutdownHooks();
         CQLTester.tearDownClass();
         CQLTester.cleanup();
-    }
-
-    private static void dumpMetrics()
-    {
-        for (TPCTaskType stage : TPCTaskType.values())
-        {
-            String v = "";
-            for (int i = 0; i < TPC.perCoreMetrics.length; ++i)
-            {
-                TPCMetrics metrics = TPC.perCoreMetrics[i];
-                if (metrics.completedTaskCount(stage) > 0)
-                    v += String.format(" %d: %,d", i, metrics.completedTaskCount(stage));
-            }
-            if (!v.isEmpty())
-                System.out.println(stage + ":" + v);
-        }
     }
 
     @Benchmark
