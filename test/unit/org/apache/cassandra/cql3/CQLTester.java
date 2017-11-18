@@ -19,6 +19,8 @@ package org.apache.cassandra.cql3;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
+import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
@@ -31,6 +33,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import javax.management.*;
+
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.*;
@@ -42,9 +46,11 @@ import org.slf4j.LoggerFactory;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.exceptions.UnauthorizedException;
 
 import io.reactivex.Single;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.auth.*;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.StageManager;
@@ -74,17 +80,15 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.*;
 
-import static junit.framework.Assert.assertNotNull;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
  * Base class for CQL tests.
- *
+ * 
  * TODO: this is now used as a test utility outside of CQL tests, we should really refactor it into a utility class
  * for things like setting up the network, inserting data, etc.
  */
@@ -106,8 +110,8 @@ public abstract class CQLTester
 
     protected static final int nativePort;
     protected static final InetAddress nativeAddr;
-    private static final Map<ProtocolVersion, Cluster> clusters = new HashMap<>();
-    protected static final Map<ProtocolVersion, Session> sessions = new HashMap<>();
+    private static final Map<Pair<User, ProtocolVersion>, Cluster> clusters = new HashMap<>();
+    private static final Map<Pair<User, ProtocolVersion>, Session> sessions = new HashMap<>();
 
     private enum ServerStatus
     {
@@ -183,6 +187,7 @@ public abstract class CQLTester
     private List<String> types = new ArrayList<>();
     private List<String> functions = new ArrayList<>();
     private List<String> aggregates = new ArrayList<>();
+    private User user;
 
     // We don't use USE_PREPARED_VALUES in the code below so some test can foce value preparation (if the result
     // is not expected to be the same without preparation)
@@ -398,6 +403,7 @@ public abstract class CQLTester
         types = null;
         functions = null;
         aggregates = null;
+        user = null;
 
         // We want to clean up after the test, but dropping a table is rather long so just do that asynchronously
         Executors.newSingleThreadExecutor().execute(new Runnable()
@@ -454,25 +460,34 @@ public abstract class CQLTester
         });
     }
 
-    // lazy initialization for all tests that require Java Driver
-    protected static void requireNetwork() throws ConfigurationException
+    protected static void requireAuthentication()
     {
-        requireNetwork(true);
+        setDDField("authenticator", new PasswordAuthenticator());
+        setDDField("authorizer", new CassandraAuthorizer());
+        setDDField("roleManager", new CassandraRoleManager());
+
+        System.setProperty("cassandra.superuser_setup_delay_ms", "0");
     }
 
-    public static void requireNetwork(boolean initClientClusters) throws ConfigurationException
+    protected static void setDDField(String fieldName, Object value)
     {
-        prepareServer();
-
-        if (server != null)
+        Field field = FBUtilities.getProtectedField(DatabaseDescriptor.class, fieldName);
+        try
         {
-            if (initClientClusters && sessions.isEmpty())
-            {
-                for (ProtocolVersion version : PROTOCOL_VERSIONS)
-                    initClientCluster(version, NettyOptions.DEFAULT_INSTANCE);
-            }
-            return;
+            field.set(null, value);
         }
+        catch (IllegalAccessException e)
+        {
+            fail("Error setting " + field.getType().getSimpleName() + " instance for test");
+        }
+    }
+
+    public static void requireNetwork() throws ConfigurationException
+    {
+        if (server != null)
+            return;
+
+        prepareServer();
 
         SystemKeyspace.finishStartupBlocking();
         TPCUtils.blockingAwait(SystemKeyspace.persistLocalMetadata());
@@ -480,44 +495,49 @@ public abstract class CQLTester
         StorageService.instance.initServer();
         Gossiper.instance.register(StorageService.instance);
         SchemaLoader.startGossiper();
+        Gossiper.instance.maybeInitializeLocalState(1);
 
         server = new NativeTransportService(nativeAddr, nativePort);
         server.start();
-
-        if (initClientClusters)
-        {
-            for (ProtocolVersion version : PROTOCOL_VERSIONS)
-                initClientCluster(version, NettyOptions.DEFAULT_INSTANCE);
-        }
     }
 
-    public static void initClientCluster(ProtocolVersion version, NettyOptions nettyOptions)
+    public static Cluster initClientCluster(User user, ProtocolVersion version)
     {
-        if (clusters.containsKey(version))
-            return;
+        Pair<User, ProtocolVersion> key = Pair.create(user, version);
+        Cluster cluster = clusters.get(key);
+        if (cluster != null)
+            return cluster;
 
-        Cluster cluster = createClientCluster(version, "Test Cluster", nettyOptions);
-        clusters.put(version, cluster);
-        sessions.put(version, cluster.connect());
+        Cluster.Builder builder = clusterBuilder(version);
+        if (user != null)
+            builder.withCredentials(user.username, user.password);
+        cluster = builder.build();
+        clusters.put(key, cluster);
+        sessions.put(key, cluster.connect());
 
         logger.info("Started Java Driver instance for protocol version {}", version);
+
+        return cluster;
     }
 
-    public static Cluster createClientCluster(ProtocolVersion version, String clusterName, NettyOptions nettyOptions)
+    public static Cluster.Builder clusterBuilder()
     {
-        Cluster.Builder builder = Cluster.builder()
-                                         .addContactPoints(nativeAddr)
-                                         .withClusterName(clusterName)
-                                         .withPort(nativePort)
-                                         .withNettyOptions(nettyOptions)
-                                         .withoutMetrics();
+        return Cluster.builder()
+                      .addContactPoints(nativeAddr)
+                      .withPort(nativePort)
+                      .withClusterName("Test Cluster")
+                      .withNettyOptions(NettyOptions.DEFAULT_INSTANCE)
+                      .withoutMetrics();
+    }
 
+    public static Cluster.Builder clusterBuilder(ProtocolVersion version)
+    {
+        Cluster.Builder builder = clusterBuilder();
         if (version.isBeta())
             builder = builder.allowBetaProtocolVersion();
         else
             builder = builder.withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt()));
-
-        return builder.build();
+        return builder;
     }
 
     public static void closeClientCluster(Cluster cluster)
@@ -951,6 +971,11 @@ public abstract class CQLTester
         return Schema.instance.getTableMetadata(ks, name);
     }
 
+    protected com.datastax.driver.core.ResultSet executeNet(String query, Object... values) throws Throwable
+    {
+        return sessionNet(ProtocolVersion.CURRENT).execute(formatQuery(query), values);
+    }
+
     protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, String query, Object... values) throws Throwable
     {
         return sessionNet(protocolVersion).execute(formatQuery(query), values);
@@ -976,6 +1001,24 @@ public abstract class CQLTester
         return sessionNet().execute(new SimpleStatement(formatQuery(query)).setFetchSize(pageSize));
     }
 
+    /**
+     * Use the specified user for executing the queries over the network.
+     * @param username the user name
+     * @param password the user password
+     */
+    public void useUser(String username, String password)
+    {
+        this.user = new User(username, password);
+    }
+
+    /**
+     * Use the super user for executing the queries over the network.
+     */
+    public void useSuperUser()
+    {
+        useUser("cassandra", "cassandra");
+    }
+
     public Session sessionNet()
     {
         return sessionNet(getDefaultVersion());
@@ -985,7 +1028,40 @@ public abstract class CQLTester
     {
         requireNetwork();
 
-        return sessions.get(protocolVersion);
+        return getSession(protocolVersion);
+    }
+
+    private Session getSession(ProtocolVersion protocolVersion)
+    {
+        Cluster cluster = getCluster(protocolVersion);
+        return sessions.computeIfAbsent(Pair.create(user, protocolVersion), userProto -> cluster.connect());
+    }
+
+    private Cluster getCluster(ProtocolVersion protocolVersion)
+    {
+        return clusters.computeIfAbsent(Pair.create(user, protocolVersion),
+                                                         userProto -> initClientCluster(user, protocolVersion));
+    }
+
+    public static void invalidateAuthCaches()
+    {
+        invalidate("PermissionsCache");
+        invalidate("RolesCache");
+        invalidate("CredentialsCache");
+    }
+
+    private static void invalidate(String authCacheName)
+    {
+        try
+        {
+            final ObjectName objectName = new ObjectName("org.apache.cassandra.auth:type=" + authCacheName);
+            JMX.newMBeanProxy(ManagementFactory.getPlatformMBeanServer(), objectName, AuthCacheMBean.class)
+               .invalidate();
+        }
+        catch (Exception e)
+        {
+            throw new IllegalStateException("Cannot invalidate " + authCacheName, e);
+        }
     }
 
     public String formatQuery(String query)
@@ -1121,9 +1197,9 @@ public abstract class CQLTester
             for (int j = 0; j < meta.size(); j++)
             {
                 DataType type = meta.getType(j);
-                com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
-                                                                           .getCodecRegistry()
-                                                                           .codecFor(type);
+                com.datastax.driver.core.TypeCodec<Object> codec = getCluster(protocolVersion).getConfiguration()
+                                                                                              .getCodecRegistry()
+                                                                                              .codecFor(type);
                 expectedRow.add(codec.serialize(rows[i][j], driverVersion));
                 actualRow.add(actual.getBytesUnsafe(meta.getName(j)));
             }
@@ -1190,9 +1266,9 @@ public abstract class CQLTester
             for (int j = 0; j < meta.size(); j++)
             {
                 DataType type = meta.getType(j);
-                com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
-                                                                           .getCodecRegistry()
-                                                                           .codecFor(type);
+                com.datastax.driver.core.TypeCodec<Object> codec = getCluster(protocolVersion).getConfiguration()
+                                                                                              .getCodecRegistry()
+                                                                                              .codecFor(type);
 
                 if (!Objects.equal(expected.get(j), actual.get(j)))
                     fail(String.format("Invalid value for row %d column %d (%s of type %s), " +
@@ -1516,6 +1592,21 @@ public abstract class CQLTester
         assertInvalidMessage(null, query, values);
     }
 
+    /**
+     * Checks that the specified query is not autorized for the current user.
+     * @param errorMessage The expected error message
+     * @param query the query
+     * @param values the query parameters
+     */
+    protected void assertUnauthorizedQuery(String errorMessage, String query, Object... values) throws Throwable
+    {
+        assertInvalidThrowMessage(Optional.of(ProtocolVersion.CURRENT),
+                                  errorMessage,
+                                  UnauthorizedException.class,
+                                  query,
+                                  values);
+    }
+
     protected void assertInvalidMessage(String errorMessage, String query, Object... values) throws Throwable
     {
         assertInvalidThrowMessage(errorMessage, null, query, values);
@@ -1546,19 +1637,18 @@ public abstract class CQLTester
             else
                 executeNet(protocolVersion.get(), query, values);
 
-            String q = USE_PREPARED_VALUES
-                       ? query + " (values: " + formatAllValues(values) + ")"
-                       : replaceValues(query, values);
-            fail("Query should be invalid but no error was thrown. Query is: " + q);
+            fail("Query should be invalid but no error was thrown. Query is: " + queryInfo(query, values));
         }
         catch (Exception e)
         {
             if (exception != null && !exception.isAssignableFrom(e.getClass()))
             {
                 fail("Query should be invalid but wrong error was thrown. " +
-                     "Expected: " + exception.getName() + ", got: " + e.getClass().getName() + ". " +
-                     "Query is: " + queryInfo(query, values) + ". Stack trace of unexpected exception is:\n" +
-                    String.join("\n", Arrays.stream(e.getStackTrace()).map(t -> t.toString()).collect(Collectors.toList())));
+                        "Expected: " + exception.getName() + ", got: " + e.getClass().getName() + ". " +
+                        "Query is: " + queryInfo(query, values) + ". Stack trace of unexpected exception is:\n" +
+                        String.join("\n", Arrays.stream(e.getStackTrace())
+                                                .map(t -> t.toString())
+                                                .collect(Collectors.toList())));
             }
             if (errorMessage != null)
             {
@@ -1926,7 +2016,7 @@ public abstract class CQLTester
     protected com.datastax.driver.core.TupleType tupleTypeOf(ProtocolVersion protocolVersion, DataType...types)
     {
         requireNetwork();
-        return clusters.get(protocolVersion).getMetadata().newTupleType(types);
+        return getCluster(protocolVersion).getMetadata().newTupleType(types);
     }
 
     // Attempt to find an AbstracType from a value (for serialization/printing sake).
@@ -2086,6 +2176,46 @@ public abstract class CQLTester
         public String toString()
         {
             return "UserTypeValue" + toCQLString();
+        }
+    }
+
+    private static class User
+    {
+        /**
+         * The user name
+         */
+        public final String username;
+
+        /**
+         * The user password
+         */
+        public final String password;
+
+        public User(String username, String password)
+        {
+            this.username = username;
+            this.password = password;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hashCode(username, password);
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o)
+                return true;
+
+            if (!(o instanceof User))
+                return false;
+
+            User u = (User) o;
+
+            return Objects.equal(username, u.username)
+                && Objects.equal(password, u.password);
         }
     }
 }

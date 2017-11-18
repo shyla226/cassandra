@@ -45,7 +45,7 @@ public class PreparedStatementsTest extends CQLTester
     @Test
     public void testInvalidatePreparedStatementsOnDrop()
     {
-        Session session = sessions.get(ProtocolVersion.V5);
+        Session session = sessionNet(ProtocolVersion.V5);
         session.execute(dropKsStatement);
         session.execute(createKsStatement);
 
@@ -89,7 +89,7 @@ public class PreparedStatementsTest extends CQLTester
 
     private void testInvalidatePreparedStatementOnAlter(ProtocolVersion version, boolean supportsMetadataChange)
     {
-        Session session = sessions.get(version);
+        Session session = sessionNet(version);
         String createTableStatement = "CREATE TABLE IF NOT EXISTS " + KEYSPACE + ".qp_cleanup (a int PRIMARY KEY, b int, c int);";
         String alterTableStatement = "ALTER TABLE " + KEYSPACE + ".qp_cleanup ADD d int;";
 
@@ -149,7 +149,7 @@ public class PreparedStatementsTest extends CQLTester
 
     private void testInvalidatePreparedStatementOnAlterUnchangedMetadata(ProtocolVersion version)
     {
-        Session session = sessions.get(version);
+        Session session = sessionNet(version);
         String createTableStatement = "CREATE TABLE IF NOT EXISTS " + KEYSPACE + ".qp_cleanup (a int PRIMARY KEY, b int, c int);";
         String alterTableStatement = "ALTER TABLE " + KEYSPACE + ".qp_cleanup ADD d int;";
 
@@ -187,7 +187,7 @@ public class PreparedStatementsTest extends CQLTester
     @Test
     public void testStatementRePreparationOnReconnect()
     {
-        Session session = sessions.get(ProtocolVersion.V5);
+        Session session = sessionNet(ProtocolVersion.V5);
         session.execute("USE " + keyspace());
 
         session.execute(dropKsStatement);
@@ -228,7 +228,7 @@ public class PreparedStatementsTest extends CQLTester
     @Test
     public void prepareAndExecuteWithCustomExpressions() throws Throwable
     {
-        Session session = sessions.get(ProtocolVersion.V5);
+        Session session = sessionNet(ProtocolVersion.V5);
 
         session.execute(dropKsStatement);
         session.execute(createKsStatement);

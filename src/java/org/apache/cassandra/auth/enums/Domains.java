@@ -13,6 +13,8 @@ import com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.github.jamm.Unmetered;
+
 /**
  * A type safe registry of {@link Enum}s which all implement a common interface.
  *
@@ -29,6 +31,7 @@ import org.slf4j.LoggerFactory;
  * @param <E> the common interface implemented by enums managed by this class
  * @see PartitionedEnum javadoc for usage.
  */
+@Unmetered
 public class Domains<E extends PartitionedEnum>
 {
     private static final Logger logger = LoggerFactory.getLogger(Domains.class);
