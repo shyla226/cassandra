@@ -1,4 +1,8 @@
 dse 6.0.0:
+ * Emit client warning when a GRANT/REVOKE/RESTRICT/UNRESTRICT has no effect (DB-1083)
+ * System keyspace filtering (DB-404)
+ * Authentication & Authorization improviements (DB-909)
+ * Separation of duties (DB-757)
  * Match 'DSE protocol' in cqlshlib test regexes (DB-1058)
  * Warn when the 'cassandra' superuser logs in (DB-104)
  * Ensure that empty clusterings with kind==CLUSTERING are Clustering.EMPTY (DB-1248)
