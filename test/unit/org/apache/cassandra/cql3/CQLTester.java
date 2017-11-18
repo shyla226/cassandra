@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3;
 import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
-import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
@@ -38,18 +37,17 @@ import javax.management.ObjectName;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Uninterruptibles;
+import io.reactivex.Single;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.datastax.driver.core.*;
-import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.exceptions.UnauthorizedException;
 
-import io.reactivex.Single;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.user.UserRolesAndPermissions;
@@ -57,7 +55,6 @@ import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.functions.FunctionName;
@@ -76,18 +73,13 @@ import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
-import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.NativeTransportService;
-import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.transport.*;
+import org.apache.cassandra.service.*;
+import org.apache.cassandra.transport.Event;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.*;
 
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.Assert.*;
 
 /**
  * Base class for CQL tests.
@@ -108,6 +100,7 @@ public abstract class CQLTester
     protected static final ByteBuffer TOO_BIG = ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT + 1024);
     public static final String DATA_CENTER = "datacenter1";
     public static final String RACK1 = "rack1";
+    private static final User SUPER_USER = new User("cassandra", "cassandra");
 
     private static NativeTransportService server;
 
@@ -490,7 +483,7 @@ public abstract class CQLTester
         server.start();
     }
 
-    public static Cluster initClientCluster(User user, ProtocolVersion version)
+    private static Cluster initClientCluster(User user, ProtocolVersion version)
     {
         Pair<User, ProtocolVersion> key = Pair.create(user, version);
         Cluster cluster = clusters.get(key);
@@ -501,8 +494,6 @@ public abstract class CQLTester
         if (user != null)
             builder.withCredentials(user.username, user.password);
         cluster = builder.build();
-        clusters.put(key, cluster);
-        sessions.put(key, cluster.connect());
 
         logger.info("Started Java Driver instance for protocol version {}", version);
 
@@ -527,6 +518,21 @@ public abstract class CQLTester
         else
             builder = builder.withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt()));
         return builder;
+    }
+
+    public static Cluster createClientCluster(ProtocolVersion version, String clusterName, NettyOptions nettyOptions,
+                                              String username, String password)
+    {
+        Cluster.Builder builder = Cluster.builder()
+                                         .addContactPoints(nativeAddr)
+                                         .withClusterName(clusterName)
+                                         .withPort(nativePort)
+                                         .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt()))
+                                         .withNettyOptions(nettyOptions)
+                                         .withoutMetrics();
+        if (username != null)
+            builder.withAuthProvider(new PlainTextAuthProvider(username, password));
+        return builder.build();
     }
 
     public static void closeClientCluster(Cluster cluster)
@@ -1005,7 +1011,12 @@ public abstract class CQLTester
      */
     public void useSuperUser()
     {
-        useUser("cassandra", "cassandra");
+        this.user = SUPER_USER;
+    }
+
+    public boolean isSuperUser()
+    {
+        return SUPER_USER.equals(user);
     }
 
     public Session sessionNet()
@@ -1166,8 +1177,14 @@ public abstract class CQLTester
         List<List<ByteBuffer>> expectedRows = new ArrayList<>(rows.length);
         List<List<ByteBuffer>> actualRows = new ArrayList<>(rows.length);
 
-        com.datastax.driver.core.ProtocolVersion driverVersion = com.datastax.driver.core.ProtocolVersion
-                                                                 .fromInt(protocolVersion.asInt()).fromInt(protocolVersion.asInt());
+        Cluster cluster = getCluster(protocolVersion);
+
+        com.datastax.driver.core.ProtocolVersion driverVersion = cluster.getConfiguration()
+                                                                        .getProtocolOptions()
+                                                                        .getProtocolVersion();
+
+        CodecRegistry codecRegistry = cluster.getConfiguration()
+                                             .getCodecRegistry();
 
         Iterator<Row> iter = result.iterator();
         int i;
@@ -1185,9 +1202,7 @@ public abstract class CQLTester
             for (int j = 0; j < meta.size(); j++)
             {
                 DataType type = meta.getType(j);
-                com.datastax.driver.core.TypeCodec<Object> codec = getCluster(protocolVersion).getConfiguration()
-                                                                                              .getCodecRegistry()
-                                                                                              .codecFor(type);
+                com.datastax.driver.core.TypeCodec<Object> codec = codecRegistry.codecFor(type);
                 expectedRow.add(codec.serialize(rows[i][j], driverVersion));
                 actualRow.add(actual.getBytesUnsafe(meta.getName(j)));
             }
@@ -1212,9 +1227,7 @@ public abstract class CQLTester
                 for (int j = 0; j < meta.size(); j++)
                 {
                     DataType type = meta.getType(j);
-                    com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
-                                                                               .getCodecRegistry()
-                                                                               .codecFor(type);
+                    com.datastax.driver.core.TypeCodec<Object> codec = codecRegistry.codecFor(type);
 
                     formattedRows[k][j] = codec.format(codec.deserialize(row.get(j), driverVersion));
                 }
@@ -1226,9 +1239,7 @@ public abstract class CQLTester
                 for (int j = 0; j < meta.size(); j++)
                 {
                     DataType type = meta.getType(j);
-                    com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
-                                                                               .getCodecRegistry()
-                                                                               .codecFor(type);
+                    com.datastax.driver.core.TypeCodec<Object> codec = codecRegistry.codecFor(type);
 
                     formattedRows[k][j] = codec.format(codec.deserialize(row.getBytesUnsafe(meta.getName(j)), driverVersion));
                 }
@@ -1254,9 +1265,7 @@ public abstract class CQLTester
             for (int j = 0; j < meta.size(); j++)
             {
                 DataType type = meta.getType(j);
-                com.datastax.driver.core.TypeCodec<Object> codec = getCluster(protocolVersion).getConfiguration()
-                                                                                              .getCodecRegistry()
-                                                                                              .codecFor(type);
+                com.datastax.driver.core.TypeCodec<Object> codec = codecRegistry.codecFor(type);
 
                 if (!Objects.equal(expected.get(j), actual.get(j)))
                     fail(String.format("Invalid value for row %d column %d (%s of type %s), " +

@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.auth.enums;
 
-import org.apache.commons.httpclient.methods.multipart.Part;
 import org.junit.Before;
 import org.junit.Test;
 

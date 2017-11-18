@@ -127,6 +127,37 @@ authorizer: AllowAllAuthorizer
 #   increase system_auth keyspace replication factor if you use this role manager.
 role_manager: CassandraRoleManager
 
+# This option, if enabled, only returns information for those keyspaces in the
+# system and system_schema keyspaces to which a user has access to.
+#
+# If enabled, consider the following:
+# - Superusers are not affected by the following restrictions.
+# - Users need the DESCRIBE permission on the keyspace level to get rows from schema
+#   elements in system and system_schema keyspaces.
+# - Users need the DESCRIBE permission on the keyspace level to receive schem
+#   change notifications in the drivers. DESCRIBE permission on other schema
+#   elements, e.g. tables, is not sufficient.
+# - Access to rows in the keyspaces system_auth, system_traces, system_distributed,
+#   is controlled by granting the DESCRIBE permission on the keyspace.
+# - Restrictions to the system_schema keyspace:
+#   All tables will only return rows for keyspaces for which the user is granted
+#   the DESCRIBE permission.
+# - Restrictions to the system keyspace:
+#   - The tables local & peers in the system-keyspace are fully readable.
+#   - The tables sstable_activity, size_estimates, IndexInfo, built_views,
+#     available_ranges, views_builds_in_progress only return rows for keyspaces
+#     for which the user is granted the DESCRIBE permission.
+#   - Reads against all other tables in the system keyspace will return no rows.
+#
+# IMPORTANT MIGRATION NOTE: Before enabling this option, make sure that all
+# roles/users, that are eligible to see the schema information, have the DESCRIBE
+# permission on the keyspace(s) they are allowed/intended to see or modify.
+# This means, that 'GRANT DESCRIBE ON KEYSPACE <keyspace> to <role>;' is executed
+# for these users/roles and keyspaces.
+#
+# Requirements: authorizer and authentication are configured.
+system_keyspaces_filtering: false
+
 # Validity period for roles cache (fetching granted roles can be an expensive
 # operation depending on the role manager, CassandraRoleManager is one example)
 # Granted roles are cached for authenticated sessions in AuthenticatedUser and

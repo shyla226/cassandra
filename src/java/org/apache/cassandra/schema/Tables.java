@@ -17,10 +17,7 @@
  */
 package org.apache.cassandra.schema;
 
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
 import javax.annotation.Nullable;
 
@@ -79,6 +76,15 @@ public final class Tables implements Iterable<TableMetadata>
     public int size()
     {
         return tables.size();
+    }
+
+    /**
+     * Returns the name of the tables.
+     * @return the name of the tables
+     */
+    public Set<String> tableNames()
+    {
+        return tables.keySet();
     }
 
     /**

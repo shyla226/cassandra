@@ -29,7 +29,6 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -357,7 +356,7 @@ public class SelectStatement implements CQLStatement
         if (isPartitionRangeQuery())
             return getRangeCommand(queryState, options, columnFilter, limit, nowInSec);
 
-        return getSliceCommands(options, columnFilter, limit, nowInSec);
+        return getSliceCommands(queryState, options, columnFilter, limit, nowInSec);
     }
 
     private Single<ResultMessage.Rows> execute(ReadQuery query,
@@ -852,6 +851,7 @@ public class SelectStatement implements CQLStatement
                        getAggregationSpec(QueryOptions.DEFAULT));
     }
 
+    @Override
     public String keyspace()
     {
         return table.keyspace;
@@ -878,7 +878,11 @@ public class SelectStatement implements CQLStatement
         return restrictions;
     }
 
-    private ReadQuery getSliceCommands(QueryOptions options, ColumnFilter columnFilter, DataLimits limit, int nowInSec)
+    private ReadQuery getSliceCommands(QueryState queryState,
+                                       QueryOptions options,
+                                       ColumnFilter columnFilter,
+                                       DataLimits limit,
+                                       int nowInSec)
     {
         Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options);
         if (keys.isEmpty())
@@ -888,7 +892,7 @@ public class SelectStatement implements CQLStatement
         if (filter == null)
             return ReadQuery.empty(table);
 
-        RowFilter rowFilter = getRowFilter(options);
+        RowFilter rowFilter = getRowFilter(queryState, options);
 
         // Note that we use the total limit for every key, which is potentially inefficient.
         // However, IN + LIMIT is not a very sensible choice.
@@ -934,7 +938,7 @@ public class SelectStatement implements CQLStatement
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
         ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter);
-        RowFilter rowFilter = getRowFilter(options);
+        RowFilter rowFilter = getRowFilter(QueryState.forInternalCalls(), options);
         return SinglePartitionReadCommand.create(table, nowInSec, columnFilter, rowFilter, DataLimits.NONE, key, filter);
     }
 
@@ -943,7 +947,7 @@ public class SelectStatement implements CQLStatement
      */
     public RowFilter rowFilterForInternalCalls()
     {
-        return getRowFilter(QueryOptions.forInternalCalls(Collections.emptyList()));
+        return getRowFilter(QueryState.forInternalCalls(), QueryOptions.forInternalCalls(Collections.emptyList()));
     }
 
     private ReadQuery getRangeCommand(QueryState queryState,
@@ -956,7 +960,7 @@ public class SelectStatement implements CQLStatement
         if (clusteringIndexFilter == null)
             return ReadQuery.empty(table);
 
-        RowFilter rowFilter = getRowFilter(options);
+        RowFilter rowFilter = getRowFilter(queryState, options);
 
         // The LIMIT provided by the user is the number of CQL row he wants returned.
         // We want to have getRangeSlice to count the number of columns, not the number of keys.
@@ -1150,12 +1154,11 @@ public class SelectStatement implements CQLStatement
     /**
      * May be used by custom QueryHandler implementations
      */
-    public RowFilter getRowFilter(QueryOptions options) throws InvalidRequestException
+    public RowFilter getRowFilter(QueryState state, QueryOptions options)
     {
         ColumnFamilyStore cfs = Keyspace.open(keyspace()).getColumnFamilyStore(columnFamily());
         SecondaryIndexManager secondaryIndexManager = cfs.indexManager;
-        RowFilter filter = restrictions.getRowFilter(secondaryIndexManager, options);
-        return filter;
+        return restrictions.getRowFilter(secondaryIndexManager, state, options);
     }
 
     private Single<ResultSet> process(Flow<FlowablePartition> partitions,
@@ -1326,6 +1329,12 @@ public class SelectStatement implements CQLStatement
             this.whereClause = whereClause;
             this.limit = limit;
             this.perPartitionLimit = perPartitionLimit;
+        }
+
+        @Override
+        public void prepareKeyspace(ClientState state) throws InvalidRequestException
+        {
+            super.prepareKeyspace(state);
         }
 
         public ParsedStatement.Prepared prepare() throws InvalidRequestException

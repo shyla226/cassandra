@@ -53,6 +53,7 @@ public class ClientState
     private volatile boolean sasiWarningIssued = false;
 
     private static final QueryHandler cqlQueryHandler;
+
     static
     {
         QueryHandler handler = QueryProcessor.instance;
@@ -384,6 +385,11 @@ public class ClientState
     public AuthenticatedUser getUser()
     {
         return user;
+    }
+
+    public boolean hasUser()
+    {
+        return user != null;
     }
 
     public static CassandraVersion[] getCQLSupportedVersion()

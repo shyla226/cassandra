@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.base.Joiner;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.cql3.*;
@@ -36,6 +37,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -82,7 +84,13 @@ public class StatementRestrictions
     /**
      * The restrictions used to build the row filter
      */
-    private IndexRestrictions filterRestrictions;
+    private final IndexRestrictions filterRestrictions;
+
+    /**
+     * The restrictions used to control row level access
+     */
+    private final ImmutableList<AuthRestriction> authRestrictions;
+
 
     /**
      * <code>true</code> if the secondary index need to be queried, <code>false</code> otherwise
@@ -121,6 +129,7 @@ public class StatementRestrictions
         this.nonPrimaryKeyRestrictions = new RestrictionSet();
         this.notNullColumns = ImmutableSet.of();
         this.filterRestrictions = IndexRestrictions.of();
+        this.authRestrictions = ImmutableList.of();
     }
 
     private StatementRestrictions(StatementType type,
@@ -131,7 +140,8 @@ public class StatementRestrictions
                                   ImmutableSet<ColumnMetadata> notNullColumns,
                                   boolean usesSecondaryIndexing,
                                   boolean isKeyRange,
-                                  IndexRestrictions filterRestrictions)
+                                  IndexRestrictions filterRestrictions,
+                                  ImmutableList<AuthRestriction> authRestrictions)
     {
         this.type = type;
         this.table = table;
@@ -142,6 +152,7 @@ public class StatementRestrictions
         this.usesSecondaryIndexing = usesSecondaryIndexing;
         this.isKeyRange = isKeyRange;
         this.filterRestrictions = filterRestrictions;
+        this.authRestrictions = authRestrictions;
     }
 
     /**
@@ -165,7 +176,8 @@ public class StatementRestrictions
                                          notNullColumns,
                                          usesSecondaryIndexing,
                                          isKeyRange,
-                                         newIndexRestrictions);
+                                         newIndexRestrictions,
+                                         authRestrictions);
     }
 
     /**
@@ -190,7 +202,8 @@ public class StatementRestrictions
                                          notNullColumns,
                                          usesSecondaryIndexing,
                                          isKeyRange,
-                                         newIndexRestrictions.build());
+                                         newIndexRestrictions.build(),
+                                         authRestrictions);
     }
 
     public StatementRestrictions(StatementType type,
@@ -354,6 +367,17 @@ public class StatementRestrictions
 
         if (usesSecondaryIndexing)
             validateSecondaryIndexSelections(selectsOnlyStaticColumns);
+
+        authRestrictions = getAuthRestrictions(table, type);
+    }
+
+    private static ImmutableList<AuthRestriction> getAuthRestrictions(TableMetadata table, StatementType type)
+    {
+        if (!type.isSelect())
+            return ImmutableList.of();
+
+        AuthRestriction restriction = SystemKeyspacesFilteringRestrictions.restrictionsForTable(table);
+        return restriction == null ? ImmutableList.of() : ImmutableList.of(restriction);
     }
 
     public void addFunctionsTo(List<Function> functions)
@@ -682,9 +706,11 @@ public class StatementRestrictions
         return expression;
     }
 
-    public RowFilter getRowFilter(SecondaryIndexManager indexManager, QueryOptions options)
+    public RowFilter getRowFilter(SecondaryIndexManager indexManager,
+                                  QueryState state,
+                                  QueryOptions options)
     {
-        if (filterRestrictions.isEmpty())
+        if (filterRestrictions.isEmpty() && authRestrictions.isEmpty())
             return RowFilter.NONE;
 
         RowFilter filter = RowFilter.create();
@@ -693,6 +719,9 @@ public class StatementRestrictions
 
         for (ExternalRestriction expression : filterRestrictions.getExternalExpressions())
             expression.addToRowFilter(filter, table, options);
+
+        for (AuthRestriction restriction : authRestrictions)
+            restriction.addRowFilterTo(filter, state);
 
         return filter;
     }

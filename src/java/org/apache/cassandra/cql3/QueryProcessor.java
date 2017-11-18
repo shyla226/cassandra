@@ -29,40 +29,59 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 
-import io.reactivex.*;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.MoreExecutors;
-import org.antlr.runtime.RecognitionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import io.reactivex.Scheduler;
+import io.reactivex.Single;
+import io.reactivex.SingleSource;
+import org.antlr.runtime.RecognitionException;
 import org.apache.cassandra.auth.user.UserRolesAndPermissions;
-import org.apache.cassandra.concurrent.*;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.cql3.statements.CFStatement;
+import org.apache.cassandra.cql3.statements.ModificationStatement;
+import org.apache.cassandra.cql3.statements.ParsedStatement;
+import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionIterators;
+import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.exceptions.CassandraException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.metrics.CQLMetrics;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.cql3.functions.FunctionName;
-import org.apache.cassandra.cql3.statements.*;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.partitions.PartitionIterators;
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.exceptions.*;
-import org.apache.cassandra.metrics.CQLMetrics;
-import org.apache.cassandra.service.*;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MD5Digest;
+import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.flow.RxThreads;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
@@ -228,14 +247,11 @@ public class QueryProcessor implements QueryHandler
                 if (logger.isTraceEnabled())
                     logger.trace("Failed to execute blocking operation, retrying on io schedulers");
 
-                Single<ResultMessage> single = Single.defer(() ->
-                                                                     {
-                                                                         statement.checkAccess(queryState);
-                                                                         statement.validate(queryState);
-                                                                         return statement.execute(queryState,
-                                                                                                  options,
-                                                                                                  queryStartNanoTime);
-                                                                     });
+                Single<ResultMessage> single = Single.defer(() -> {
+                    statement.checkAccess(queryState);
+                    statement.validate(queryState);
+                    return statement.execute(queryState, options, queryStartNanoTime);
+                });
                 return RxThreads.subscribeOnIo(single, TPCTaskType.EXECUTE_STATEMENT);
             }
         });
@@ -261,7 +277,21 @@ public class QueryProcessor implements QueryHandler
     public Single<ResultMessage> process(String queryString, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        ParsedStatement.Prepared p = getStatement(queryString, queryState.cloneWithKeyspaceIfSet(options.getKeyspace()));
+        QueryState state = queryState.cloneWithKeyspaceIfSet(options.getKeyspace());
+        try
+        {
+            return processInner(queryString, state, options, queryStartNanoTime);
+        }
+        catch (TPCUtils.WouldBlockException e)
+        {
+            Single<ResultMessage> single = Single.defer(() -> processInner(queryString, state, options, queryStartNanoTime));
+            return RxThreads.subscribeOnIo(single, TPCTaskType.EXECUTE_STATEMENT);
+        }
+    }
+
+    private Single<ResultMessage> processInner(String queryString, QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    {
+        ParsedStatement.Prepared p = getStatement(queryString, queryState);
         options.prepare(p.boundNames);
         CQLStatement prepared = p.statement;
         if (prepared.getBoundTerms() != options.getValues().size())
@@ -595,10 +625,7 @@ public class QueryProcessor implements QueryHandler
         return Single.defer(() -> {
             try
             {
-                batch.checkAccess(state);
-                batch.validate();
-                batch.validate(state);
-                return batch.execute(state, options, queryStartNanoTime);
+                return processBatchInternal(batch, options, queryStartNanoTime, state);
             }
             catch (RuntimeException ex)
             {
@@ -606,16 +633,19 @@ public class QueryProcessor implements QueryHandler
                     throw ex;
 
                 return RxThreads.subscribeOnIo(
-                    Single.defer(() -> {
-                        batch.checkAccess(state);
-                        batch.validate();
-                        batch.validate(state);
-                        return batch.execute(state, options, queryStartNanoTime);
-                    }),
+                    Single.defer(() -> processBatchInternal(batch, options, queryStartNanoTime, state)),
                     TPCTaskType.EXECUTE_STATEMENT
                 );
             }
         });
+    }
+
+    private SingleSource<? extends ResultMessage> processBatchInternal(BatchStatement batch, BatchQueryOptions options, long queryStartNanoTime, QueryState state)
+    {
+        batch.checkAccess(state);
+        batch.validate();
+        batch.validate(state);
+        return batch.execute(state, options, queryStartNanoTime);
     }
 
     public static ParsedStatement.Prepared getStatement(String queryStr, QueryState state)
@@ -626,7 +656,10 @@ public class QueryProcessor implements QueryHandler
 
         // Set keyspace for statement that require login
         if (statement instanceof CFStatement)
-            ((CFStatement) statement).prepareKeyspace(state.getClientState());
+        {
+            CFStatement cfStatement = (CFStatement) statement;
+            cfStatement.prepareKeyspace(state.getClientState());
+        }
 
         Tracing.trace("Preparing statement");
         return statement.prepare();

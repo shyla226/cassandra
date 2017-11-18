@@ -77,6 +77,7 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
     }
 
+    @Override
     public Prepared prepare() throws InvalidRequestException
     {
         if (new HashSet<>(argNames).size() != argNames.size())
@@ -91,6 +92,7 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
         return super.prepare();
     }
 
+    @Override
     public void prepareKeyspace(ClientState state) throws InvalidRequestException
     {
         if (!functionName.hasKeyspace() && state.getRawKeyspace() != null)
@@ -102,6 +104,7 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
         Schema.validateKeyspaceNotSystem(functionName.keyspace);
     }
 
+    @Override
     protected void grantPermissionsToCreator(QueryState state)
     {
         try
