@@ -73,7 +73,7 @@ public class StartupMessage extends Message.Request
         this.options = options;
     }
 
-    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(Single<QueryState> state, long queryStartNanoTime)
     {
         String cqlVersion = options.get(CQL_VERSION);
         if (cqlVersion == null)
@@ -108,10 +108,14 @@ public class StartupMessage extends Message.Request
             }
         }
 
+        // Has the user has not logged in yet, we do not need to load any user auth info.
+        // So calling blockingGet is safe.
+        final QueryState queryState = state.blockingGet();
+
         // Pull out client ID, driver information and application information. Although this
         // is officially introduced in dse_protocol_v2, it can be also be used in previous protocol
         // version.
-        ClientState clientState = state.getClientState();
+        ClientState clientState = queryState.getClientState();
         clientState.setClientID(options.get(CLIENT_ID));
         clientState.setApplicationName(options.get(APPLICATION_NAME));
         clientState.setApplicationVersion(options.get(APPLICATION_VERSION));
@@ -120,8 +124,8 @@ public class StartupMessage extends Message.Request
 
         if (DatabaseDescriptor.getAuthenticator().requireAuthentication())
             return Single.just(new AuthenticateMessage(DatabaseDescriptor.getAuthenticator().getClass().getName()));
-        else
-            return Single.just(new ReadyMessage());
+
+        return Single.just(new ReadyMessage());
     }
 
     private static Map<String, String> upperCaseKeys(Map<String, String> options)

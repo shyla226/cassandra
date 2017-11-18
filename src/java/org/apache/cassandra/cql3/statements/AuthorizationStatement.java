@@ -47,10 +47,10 @@ public abstract class AuthorizationStatement extends ParsedStatement implements 
     public Single<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime)
     throws RequestValidationException, RequestExecutionException
     {
-        return execute(state.getClientState());
+        return execute(state);
     }
 
-    public abstract Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException;
+    public abstract Single<ResultMessage> execute(QueryState state) throws RequestValidationException, RequestExecutionException;
 
     public Single<ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {

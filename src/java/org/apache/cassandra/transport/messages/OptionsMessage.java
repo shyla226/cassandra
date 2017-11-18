@@ -57,7 +57,7 @@ public class OptionsMessage extends Message.Request
         super(Message.Type.OPTIONS);
     }
 
-    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(Single<QueryState> state, long queryStartNanoTime)
     {
         List<String> cqlVersions = new ArrayList<String>();
         cqlVersions.add(QueryProcessor.CQL_VERSION.toString());

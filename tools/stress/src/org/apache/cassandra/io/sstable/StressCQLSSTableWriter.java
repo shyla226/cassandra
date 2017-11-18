@@ -55,7 +55,7 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.Types;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.JavaDriverUtils;
 import org.apache.cassandra.utils.Pair;
@@ -617,7 +617,7 @@ public class StressCQLSSTableWriter implements Closeable
                 return Schema.instance.getColumnFamilyStoreInstance(tableMetadata.id);
 
             CreateTableStatement statement = (CreateTableStatement) schemaStatement.prepare(ksm.types).statement;
-            statement.validate(ClientState.forInternalCalls());
+            statement.validate(QueryState.forInternalCalls());
 
             //Build metadata with a portable tableId
             tableMetadata = statement.builder()
@@ -650,7 +650,7 @@ public class StressCQLSSTableWriter implements Closeable
         {
             ParsedStatement.Prepared cqlStatement = insertStatement.prepare();
             UpdateStatement insert = (UpdateStatement) cqlStatement.statement;
-            insert.validate(ClientState.forInternalCalls());
+            insert.validate(QueryState.forInternalCalls());
 
             if (insert.hasConditions())
                 throw new IllegalArgumentException("Conditional statements are not supported");

@@ -19,7 +19,7 @@ import com.google.common.collect.ImmutableSet;
 public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
 {
     private final Domains<E> registry;
-    private final Map<String, BitSet> domains = new HashMap<>();
+    private final BitSet bits;
     private final Class<E> elementType;
     private final boolean isImmutable;
 
@@ -160,17 +160,26 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
     {
         this.registry = registry;
         this.elementType = registry.getType();
-        elements.forEach(this::add);
+        if (elements instanceof PartitionedEnumSet)
+        {
+            PartitionedEnumSet src = (PartitionedEnumSet) elements;
+            bits = (BitSet) src.bits.clone();
+        }
+        else
+        {
+            bits = new BitSet();
+            elements.forEach(this::add);
+        }
         this.isImmutable = isImmutable;
     }
 
     // Methods from java.util.Set
     public int size()
     {
-        if (domains.isEmpty())
+        if (bits.isEmpty())
             return 0;
 
-        return domains.values().stream().mapToInt(BitSet::cardinality).sum();
+        return bits.cardinality();
     }
 
     public boolean contains(Object o)
@@ -182,10 +191,9 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
             return false;
 
         PartitionedEnum element = (PartitionedEnum)o;
-        checkElement(element);
+        int bit = checkElementGetBit(element);
 
-        BitSet b = domains.get(element.domain());
-        return b != null && b.get(element.ordinal());
+        return bits.get(bit);
     }
 
     /**
@@ -195,44 +203,45 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
      */
     public boolean intersects(PartitionedEnumSet<E> other)
     {
-        Iterator<Map.Entry<String, BitSet>> iter = domains.entrySet().iterator();
-        while (iter.hasNext())
-        {
-            Map.Entry<String, BitSet> domain = iter.next();
-            BitSet otherDomain = other.domains.get(domain.getKey());
-            if (otherDomain == null)
-                continue;
-
-            BitSet mine = domain.getValue();
-            if (mine.intersects(otherDomain))
-                return true;
-        }
-        return false;
+        return bits.intersects(other.bits);
     }
 
     public boolean isEmpty()
     {
-        return domains.isEmpty();
+        return bits.isEmpty();
     }
 
     public Iterator<E> iterator()
     {
         ImmutableList.Builder<E> builder = ImmutableList.builder();
-        stream().forEach(builder::add);
+        forEach(builder::add);
         return builder.build().iterator();
+    }
+
+    public void forEach(Consumer<? super E> action)
+    {
+        for (Domains.Domain d : registry.domains())
+        {
+            int off = d.bitOffset;
+            for (Enum e : d.enumType.getEnumConstants())
+            {
+                if (bits.get(off + e.ordinal()))
+                    action.accept((E) e);
+            }
+        }
     }
 
     public Stream<E> stream()
     {
-        return domains.entrySet()
-                      .stream()
-                      .flatMap(d -> domainToElements(d.getKey(), d.getValue()));
+        List<E> lst = new ArrayList<>();
+        forEach(lst::add);
+        return lst.stream();
     }
 
     public String toString()
     {
         StringBuilder builder = new StringBuilder();
-        stream().forEach((e) -> {
+        forEach((e) -> {
             builder.append(e.getFullName());
             builder.append(", ");
         });
@@ -244,24 +253,20 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
     private ImmutableSet<E> asImmutableSet()
     {
         ImmutableSet.Builder<E> builder = ImmutableSet.builder();
-        stream().forEach(builder::add);
+        forEach(builder::add);
         return builder.build();
     }
 
-    private Stream<E> domainToElements(String domain, BitSet bits)
+    private int checkElementGetBit(PartitionedEnum element)
     {
-        List<E> list = new ArrayList<>();
-        for (int i = bits.nextSetBit(0); i >= 0; i = bits.nextSetBit(i + 1))
-            list.add(registry.get(domain, i));
-        return list.stream();
-    }
+        Domains.Domain d = registry.domain(element.domain());
 
-    private void checkElement(PartitionedEnum element)
-    {
-        if (registry.get(element.domain(), element.ordinal()) != element)
+        if (d == null || d.enumType.getEnumConstants()[element.ordinal()] != element)
             throw new IllegalArgumentException(String.format("Supplied and registered elements " +
                                                              "are not equal (%s)",
                                                              element));
+
+        return d.bitOffset + element.ordinal();
     }
 
     /**
@@ -281,32 +286,10 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
             return modified;
         }
 
-        Iterator<Map.Entry<String, BitSet>> iter = domains.entrySet().iterator();
-        while (iter.hasNext())
-        {
-            Map.Entry<String, BitSet> domain = iter.next();
-            BitSet otherDomain = other.domains.get(domain.getKey());
-            BitSet mine = domain.getValue();
 
-            // there are no elements of this domain in other
-            if (otherDomain == null)
-            {
-                if (!mine.isEmpty())
-                    modified = true;
-
-                iter.remove();
-                continue;
-            }
-
-            long[] before = mine.toLongArray();
-            mine.and(otherDomain);
-            if (!Arrays.equals(before, mine.toLongArray()))
-                modified = true;
-
-            if (mine.isEmpty())
-                iter.remove();
-        }
-        return modified;
+        long[] before = bits.toLongArray();
+        bits.and(other.bits);
+        return !Arrays.equals(before, bits.toLongArray());
     }
 
     /**
@@ -316,16 +299,9 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
      */
     private boolean union(PartitionedEnumSet<E> other)
     {
-        boolean modified = false;
-        for (Map.Entry<String, BitSet> otherDomain : other.domains.entrySet())
-        {
-            BitSet mine = domains.computeIfAbsent(otherDomain.getKey(), d -> new BitSet());
-            long[] before = mine.toLongArray();
-            mine.or(otherDomain.getValue());
-            if (!Arrays.equals(before, mine.toLongArray()))
-                modified = true;
-        }
-        return modified;
+        long[] before = bits.toLongArray();
+        bits.or(other.bits);
+        return !Arrays.equals(before, bits.toLongArray());
     }
 
     /**
@@ -335,21 +311,11 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
      */
     private boolean contains(PartitionedEnumSet<E> other)
     {
-        for (Map.Entry<String, BitSet> otherDomain : other.domains.entrySet())
-        {
-            BitSet mine = domains.get(otherDomain.getKey());
-            if (mine == null)
-                return false;
-
-            // if (other & mine) != other then other is not a subset of mine
-            BitSet otherBits = otherDomain.getValue();
-            BitSet otherCopy = new BitSet();
-            otherCopy.or(otherBits);
-            otherCopy.and(mine);
-            if (!otherCopy.equals(otherBits))
-                return false;
-        }
-        return true;
+        BitSet otherBits = other.bits;
+        BitSet otherCopy = new BitSet();
+        otherCopy.or(otherBits);
+        otherCopy.and(bits);
+        return otherCopy.equals(otherBits);
     }
 
     /**
@@ -359,22 +325,9 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
      */
     private boolean remove(PartitionedEnumSet<E> other)
     {
-        boolean modified = false;
-        for (Map.Entry<String, BitSet> otherDomain : other.domains.entrySet())
-        {
-            BitSet mine = domains.get(otherDomain.getKey());
-            if (mine == null)
-                continue;
-
-            long[] before = mine.toLongArray();
-            mine.andNot(otherDomain.getValue());
-            if (!Arrays.equals(before, mine.toLongArray()))
-                modified = true;
-
-            if (mine.isEmpty())
-                domains.remove(otherDomain.getKey());
-        }
-        return modified;
+        long[] before = bits.toLongArray();
+        bits.andNot(other.bits);
+        return !Arrays.equals(before, bits.toLongArray());
     }
 
     public boolean equals(Object o)
@@ -385,24 +338,7 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
         if (o instanceof PartitionedEnumSet)
         {
             PartitionedEnumSet<?> other = (PartitionedEnumSet) o;
-            if (elementType != other.elementType)
-                return false;
-            if (size() != other.size())
-                return false;
-
-            for (Map.Entry<String, BitSet> domain : domains.entrySet())
-            {
-                BitSet otherBits = other.domains.get(domain.getKey());
-                BitSet bits = domain.getValue();
-
-                if (otherBits == null && bits.isEmpty())
-                    continue;
-
-                if (!bits.equals(otherBits))
-                    return false;
-            }
-
-            return true;
+            return elementType == other.elementType && bits.equals(other.bits);
         }
 
         return o instanceof Set && asImmutableSet().equals(o);
@@ -410,16 +346,40 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
 
     public int hashCode()
     {
-        // A set's hashcode should equal the sum of its elements
-        if (domains.isEmpty())
-            return 0;
+        return new Consumer<E>()
+        {
+            int sum;
 
-        return stream().mapToInt(Object::hashCode) .sum();
+            public void accept(E e)
+            {
+                sum += e.hashCode();
+            }
+
+            {
+                forEach(this);
+            }
+        }.sum;
     }
 
     public Object[] toArray()
     {
-        return stream().toArray();
+        Object[] r = new Object[bits.cardinality()];
+        return toArrayInt(r);
+    }
+
+    private Object[] toArrayInt(Object[] r)
+    {
+        int i = 0;
+        for (Domains.Domain d : registry.domains())
+        {
+            Enum[] enums = d.enumType.getEnumConstants();
+            for (int n = 0; n < enums.length; n++)
+            {
+                if (bits.get(d.bitOffset + n))
+                    r[i++] = enums[n];
+            }
+        }
+        return r;
     }
 
     public <T> T[] toArray(T[] a)
@@ -427,20 +387,10 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
         int size = size();
         @SuppressWarnings("unchecked")
         T[] array = a.length >= size ? a : (T[])java.lang.reflect.Array.newInstance(a.getClass().getComponentType(), size);
-        Consumer<E> consumer = new Consumer<E>()
-        {
-            int idx = 0;
-            public void accept(E e)
-            {
-                array[idx++] = (T)e;
-            }
-        };
-        stream().forEach(consumer);
-        // if we filled the supplied array and it has spare capacity,
-        // set the first additional element to null as per the set contract
-        if (size < a.length)
-            array[size] = null;
-        return array;
+        T[] r = (T[]) toArrayInt(array);
+        for (int i = size; i < a.length; i++)
+            r[i] = null;
+        return r;
     }
 
     private void checkIsMutable()
@@ -452,10 +402,9 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
     public boolean add(E element)
     {
         checkIsMutable();
-        checkElement(element);
-        boolean present = contains(element);
-        BitSet bits = domains.computeIfAbsent(element.domain(), d -> new BitSet());
-        bits.set(element.ordinal());
+        int bit = checkElementGetBit(element);
+        boolean present = bits.get(bit);
+        bits.set(bit);
         return !present;
     }
 
@@ -466,16 +415,14 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
             return false;
 
         PartitionedEnum element = (PartitionedEnum)o;
-        checkElement(element);
 
-        BitSet bits = domains.get(element.domain());
-        if (bits == null)
+        int bit = checkElementGetBit(element);
+
+        boolean present = bits.get(bit);
+        if (!present)
             return false;
 
-        if (!bits.get(element.ordinal()))
-            return false;
-
-        bits.clear(element.ordinal());
+        bits.clear(bit);
         return true;
     }
 
@@ -579,6 +526,6 @@ public class PartitionedEnumSet<E extends PartitionedEnum> implements Set<E>
     public void clear()
     {
         checkIsMutable();
-        domains.clear();
+        bits.clear();
     }
 }

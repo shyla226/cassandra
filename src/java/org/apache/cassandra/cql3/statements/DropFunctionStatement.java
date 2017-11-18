@@ -24,14 +24,12 @@ import java.util.List;
 import com.google.common.base.Joiner;
 
 import io.reactivex.Maybe;
-import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
@@ -97,7 +95,8 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
         Schema.validateKeyspaceNotSystem(functionName.keyspace);
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
         Function function = findFunction();
         if (function == null)
@@ -110,13 +109,11 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
         }
         else
         {
-            state.ensureHasPermission(CorePermission.DROP, FunctionResource.function(function.name().keyspace,
-                                                                                     function.name().name,
-                                                                                     function.argTypes()));
+            state.checkFunctionPermission(function, CorePermission.DROP);
         }
     }
 
-    public void validate(ClientState state)
+    public void validate(QueryState state)
     {
         Collection<Function> olds = Schema.instance.getFunctions(functionName);
 

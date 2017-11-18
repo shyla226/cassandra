@@ -18,6 +18,8 @@
 package org.apache.cassandra.transport;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -28,6 +30,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -44,8 +47,10 @@ import io.netty.channel.*;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.MessageToMessageEncoder;
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
@@ -215,16 +220,41 @@ public abstract class Message
                 throw new IllegalArgumentException();
         }
 
-        public abstract Single<? extends Response> execute(QueryState queryState, long queryStartNanoTime);
+        public abstract Single<? extends Response> execute(Single<QueryState> queryState, long queryStartNanoTime);
 
         public void setTracingRequested()
         {
             this.tracingRequested = true;
         }
 
+        public final boolean shouldTraceRequest()
+        {
+            if (tracingRequested)
+                return true;
+
+            // If no tracing is explicitly requested in the message, eventually trace the query according to configured trace probability.
+            return StorageService.instance.shouldTraceRequest();
+        }
+
         public boolean isTracingRequested()
         {
             return tracingRequested;
+        }
+
+        protected final InetSocketAddress getRemoteAddress()
+        {
+            return ((ServerConnection) connection).getRemoteAddress();
+        }
+
+        protected final InetAddress getClientAddress()
+        {
+            return ((ServerConnection) connection).getClientAddress();
+        }
+
+        protected void checkIsLoggedIn(QueryState state)
+        {
+            if (state.getUser() == null)
+                throw new UnauthorizedException("You have not logged in");
         }
     }
 
@@ -591,7 +621,7 @@ public abstract class Message
                 if (connection.getVersion().isGreaterOrEqualTo(ProtocolVersion.V4))
                     ClientWarn.instance.captureWarnings();
 
-                QueryState qstate = connection.validateNewMessage(request, connection.getVersion());
+                Single<QueryState> qstate = connection.validateNewMessage(request, connection.getVersion());
                 if (logger.isTraceEnabled())
                     logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
 

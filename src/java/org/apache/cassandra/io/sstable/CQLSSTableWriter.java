@@ -62,7 +62,7 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.schema.Views;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.JavaDriverUtils;
 import org.apache.cassandra.utils.Pair;
@@ -572,7 +572,7 @@ public class CQLSSTableWriter implements Closeable
         private TableMetadata createTable(Types types)
         {
             CreateTableStatement statement = (CreateTableStatement) schemaStatement.prepare(types).statement;
-            statement.validate(ClientState.forInternalCalls());
+            statement.validate(QueryState.forInternalCalls());
 
             TableMetadata.Builder builder = statement.builder();
             if (partitioner != null)
@@ -590,7 +590,7 @@ public class CQLSSTableWriter implements Closeable
         {
             ParsedStatement.Prepared cqlStatement = insertStatement.prepare();
             UpdateStatement insert = (UpdateStatement) cqlStatement.statement;
-            insert.validate(ClientState.forInternalCalls());
+            insert.validate(QueryState.forInternalCalls());
 
             if (insert.hasConditions())
                 throw new IllegalArgumentException("Conditional statements are not supported");

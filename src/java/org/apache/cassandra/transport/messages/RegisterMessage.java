@@ -69,7 +69,7 @@ public class RegisterMessage extends Message.Request
         this.eventTypes = eventTypes;
     }
 
-    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(Single<QueryState> state, long queryStartNanoTime)
     {
         assert connection instanceof ServerConnection;
         Connection.Tracker tracker = connection.getTracker();

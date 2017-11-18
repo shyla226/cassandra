@@ -53,6 +53,7 @@ public class StageManager
         stages.put(Stage.ANTI_ENTROPY, new JMXEnabledThreadPoolExecutor(Stage.ANTI_ENTROPY));
         stages.put(Stage.MIGRATION, new JMXEnabledThreadPoolExecutor(Stage.MIGRATION));
         stages.put(Stage.MISC, new JMXEnabledThreadPoolExecutor(Stage.MISC));
+        stages.put(Stage.AUTHZ, new JMXEnabledThreadPoolExecutor(Stage.AUTHZ));
 
         // add the corresponding scheduler to each stage
         stages.forEach((stage, executor) -> schedulers.put(stage, Schedulers.from(executor)));

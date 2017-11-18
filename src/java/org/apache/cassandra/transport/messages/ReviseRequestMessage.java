@@ -133,13 +133,13 @@ public class ReviseRequestMessage extends Message.Request
         this.nextPages = nextPages;
     }
 
-    public Single<Response> execute(QueryState queryState, long queryStartNanoTime)
+    public Single<Response> execute(Single<QueryState> queryState, long queryStartNanoTime)
     {
         Single<Boolean> ret;
         if (revisionType == RevisionType.CONTINUOUS_PAGING_CANCEL)
             ret = ContinuousPagingService.cancel(queryState, id);
         else if (revisionType == RevisionType.CONTINUOUS_PAGING_BACKPRESSURE)
-            ret = Single.just(ContinuousPagingService.updateBackpressure(queryState, id, nextPages));
+            ret = ContinuousPagingService.updateBackpressure(queryState, id, nextPages);
         else
             ret = Single.error(new InvalidRequestException(String.format("Unknown update type: %s", revisionType)));
 

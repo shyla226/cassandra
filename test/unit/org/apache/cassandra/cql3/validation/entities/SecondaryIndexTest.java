@@ -46,7 +46,7 @@ import org.apache.cassandra.index.StubIndex;
 import org.apache.cassandra.index.internal.CustomCassandraIndex;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.MD5Digest;
@@ -1515,7 +1515,7 @@ public class SecondaryIndexTest extends CQLTester
     private ResultMessage.Prepared prepareStatement(String cql)
     {
         return QueryProcessor.prepare(String.format(cql, KEYSPACE, currentTable()),
-                                      ClientState.forInternalCalls()).blockingGet();
+                                      QueryState.forInternalCalls()).blockingGet();
     }
 
     private void validateCell(Cell cell, ColumnMetadata def, ByteBuffer val, long timestamp)

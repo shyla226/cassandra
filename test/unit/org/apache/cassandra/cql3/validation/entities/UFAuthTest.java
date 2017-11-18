@@ -17,33 +17,33 @@
  */
 package org.apache.cassandra.cql3.validation.entities;
 
-import java.lang.reflect.Field;
 import java.util.*;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableSet;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.*;
 
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.Assert.*;
 
 public class UFAuthTest extends CQLTester
 {
+    static StubAuthorizer authorizer;
+    static CassandraRoleManager roleManager;
     String roleName = "test_role";
     AuthenticatedUser user;
     RoleResource role;
@@ -52,26 +52,25 @@ public class UFAuthTest extends CQLTester
     @BeforeClass
     public static void setupAuthorizer()
     {
-        try
-        {
-            IAuthorizer authorizer = new StubAuthorizer();
-            Field authorizerField = DatabaseDescriptor.class.getDeclaredField("authorizer");
-            authorizerField.setAccessible(true);
-            authorizerField.set(null, authorizer);
-            DatabaseDescriptor.setPermissionsValidity(0);
-        }
-        catch (IllegalAccessException | NoSuchFieldException e)
-        {
-            throw new RuntimeException(e);
-        }
+        authorizer = new StubAuthorizer();
+        roleManager = new CassandraRoleManager();
+        DatabaseDescriptor.setAuthManager(new AuthManager(roleManager, authorizer));
+        DatabaseDescriptor.setPermissionsValidity(0);
     }
 
     @Before
     public void setup() throws Throwable
     {
-        ((StubAuthorizer) DatabaseDescriptor.getAuthorizer()).clear();
+        authorizer.clear();
         setupClientState();
         setupTable("CREATE TABLE %s (k int, v1 int, v2 int, PRIMARY KEY (k, v1))");
+    }
+
+    @AfterClass
+    public static void teardownAuthorizer() throws Throwable
+    {
+        authorizer = null;
+        roleManager = null;
     }
 
     @Test
@@ -237,7 +236,7 @@ public class UFAuthTest extends CQLTester
         assertUnauthorized(batch, functions.subList(2, functions.size()));
 
         grantExecuteOnFunction(functions.get(2));
-        batch.checkAccess(clientState);
+        batch.checkAccess(getQueryState());
     }
 
     @Test
@@ -314,7 +313,7 @@ public class UFAuthTest extends CQLTester
         // with terminal arguments, so evaluated at prepare time
         String cql = String.format("UPDATE %s SET v2 = 0 WHERE k = blobasint(intasblob(0)) and v1 = 0",
                                    KEYSPACE + "." + currentTable());
-        getStatement(cql).checkAccess(clientState);
+        getStatement(cql).checkAccess(getQueryState());
 
         // with non-terminal arguments, so evaluated at execution
         String functionName = createSimpleFunction();
@@ -322,7 +321,7 @@ public class UFAuthTest extends CQLTester
         cql = String.format("UPDATE %s SET v2 = 0 WHERE k = blobasint(intasblob(%s)) and v1 = 0",
                             KEYSPACE + "." + currentTable(),
                             functionCall(functionName));
-        getStatement(cql).checkAccess(clientState);
+        getStatement(cql).checkAccess(getQueryState());
     }
 
     @Test
@@ -345,7 +344,7 @@ public class UFAuthTest extends CQLTester
         assertUnauthorized(aggDef, fFunc, "int");
         grantExecuteOnFunction(fFunc);
 
-        getStatement(aggDef).checkAccess(clientState);
+        getStatement(aggDef).checkAccess(getQueryState());
     }
 
     @Test
@@ -363,24 +362,24 @@ public class UFAuthTest extends CQLTester
         String cql = String.format("SELECT %s(v1) FROM %s",
                                    aggregate,
                                    KEYSPACE + "." + currentTable());
-        getStatement(cql).checkAccess(clientState);
+        getStatement(cql).checkAccess(getQueryState());
 
         // check that revoking EXECUTE permission on any one of the
         // component functions means we lose the ability to execute it
         revokeExecuteOnFunction(aggregate);
         assertUnauthorized(cql, aggregate, "int");
         grantExecuteOnFunction(aggregate);
-        getStatement(cql).checkAccess(clientState);
+        getStatement(cql).checkAccess(getQueryState());
 
         revokeExecuteOnFunction(sFunc);
         assertUnauthorized(cql, sFunc, "int, int");
         grantExecuteOnFunction(sFunc);
-        getStatement(cql).checkAccess(clientState);
+        getStatement(cql).checkAccess(getQueryState());
 
         revokeExecuteOnFunction(fFunc);
         assertUnauthorized(cql, fFunc, "int");
         grantExecuteOnFunction(fFunc);
-        getStatement(cql).checkAccess(clientState);
+        getStatement(cql).checkAccess(getQueryState());
     }
 
     @Test
@@ -412,7 +411,7 @@ public class UFAuthTest extends CQLTester
         assertUnauthorized(cql, aggregate, "int");
         grantExecuteOnFunction(aggregate);
 
-        getStatement(cql).checkAccess(clientState);
+        getStatement(cql).checkAccess(getQueryState());
     }
 
     @Test
@@ -444,7 +443,7 @@ public class UFAuthTest extends CQLTester
         assertUnauthorized(cql, innerFunc, "int");
         grantExecuteOnFunction(innerFunc);
 
-        getStatement(cql).checkAccess(clientState);
+        getStatement(cql).checkAccess(getQueryState());
     }
 
     @Test
@@ -486,7 +485,7 @@ public class UFAuthTest extends CQLTester
         grantExecuteOnFunction(innerFunction);
 
         // now execution of both is permitted
-        getStatement(cql).checkAccess(clientState);
+        getStatement(cql).checkAccess(getQueryState());
     }
 
     private void assertPermissionsOnFunction(String cql, String functionName) throws Throwable
@@ -498,14 +497,14 @@ public class UFAuthTest extends CQLTester
     {
         assertUnauthorized(cql, functionName, argTypes);
         grantExecuteOnFunction(functionName);
-        getStatement(cql).checkAccess(clientState);
+        getStatement(cql).checkAccess(getQueryState());
     }
 
     private void assertUnauthorized(BatchStatement batch, Iterable<String> functionNames) throws Throwable
     {
         try
         {
-            batch.checkAccess(clientState);
+            batch.checkAccess(getQueryState());
             fail("Expected an UnauthorizedException, but none was thrown");
         }
         catch (UnauthorizedException e)
@@ -522,7 +521,7 @@ public class UFAuthTest extends CQLTester
     {
         try
         {
-            getStatement(cql).checkAccess(clientState);
+            getStatement(cql).checkAccess(getQueryState());
             fail("Expected an UnauthorizedException, but none was thrown");
         }
         catch (UnauthorizedException e)
@@ -537,11 +536,11 @@ public class UFAuthTest extends CQLTester
 
     private void grantExecuteOnFunction(String functionName)
     {
-            DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
-                                                     ImmutableSet.of(CorePermission.EXECUTE),
-                                                     functionResource(functionName),
-                                                     role,
-                                                     GrantMode.GRANT);
+        DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
+                                                 ImmutableSet.of(CorePermission.EXECUTE),
+                                                 functionResource(functionName),
+                                                 role,
+                                                 GrantMode.GRANT);
     }
 
     private void revokeExecuteOnFunction(String functionName)
@@ -556,27 +555,21 @@ public class UFAuthTest extends CQLTester
     void setupClientState()
     {
 
-        try
-        {
-            role = RoleResource.role(roleName);
-            // use reflection to set the logged in user so that we don't need to
-            // bother setting up an IRoleManager
-            user = new AuthenticatedUser(roleName);
-            clientState = ClientState.forInternalCalls();
-            Field userField = ClientState.class.getDeclaredField("user");
-            userField.setAccessible(true);
-            userField.set(clientState, user);
-        }
-        catch (IllegalAccessException | NoSuchFieldException e)
-        {
-            throw new RuntimeException(e);
-        }
+        role = RoleResource.role(roleName);
+        // use reflection to set the logged in user so that we don't need to
+        // bother setting up an IRoleManager
+        user = new AuthenticatedUser(roleName);
+        clientState = ClientState.forExternalCalls(user);
     }
 
     private void setupTable(String tableDef) throws Throwable
     {
         createTable(tableDef);
         // test user needs SELECT & MODIFY on the table regardless of permissions on any function
+        roleManager.setClusterReadyForTests();
+        roleManager.createRole(new AuthenticatedUser(roleName),
+                               RoleResource.role(roleName),
+                               new RoleOptions());
         DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
                                                  ImmutableSet.of(CorePermission.SELECT, CorePermission.MODIFY),
                                                  DataResource.table(KEYSPACE, currentTable()),
@@ -630,7 +623,15 @@ public class UFAuthTest extends CQLTester
 
     private CQLStatement getStatement(String cql)
     {
-        return QueryProcessor.getStatement(cql, clientState).statement;
+        return QueryProcessor.getStatement(cql, getQueryState()).statement;
+    }
+
+    private QueryState getQueryState()
+    {
+        UserRolesAndPermissions userRolesAndPermissions = DatabaseDescriptor.getAuthManager()
+                                                                            .getUserRolesAndPermissions(clientState.getUser())
+                                                                            .blockingGet();
+        return new QueryState(clientState, userRolesAndPermissions);
     }
 
     private FunctionResource functionResource(String functionName)

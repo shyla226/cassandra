@@ -32,7 +32,7 @@ import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 
 import static org.junit.Assert.assertTrue;
 
@@ -326,12 +326,12 @@ public class UFIdentificationTest extends CQLTester
 
     private ModificationStatement modificationStatement(String cql)
     {
-        return (ModificationStatement) QueryProcessor.getStatement(cql, ClientState.forInternalCalls()).statement;
+        return (ModificationStatement) QueryProcessor.getStatement(cql, QueryState.forInternalCalls()).statement;
     }
 
     private void assertFunctions(String cql, String... function)
     {
-        CQLStatement stmt = QueryProcessor.getStatement(cql, ClientState.forInternalCalls()).statement;
+        CQLStatement stmt = QueryProcessor.getStatement(cql, QueryState.forInternalCalls()).statement;
         assertFunctions(stmt, function);
     }
 

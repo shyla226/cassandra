@@ -103,7 +103,7 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
         //   custom external implementations may not)
         return ce.map(event ->
                       {
-                          AuthenticatedUser user = state.getClientState().getUser();
+                          AuthenticatedUser user = state.getUser();
                           if (user != null && !user.isAnonymous() && event.change == Event.SchemaChange.Change.CREATED)
                           {
                               try

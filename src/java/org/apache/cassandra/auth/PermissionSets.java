@@ -8,6 +8,8 @@ package org.apache.cassandra.auth;
 import java.util.EnumSet;
 import java.util.Set;
 
+import com.google.common.base.MoreObjects;
+
 import org.apache.cassandra.auth.permission.Permissions;
 
 /**
@@ -15,7 +17,9 @@ import org.apache.cassandra.auth.permission.Permissions;
  */
 public final class PermissionSets
 {
-    public static final PermissionSets EMPTY = builder().build();
+    public static final PermissionSets EMPTY = new PermissionSets(Permissions.immutableSetOf(),
+                                                                  Permissions.immutableSetOf(),
+                                                                  Permissions.immutableSetOf());
 
     /**
      * Immutable set of granted permissions.
@@ -69,9 +73,52 @@ public final class PermissionSets
                             .addGrantables(grantables);
     }
 
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        PermissionSets that = (PermissionSets) o;
+
+        if (!granted.equals(that.granted)) return false;
+        if (!restricted.equals(that.restricted)) return false;
+        return grantables.equals(that.grantables);
+    }
+
+    public int hashCode()
+    {
+        int result = granted.hashCode();
+        result = 31 * result + restricted.hashCode();
+        result = 31 * result + grantables.hashCode();
+        return result;
+    }
+
+    @Override
+    public String toString()
+    {
+        return MoreObjects.toStringHelper(this)
+                          .add("granted", granted)
+                          .add("restricted", restricted)
+                          .add("grantables", grantables)
+                          .toString();
+    }
+
     public static Builder builder()
     {
         return new Builder();
+    }
+
+    public Set<Permission> effectivePermissions()
+    {
+        Set<Permission> result = Permissions.setOf();
+        result.addAll(granted);
+        result.removeAll(restricted);
+        return result;
+    }
+
+    public boolean hasEffectivePermission(Permission permission)
+    {
+        return granted.contains(permission) && !restricted.contains(permission);
     }
 
     public static final class Builder
@@ -156,8 +203,19 @@ public final class PermissionSets
             return this;
         }
 
+        public Builder add(PermissionSets permissionSets)
+        {
+            this.granted.addAll(permissionSets.granted);
+            this.restricted.addAll(permissionSets.restricted);
+            this.grantables.addAll(permissionSets.grantables);
+            return this;
+        }
+
         public PermissionSets build()
         {
+            if (granted.isEmpty() && restricted.isEmpty() && grantables.isEmpty())
+                return EMPTY;
+
             return new PermissionSets(Permissions.immutableSetOf(granted),
                                       Permissions.immutableSetOf(restricted),
                                       Permissions.immutableSetOf(grantables));

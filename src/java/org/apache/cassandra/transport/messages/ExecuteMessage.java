@@ -17,11 +17,15 @@
  */
 package org.apache.cassandra.transport.messages;
 
+import java.util.UUID;
+
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Single;
 
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryHandler;
@@ -35,6 +39,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
+import org.apache.cassandra.utils.flow.RxThreads;
 
 public class ExecuteMessage extends Message.Request
 {
@@ -104,7 +109,7 @@ public class ExecuteMessage extends Message.Request
         this.resultMetadataId = resultMetadataId;
     }
 
-    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(Single<QueryState> state, long queryStartNanoTime)
     {
         try
         {
@@ -116,43 +121,58 @@ public class ExecuteMessage extends Message.Request
             options.prepare(prepared.boundNames);
             CQLStatement statement = prepared.statement;
 
-            if (state.shouldTraceRequest(isTracingRequested()))
-                setUpTracing(state, prepared);
+            final UUID tracingID = setUpTracing(prepared);
 
             // Some custom QueryHandlers are interested by the bound names. We provide them this information
             // by wrapping the QueryOptions.
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.boundNames);
-            return handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime)
-                          .map(response -> {
 
-                              if (response instanceof ResultMessage.Rows)
-                              {
-                                  ResultMessage.Rows rows = (ResultMessage.Rows) response;
+            return state.flatMap( s ->
+            {
+                Single<ResultMessage> resp = Single.defer(() ->
+                {
+                    checkIsLoggedIn(s);
 
-                                  ResultSet.ResultMetadata resultMetadata = rows.result.metadata;
-                                  ProtocolVersion version = options.getProtocolVersion();
-                                  if (version.isGreaterOrEqualTo(ProtocolVersion.V5, ProtocolVersion.DSE_V2))
-                                  {
-                                      // Starting with V5 we can rely on the result metadata id coming with execute message in order to
-                                      // check if there was a change, comparing it with metadata that's about to be returned to client.
-                                      if (!resultMetadata.getResultMetadataId().equals(resultMetadataId))
-                                          resultMetadata.setMetadataChanged();
-                                      else if (options.skipMetadata())
-                                          resultMetadata.setSkipMetadata();
-                                  }
-                                  else
-                                  {
-                                      // Pre-V5 code has to rely on the difference between the metadata in the prepared message cache
-                                      // and compare it with the metadata to be returned to client.
-                                      if (options.skipMetadata() && prepared.resultMetadataId.equals(resultMetadata.getResultMetadataId()))
-                                          resultMetadata.setSkipMetadata();
-                                  }
-                              }
+                    return handler.processPrepared(statement, s, queryOptions, getCustomPayload(), queryStartNanoTime)
+                                  .map(response -> {
+
+                                      if (response instanceof ResultMessage.Rows)
+                                      {
+                                          ResultMessage.Rows rows = (ResultMessage.Rows) response;
+
+                                          ResultSet.ResultMetadata resultMetadata = rows.result.metadata;
+                                          ProtocolVersion version = options.getProtocolVersion();
+                                          if (version.isGreaterOrEqualTo(ProtocolVersion.V5, ProtocolVersion.DSE_V2))
+                                          {
+                                              // Starting with V5 we can rely on the result metadata id coming with execute message in order to
+                                              // check if there was a change, comparing it with metadata that's about to be returned to client.
+                                              if (!resultMetadata.getResultMetadataId().equals(resultMetadataId))
+                                                  resultMetadata.setMetadataChanged();
+                                              else if (options.skipMetadata())
+                                                  resultMetadata.setSkipMetadata();
+                                          }
+                                          else
+                                          {
+                                              // Pre-V5 code has to rely on the difference between the metadata in the prepared message cache
+                                              // and compare it with the metadata to be returned to client.
+                                              if (options.skipMetadata() && prepared.resultMetadataId.equals(resultMetadata.getResultMetadataId()))
+                                                  resultMetadata.setSkipMetadata();
+                                          }
+                                      }
 
 
-                                  response.setTracingId(state.getPreparedTracingSession());
-                                  return response;
-                          }).flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
+                                      response.setTracingId(tracingID);
+                                      return response;
+                                  }).flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
+                 });
+
+                // If some Auth data was not in the caches we might be on an IO thread. In which case we need to switch
+                // back to the TPC thread.
+                if (!TPC.isTPCThread())
+                    return RxThreads.subscribeOn(resp, TPC.bestTPCScheduler(), TPCTaskType.EXECUTE_STATEMENT);
+
+                return resp;
+            });
         }
         catch (Exception e)
         {
@@ -161,9 +181,12 @@ public class ExecuteMessage extends Message.Request
         }
     }
 
-    private void setUpTracing(QueryState state, ParsedStatement.Prepared prepared)
+    private UUID setUpTracing(ParsedStatement.Prepared prepared)
     {
-        state.createTracingSession(getCustomPayload());
+        if(!shouldTraceRequest())
+            return null;
+
+        final UUID sessionId = Tracing.instance.newSession(getCustomPayload());
 
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
         if (options.getPagingOptions() != null)
@@ -187,7 +210,8 @@ public class ExecuteMessage extends Message.Request
             builder.put("bound_var_" + Integer.toString(i) + "_" + boundName, boundValue);
         }
 
-        Tracing.instance.begin("Execute CQL3 prepared query", state.getClientAddress(), builder.build());
+        Tracing.instance.begin("Execute CQL3 prepared query", getClientAddress(), builder.build());
+        return sessionId;
     }
 
     @Override

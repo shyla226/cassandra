@@ -1035,7 +1035,7 @@ public class DseNode
         {
             try
             {
-                MigrationManager.announceKeyspaceUpdate(ksm);
+                MigrationManager.announceKeyspaceUpdate(ksm).blockingAwait();
             }
             catch (ConfigurationException e)
             {

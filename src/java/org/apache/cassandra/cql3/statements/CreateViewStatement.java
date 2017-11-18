@@ -39,7 +39,6 @@ import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
@@ -77,14 +76,15 @@ public class CreateViewStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
         if (!baseName.hasKeyspace())
             baseName.setKeyspace(keyspace(), true);
-        state.hasColumnFamilyAccess(keyspace(), baseName.getColumnFamily(), CorePermission.ALTER);
+        state.checkTablePermission(keyspace(), baseName.getColumnFamily(), CorePermission.ALTER);
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
         // We do validation in announceMigration to reduce doubling up of work
     }

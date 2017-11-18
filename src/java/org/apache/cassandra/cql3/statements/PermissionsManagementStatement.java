@@ -28,7 +28,9 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
+
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 public abstract class PermissionsManagementStatement extends AuthorizationStatement
 {
@@ -45,45 +47,50 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
         this.grantMode = grantMode;
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException
+    @Override
+    public void checkAccess(QueryState state)
     {
         // validate login here before checkAccess to avoid leaking user existence to anonymous users.
-        state.ensureNotAnonymous();
+        state.checkNotAnonymous();
 
         if (!DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
-            throw new InvalidRequestException(String.format("Role %s doesn't exist", grantee.getRoleName()));
+            throw invalidRequest("Role %s doesn't exist", grantee.getRoleName());
 
         // if a keyspace is omitted when GRANT/REVOKE ON TABLE <table>, we need to correct the resource.
-        resource = maybeCorrectResource(resource, state);
+        resource = maybeCorrectResource(resource, state.getClientState());
 
         // altering permissions on builtin functions is not supported
         if (resource instanceof FunctionResource
             && SchemaConstants.SYSTEM_KEYSPACE_NAME.equals(((FunctionResource)resource).getKeyspace()))
         {
-            throw new InvalidRequestException("Altering permissions on builtin functions is not supported");
+            throw invalidRequest("Altering permissions on builtin functions is not supported");
         }
 
         if (!resource.exists())
-            throw new InvalidRequestException(String.format("Resource %s doesn't exist", resource));
+            throw invalidRequest("Resource %s doesn't exist", resource);
+
+        if (state.isSuper())
+            // Nobody can stop superman
+            return;
 
         if (grantMode == GrantMode.RESTRICT)
-            state.ensureIsSuper("Only superusers are allowed to RESTRICT/UNRESTRICT");
+            throw new UnauthorizedException("Only superusers are allowed to RESTRICT/UNRESTRICT");
 
         Set<Permission> missingPermissions = Permissions.setOf();
         try
         {
             // check that the user has AUTHORIZE permission on the resource or its parents, otherwise reject GRANT/REVOKE.
-            state.ensureHasPermission(CorePermission.AUTHORIZE, resource);
+            state.checkPermission(resource, CorePermission.AUTHORIZE);
 
             // check that the user has [a single permission or all in case of ALL] on the resource or its parents.
             for (Permission p : permissions)
                 try
                 {
-                    state.ensureHasPermission(p, resource);
+                    state.checkPermission(resource, p);
                 }
                 catch (UnauthorizedException noAuthorizePermission)
                 {
@@ -100,7 +107,7 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
             if (grantMode == GrantMode.GRANTABLE)
             {
                 throw new UnauthorizedException(String.format("User %s must not grant AUTHORIZE FOR %s permission on %s",
-                                                              state.getUser().getName(),
+                                                              state.getUserName(),
                                                               StringUtils.join(missingPermissions, ", "),
                                                               resource));
             }
@@ -110,14 +117,14 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
             // Check that the user has grant-option on all permissions to be
             // granted for the resource
             for (Permission p : permissions)
-                if (!state.hasGrantOption(p, resource))
+                if (!state.hasGrantPermission(resource, p))
                 {
                     missingGrantables.add(p);
                 }
 
             if (!missingGrantables.isEmpty())
                 throw new UnauthorizedException(String.format("User %s has no %s permission nor AUTHORIZE FOR %s permission on %s or any of its parents",
-                                                              state.getUser().getName(),
+                                                              state.getUserName(),
                                                               StringUtils.join(missingPermissions, ", "),
                                                               StringUtils.join(missingGrantables, ", "),
                                                               resource));
@@ -126,9 +133,9 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
             // to any of the roles the user belongs to. This check
             // assumes that getRoles() returns a role for the user himself
             // (i.e. like "RoleResource(username)" as for AuthenticatedUser.role).
-            if (state.getUser().getRoles().contains(grantee))
+            if (state.hasRole(grantee))
                 throw new UnauthorizedException(String.format("User %s has grant privilege for %s permission(s) on %s but must not grant/revoke for him/herself",
-                                                              state.getUser().getName(),
+                                                              state.getUserName(),
                                                               StringUtils.join(permissions, ", "),
                                                               resource));
 

@@ -19,21 +19,24 @@
 package org.apache.cassandra.auth;
 
 import java.lang.management.ManagementFactory;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
-import javax.management.MBeanServer;
-import javax.management.MalformedObjectNameException;
-import javax.management.ObjectName;
+import javax.management.*;
 
 import com.google.common.util.concurrent.MoreExecutors;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,7 +87,14 @@ public class AuthCache<K, V> implements AuthCacheMBean
         try
         {
             MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
-            mbs.registerMBean(this, getObjectName());
+            ObjectName objectName = getObjectName();
+            try
+            {
+                mbs.unregisterMBean(objectName);
+            }
+            catch (InstanceNotFoundException ignore)
+            {}
+            mbs.registerMBean(this, objectName);
         }
         catch (Exception e)
         {
@@ -100,47 +110,42 @@ public class AuthCache<K, V> implements AuthCacheMBean
     /**
      * Retrieve an entry from the cache. If the entry is not present, or the
      * cache is disabled, then invoke the load function to compute and store
-     * the entry but only if retrieveIfMissing is true.
-     * <p>
-     * This parameter can be used by callers (sub-classes) to control if the
-     * load function should be invoked, given that in some cases the load
-     * function might block and in this case we do not want to invoke it
-     * on TPC threads.
+     * the entry.
      *
      * @param k - the key of the entry to retrieve
-     * @param retrieveIfMissing - if true retrieve missing entries by invoking the load function
-     *
-     * @return the entry or null if retrieveIfMissing is false and the entry is missing
+     * @return the entry
      */
     @Nullable
-    protected V get(K k, boolean retrieveIfMissing)
+    protected V get(K k)
     {
-        V ret = cache == null ? null : cache.getIfPresent(k);
-        if (ret != null)
-            return ret;
-
-        if (!retrieveIfMissing)
-            return null;
-
         if (cache == null)
             return loadFunction.apply(k);
 
         return cache.get(k);
     }
 
-    public Map<K, V> getAll(Collection<K> keys, boolean retrieveIfMissing)
+    @Nullable
+    protected V getIfPresent(K k)
+    {
+        return cache == null ? null : cache.getIfPresent(k);
+    }
+
+    protected Map<K, V> getAllPresent(Collection<K> keys)
+    {
+        if (cache == null)
+            return Collections.emptyMap();
+
+        return cache.getAllPresent(keys);
+    }
+
+    public Map<K, V> getAll(Collection<K> keys)
     {
         if (cache == null)
         {
-            Map<K, V> r = new HashMap<>();
-            if (retrieveIfMissing)
-                keys.forEach(key -> r.put(key, loadFunction.apply(key)));
-            return r;
+            Map<K, V> map = new HashMap<>(keys.size());
+            keys.forEach(key -> map.put(key, loadFunction.apply(key)));
+            return map;
         }
-
-        Map<K, V> result = cache.getAllPresent(keys);
-        if (!retrieveIfMissing && result.size() != keys.size())
-            return result;
 
         return cache.getAll(keys);
     }

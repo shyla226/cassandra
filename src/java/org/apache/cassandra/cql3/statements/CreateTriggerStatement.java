@@ -21,6 +21,8 @@ import io.reactivex.Maybe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -31,7 +33,6 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TriggerMetadata;
 import org.apache.cassandra.schema.Triggers;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 import org.apache.cassandra.triggers.TriggerExecutor;
@@ -52,12 +53,14 @@ public class CreateTriggerStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
+    @Override
+    public void checkAccess(QueryState state)
     {
-        state.ensureIsSuper("Only superusers are allowed to perform CREATE TRIGGER queries");
+        if (DatabaseDescriptor.getAuthenticator().requireAuthentication() && !state.isSuper())
+            throw new UnauthorizedException("Only superusers are allowed to perform CREATE TRIGGER queries");
     }
 
-    public void validate(ClientState state) throws RequestValidationException
+    public void validate(QueryState state) throws RequestValidationException
     {
         TableMetadata metadata = Schema.instance.validateTable(keyspace(), columnFamily());
         if (metadata.isView())

@@ -36,9 +36,6 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Single;
-import io.reactivex.SingleObserver;
-import io.reactivex.annotations.NonNull;
-import io.reactivex.internal.disposables.EmptyDisposable;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.ContinuousPagingConfig;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -56,6 +53,7 @@ import org.apache.cassandra.metrics.ContinuousPagingMetrics;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.pager.PagingState;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Frame;
 import org.apache.cassandra.transport.Message;
@@ -233,23 +231,27 @@ public class ContinuousPagingService
      * @param streamId - the initial frame id of the continuous paging request message
      * @return true if the session was cancelled, false if the session was not found
      */
-    public static Single<Boolean> cancel(QueryState queryState, int streamId)
+    public static Single<Boolean> cancel(Single<QueryState> queryState, int streamId)
     {
-        SessionKey key = new SessionKey(queryState.getClientState().getRemoteAddress(), streamId);
-        ContinuousPagingSession session = removeSession(key);
-        if (session == null)
-        {
-            if (logger.isTraceEnabled())
-                logger.trace("Cannot cancel continuous paging session {}: not found", key);
-            return Single.just(false);
-        }
+        return queryState.flatMap(qs ->
+                       {
+                           SessionKey key = new SessionKey(qs.getClientState().getRemoteAddress(), streamId);
+                           ContinuousPagingSession session = removeSession(key);
+                           if (session == null)
+                           {
+                               if (logger.isTraceEnabled())
+                                   logger.trace("Cannot cancel continuous paging session {}: not found", key);
+                               return Single.just(false);
+                           }
 
-        if (logger.isTraceEnabled())
-            logger.trace("Cancelling continuous paging session {}", key);
+                           if (logger.isTraceEnabled())
+                               logger.trace("Cancelling continuous paging session {}", key);
 
-        return TPCUtils.toSingle(session.cancel()
-                                        .thenCompose(ret -> TPCUtils.completedFuture(true)))
-                       .timeout(session.config().cancel_timeout_sec, TimeUnit.SECONDS);
+                           return TPCUtils.toSingle(session.cancel()
+                                                           .thenCompose(ret -> TPCUtils.completedFuture(true)))
+                                          .timeout(session.config().cancel_timeout_sec, TimeUnit.SECONDS);
+
+                       });
     }
 
     /**
@@ -257,7 +259,7 @@ public class ContinuousPagingService
      * requested by the client. If the session was suspended because all previously requested pages were sent,
      * then it will be resumed, see also {@link ContinuousPagingSession#updateBackpressure(int)}.
      *
-     * @param state - the query state
+     * @param queryState - the socket address
      * @param streamId - the initial stream id of the continuous paging request message
      * @param nextPages - the number of additional pages requested, must be positive.
      *
@@ -265,28 +267,31 @@ public class ContinuousPagingService
      *              or already had numPagesRequested set to the max
      * @throws RequestValidationException if nextPages is <= 0
      */
-    public static boolean updateBackpressure(QueryState state, int streamId, int nextPages)
+    public static Single<Boolean> updateBackpressure(Single<QueryState> queryState, int streamId, int nextPages)
     {
-        SessionKey key = new SessionKey(state.getClientState().getRemoteAddress(), streamId);
+        return queryState.map(qs ->
+                       {
+                           SessionKey key = new SessionKey(qs.getClientState().getRemoteAddress(), streamId);
 
-        if (nextPages <= 0)
-            throw RequestValidations.invalidRequest(String.format("Cannot update next_pages for continuous paging session %s, expected positive value but got %d", key, nextPages));
+                           if (nextPages <= 0)
+                               throw RequestValidations.invalidRequest(String.format("Cannot update next_pages for continuous paging session %s, expected positive value but got %d", key, nextPages));
 
-        ContinuousPagingSession session = getSession(key);
-        if (session == null || session.state.get() != ContinuousPagingSession.State.RUNNING)
-        {
-            if (logger.isTraceEnabled())
-                logger.trace("Cannot update next_pages for continuous paging session {}: not found or no longer running", key);
-            return false;
-        }
+                           ContinuousPagingSession session = getSession(key);
+                           if (session == null || session.state.get() != ContinuousPagingSession.State.RUNNING)
+                           {
+                               if (logger.isTraceEnabled())
+                                   logger.trace("Cannot update next_pages for continuous paging session {}: not found or no longer running", key);
+                               return false;
+                           }
 
-        if (session.numPagesRequested == Integer.MAX_VALUE)
-        {
-            logger.warn("Cannot update next_pages for continuous paging session {}, numPagesRequested already set to maximum", key);
-            return false;
-        }
+                           if (session.numPagesRequested == Integer.MAX_VALUE)
+                           {
+                               logger.warn("Cannot update next_pages for continuous paging session {}, numPagesRequested already set to maximum", key);
+                               return false;
+                           }
 
-        return session.updateBackpressure(nextPages);
+                           return session.updateBackpressure(nextPages);
+                       });
     }
 
     /**
@@ -435,7 +440,8 @@ public class ContinuousPagingService
                 metadata.setPagingResult(pagingResult);
                 EncodedPage response = new EncodedPage(metadata, numRows, buf);
                 response.setWarnings(ClientWarn.instance.getWarnings());
-                response.setTracingId(state.getPreparedTracingSession());
+                if (Tracing.isTracing())
+                    response.setTracingId(Tracing.instance.getSessionId());
 
                 return makeFrame(response, EncodedPage.codec, version, state.getStreamId());
             }
