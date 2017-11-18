@@ -163,15 +163,7 @@ options {
 
     public Permission validatePermission(String domain, String name)
     {
-       try
-       {
-          return Permissions.permission(domain, name);
-       }
-       catch (java.lang.IllegalArgumentException e)
-       {
-          addRecognitionError("Unknown permission " + domain + "." + name);
-       }
-       return null;
+        return Permissions.permission(domain, name);
     }
 
     public String canonicalizeObjectName(String s, boolean enforcePattern)
@@ -1176,22 +1168,17 @@ corePermissionName
 
 permission returns [Permission perm]
     // unnamespaced permissions default to the SYSTEM namespace
-    : p=corePermissionName
-        { $perm = Permissions.permission(CorePermission.getDomain(), $p.text); }
-    | domain=permissionDomain '.' name=permissionName
-        { $perm = validatePermission($domain.text, $name.text); }
+    : p=corePermissionName { $perm = Permissions.permission(CorePermission.getDomain(), $p.text); }
+    | domain=permissionDomain '.' name=permissionName { $perm = validatePermission($domain.text, $name.text); }
     ;
 
 permissionOrAll returns [Set<Permission> perms]
     : K_ALL ( K_PERMISSIONS )?       { $perms = Permissions.all(); }
     | K_PERMISSIONS { $perms = Permissions.all(); }
-    | (
-        p=permission ( K_PERMISSION )? { $perms = $p.perm == null ? Collections.emptySet() : Permissions.setOf($p.perm); }
+    | p=permission ( K_PERMISSION )? { $perms = p == null ? Collections.emptySet() : Permissions.setOf(p); }
         (
-            ','
-            px=permission ( K_PERMISSION )? { $perms = Permissions.setOf($perms, $px.perm); }
+            ',' px=permission ( K_PERMISSION )? { if (px != null) $perms = Permissions.setOf($perms, px); }
         )*
-      )
     ;
 
 resourceFromInternalName returns [IResource res]

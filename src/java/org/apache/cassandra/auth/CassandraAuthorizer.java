@@ -23,7 +23,9 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
 
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +34,7 @@ import org.apache.cassandra.auth.permission.Permissions;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.UntypedResultSet.Row;
 import org.apache.cassandra.cql3.statements.*;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -66,7 +69,6 @@ public class CassandraAuthorizer implements IAuthorizer
     public CassandraAuthorizer()
     {
     }
-
 
     // Called when deleting a role with DROP ROLE query.
     // Internal hook, so no permission checks are needed here.
@@ -192,44 +194,115 @@ public class CassandraAuthorizer implements IAuthorizer
            .forEach(perms);
     }
 
-    public void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee, GrantMode... grantModes)
-    throws RequestValidationException, RequestExecutionException
+    public Set<Permission> grant(AuthenticatedUser performer,
+                                 Set<Permission> permissions,
+                                 IResource resource,
+                                 RoleResource grantee,
+                                 GrantMode... grantModes)
     {
-        grantRevoke(permissions, resource, grantee, "+", grantModes);
-    }
-
-    public void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee, GrantMode... grantModes)
-    throws RequestValidationException, RequestExecutionException
-    {
-        grantRevoke(permissions, resource, revokee, "-", grantModes);
-    }
-
-    private void grantRevoke(Set<Permission> permissions, IResource resource, RoleResource role, String op, GrantMode... grantModes)
-    {
-        if (grantModes == null || grantModes.length == 0)
+        if (ArrayUtils.isEmpty(grantModes))
             throw new IllegalArgumentException("Must specify at least one grantMode");
 
-        // Construct a CQL command like the following. The updated columns are variable (depend on grantMode).
-        //
-        //   UPDATE system_auth.role_permissions
-        //      SET permissions = permissions + {<permissions>}
-        //    WHERE role = <role-name>
-        //      AND resource = <resource-name>
-        //
+        String roleName = escape(grantee.getRoleName());
+        String resourceName = escape(resource.getName());
 
+        Set<Permission> grantedPermissions = Sets.newHashSetWithExpectedSize(permissions.size());
         for (GrantMode grantMode : grantModes)
         {
-            String column = columnForGrantMode(grantMode);
+            String grantModeColumn = columnForGrantMode(grantMode);
+            Set<Permission> nonExistingPermissions = new HashSet<>(permissions);
+            nonExistingPermissions.removeAll(getExistingPermissions(roleName, resourceName, grantModeColumn, permissions));
 
-            String perms = permissions.stream()
+            if (!nonExistingPermissions.isEmpty())
+            {
+                String perms = nonExistingPermissions.stream()
                                       .map(Permission::getFullName)
                                       .collect(Collectors.joining("','", "'", "'"));
 
-            process("UPDATE " + ROLE_PERMISSIONS_TABLE + " SET %s = %s %s { %s } WHERE role = '%s' AND resource = '%s'",
-                    column, column, op, perms,
-                    escape(role.getRoleName()),
-                    escape(resource.getName()));
+                updatePermissions(roleName, resourceName, grantModeColumn, "+", perms);
+                grantedPermissions.addAll(nonExistingPermissions);
+            }
         }
+        return grantedPermissions;
+    }
+
+    public Set<Permission> revoke(AuthenticatedUser performer,
+                                  Set<Permission> permissions,
+                                  IResource resource,
+                                  RoleResource revokee,
+                                  GrantMode... grantModes)
+    {
+        if (ArrayUtils.isEmpty(grantModes))
+            throw new IllegalArgumentException("Must specify at least one grantMode");
+
+        String roleName = escape(revokee.getRoleName());
+        String resourceName = escape(resource.getName());
+
+        Set<Permission> revokedPermissions = Sets.newHashSetWithExpectedSize(permissions.size());
+        for (GrantMode grantMode : grantModes)
+        {
+            String grantModeColumn = columnForGrantMode(grantMode);
+            Set<Permission> existingPermissions = getExistingPermissions(roleName, resourceName, grantModeColumn, permissions);
+            if (!existingPermissions.isEmpty())
+            {
+                String perms = existingPermissions.stream()
+                                                  .map(Permission::getFullName)
+                                                  .collect(Collectors.joining("','", "'", "'"));
+
+                updatePermissions(roleName, resourceName, grantModeColumn, "-", perms);
+                revokedPermissions.addAll(existingPermissions);
+            }
+        }
+        return revokedPermissions;
+    }
+
+    private void updatePermissions(String roleName,
+                                   String resourceName,
+                                   String grantModeColumn,
+                                   String op,
+                                   String perms)
+    {
+        process("UPDATE " + ROLE_PERMISSIONS_TABLE + " SET %s = %s %s { %s } WHERE role = '%s' AND resource = '%s'",
+                grantModeColumn, grantModeColumn, op, perms,
+                roleName,
+                resourceName);
+    }
+
+    /**
+     * Checks that the specified role has at least one of the expected permissions on the resource.
+     *
+     * @param roleName the role name
+     * @param resourceName the resource name
+     * @param grantModeColumn the grant mode column
+     * @param expectedPermissions the permissions to check for
+     * @return {@code true} if the role has at least one of the expected permissions on the resource, {@code false} otherwise.
+     */
+    private Set<Permission> getExistingPermissions(String roleName,
+                                                   String resourceName,
+                                                   String grantModeColumn,
+                                                   Set<Permission> expectedPermissions)
+    {
+        UntypedResultSet rs = process("SELECT %s FROM " + ROLE_PERMISSIONS_TABLE + " WHERE role = '%s' AND resource = '%s'",
+                                      grantModeColumn,
+                                      roleName,
+                                      resourceName);
+
+        if (rs.isEmpty())
+            return Collections.emptySet();
+
+        Row one = rs.one();
+ 
+        if (!one.has(grantModeColumn))
+            return Collections.emptySet();
+
+        Set<Permission> existingPermissions = Sets.newHashSetWithExpectedSize(expectedPermissions.size());
+        for (String permissionName : one.getSet(grantModeColumn, UTF8Type.instance))
+        {
+            Permission permission = Permissions.permission(permissionName);
+            if (expectedPermissions.contains(permission))
+                existingPermissions.add(permission);
+        }
+        return existingPermissions;
     }
 
     private static String columnForGrantMode(GrantMode grantMode)

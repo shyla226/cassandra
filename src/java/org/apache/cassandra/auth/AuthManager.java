@@ -15,6 +15,8 @@ import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verbs;
@@ -610,31 +612,39 @@ public final class AuthManager
         }
 
         @Override
-        public void grant(AuthenticatedUser performer,
-                          Set<Permission> permissions,
-                          IResource resource,
-                          RoleResource grantee,
-                          GrantMode... grantModes)
+        public Set<Permission> grant(AuthenticatedUser performer,
+                                     Set<Permission> permissions,
+                                     IResource resource,
+                                     RoleResource grantee,
+                                     GrantMode... grantModes)
         {
             // We do not want to load those roles within the cache so we have to fetch them directly from 
             // the IRoleManager
             Set<RoleResource> roles = roleManager.getRoles(grantee, true);
-            authorizer.grant(performer, permissions, resource, grantee, grantModes);
-            invalidateRoles(roles);
+            Set<Permission> granted = authorizer.grant(performer, permissions, resource, grantee, grantModes);
+            if (!granted.isEmpty())
+            {
+                invalidateRoles(roles);
+            }
+            return granted;
         }
 
         @Override
-        public void revoke(AuthenticatedUser performer,
-                           Set<Permission> permissions,
-                           IResource resource,
-                           RoleResource revokee,
-                           GrantMode... grantModes)
+        public Set<Permission> revoke(AuthenticatedUser performer,
+                                      Set<Permission> permissions,
+                                      IResource resource,
+                                      RoleResource revokee,
+                                      GrantMode... grantModes)
         {
             // We do not want to load those roles within the cache so we have to fetch them directly from
             // the IRoleManager
             Set<RoleResource> roles = roleManager.getRoles(revokee, true);
-            authorizer.revoke(performer, permissions, resource, revokee, grantModes);
-            invalidateRoles(roles);
+            Set<Permission> revoked = authorizer.revoke(performer, permissions, resource, revokee, grantModes);
+            if (!revoked.isEmpty())
+            {
+                invalidateRoles(roles);
+            }
+            return revoked;
         }
 
         @Override
