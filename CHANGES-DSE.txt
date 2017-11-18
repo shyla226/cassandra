@@ -1,9 +1,10 @@
 DSE 5.1.6
  * Skip building views during base table streams on range movements (Backport CASSANDRA-13065) (DB-1311)
  * Add invalid-sstable-root JVM argument to all relevant test entries in build.xml (DB-1133)
+ * Do not leak body buffer in case of protocol exceptions and upgrade Netty to 4.0.52 (DB-1257)
+ * Ensure that the list and set selectors elements are all of the same type (DB-905)
 Merged from dse5.0:
  * Change token allocation to use RF=1 method when RF equals rack count (DB-1253)
- * Memoize seeds (DB-865)
  * Add -Dcassandra.native_transport_startup_delay_seconds to delay startup of native transport, default 0 (DB-1315)
  * New metrics for batchlog-replays (DB-1314)
  * Failed bootstrap streaming leaves auth uninitialized (DB-1274)
@@ -12,17 +13,15 @@ Merged from dse5.0:
  * Add 'nodetool abortrebuild' (DB-1234)
  * Make assassinate more resilient to missing tokens (DB-1283)
  * Add metrics on coordination of read commands (DB-637)
-
-
-DSE 5.1.4
- * Do not leak body buffer in case of protocol exceptions and upgrade Netty to 4.0.52 (DB-1257)
- * Ensure that the list and set selectors elements are all of the same type (DB-905)
- * Always define execution_profiles in cqlsh.py (DB-1150)
- * Fix stress-tool not outputting row/s (DB-1123)
-Merged from dse5.0:
  * Added "-Dcassandra.replace_consistency" to support replace from multiple sources (DB-247)
  * Add cross_dc_rtt_in_ms to cross dc requests, default 0 (DB-854)
  * Backport CASSANDRA-13299, Throttle base partitions during MV repair streaming to prevent OOM (DB-878)
+
+
+DSE 5.1.4
+ * Always define execution_profiles in cqlsh.py (DB-1150)
+ * Fix stress-tool not outputting row/s (DB-1123)
+Merged from dse5.0:
  * Backport CASSANDRA-13079: Warn user to run full repair when increasing replication factor (DB-602)
  * Add anticompaction metrics and warn users when incremental repair is inefficient (DB-689)
  * Make scrub validate the partition key, add validation to schema mutation creation (DB-657)
