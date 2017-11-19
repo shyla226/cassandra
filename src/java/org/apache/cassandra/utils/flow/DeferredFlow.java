@@ -58,7 +58,7 @@ public abstract class DeferredFlow<T> extends Flow<T>
     @VisibleForTesting
     static <T> DeferredFlow<T> createWithTimeout(long timeoutNanos)
     {
-        return create(System.nanoTime() + timeoutNanos, TPC.bestTPCScheduler(), () -> Flow.error(new TimeoutException()));
+        return create(System.nanoTime() + timeoutNanos, () -> TPC.bestTPCScheduler(), () -> Flow.error(new TimeoutException()));
     }
 
     /**
@@ -72,8 +72,8 @@ public abstract class DeferredFlow<T> extends Flow<T>
      *
      * @return a deferred flow implementation
      */
-    public static <T> DeferredFlow<T> create(long deadlineNanos, StagedScheduler scheduler, Supplier<Flow<T>> timeoutSupplier)
+    public static <T> DeferredFlow<T> create(long deadlineNanos, Supplier<StagedScheduler> schedulerSupplier, Supplier<Flow<T>> timeoutSupplier)
     {
-        return new DeferredFlowImpl<>(deadlineNanos, scheduler, timeoutSupplier);
+        return new DeferredFlowImpl<>(deadlineNanos, schedulerSupplier, timeoutSupplier);
     }
 }

@@ -79,7 +79,7 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
 
         long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(command().getTimeout());
         this.result = DeferredFlow.create(queryStartNanos() + timeoutNanos,
-                                          resolver.command.getScheduler(),
+                                          resolver.command.getSchedulerSupplier(),
                                           this::generateFlowOnTimeout);
 
         if (logger.isTraceEnabled())

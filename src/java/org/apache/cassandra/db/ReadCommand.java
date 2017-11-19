@@ -35,6 +35,8 @@ import org.apache.cassandra.utils.flow.Flow;
 
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.Schedulable;
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.selection.ResultBuilder;
@@ -143,6 +145,11 @@ public abstract class ReadCommand implements ReadQuery, Schedulable
     public boolean isEmpty()
     {
         return false;
+    }
+
+    public Supplier<StagedScheduler> getSchedulerSupplier()
+    {
+        return () -> TPC.bestTPCScheduler();
     }
 
     /**

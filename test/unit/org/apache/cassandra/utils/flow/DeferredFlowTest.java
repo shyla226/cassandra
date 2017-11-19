@@ -175,7 +175,7 @@ public class DeferredFlowTest
     public void testTimeout() throws Exception
     {
         final DeferredFlow<Integer> deferred = DeferredFlow.create(System.nanoTime() + TimeUnit.SECONDS.toNanos(1),
-                                                                   TPC.bestTPCScheduler(),
+                                                                   () -> TPC.bestTPCScheduler(),
                                                                    () -> Flow.error(new TimeoutException()));
 
         try

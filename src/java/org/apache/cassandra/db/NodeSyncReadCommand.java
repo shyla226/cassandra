@@ -20,9 +20,12 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.Collection;
+import java.util.function.Supplier;
+
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -90,6 +93,12 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
              DataRange.forTokenRange(segment.range),
              null,
              nodeSyncScheduler);
+    }
+
+    @Override
+    public Supplier<StagedScheduler> getSchedulerSupplier()
+    {
+        return nodeSyncScheduler == null ? super.getSchedulerSupplier() : () -> nodeSyncScheduler;
     }
 
     @Override

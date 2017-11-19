@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,7 +54,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
     private final AtomicReference<Flow<T>> source;
     private final long deadlineNanos;
     private final Supplier<Flow<T>> timeoutSupplier;
-    private final StagedScheduler scheduler;
+    private final Supplier<StagedScheduler> schedulerSupplier;
 
     private volatile FlowSubscriber<T> subscriber;
     private volatile FlowSubscriptionRecipient subscriptionRecipient;
@@ -62,13 +63,13 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
 
     private final AtomicBoolean subscribed = new AtomicBoolean(false);
 
-    DeferredFlowImpl(long deadlineNanos, StagedScheduler scheduler, Supplier<Flow<T>> timeoutSupplier)
+    DeferredFlowImpl(long deadlineNanos, Supplier<StagedScheduler> schedulerSupplier, Supplier<Flow<T>> timeoutSupplier)
     {
-        assert scheduler != null;
+        assert schedulerSupplier != null;
         this.source = new AtomicReference<>(null);
         this.deadlineNanos = deadlineNanos;
         this.timeoutSupplier = timeoutSupplier;
-        this.scheduler = scheduler;
+        this.schedulerSupplier = schedulerSupplier;
     }
 
     public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
@@ -125,7 +126,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
             return;
         }
 
-        timeoutTask = scheduler.scheduleDirect(() -> {
+        timeoutTask = schedulerSupplier.get().scheduleDirect(() -> {
             timeoutTask = null;
             if (!hasSource()) // important to check because it is expensive to create an exception, due to the callstack
                 onSource(timeoutSupplier.get());
