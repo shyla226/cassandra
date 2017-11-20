@@ -4,6 +4,11 @@
 #
 # Please see the included license file for details.
 
+if [ -z "$BASH_VERSION" ]; then
+   exec bash "$0" "$@"
+   exit 1  # Will only get here if exec itself fails to run
+fi
+
 if [ "x$CASSANDRA_INCLUDE" = "x" ]; then
     # Locations (in order) to use when searching for an include file.
     for include in "`dirname "$0"`/cassandra.in.sh" \
@@ -42,12 +47,12 @@ if [ "x$MAX_HEAP_SIZE" = "x" ]; then
 fi
 
 set -f
-ARGS=""
+ARGS=()
 JVM_ARGS=""
 SSL_FILE=$HOME/.cassandra/nodesync-ssl.properties
 while true
 do
-  if [ ! $1 ]; then break; fi
+  if [ ! "$1" ]; then break; fi
   case $1 in
     -cs | --cql-ssl | -js | --jmx-ssl)
       if [ -f $SSL_FILE ]
@@ -61,16 +66,17 @@ do
       JVM_ARGS="$JVM_ARGS $1"
       ;;
     *)
-      ARGS="$ARGS $1"
+      ARGS+=("$1")
       ;;
   esac
   shift
 done
+set -- "${ARGS[@]}"
 
 "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" $JVM_OPTS -Xmx$MAX_HEAP_SIZE \
         -Dcassandra.storagedir="$cassandra_storagedir" \
         -Dlogback.configurationFile=logback-tools.xml \
         $JVM_ARGS \
-        com.datastax.bdp.db.tools.NodeSync $ARGS
+        com.datastax.bdp.db.tools.NodeSync "$@"
 
 # vi:ai sw=4 ts=4 tw=0 et
