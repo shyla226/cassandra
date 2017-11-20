@@ -39,12 +39,16 @@ import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.net.*;
+import org.apache.cassandra.net.Verbs.Group;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.flow.Flow;
 
 public class DataResolver extends ResponseResolver<FlowablePartition>
 {
+    private static final boolean DROP_OVERSIZED_READ_REPAIR_MUTATIONS =
+            Boolean.getBoolean("cassandra.drop_oversized_readrepair_mutations");
+    
     DataResolver(ReadCommand command, ReadContext ctx, int maxResponseCount)
     {
         super(command, ctx, maxResponseCount);
@@ -495,20 +499,52 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
             public void close()
             {
                 for (int i = 0; i < repairs.length; i++)
+                    if (null != repairs[i])
+                        sendRepairMutation(repairs[i], sources[i]);
+            }
+
+            private void sendRepairMutation(PartitionUpdate partition, InetAddress destination)
+            {
+                Mutation mutation = new Mutation(partition);
+
+                MessagingVersion messagingVersion = MessagingService.instance().getVersion(destination);
+                long mutationSize = Mutation.serializers.get(messagingVersion.groupVersion(Group.WRITES))
+                                                        .serializedSize(mutation);
+
+                int maxMutationSize = DatabaseDescriptor.getMaxMutationSize();
+
+                if (mutationSize <= maxMutationSize)
                 {
-                    PartitionUpdate repair = repairs[i];
-                    if (repair == null)
-                        continue;
-
-                    InetAddress source = sources[i];
-                    // use a separate verb here because we don't want these to be get the white glove hint-
-                    // on-timeout behavior that a "real" mutation gets
-                    Tracing.trace("Sending read-repair-mutation to {}", source);
+                    Tracing.trace("Sending read-repair-mutation to {}", destination);
                     if (ctx.readObserver != null)
-                        ctx.readObserver.onRepair(source, repair);
+                        ctx.readObserver.onRepair(destination, partition);
 
-                    Request<Mutation, EmptyPayload> request = Verbs.WRITES.READ_REPAIR.newRequest(source, new Mutation(repairs[i]));
+                    // use a separate verb here to avoid writing hints on timeouts
+                    Request<Mutation, EmptyPayload> request = Verbs.WRITES.READ_REPAIR.newRequest(destination, mutation);
                     MessagingService.instance().send(request, repairResults.getRepairCallback());
+                    ColumnFamilyStore.metricsFor(command.metadata().id).readRepairRequests.mark();
+                }
+                else if (DROP_OVERSIZED_READ_REPAIR_MUTATIONS)
+                {
+                    logger.debug("Encountered an oversized ({}/{}) read repair mutation for table {}, key {}, node {}",
+                                 mutationSize,
+                                 maxMutationSize,
+                                 command.metadata(),
+                                 command.metadata().partitionKeyType.getString(partitionKey.getKey()),
+                                 destination);
+                }
+                else
+                {
+                    logger.warn("Encountered an oversized ({}/{}) read repair mutation for table {}, key {}, node {}",
+                                mutationSize,
+                                maxMutationSize,
+                                command.metadata(),
+                                command.metadata().partitionKeyType.getString(partitionKey.getKey()),
+                                destination);
+
+                    int blockFor = ctx.requiredResponses();
+                    Tracing.trace("Timed out while read-repairing after receiving all {} data and digest responses", blockFor);
+                    throw new ReadTimeoutException(ctx.consistencyLevel, blockFor - 1, blockFor, true);
                 }
             }
         }
