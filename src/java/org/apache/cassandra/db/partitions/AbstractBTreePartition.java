@@ -27,7 +27,6 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
-import org.apache.cassandra.utils.btree.BTreeSearchIterator;
 import org.apache.cassandra.utils.flow.Flow;
 
 import static org.apache.cassandra.utils.btree.BTree.Dir.desc;
@@ -133,7 +132,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         final Holder current = holder();
         return new SearchIterator<Clustering, Row>()
         {
-            private final SearchIterator<Clustering, Row> rawIter = new BTreeSearchIterator<>(current.tree, metadata().comparator, desc(reversed));
+            private final SearchIterator<Clustering, Row> rawIter = BTree.slice(current.tree, metadata().comparator, desc(reversed));
             private final DeletionTime partitionDeletion = current.deletionInfo.getPartitionDeletion();
 
             public Row next(Clustering clustering)
