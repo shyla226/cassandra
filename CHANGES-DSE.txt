@@ -4,6 +4,7 @@ DSE 5.1.6
  * Do not leak body buffer in case of protocol exceptions and upgrade Netty to 4.0.52 (DB-1257)
  * Ensure that the list and set selectors elements are all of the same type (DB-905)
 Merged from dse5.0:
+ * nodetool arguments with spaces print script errors (DB-1183)
  * Change token allocation to use RF=1 method when RF equals rack count (DB-1253)
  * Add -Dcassandra.native_transport_startup_delay_seconds to delay startup of native transport, default 0 (DB-1315)
  * New metrics for batchlog-replays (DB-1314)
