@@ -16,6 +16,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+if [ -z "$BASH_VERSION" ]; then
+   exec bash "$0" "$@"
+   exit 1  # Will only get here if exec itself fails to run
+fi
+
 if [ "`basename "$0"`" = 'nodeprobe' ]; then
     echo "***************************************************************" >&2
     echo "WARNING: $0 is obsolete, use `dirname "$0"`/nodetool instead" >&2
@@ -66,13 +71,13 @@ fi
 
 # JMX Port passed via cmd line args (-p 9999 / --port 9999 / --port=9999)
 # should override the value from cassandra-env.sh
-ARGS=""
+ARGS=()
 JVM_ARGS=""
 SSL_FILE=$HOME/.cassandra/nodetool-ssl.properties
 while true
 do
-  if [ ! $1 ]; then break; fi
-  case $1 in
+  if [ ! "$1" ]; then break; fi
+  case "$1" in
     -p)
       JMX_PORT=$2
       shift
@@ -95,11 +100,12 @@ do
       JVM_ARGS="$JVM_ARGS $1"
       ;;
     *)
-      ARGS="$ARGS $1"
+      ARGS+=("$1")
       ;;
   esac
   shift
 done
+set -- "${ARGS[@]}"
 
 if [ "x$MAX_HEAP_SIZE" = "x" ]; then
     MAX_HEAP_SIZE="128m"
@@ -109,6 +115,6 @@ fi
         -Dcassandra.storagedir="$cassandra_storagedir" \
         -Dlogback.configurationFile=logback-tools.xml \
         $JVM_ARGS \
-        org.apache.cassandra.tools.NodeTool -p $JMX_PORT $ARGS
+        org.apache.cassandra.tools.NodeTool -p $JMX_PORT "$@"
 
 # vi:ai sw=4 ts=4 tw=0 et
