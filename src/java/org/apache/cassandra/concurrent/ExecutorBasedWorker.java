@@ -51,6 +51,9 @@ class ExecutorBasedWorker extends Scheduler.Worker
 
     private volatile boolean disposed;
 
+    /** Used by IOScheduler to put inactive threads to sleep */
+    private long unusedSince;
+
     protected ExecutorBasedWorker(ScheduledExecutorService executor, boolean shutdown)
     {
         this.executor = executor;
@@ -191,5 +194,15 @@ class ExecutorBasedWorker extends Scheduler.Worker
         }
 
         return sr;
+    }
+
+    public long unusedTime(long currrentTime)
+    {
+        return currrentTime - unusedSince;
+    }
+
+    public void markUse(long currentTime)
+    {
+        unusedSince = currentTime;
     }
 }

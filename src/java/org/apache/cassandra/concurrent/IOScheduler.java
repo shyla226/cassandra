@@ -17,11 +17,14 @@
  */
 package org.apache.cassandra.concurrent;
 
-import java.util.Queue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.Deque;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
@@ -51,8 +54,8 @@ import io.reactivex.internal.disposables.EmptyDisposable;
  * {@link IOScheduler#MAX_POOL_SIZE} workers. When this pool size is exceeded, any worker returned to the pool is expired
  * immediately. If the pool size reaches below {@link IOScheduler#MIN_POOL_SIZE} workers, then the workers returned
  * when the queue is below this threshold are never expired. Otherwise, if the queue size is between MIN and MAX when
- * the worker is returned, the worker is used to schedule a task after {@link #KEEP_ALIVE_TIME_SECS} seconds. This task
- * will expire the worker if it is still in the queue, and the queue is still bigger than {@link IOScheduler#MIN_POOL_SIZE}.
+ * the worker is returned, the periodic clean-up task will expire workers that have been unused for more than
+ * {@link #KEEP_ALIVE_TIME_SECS} seconds.
  * <p>
  * Note 1:
  * The IO scheduler currently uses {@link TPCRunnable} instances on NUM_CORES +1, but we could extend the metrics system
@@ -78,17 +81,19 @@ public class IOScheduler extends StagedScheduler
     private final Function<ThreadFactory, ExecutorBasedWorker> workerSupplier;
     private final AtomicReference<WorkersPool> pool;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
+    private final int keepAliveMillis;
 
     IOScheduler()
     {
-        this(factory -> ExecutorBasedWorker.singleThreaded(factory));
+        this(factory -> ExecutorBasedWorker.singleThreaded(factory), KEEP_ALIVE_TIME_SECS * 1000);
     }
 
     @VisibleForTesting
-    IOScheduler(Function<ThreadFactory, ExecutorBasedWorker> workerSupplier)
+    IOScheduler(Function<ThreadFactory, ExecutorBasedWorker> workerSupplier, int keepAliveMillis)
     {
         this.workerSupplier = workerSupplier;
-        this.pool = new AtomicReference<>(new WorkersPool(workerSupplier));
+        this.pool = new AtomicReference<>(new WorkersPool(workerSupplier, keepAliveMillis));
+        this.keepAliveMillis = keepAliveMillis;
     }
 
     public int metricsCoreId()
@@ -135,7 +140,7 @@ public class IOScheduler extends StagedScheduler
     {
         while (pool.get() == null)
         {
-            WorkersPool next = new WorkersPool(workerSupplier);
+            WorkersPool next = new WorkersPool(workerSupplier, keepAliveMillis);
             if (pool.compareAndSet(null, next))
                 break;
 
@@ -184,22 +189,29 @@ public class IOScheduler extends StagedScheduler
     {
         private final ThreadFactory threadFactory;
         private final Function<ThreadFactory, ExecutorBasedWorker> workerSupplier;
-        private final Queue<ExecutorBasedWorker> workersQueue;
+        private final Deque<ExecutorBasedWorker> workersQueue;
         private final CompositeDisposable allWorkers;
         private final AtomicBoolean shutdown;
+        private final ScheduledFuture<?> killTimer;
+        private final AtomicInteger workersQueueSize;
 
-        WorkersPool(Function<ThreadFactory, ExecutorBasedWorker> workerSupplier)
+        WorkersPool(Function<ThreadFactory, ExecutorBasedWorker> workerSupplier, int keepAliveMillis)
         {
             this.threadFactory = new IOThread.Factory();
             this.workerSupplier = workerSupplier;
-            this.workersQueue = new LinkedBlockingQueue<>(MAX_POOL_SIZE);
+            this.workersQueue = new ConcurrentLinkedDeque<>();
+            this.workersQueueSize = new AtomicInteger(0);   // workers queue doesn't track its size
+                                                                      // we do that explicitly
             this.allWorkers = new CompositeDisposable();
             this.shutdown = new AtomicBoolean(false);
+
+            // Start with one thread where we can put the periodic clean-up task
+            this.killTimer = startKillTimer(keepAliveMillis);
         }
 
         int cachedSize()
         {
-            return workersQueue.size();
+            return workersQueueSize.get();
         }
 
         ExecutorBasedWorker get()
@@ -207,11 +219,11 @@ public class IOScheduler extends StagedScheduler
             if (shutdown.get() || allWorkers.isDisposed())
                 return ExecutorBasedWorker.DISPOSED;
 
-            while (!workersQueue.isEmpty())
+            ExecutorBasedWorker threadWorker = workersQueue.pollFirst();
+            if (threadWorker != null)
             {
-                ExecutorBasedWorker threadWorker = workersQueue.poll();
-                if (threadWorker != null)
-                    return threadWorker;
+                workersQueueSize.decrementAndGet();
+                return threadWorker;
             }
 
             // No cached worker found, so create a new one.
@@ -220,19 +232,50 @@ public class IOScheduler extends StagedScheduler
             return w;
         }
 
+        private ScheduledFuture<?> startKillTimer(int keepAliveMillis)
+        {
+            if (MAX_POOL_SIZE <= MIN_POOL_SIZE)
+                return null; // we don't need a timer as we will not grow beyond MIN_POOL_SIZE
+
+            return ScheduledExecutors.scheduledFastTasks.scheduleAtFixedRate(() -> {
+                if (workersQueueSize.get() <= MIN_POOL_SIZE)
+                    return;
+
+                long runStartTime = System.currentTimeMillis();
+
+                while (true)
+                {
+                    ExecutorBasedWorker w = workersQueue.peekLast();
+                    if (w == null)
+                        break;
+                    if (w.unusedTime(runStartTime) < keepAliveMillis)
+                        break;  // we are done, all others in the queue will have been used after this one
+
+                    // This removal below should almost always finish in one step.
+                    if (!workersQueue.removeLastOccurrence(w))
+                        break;  // item got removed from the front, i.e. the stack has only items added after this run
+                                // started; no need to continue this run
+
+                    w.dispose();
+                    if (workersQueueSize.decrementAndGet() <= MIN_POOL_SIZE)
+                        break;
+                }
+            }, keepAliveMillis, keepAliveMillis, TimeUnit.MILLISECONDS);
+        }
+
         void release(ExecutorBasedWorker worker)
         {
-            if (shutdown.get() || !workersQueue.offer(worker))
-                worker.dispose(); // no space or shutdown
+            if (!shutdown.get() && workersQueueSize.get() < MAX_POOL_SIZE)
+            {
+                // Claim the slot. We may get over the limit if multiple threads race this. Even if that happens,
+                // we will only temporarily overrun the count by a little.
+                workersQueueSize.incrementAndGet();
+                worker.markUse(System.currentTimeMillis());
+                // Add to the front of the queue (LIFO semantics) so we can keep reusing as few threads as possible.
+                workersQueue.addFirst(worker);  // can't fail
+            }
             else
-                worker.scheduleDirect(() -> {
-                    if (shutdown.get() || workersQueue.size() > MIN_POOL_SIZE)
-                    {   // there's a risk that the queue may decrease to less than MIN_POOL_SIZE if two threads
-                        // race each other, but I think this is of no consequence
-                        if (workersQueue.remove(worker))
-                            worker.dispose();
-                    }
-                }, KEEP_ALIVE_TIME_SECS, TimeUnit.SECONDS);
+                worker.dispose(); // no space or shutdown
         }
 
         void shutdown()
@@ -240,6 +283,8 @@ public class IOScheduler extends StagedScheduler
             if (!shutdown.compareAndSet(false, true))
                 return;
 
+            if (killTimer != null)
+                killTimer.cancel(false);
             allWorkers.dispose();
         }
     }
@@ -252,6 +297,8 @@ public class IOScheduler extends StagedScheduler
 
         PooledTaskWorker(WorkersPool pool, Runnable task)
         {
+            if (pool == null)
+                throw new RejectedExecutionException("Task sent to a shut down scheduler.");
             this.pool = pool;
             this.worker = pool.get();
             this.task = task;
@@ -284,6 +331,8 @@ public class IOScheduler extends StagedScheduler
 
         PooledWorker(WorkersPool pool)
         {
+            if (pool == null)
+                throw new RejectedExecutionException("Task sent to a shut down scheduler.");
             this.tasks = new CompositeDisposable();
             this.pool = pool;
             this.worker = pool.get();

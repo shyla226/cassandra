@@ -26,11 +26,13 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -123,7 +125,7 @@ public class IOSchedulerTest
     public void testWorkersCachedAndReleased()
     {
         TestWorker testWorker = new TestWorker();
-        scheduler = new IOScheduler(threadFactory -> testWorker);
+        scheduler = new IOScheduler(threadFactory -> testWorker, 25);
         assertEquals(0, scheduler.numCachedWorkers());
 
         Scheduler.Worker[] workers = new Scheduler.Worker[IOScheduler.MAX_POOL_SIZE + 1];
@@ -136,12 +138,12 @@ public class IOSchedulerTest
         for (Scheduler.Worker worker : workers)
             worker.dispose();
 
-        assertEquals(IOScheduler.MAX_POOL_SIZE, scheduler.numCachedWorkers()); // only MAX POOL size cached...
-        assertEquals(IOScheduler.MAX_POOL_SIZE, testWorker.tasks.size()); // ...and scheduled for checking later on
+        assertEquals(IOScheduler.MAX_POOL_SIZE, scheduler.numCachedWorkers()); // only MAX POOL size cached
+        assertEquals(0, testWorker.tasks.size()); // no task added for each created worker
         assertEquals(workers.length - IOScheduler.MAX_POOL_SIZE, testWorker.numTimesDisposed); // remaining tasks alredy disposed
 
-        for (Runnable disposeTask : testWorker.tasks)
-            disposeTask.run();
+        // Wait long enough for clean-up to be run after the keep alive has expired.
+        Uninterruptibles.sleepUninterruptibly(55, TimeUnit.MILLISECONDS);
 
         assertEquals(IOScheduler.MIN_POOL_SIZE, scheduler.numCachedWorkers());
         assertEquals(workers.length - IOScheduler.MIN_POOL_SIZE, testWorker.numTimesDisposed); // all tasks disposed except for MIN POOL SIZE
@@ -151,23 +153,23 @@ public class IOSchedulerTest
     public void testWorkersDisposedWithAllCalls() throws InterruptedException
     {
         TestWorker testWorker = new TestWorker();
-        scheduler = new IOScheduler(threadFactory -> testWorker);
+        scheduler = new IOScheduler(threadFactory -> testWorker, 25);
 
         scheduler.execute(() -> numChecks++, ExecutorLocals.create(), TPCTaskType.UNKNOWN);
         assertEquals(1, testWorker.tasks.size());
-        testWorker.tasks.remove(0).run(); // the first task is the user action
+        testWorker.tasks.remove(0).run(); // the second task is the user action
         assertEquals(1, scheduler.numCachedWorkers());
         assertEquals(1, numChecks);
 
         scheduler.scheduleDirect(() -> numChecks++, 1, TimeUnit.MICROSECONDS);
-        assertEquals(2, testWorker.tasks.size());
-        testWorker.tasks.remove(1).run(); // the second task is the user action
+        assertEquals(1, testWorker.tasks.size());
+        testWorker.tasks.remove(0).run(); // the second task is the user action
         assertEquals(2, numChecks);
 
         assertEquals(1, scheduler.numCachedWorkers());
 
-        for (Runnable disposeTask : testWorker.tasks)
-            disposeTask.run();
+        // Wait long enough for clean-up to be run after the keep alive has expired.
+        Uninterruptibles.sleepUninterruptibly(55, TimeUnit.MILLISECONDS);
 
         assertEquals(0, testWorker.numTimesDisposed);
         assertEquals(1, scheduler.numCachedWorkers());
@@ -177,30 +179,52 @@ public class IOSchedulerTest
     public void testShutdown()
     {
         TestWorker worker = new TestWorker();
-        scheduler = new IOScheduler((factory) -> worker);
+        scheduler = new IOScheduler((factory) -> worker, 25);
 
         scheduler.createWorker().dispose();
-        assertEquals(1, worker.tasks.size());
+        assertEquals(0, worker.tasks.size());
         assertEquals(1, scheduler.numCachedWorkers());
-        worker.tasks.remove(0).run();
+        // Wait long enough for clean-up to be run after the keep alive has expired.
+        Uninterruptibles.sleepUninterruptibly(55, TimeUnit.MILLISECONDS);
         assertEquals(1, scheduler.numCachedWorkers());
         assertEquals(0, worker.numTimesDisposed);
 
         scheduler.shutdown();
         assertEquals(1, worker.numTimesDisposed);
         assertEquals(0, scheduler.numCachedWorkers());
+
+        try
+        {
+            scheduler.execute(() -> {}, null, TPCTaskType.UNKNOWN);
+            fail("Scheduler is shut down, expected exception.");
+        }
+        catch (RejectedExecutionException e)
+        {
+            // expected
+        }
+
+        try
+        {
+            scheduler.scheduleDirect(() -> {}, 1, TimeUnit.MILLISECONDS);
+            fail("Scheduler is shut down, expected exception.");
+        }
+        catch (RejectedExecutionException e)
+        {
+            // expected
+        }
     }
 
     @Test
     public void testRestart()
     {
         TestWorker worker = new TestWorker();
-        scheduler = new IOScheduler((factory) -> worker);
+        scheduler = new IOScheduler((factory) -> worker, 25);
 
         scheduler.createWorker().dispose();
-        assertEquals(1, worker.tasks.size());
+        assertEquals(0, worker.tasks.size());
         assertEquals(1, scheduler.numCachedWorkers());
-        worker.tasks.remove(0).run();
+        // Wait long enough for clean-up to be run after the keep alive has expired.
+        Uninterruptibles.sleepUninterruptibly(55, TimeUnit.MILLISECONDS);
         assertEquals(1, scheduler.numCachedWorkers());
         assertEquals(0, worker.numTimesDisposed);
 
@@ -253,6 +277,25 @@ public class IOSchedulerTest
                           }, null, TPCTaskType.UNKNOWN);
 
         completed.get(10, TimeUnit.SECONDS);
+    }
+
+    @Test
+    public void quickStressTest() throws InterruptedException, ExecutionException, TimeoutException
+    {
+        scheduler = new IOScheduler();
+        ExecutorService executor = Executors.newFixedThreadPool(IOScheduler.MAX_POOL_SIZE);
+        int numIterations = 5_000_000;
+
+        CountDownLatch latch = new CountDownLatch(numIterations);
+        for (int i = 0; i < numIterations; ++i)
+        {
+            executor.execute(() -> {
+                scheduler.execute(() -> {
+                    latch.countDown();
+                }, null, TPCTaskType.UNKNOWN);
+            });
+        }
+        assertTrue(latch.await(1, TimeUnit.MINUTES));
     }
 
     private synchronized void check(Runnable runnable)
