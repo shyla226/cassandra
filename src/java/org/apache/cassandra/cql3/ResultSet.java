@@ -22,6 +22,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import io.netty.buffer.ByteBuf;
 
 import org.apache.cassandra.cql3.selection.ResultBuilder;
@@ -263,6 +265,8 @@ public class ResultSet
         public ResultMetadata(List<ColumnSpecification> names)
         {
             this(computeResultMetadataId(names), EnumSet.noneOf(Flag.class), names, names.size(), PagingResult.NONE);
+            if (!names.isEmpty() && ColumnSpecification.allInSameTable(names))
+                flags.add(Flag.GLOBAL_TABLES_SPEC);
         }
 
         public ResultMetadata(MD5Digest digest, List<ColumnSpecification> names)
@@ -283,8 +287,6 @@ public class ResultSet
 
         public ResultMetadata copy()
         {
-
-
             return new ResultMetadata(resultMetadataId, EnumSet.copyOf(flags), names, columnCount, pagingResult);
         }
 
@@ -301,6 +303,24 @@ public class ResultSet
         public int valueCount()
         {
             return names == null ? columnCount : names.size();
+        }
+
+        @VisibleForTesting
+        public EnumSet<Flag> getFlags()
+        {
+            return flags;
+        }
+
+        @VisibleForTesting
+        public int getColumnCount()
+        {
+            return columnCount;
+        }
+
+        @VisibleForTesting
+        public PagingResult getPagingResult()
+        {
+            return pagingResult;
         }
 
         /**

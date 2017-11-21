@@ -99,4 +99,12 @@ public interface CQLStatement
      * @return the scheduler for this statement, or null, if no specific scheduler is required because the operations are non blocking.
      */
     @Nullable public Scheduler getScheduler();
+
+    /**
+     * Whether or not this CQL Statement has LWT conditions
+     */
+    default public boolean hasConditions()
+    {
+        return false;
+    }
 }

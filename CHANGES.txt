@@ -1,4 +1,6 @@
 4.0
+ * Make LWTs send resultset metadata on every request (CASSANDRA-13992)
+ * Fix flaky indexWithFailedInitializationIsNotQueryableAfterPartialRebuild (CASSANDRA-13963)
  * Introduce leaf-only iterator (CASSANDRA-9988)
  * Allow only one concurrent call to StatusLogger (CASSANDRA-12182)
  * Refactoring to specialised functional interfaces (CASSANDRA-13982)

@@ -18,6 +18,8 @@
 package org.apache.cassandra.transport.messages;
 
 
+import com.google.common.annotations.VisibleForTesting;
+
 import io.netty.buffer.ByteBuf;
 
 import org.apache.cassandra.cql3.ColumnSpecification;
@@ -311,6 +313,12 @@ public abstract class ResultMessage extends Message.Response
             this.thriftStatementId = thriftStatementId;
             this.metadata = metadata;
             this.resultMetadata = resultMetadata;
+        }
+
+        @VisibleForTesting
+        public Prepared withResultMetadata(ResultSet.ResultMetadata resultMetadata)
+        {
+            return new Prepared(statementId, resultMetadata.getResultMetadataId(), metadata, resultMetadata);
         }
 
         @Override

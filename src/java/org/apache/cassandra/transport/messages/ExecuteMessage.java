@@ -31,6 +31,8 @@ import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.ResultSet;
+import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
 import org.apache.cassandra.service.ClientState;
@@ -144,12 +146,18 @@ public class ExecuteMessage extends Message.Request
                                           ProtocolVersion version = options.getProtocolVersion();
                                           if (version.isGreaterOrEqualTo(ProtocolVersion.V5, ProtocolVersion.DSE_V2))
                                           {
-                                              // Starting with V5 we can rely on the result metadata id coming with execute message in order to
-                                              // check if there was a change, comparing it with metadata that's about to be returned to client.
-                                              if (!resultMetadata.getResultMetadataId().equals(resultMetadataId))
-                                                  resultMetadata.setMetadataChanged();
-                                              else if (options.skipMetadata())
-                                                  resultMetadata.setSkipMetadata();
+                                              // For LWTs, always send a resultset metadata but avoid setting a metadata changed flag. This way
+                                              // Client will always receive fresh metadata, but will avoid caching and reusing it. See CASSANDRA-13992
+                                              // for details.
+                                              if (!statement.hasConditions())
+                                              {
+                                                  // Starting with V5 we can rely on the result metadata id coming with execute message in order to
+                                                  // check if there was a change, comparing it with metadata that's about to be returned to client.
+                                                  if (!resultMetadata.getResultMetadataId().equals(resultMetadataId))
+                                                      resultMetadata.setMetadataChanged();
+                                                  else if (options.skipMetadata())
+                                                      resultMetadata.setSkipMetadata();
+                                              }
                                           }
                                           else
                                           {

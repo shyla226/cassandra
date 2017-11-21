@@ -504,6 +504,11 @@ public class BatchStatement implements CQLStatement
         return Pair.create(casRequest, columnsWithConditions);
     }
 
+    public boolean hasConditions()
+    {
+        return hasConditions;
+    }
+
     public Single<ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         return hasConditions
