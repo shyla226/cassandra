@@ -341,14 +341,6 @@ public class DatabaseDescriptorTest
         DatabaseDescriptor.setConfig(testConfig = new Config());
         testConfig.system_info_encryption.enabled = true;
         testConfig.system_info_encryption.key_provider = "com.datastax.bdp.cassandra.crypto.KmipKeyProviderFactory";
-        testConfig.system_info_encryption.kmip_host = "this-crazy-hostname-hopefully.never-exists-in-the-world.datastax.lan";
-        assertConfigException(DatabaseDescriptor::applyEncryptionContext, "system_info_encryption.kmip_host 'this-crazy-hostname-hopefully.never-exists-in-the-world.datastax.lan' " +
-                                                                          "is not a valid, resolvable host name: java.net.UnknownHostException: " +
-                                                                          "this-crazy-hostname-hopefully.never-exists-in-the-world.datastax.lan: Name or service not known");
-
-        DatabaseDescriptor.setConfig(testConfig = new Config());
-        testConfig.system_info_encryption.enabled = true;
-        testConfig.system_info_encryption.key_provider = "com.datastax.bdp.cassandra.crypto.KmipKeyProviderFactory";
         testConfig.system_info_encryption.kmip_host = "localhost";
         DatabaseDescriptor.applyEncryptionContext();
     }
