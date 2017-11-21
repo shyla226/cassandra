@@ -1435,6 +1435,16 @@ public class DatabaseDescriptor
         conf.range_request_timeout_in_ms = timeOutInMillis;
     }
 
+    public static long getAggregatedQueryTimeout()
+    {
+        return conf.aggregated_request_timeout_in_ms;
+    }
+
+    public static void setAggregatedQueryTimeout(long timeOutInMillis)
+    {
+        conf.aggregated_request_timeout_in_ms = timeOutInMillis;
+    }
+
     public static long getWriteRpcTimeout()
     {
         return conf.write_request_timeout_in_ms;

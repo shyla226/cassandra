@@ -34,6 +34,7 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.driver.core.exceptions.ReadTimeoutException;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -93,6 +94,7 @@ import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.ClientWriteException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
@@ -704,6 +706,11 @@ public class SelectStatement implements CQLStatement
                 logger.debug("Continuous paging client did not keep up: {}", e.getMessage());
                 builder.complete(e);
             }
+            catch (ReadFailureException | ReadTimeoutException e)
+            {
+                logger.debug("Continuous paging query failed: {}", e.getMessage());
+                builder.complete(e);
+            }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t);
@@ -793,7 +800,10 @@ public class SelectStatement implements CQLStatement
         if (aggregationSpec == null || query == ReadQuery.EMPTY)
             return pager;
 
-        return new AggregationQueryPager(pager, query.limits());
+        return new AggregationQueryPager(pager,
+                                         query.limits(),
+                                         DatabaseDescriptor.getAggregatedQueryTimeout(),
+                                         ResultSet.estimatedRowSize(cfm, selection.getColumnMapping()));
     }
 
     public ResultSet process(PartitionIterator partitions, int nowInSec) throws InvalidRequestException

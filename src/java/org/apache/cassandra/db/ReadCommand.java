@@ -692,6 +692,7 @@ public abstract class ReadCommand implements ReadQuery
      * we query them all). So this shouldn't be relied too strongly, but this should be good enough for
      * debugging purpose which is what this is for.
      */
+    @Override
     public String toCQLString()
     {
         StringBuilder sb = new StringBuilder();

@@ -115,6 +115,11 @@ public interface ReadQuery
         {
             return false;
         }
+
+        public String toCQLString()
+        {
+            return  "<EMPTY>";
+        }
     };
 
     /**
@@ -265,4 +270,9 @@ public interface ReadQuery
      * @return {@code true} if this {@code ReadQuery} selects full partitions, {@code false} otherwise.
      */
     public boolean selectsFullPartition();
+
+    /**
+     * @return a CQL string reconstruction for this read query.
+     */
+    public String toCQLString();
 }

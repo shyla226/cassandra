@@ -27,9 +27,19 @@ public class RequestTimeoutException extends RequestExecutionException
 
     protected RequestTimeoutException(ExceptionCode code, ConsistencyLevel consistency, int received, int blockFor)
     {
-        super(code, String.format("Operation timed out - received only %d responses.", received));
+        this(code, String.format("Operation timed out - received only %d responses.", received), consistency, received, blockFor);
+    }
+
+    private RequestTimeoutException(ExceptionCode code, String message, ConsistencyLevel consistency, int received, int blockFor)
+    {
+        super(code, message);
         this.consistency = consistency;
         this.received = received;
         this.blockFor = blockFor;
+    }
+
+    protected RequestTimeoutException(ExceptionCode code, ConsistencyLevel consistency)
+    {
+        this(code, "Operation timed out", consistency, 0, 0);
     }
 }

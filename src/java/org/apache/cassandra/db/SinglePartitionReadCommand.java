@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Joiner;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
@@ -1332,6 +1333,14 @@ public class SinglePartitionReadCommand extends ReadCommand
         }
 
         @Override
+        public String toCQLString()
+        {
+            // A group is really just a SELECT ... IN (x, y, z) where the IN is on the partition key. Rebuilding that
+            // just too much work, so we simply concat the string for each command.
+            return Joiner.on("; ").join(Iterables.transform(commands, ReadCommand::toCQLString));
+        }
+
+        @Override
         public String toString()
         {
             return commands.toString();
@@ -1339,11 +1348,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         public void monitor(long constructionTime, long timeout, long slowQueryTimeout, boolean isCrossNode)
         {
-            String name = StringUtils.join(commands.stream()
-                                                   .map(SinglePartitionReadCommand::toCQLString)
-                                                   .collect(Collectors.toList()).iterator(),
-                                           '\n');
-            optionalMonitor = Monitorable.forNormalQuery(name, constructionTime, timeout, slowQueryTimeout, isCrossNode);
+            optionalMonitor = Monitorable.forNormalQuery(toCQLString(), constructionTime, timeout, slowQueryTimeout, isCrossNode);
         }
 
         public void monitorLocal(long startTime)
