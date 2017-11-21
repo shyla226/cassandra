@@ -20,9 +20,16 @@ package org.apache.cassandra.concurrent;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.After;
 import org.junit.BeforeClass;
@@ -147,7 +154,7 @@ public class IOSchedulerTest
         scheduler = new IOScheduler(threadFactory -> testWorker);
 
         scheduler.execute(() -> numChecks++, ExecutorLocals.create(), TPCTaskType.UNKNOWN);
-        assertEquals(2, testWorker.tasks.size());
+        assertEquals(1, testWorker.tasks.size());
         testWorker.tasks.remove(0).run(); // the first task is the user action
         assertEquals(1, scheduler.numCachedWorkers());
         assertEquals(1, numChecks);
@@ -204,6 +211,48 @@ public class IOSchedulerTest
         scheduler.start();
         scheduler.createWorker().dispose();
         assertEquals(1, scheduler.numCachedWorkers());
+    }
+
+    // See DB-1386
+    @Test
+    public void testExecuteDeadlock() throws InterruptedException, ExecutionException, TimeoutException
+    {
+        CompletableFuture<Void> completed = new CompletableFuture<>();
+        scheduler = new IOScheduler();
+        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+        scheduler.execute(() ->
+                          {
+                              try
+                              {
+                                  AtomicReference<CountDownLatch> latch = new AtomicReference<>();
+                                  latch.set(new CountDownLatch(1));
+                                  scheduler.execute(() -> latch.get().countDown(),
+                                                    null, TPCTaskType.UNKNOWN);
+
+                                  // The latch should be released.
+                                  assertTrue(latch.get().await(1, TimeUnit.SECONDS));
+
+                                  // Now use an intermediate thread so that task needs to be scheduled rather than immediately
+                                  // executed
+                                  latch.set(new CountDownLatch(1));
+                                  executor.schedule(() -> scheduler.execute(() -> latch.get().countDown(),
+                                                                            null,
+                                                                            TPCTaskType.UNKNOWN),
+                                                    10,
+                                                    TimeUnit.MILLISECONDS);
+
+                                  // The latch should be released.
+                                  assertTrue(latch.get().await(1, TimeUnit.SECONDS));
+
+                                  completed.complete(null);
+                              }
+                              catch (Throwable t)
+                              {
+                                  completed.completeExceptionally(t);
+                              }
+                          }, null, TPCTaskType.UNKNOWN);
+
+        completed.get(10, TimeUnit.SECONDS);
     }
 
     private synchronized void check(Runnable runnable)

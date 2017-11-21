@@ -18,7 +18,6 @@
 package org.apache.cassandra.concurrent;
 
 import java.util.Queue;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -99,7 +98,7 @@ public class IOScheduler extends StagedScheduler
 
     public void enqueue(TPCRunnable runnable)
     {
-        ((PooledWorker)createWorker()).execute(runnable);
+        new PooledTaskWorker(pool.get(), runnable).execute();
     }
 
     @Override
@@ -245,7 +244,38 @@ public class IOScheduler extends StagedScheduler
         }
     }
 
-    static final class PooledWorker extends Worker
+    static final class PooledTaskWorker implements Runnable
+    {
+        private final WorkersPool pool;
+        private final ExecutorBasedWorker worker;
+        private final Runnable task;
+
+        PooledTaskWorker(WorkersPool pool, Runnable task)
+        {
+            this.pool = pool;
+            this.worker = pool.get();
+            this.task = task;
+        }
+
+        public void execute()
+        {
+            worker.getExecutor().execute(this);
+        }
+
+        public void run()
+        {
+            try
+            {
+                task.run();
+            }
+            finally
+            {
+                pool.release(worker);
+            }
+        }
+    }
+
+    static class PooledWorker extends Worker
     {
         private final CompositeDisposable tasks;
         private final WorkersPool pool;
@@ -274,21 +304,6 @@ public class IOScheduler extends StagedScheduler
         public boolean isDisposed()
         {
             return disposed.get();
-        }
-
-        public void execute(Runnable runnable)
-        {
-            if (disposed.get())
-                return;
-
-            try
-            {
-                worker.getExecutor().execute(runnable);
-            }
-            finally
-            {
-                dispose();
-            }
         }
 
         @Override
