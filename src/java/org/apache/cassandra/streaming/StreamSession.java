@@ -30,7 +30,6 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.*;
 
-import io.reactivex.Single;
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -47,7 +46,6 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.gms.*;
 import org.apache.cassandra.metrics.StreamingMetrics;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -121,7 +119,7 @@ import org.apache.cassandra.utils.concurrent.Refs;
  *       session is done is is closed (closeSession()). Otherwise, the node switch to the WAIT_COMPLETE state and
  *       send a CompleteMessage to the other side.
  */
-public class StreamSession implements IEndpointStateChangeSubscriber
+public class StreamSession
 {
 
     /**
@@ -318,7 +316,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber
      * @param ranges Transfer ranges
      * @param columnFamilies Transfer ColumnFamilies
      * @param flushTables flush tables - only if this session is allowed to flush (see {@link this#canFlush})
-     * @param repairedAt the time the repair started.
      */
     public synchronized void addTransferRanges(String keyspace, Collection<Range<Token>> ranges, Collection<String> columnFamilies, boolean flushTables)
     {
@@ -772,24 +769,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     {
         transfers.remove(completedTask.tableId);
         maybeCompleted();
-    }
-
-    public void onJoin(InetAddress endpoint, EndpointState epState) {}
-    public void beforeChange(InetAddress endpoint, EndpointState currentState, ApplicationState newStateKey, VersionedValue newValue) {}
-    public void onChange(InetAddress endpoint, ApplicationState state, VersionedValue value) {}
-    public void onAlive(InetAddress endpoint, EndpointState state) {}
-    public void onDead(InetAddress endpoint, EndpointState state) {}
-
-    public void onRemove(InetAddress endpoint)
-    {
-        logger.error("[Stream #{}] Session failed because remote peer {} has left.", planId(), peer.getHostAddress());
-        closeSession(State.FAILED);
-    }
-
-    public void onRestart(InetAddress endpoint, EndpointState epState)
-    {
-        logger.error("[Stream #{}] Session failed because remote peer {} was restarted.", planId(), peer.getHostAddress());
-        closeSession(State.FAILED);
     }
 
     private void completePreview()
