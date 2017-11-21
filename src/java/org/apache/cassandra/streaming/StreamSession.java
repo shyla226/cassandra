@@ -42,7 +42,6 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.gms.*;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.metrics.StreamingMetrics;
@@ -116,7 +115,7 @@ import org.apache.cassandra.utils.concurrent.Refs;
  *       session is done is is closed (closeSession()). Otherwise, the node switch to the WAIT_COMPLETE state and
  *       send a CompleteMessage to the other side.
  */
-public class StreamSession implements IEndpointStateChangeSubscriber
+public class StreamSession
 {
     private static final Logger logger = LoggerFactory.getLogger(StreamSession.class);
 
@@ -692,24 +691,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     {
         transfers.remove(completedTask.cfId);
         maybeCompleted();
-    }
-
-    public void onJoin(InetAddress endpoint, EndpointState epState) {}
-    public void beforeChange(InetAddress endpoint, EndpointState currentState, ApplicationState newStateKey, VersionedValue newValue) {}
-    public void onChange(InetAddress endpoint, ApplicationState state, VersionedValue value) {}
-    public void onAlive(InetAddress endpoint, EndpointState state) {}
-    public void onDead(InetAddress endpoint, EndpointState state) {}
-
-    public void onRemove(InetAddress endpoint)
-    {
-        logger.error("[Stream #{}] Session failed because remote peer {} has left.", planId(), peer.getHostAddress());
-        closeSession(State.FAILED);
-    }
-
-    public void onRestart(InetAddress endpoint, EndpointState epState)
-    {
-        logger.error("[Stream #{}] Session failed because remote peer {} was restarted.", planId(), peer.getHostAddress());
-        closeSession(State.FAILED);
     }
 
     private boolean maybeCompleted()
