@@ -1277,6 +1277,17 @@
       </jar>
     </target>
 
+    <target name="build-jmh-jar" depends="clean-benches, build-test" description="Create JMH uber jar">
+        <jar jarfile="${build.test.dir}/benchmarks-only.jar">
+            <zipgroupfileset dir="${build.dir.lib}/jars">
+                <include name="*jmh*.jar"/>
+                <include name="jopt*.jar"/>
+                <include name="commons*.jar"/>
+            </zipgroupfileset>
+            <fileset dir="${build.classes.main}"/>
+            <fileset dir="${test.classes}"/>
+        </jar>
+    </target>
     <!-- use https://github.com/krummas/jstackjunit to get thread dumps when unit tests time out -->
   <taskdef name="junit" classname="org.krummas.junit.JStackJUnitTask" classpath="lib/jstackjunit-0.0.1.jar"/>
 
