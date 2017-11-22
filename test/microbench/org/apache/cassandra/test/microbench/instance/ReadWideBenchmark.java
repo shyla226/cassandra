@@ -33,80 +33,21 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.infra.BenchmarkParams;
 
-public class ReadWideBenchmark  extends BaseBenchmark
+public class ReadWideBenchmark  extends ReadBenchmark
 {
-
-    /** Boiler plate start */
-    @State(Scope.Benchmark)
-    public static class GlobalState extends CassandraSetup
-    {
-        @Setup(Level.Trial)
-        public void setup(ReadWideBenchmark benchmark, BenchmarkParams params) throws Throwable
-        {
-            super.setup(benchmark, params);
-        }
-
-        @TearDown
-        public void teardown() throws Throwable
-        {
-            super.teardown();
-        }
-    }
-    @State(Scope.Thread)
-    public static class ThreadState extends PerThreadSession
-    {
-        @Setup(Level.Trial)
-        public void setup(GlobalState g, ReadWideBenchmark benchmark) throws Throwable
-        {
-            super.setupSessionAndStatements(g, benchmark);
-        }
-    }
-    /** Boiler plate ends */
-
-    @Benchmark
-    public Object readSequential(ThreadState state) throws Throwable
-    {
-        return executeInflight(() -> incrementAndGetOpCounter() % populationSize, state);
-    }
-
-    @Benchmark
-    public Object readFixed(ThreadState state) throws Throwable
-    {
-        return executeInflight(() -> 1231231231L % populationSize, state);
-    }
-
-    @Benchmark
-    public Object readFail(ThreadState state) throws Throwable
-    {
-        return executeInflight(() -> populationSize + ThreadLocalRandom.current().nextLong(populationSize), state);
-    }
-
-    @Benchmark
-    public Object readRandomNoFail(ThreadState state) throws Throwable
-    {
-        return executeInflight(() -> ThreadLocalRandom.current().nextLong(populationSize), state);
-    }
-
-    @Benchmark
-    public Object readRandomHalfFail(ThreadState state) throws Throwable
-    {
-        final ThreadLocalRandom tlr = ThreadLocalRandom.current();
-        return executeInflight(() -> (tlr.nextBoolean() ? populationSize : 0) + tlr.nextLong(populationSize), state);
-    }
-
     @Param("4")
-    int rowCount;
+    int partitionCount;
 
     @Override
     protected ResultSetFuture insertRowForValue(Session session, PreparedStatement write, long v)
     {
-        return session.executeAsync(write.bind(v % rowCount, v, v));
+        return session.executeAsync(write.bind(v % partitionCount, v, v));
     }
 
     @Override
     protected ResultSetFuture executeForKey(PerThreadSession state, long key)
     {
-        return state.session.executeAsync(state.statement.bind(key % rowCount, key));
+        return state.session.executeAsync(state.statement.bind(key % partitionCount, key));
     }
 
     @Override

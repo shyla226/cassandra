@@ -55,6 +55,7 @@ import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.BenchmarkParams;
@@ -104,6 +105,7 @@ public class BaseBenchmark
     @Param("true")
     boolean stabiliseSSCount;
 
+    @State(Scope.Benchmark)
     public static class CassandraSetup extends CQLTester
     {
         String keyspace;
@@ -111,9 +113,11 @@ public class BaseBenchmark
         Cluster clientCluster;
         List<Session> sessions = new ArrayList();
         int perThreadInflight;
+        BaseBenchmark benchmark;
 
         public void setup(BaseBenchmark benchmark, BenchmarkParams params) throws Throwable
         {
+            this.benchmark = benchmark;
             perThreadInflight = benchmark.inflight/params.getThreads();
 
             Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(IOScheduler.MAX_POOL_SIZE));
@@ -143,6 +147,7 @@ public class BaseBenchmark
             return session;
         }
 
+        @TearDown(Level.Trial)
         public synchronized void teardown() throws Throwable
         {
             printTPCStats();
@@ -159,18 +164,26 @@ public class BaseBenchmark
         }
     }
 
+    @State(Scope.Thread)
     public static class PerThreadSession
     {
         Session session;
         int inflight;
         PreparedStatement statement;
 
-        public void setupSessionAndStatements(CassandraSetup globalState, BaseBenchmark benchmark)
+        @Setup(Level.Trial)
+        public void setupSessionAndStatements(CassandraSetup globalState)
         {
             session = globalState.newSession();
             inflight = globalState.perThreadInflight;
-            statement = benchmark.createStatement(session, globalState.table);
+            statement = globalState.benchmark.createStatement(session, globalState.table);
         }
+    }
+
+    @Setup(Level.Trial)
+    public void setup(CassandraSetup cassandraSetup, BenchmarkParams params) throws Throwable
+    {
+        cassandraSetup.setup(this, params);
     }
 
     protected PreparedStatement createStatement(Session session, String table)
@@ -256,11 +269,10 @@ public class BaseBenchmark
 
     public Object executeInflight(Supplier<Long> nextKey, PerThreadSession state) throws Throwable
     {
-        List<ResultSetFuture> futures = new ArrayList<>(inflight);
+        List<ResultSetFuture> futures = new ArrayList<>(state.inflight);
         for (int i = 0; i < state.inflight; i++)
         {
-            final long queryKey = nextKey.get();
-            futures.add(executeForKey(state, queryKey));
+            futures.add(executeForKey(state, nextKey.get()));
         }
 
         FBUtilities.waitOnFutures(futures);

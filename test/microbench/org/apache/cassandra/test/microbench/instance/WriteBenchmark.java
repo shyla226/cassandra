@@ -40,56 +40,32 @@ import org.openjdk.jmh.infra.BenchmarkParams;
 
 public class WriteBenchmark extends BaseBenchmark
 {
-
-    /** Boiler plate start */
-    @State(Scope.Benchmark)
-    public static class GlobalState extends CassandraSetup
-    {
-        @Setup(Level.Trial)
-        public void setup(WriteBenchmark benchmark, BenchmarkParams params) throws Throwable
-        {
-            super.setup(benchmark, params);
-        }
-
-        @TearDown
-        public void teardown() throws Throwable
-        {
-            super.teardown();
-        }
-    }
-
-    @State(Scope.Thread)
-    public static class ThreadState extends PerThreadSession
-    {
-        @Setup(Level.Trial)
-        public void setup(GlobalState g, WriteBenchmark b) throws Throwable
-        {
-            super.setupSessionAndStatements(g, b);
-        }
-    }
-
-    /** Boiler plate ends */
     @Override
     protected PreparedStatement createStatement(Session session, String table)
     {
         return prepareWrite(session, table);
     }
 
+    @Override
+    protected ResultSetFuture executeForKey(PerThreadSession state, long key)
+    {
+        return insertRowForValue(state.session, state.statement, key);
+    }
 
     @Benchmark
-    public Object insertSequential(ThreadState state) throws Throwable
+    public Object insertSequential(PerThreadSession state) throws Throwable
     {
         return executeInflight(() -> incrementAndGetOpCounter() + populationSize, state);
     }
 
     @Benchmark
-    public Object updateSequential(ThreadState state) throws Throwable
+    public Object updateSequential(PerThreadSession state) throws Throwable
     {
         return executeInflight(() -> incrementAndGetOpCounter() & populationSize, state);
     }
 
     @Benchmark
-    public Object updateRandom(ThreadState state) throws Throwable
+    public Object updateRandom(PerThreadSession state) throws Throwable
     {
         final ThreadLocalRandom tlr = ThreadLocalRandom.current();
 

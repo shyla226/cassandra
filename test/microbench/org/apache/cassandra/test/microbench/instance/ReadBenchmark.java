@@ -33,34 +33,6 @@ import org.openjdk.jmh.infra.BenchmarkParams;
 
 public class ReadBenchmark extends BaseBenchmark
 {
-
-    /** Boiler plate start */
-    @State(Scope.Benchmark)
-    public static class GlobalState extends CassandraSetup
-    {
-        @Setup(Level.Trial)
-        public void setup(ReadBenchmark benchmark, BenchmarkParams params) throws Throwable
-        {
-            super.setup(benchmark, params);
-        }
-
-        @TearDown
-        public void teardown() throws Throwable
-        {
-            super.teardown();
-        }
-    }
-    @State(Scope.Thread)
-    public static class ThreadState extends PerThreadSession
-    {
-        @Setup(Level.Trial)
-        public void setup(GlobalState g, ReadBenchmark benchmark) throws Throwable
-        {
-            super.setupSessionAndStatements(g, benchmark);
-        }
-    }
-    /** Boiler plate ends */
-
     @Override
     protected PreparedStatement createStatement(Session session, String table)
     {
@@ -68,32 +40,32 @@ public class ReadBenchmark extends BaseBenchmark
     }
 
     @Benchmark
-    public Object readSequential(ThreadState state) throws Throwable
+    public Object readSequential(PerThreadSession state) throws Throwable
     {
         return executeInflight(() -> incrementAndGetOpCounter() % populationSize, state);
     }
 
 
     @Benchmark
-    public Object readFixed(ThreadState state) throws Throwable
+    public Object readFixed(PerThreadSession state) throws Throwable
     {
         return executeInflight(() -> 1231231231L % populationSize, state);
     }
 
     @Benchmark
-    public Object readFail(ThreadState state) throws Throwable
+    public Object readFail(PerThreadSession state) throws Throwable
     {
         return executeInflight(() -> populationSize + ThreadLocalRandom.current().nextLong(populationSize), state);
     }
 
     @Benchmark
-    public Object readRandomNoFail(ThreadState state) throws Throwable
+    public Object readRandomNoFail(PerThreadSession state) throws Throwable
     {
         return executeInflight(() -> ThreadLocalRandom.current().nextLong(populationSize), state);
     }
 
     @Benchmark
-    public Object readRandomHalfFail(ThreadState state) throws Throwable
+    public Object readRandomHalfFail(PerThreadSession state) throws Throwable
     {
         final ThreadLocalRandom tlr = ThreadLocalRandom.current();
         return executeInflight(() -> (tlr.nextBoolean() ? populationSize : 0) + tlr.nextLong(populationSize), state);
