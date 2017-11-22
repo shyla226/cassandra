@@ -170,14 +170,24 @@ public class BaseBenchmark
         Session session;
         int inflight;
         PreparedStatement statement;
-
+        long throttleMs;
         @Setup(Level.Trial)
         public void setupSessionAndStatements(CassandraSetup globalState)
         {
             session = globalState.newSession();
             inflight = globalState.perThreadInflight;
             statement = globalState.benchmark.createStatement(session, globalState.table);
+            throttleMs = globalState.benchmark.throttleMs;
         }
+
+        @Setup(Level.Invocation)
+        public void throttle()
+        {
+            if (throttleMs == 0)
+                return;
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(throttleMs));
+        }
+
     }
 
     @Setup(Level.Trial)
@@ -251,14 +261,6 @@ public class BaseBenchmark
     protected String keyspace()
     {
         return "CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false";
-    }
-
-    @Setup(Level.Invocation)
-    public void throttle()
-    {
-        if (throttleMs == 0)
-            return;
-        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(throttleMs));
     }
 
     long incrementAndGetOpCounter()
