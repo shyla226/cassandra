@@ -124,7 +124,7 @@ cassandra_parms="$cassandra_parms -Dcassandra-foreground=yes"
 cassandra_parms="$cassandra_parms -Djmh.executor=CUSTOM"
 cassandra_parms="$cassandra_parms -Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"
 cassandra_parms="$cassandra_parms -XX:+PreserveFramePointer"
-echo $NUMACTL "$JAVA" -cp "$CLASSPATH:$CASSANDRA_HOME/build/test/benchmarks-only.jar" org.openjdk.jmh.Main -jvmArgsPrepend="$cassandra_parms $JVM_OPTS"
+
 exec $NUMACTL "$JAVA" -cp "$CLASSPATH:$CASSANDRA_HOME/build/test/benchmarks-only.jar" org.openjdk.jmh.Main -jvmArgsPrepend="$cassandra_parms $JVM_OPTS" $@
 
 # vi:ai sw=4 ts=4 tw=0 et
