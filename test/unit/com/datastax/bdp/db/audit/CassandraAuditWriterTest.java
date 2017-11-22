@@ -11,7 +11,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -29,7 +28,6 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MutableTimeSource;
 import org.apache.cassandra.utils.UUIDGen;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
@@ -43,7 +41,6 @@ import static com.datastax.bdp.db.audit.CoreAuditableEventType.*;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 public class CassandraAuditWriterTest extends CQLTester
 {
@@ -135,7 +132,7 @@ public class CassandraAuditWriterTest extends CQLTester
         assertEquals(event.getType().toString(), row.getString("type"));
         assertEquals(event.getUser(), row.getString("username"));
 
-assertFalse(row.has("consistency"));
+        assertFalse(row.has("consistency"));
         rows = query("SELECT ttl(type) as ttltype FROM %s.%s");
         assertEquals(1, rows.size());
         row = rows.one();
@@ -173,14 +170,13 @@ assertFalse(row.has("consistency"));
 
         logger.recordEvent(event).blockingAwait();
 
-        waitForEventsToBeWritten(1, 1000);
+        waitForEventsToBeWritten(1, 10000);
     }
 
     @Test
     public void checkEventsArentSavedUntilBatchSizeIsMet() throws Exception
     {
-        final MutableTimeSource ts = new MutableTimeSource(0);
-        BatchingOptions options = new BatchingOptions(20, 1, () -> new DefaultBatchController(100, 2, ts));
+        BatchingOptions options = new BatchingOptions(20, 1, () -> new DefaultBatchController(100, 2));
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
         logger.setup();
 
@@ -194,7 +190,7 @@ assertFalse(row.has("consistency"));
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
         logger.recordEvent(event).blockingAwait();
 
-        waitForEventsToBeWritten(2, 1000);
+        waitForEventsToBeWritten(2, 10000);
     }
 
     @Test
@@ -202,8 +198,7 @@ assertFalse(row.has("consistency"));
     {
         final int flushPeriod = 100;
         final int batchSize = 2;
-        final MutableTimeSource ts = new MutableTimeSource(0);
-        BatchingOptions options = new BatchingOptions(20, 1, () -> new DefaultBatchController(flushPeriod, batchSize, ts));
+        BatchingOptions options = new BatchingOptions(20, 1, () -> new DefaultBatchController(flushPeriod, batchSize));
 
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
         logger.setup();
@@ -215,9 +210,7 @@ assertFalse(row.has("consistency"));
         // no records should be written until the timer says the flush period has been exceeded
         assertEquals(0, getLoggedEventCount());
 
-        ts.forward(flushPeriod + flushPeriod / 2, TimeUnit.MILLISECONDS);        // now the timer is reporting it's time to flush, the record should get
-        // written (we give it some grace time to actually do the write)
-        waitForEventsToBeWritten(1, 1000);
+        waitForEventsToBeWritten(1, 10000);
     }
 
     @Test
@@ -348,7 +341,7 @@ assertFalse(row.has("consistency"));
 
         logger.recordEvent(event).blockingAwait();
 
-        waitForEventsToBeWritten(2, 1000);
+        waitForEventsToBeWritten(2, 10000);
         Assert.assertEquals(2, batches.size());
     }
 
@@ -358,11 +351,11 @@ assertFalse(row.has("consistency"));
         while ((System.currentTimeMillis() - startTime) < timeout)
         {
             if (getLoggedEventCount() == eventCount)
-            {
-                return;
-            }
+                break;
+            Thread.yield();
         }
-        fail(String.format("Expected %s events to be written, but condition not met after %s ms", eventCount, timeout));
+        assertEquals(String.format("Expected %s events to be written, but condition not met after %s ms", eventCount, timeout),
+                     eventCount, getLoggedEventCount());
     }
 
     private int getLoggedEventCount() throws RequestExecutionException
