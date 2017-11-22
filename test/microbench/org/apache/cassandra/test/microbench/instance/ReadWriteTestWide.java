@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.test.microbench;
+package org.apache.cassandra.test.microbench.instance;
 
 
 import java.io.IOException;
