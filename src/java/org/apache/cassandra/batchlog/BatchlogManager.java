@@ -44,6 +44,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.net.MessagingVersion;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -289,7 +290,7 @@ public class BatchlogManager implements BatchlogManagerMBean
             try
             {
                 ReplayingBatch batch = new ReplayingBatch(id, version, row.getList("mutations", BytesType.instance));
-                if (batch.replay(rateLimiter, hintedNodes) > 0)
+                if (batch.replay(rateLimiter, hintedNodes))
                 {
                     unfinishedBatches.add(batch);
                 }
@@ -373,22 +374,22 @@ public class BatchlogManager implements BatchlogManagerMBean
             return System.currentTimeMillis() - UUIDGen.getAdjustedTimestamp(id);
         }
 
-        public int replay(RateLimiter rateLimiter, Set<InetAddress> hintedNodes) throws IOException
+        public boolean replay(RateLimiter rateLimiter, Set<InetAddress> hintedNodes) throws IOException
         {
             logger.trace("Replaying batch {}", id);
 
             if (mutations.isEmpty())
-                return 0;
+                return false;
 
             int gcgs = gcgs(mutations);
             if (TimeUnit.MILLISECONDS.toSeconds(writtenAt) + gcgs <= FBUtilities.nowInSeconds())
-                return 0;
+                return false;
 
             replayHandlers = sendReplays(mutations, writtenAt, hintedNodes);
 
             rateLimiter.acquire(replayedBytes); // acquire afterwards, to not mess up ttl calculation.
 
-            return replayHandlers.size();
+            return !replayHandlers.isEmpty();
         }
 
         public void finish(Set<InetAddress> hintedNodes)
@@ -407,7 +408,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                     writeHintsForUndeliveredEndpoints(i, hintedNodes);
                     if (logger.isTraceEnabled())
                         logger.trace("Failed to replay batchlog {} of age {} seconds with {} mutations, will write hints. Reason/failure: {}",
-                                     id, TimeUnit.MILLISECONDS.toSeconds(ageInMillis()), mutations.size(), e.getMessage());
+                                 id, TimeUnit.MILLISECONDS.toSeconds(ageInMillis()), mutations.size(), e.getMessage());
                     return;
                 }
             }
@@ -494,23 +495,30 @@ public class BatchlogManager implements BatchlogManagerMBean
                                             Hint.create(mutation, writtenAt));
             }
 
-            if (endpoints.liveCount() == 0)
+            // We iterate over 'endpoints.live()' in order to indicate to the caller that all
+            // other endpoints beside the local node are not alive and there is no need to bother
+            // the timeout logic to fire for something that we already know (that the endpoints
+            // are dead).
+            WriteEndpoints writeEndpoints = endpoints;
+            if (endpoints.live().contains(FBUtilities.getBroadcastAddress()))
+            {
+                mutation.apply();
+                if (endpoints.live().size() == 1)
+                    return null;
+                writeEndpoints = endpoints.withoutLocalhost(true);
+            }
+
+            // writeEndpoints contains the _remote_ endpoints that are targeted for the write.
+
+            if (writeEndpoints.liveCount() == 0)
+                // no endpoints beside the local node are alive - no need to create a handler
                 return null;
 
-            ReplayWriteHandler handler = null;
-            for (InetAddress live : endpoints.live())
-            {
-                if (live.equals(FBUtilities.getBroadcastAddress()))
-                {
-                    mutation.apply();
-                }
-                else
-                {
-                    if (handler == null)
-                        handler = ReplayWriteHandler.create(endpoints.withoutLocalhost(false), System.nanoTime());
-                    MessagingService.instance().send(Verbs.WRITES.WRITE.newRequest(live, mutation), handler);
-                }
-            }
+            ReplayWriteHandler handler = ReplayWriteHandler.create(writeEndpoints, System.nanoTime());
+            String localDataCenter = DatabaseDescriptor.getLocalDataCenter();
+            Verb.AckedRequest<Mutation> messageDefinition = Verbs.WRITES.WRITE;
+            MessagingService.instance().send(messageDefinition.newForwardingDispatcher(writeEndpoints.live(), localDataCenter, mutation), handler);
+
             return handler;
         }
 
