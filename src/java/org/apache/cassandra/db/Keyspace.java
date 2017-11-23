@@ -395,7 +395,7 @@ public class Keyspace
         if (boundaries == null || boundariesForRingVersion < StorageService.instance.getTokenMetadata().getRingVersion())
         {
             if (!StorageService.instance.isInitialized())
-                return TPCBoundaries.NONE;
+                return boundaries != null ? boundaries : TPCBoundaries.NONE;
 
             synchronized (this)
             {
