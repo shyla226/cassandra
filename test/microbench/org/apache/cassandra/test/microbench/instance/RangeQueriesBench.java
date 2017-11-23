@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.test.microbench;
+package org.apache.cassandra.test.microbench.instance;
 
 import java.io.IOException;
 import java.util.concurrent.*;
@@ -26,8 +26,6 @@ import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.IOScheduler;
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCMetrics;
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -36,7 +34,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.LineNumberInference;
 import org.openjdk.jmh.annotations.*;
 
-import static org.apache.cassandra.test.microbench.Util.printTPCStats;
+import static org.apache.cassandra.test.microbench.instance.Util.printTPCStats;
 
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)

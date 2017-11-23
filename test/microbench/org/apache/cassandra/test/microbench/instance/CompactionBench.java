@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.test.microbench;
+package org.apache.cassandra.test.microbench.instance;
 
 
 import java.io.File;
@@ -44,10 +44,8 @@ public class CompactionBench extends CQLTester
     static String keyspace;
     String table;
     String writeStatement;
-    String readStatement;
     ColumnFamilyStore cfs;
     List<File> snapshotFiles;
-    List<Descriptor> liveFiles;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable
@@ -57,7 +55,6 @@ public class CompactionBench extends CQLTester
         table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))");
         execute("use "+keyspace+";");
         writeStatement = "INSERT INTO "+table+"(userid,picid,commentid)VALUES(?,?,?)";
-        readStatement = "SELECT * from "+table+" limit 100";
 
         Keyspace.system().forEach(k -> k.getColumnFamilyStores().forEach(c -> c.disableAutoCompaction()));
 
@@ -94,7 +91,6 @@ public class CompactionBench extends CQLTester
             if (!t.isDaemon())
                 System.err.println("Thread "+t.getName());
         }
-
         CQLTester.cleanup();
     }
 
