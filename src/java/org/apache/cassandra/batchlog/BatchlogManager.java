@@ -347,6 +347,8 @@ public class BatchlogManager implements BatchlogManagerMBean
 
         public void finish(Set<InetAddress> hintedNodes)
         {
+            boolean replayFailed = false;
+
             for (int i = 0; i < replayHandlers.size(); i++)
             {
                 ReplayWriteResponseHandler<Mutation> handler = replayHandlers.get(i);
@@ -356,15 +358,19 @@ public class BatchlogManager implements BatchlogManagerMBean
                 }
                 catch (WriteTimeoutException | WriteFailureException e)
                 {
-                    // writing hints for the rest to hints, starting from i
-                    StorageMetrics.hintedBatchlogReplays.mark();
+                    // only write hints for failed mutations
                     writeHintsForUndeliveredEndpoints(i, hintedNodes);
-                    if (logger.isTraceEnabled())
-                        logger.trace("Failed to replay batchlog {} of age {} seconds with {} mutations, will write hints. Reason/failure: {}",
-                                     id, TimeUnit.MILLISECONDS.toSeconds(ageInMillis()), mutations.size(), e.getMessage());
-                    return;
+                    if (!replayFailed) {
+                        replayFailed = true;
+                        StorageMetrics.hintedBatchlogReplays.mark();
+                        if (logger.isTraceEnabled())
+                            logger.trace("Failed to replay batchlog {} of age {} seconds with {} mutations, will write hints. Reason/failure: {}",
+                                         id, TimeUnit.MILLISECONDS.toSeconds(ageInMillis()), mutations.size(), e.getMessage());
+                    }
                 }
             }
+            if (replayFailed)
+                return;
 
             if (logger.isTraceEnabled())
                 logger.trace("Finished replay of batchlog {} of age {} seconds with {} mutations",
@@ -400,25 +406,24 @@ public class BatchlogManager implements BatchlogManagerMBean
                 mutations.add(mutation);
         }
 
-        private void writeHintsForUndeliveredEndpoints(int startFrom, Set<InetAddress> hintedNodes)
+        private void writeHintsForUndeliveredEndpoints(int index, Set<InetAddress> hintedNodes)
         {
-            int gcgs = gcgs(mutations);
+            int gcgs = mutations.get(index).smallestGCGS();
 
             // expired
             if (TimeUnit.MILLISECONDS.toSeconds(writtenAt) + gcgs <= FBUtilities.nowInSeconds())
                 return;
 
-            for (int i = startFrom; i < replayHandlers.size(); i++)
-            {
-                ReplayWriteResponseHandler<Mutation> handler = replayHandlers.get(i);
-                Mutation undeliveredMutation = mutations.get(i);
+            ReplayWriteResponseHandler<Mutation> handler = replayHandlers.get(index);
+            Mutation undeliveredMutation = mutations.get(index);
 
-                if (handler != null)
-                {
-                    hintedNodes.addAll(handler.undelivered);
-                    HintsService.instance.write(transform(handler.undelivered, StorageService.instance::getHostIdForEndpoint),
-                                                Hint.create(undeliveredMutation, writtenAt));
-                }
+            if (handler != null)
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Adding hints for undelivered endpoints: {}", handler.undelivered);
+                hintedNodes.addAll(handler.undelivered);
+                HintsService.instance.write(transform(handler.undelivered, StorageService.instance::getHostIdForEndpoint),
+                                            Hint.create(undeliveredMutation, writtenAt));
             }
         }
 

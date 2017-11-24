@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Only serialize failed batchlog replay mutations to hints (DB-1377)
  * nodetool arguments with spaces print script errors (DB-1183)
  * Change token allocation to use RF=1 method when RF equals rack count (DB-1253)
  * Skip building views during base table streams on range movements (Backport CASSANDRA-13065) (DB-1311)
