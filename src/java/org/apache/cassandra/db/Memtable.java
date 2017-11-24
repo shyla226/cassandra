@@ -970,7 +970,7 @@ public class Memtable implements Comparable<Memtable>
         // several threads may read from it and iterate over it. Iterators are created when a the first item of
         // a flow is requested for example, and then used asynchronously when sub-sequent items are requested.
         // Therefore, iterators should not throw ConcurrentModificationExceptions if the underlying map is modified
-        // during iteration, they should provide a weekly consistent view of the map instead.
+        // during iteration, they should provide a weakly consistent view of the map instead.
         private final NavigableMap<PartitionPosition, AtomicBTreePartition> data = new ConcurrentSkipListMap<>();
 
         private final ColumnsCollector columnsCollector = new ColumnsCollector(metadata.regularAndStaticColumns());
