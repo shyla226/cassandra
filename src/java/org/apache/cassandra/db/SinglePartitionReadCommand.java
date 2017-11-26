@@ -83,12 +83,13 @@ public class SinglePartitionReadCommand extends ReadCommand
     private final DecoratedKey partitionKey;
     private final ClusteringIndexFilter clusteringIndexFilter;
 
-    // We access the scheduler/operationExecutor multiple times for each command (at least twice for every replica
+    // We access the scheduler and the executors multiple times for each command (at least twice for every replica
     // involved in the request and response executor in Messaging, plus potentially in AbstractReadExecutor when
     // speculating) and re-doing their computation is unnecessary so caching their value here. Note that we don't
     // serialize those in any way, they are just recomputed in the ctor.
     private final transient TPCScheduler scheduler;
-    private final transient TracingAwareExecutor operationExecutor;
+    private final transient TracingAwareExecutor requestExecutor;
+    private final transient TracingAwareExecutor responseExecutor;
 
     /**
      * Race condition when ReadCommand is re-used.
@@ -116,7 +117,8 @@ public class SinglePartitionReadCommand extends ReadCommand
         this.clusteringIndexFilter = clusteringIndexFilter;
 
         this.scheduler = TPC.bestTPCScheduler();
-        this.operationExecutor = scheduler.forTaskType(TPCTaskType.READ);
+        this.requestExecutor = scheduler.forTaskType(TPCTaskType.READ);
+        this.responseExecutor = scheduler.forTaskType(TPCTaskType.READ_RESPONSE);
     }
 
     public Request.Dispatcher<SinglePartitionReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints)
@@ -1104,9 +1106,14 @@ public class SinglePartitionReadCommand extends ReadCommand
         return scheduler;
     }
 
-    public TracingAwareExecutor getOperationExecutor()
+    public TracingAwareExecutor getRequestExecutor()
     {
-        return operationExecutor;
+        return requestExecutor;
+    }
+
+    public TracingAwareExecutor getResponseExecutor()
+    {
+        return responseExecutor;
     }
 
     @Override

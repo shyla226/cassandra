@@ -78,11 +78,12 @@ public class PartitionRangeReadCommand extends ReadCommand
      */
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
 
-    // We access the scheduler/operationExecutor multiple times for each command (at least twice for every replica
+    // We access the scheduler and the executors multiple times for each command (at least twice for every replica
     // involved in the request and response executor in Messaging) and re-doing their computation is unnecessary so
     // caching their value here. Note that we don't serialize those in any way, they are just recomputed in the ctor.
     private final transient StagedScheduler scheduler;
-    private final transient TracingAwareExecutor operationExecutor;
+    private final transient TracingAwareExecutor requestExecutor;
+    private final transient TracingAwareExecutor responseExecutor;
 
     // Note: non static methods of this class should not use this ctor directly, but use the copy() method instead.
     protected PartitionRangeReadCommand(DigestVersion digestVersion,
@@ -99,7 +100,8 @@ public class PartitionRangeReadCommand extends ReadCommand
         this.dataRange = dataRange;
 
         this.scheduler = scheduler == null ? TPC.bestTPCScheduler() : scheduler;
-        this.operationExecutor = this.scheduler.forTaskType(TPCTaskType.READ_RANGE);
+        this.requestExecutor = this.scheduler.forTaskType(TPCTaskType.READ_RANGE);
+        this.responseExecutor = this.scheduler.forTaskType(TPCTaskType.READ_RANGE_RESPONSE);
     }
 
     /**
@@ -475,9 +477,14 @@ public class PartitionRangeReadCommand extends ReadCommand
         return scheduler;
     }
 
-    public TracingAwareExecutor getOperationExecutor()
+    public TracingAwareExecutor getRequestExecutor()
     {
-        return operationExecutor;
+        return requestExecutor;
+    }
+
+    public TracingAwareExecutor getResponseExecutor()
+    {
+        return responseExecutor;
     }
 
     @Override

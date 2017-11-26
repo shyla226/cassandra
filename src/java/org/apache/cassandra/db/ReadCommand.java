@@ -35,7 +35,7 @@ import org.apache.cassandra.net.Request;
 import org.apache.cassandra.utils.flow.Flow;
 
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.Schedulable;
+import org.apache.cassandra.concurrent.SchedulableMessage;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.*;
@@ -69,7 +69,7 @@ import org.apache.cassandra.utils.versioning.VersionDependent;
  * <p>
  * This contains all the information needed to do a local read.
  */
-public abstract class ReadCommand implements ReadQuery, Schedulable
+public abstract class ReadCommand implements ReadQuery, SchedulableMessage
 {
     protected static final Logger logger = LoggerFactory.getLogger(ReadCommand.class);
 

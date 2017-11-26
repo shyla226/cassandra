@@ -21,7 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import org.apache.cassandra.concurrent.Schedulable;
+import org.apache.cassandra.concurrent.SchedulableMessage;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
@@ -43,7 +43,7 @@ import org.apache.cassandra.utils.versioning.Versioned;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
 
-public final class Batch implements Schedulable
+public final class Batch implements SchedulableMessage
 {
     public static final Versioned<WriteVersion, Serializer<Batch>> serializers = WriteVersion.versioned(BatchSerializer::new);
 
@@ -94,9 +94,14 @@ public final class Batch implements Schedulable
         return TPC.getForKey(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME), SystemKeyspace.decorateBatchKey(id));
     }
 
-    public TracingAwareExecutor getOperationExecutor()
+    public TracingAwareExecutor getRequestExecutor()
     {
         return getScheduler().forTaskType(TPCTaskType.BATCH_STORE);
+    }
+
+    public TracingAwareExecutor getResponseExecutor()
+    {
+        return getScheduler().forTaskType(TPCTaskType.BATCH_STORE_RESPONSE);
     }
 
     static final class BatchSerializer extends VersionDependent<WriteVersion> implements Serializer<Batch>

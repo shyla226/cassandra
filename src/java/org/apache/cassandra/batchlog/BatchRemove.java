@@ -21,7 +21,7 @@ package org.apache.cassandra.batchlog;
 import java.io.IOException;
 import java.util.UUID;
 
-import org.apache.cassandra.concurrent.Schedulable;
+import org.apache.cassandra.concurrent.SchedulableMessage;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
@@ -34,7 +34,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.UUIDSerializer;
 
-public class BatchRemove implements Schedulable
+public class BatchRemove implements SchedulableMessage
 {
     public static final Serializer<BatchRemove> serializer = new BatchRemoveSerializer();
 
@@ -68,7 +68,7 @@ public class BatchRemove implements Schedulable
         return TPC.getForKey(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME), SystemKeyspace.decorateBatchKey(id));
     }
 
-    public TracingAwareExecutor getOperationExecutor()
+    public TracingAwareExecutor getRequestExecutor()
     {
         return getScheduler().forTaskType(TPCTaskType.BATCH_REMOVE);
     }

@@ -43,8 +43,12 @@ public enum TPCTaskType
     UNKNOWN,
     /** Single-partition read request */
     READ(Features.PENDABLE),
+    /** Single-partition read response, not always counted */
+    READ_RESPONSE("READ_SWITCH_FOR_RESPONSE"),
     /** Partition range read request */
     READ_RANGE(Features.PENDABLE),
+    /** Partition range read response, not always counted */
+    READ_RANGE_RESPONSE("READ_RANGE_SWITCH_FOR_RESPONSE"),
     /** Switching thread to read from an iterator */
     READ_FROM_ITERATOR("READ_SWITCH_FOR_ITERATOR"),   // test-only
     /** Switching thread to read from secondary index */
@@ -53,6 +57,8 @@ public enum TPCTaskType
     READ_DISK_ASYNC(Features.EXTERNAL_QUEUE),
     /** Write request */
     WRITE(Features.PENDABLE),
+    /** Write response, not always counted */
+    WRITE_RESPONSE("WRITE_SWITCH_FOR_RESPONSE"),
     /** Write issued to defragment data that required too many sstables to read */
     WRITE_DEFRAGMENT(Features.PENDABLE),
     /** Switching thread to write in memtable when not already on the correct thread */
@@ -67,6 +73,8 @@ public enum TPCTaskType
     BATCH_REPLAY(Features.ALWAYS_COUNT),
     /** Store a batchlog entry */
     BATCH_STORE(Features.PENDABLE),
+    /** Response to a batchlog entry store */
+    BATCH_STORE_RESPONSE, // TODO Does this really need its own task type? Or is it better to just throw it in the "unknown" bundle?
     /** Remove a batchlog entry */
     BATCH_REMOVE(Features.PENDABLE),
     /** Acquiring counter lock */

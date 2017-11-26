@@ -23,7 +23,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 import io.reactivex.Completable;
-import org.apache.cassandra.concurrent.Schedulable;
+import org.apache.cassandra.concurrent.SchedulableMessage;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
@@ -51,7 +51,7 @@ import org.apache.cassandra.utils.versioning.Versioned;
 
 // TODO convert this to a Builder pattern instead of encouraging M.add directly,
 // which is less-efficient since we have to keep a mutable HashMap around
-public class Mutation implements IMutation, Schedulable
+public class Mutation implements IMutation, SchedulableMessage
 {
     /**
      * The raw serializer is used for local serialization (commit log, hints, schema), we need to expose
@@ -88,12 +88,13 @@ public class Mutation implements IMutation, Schedulable
     private static final int CACHED_SERIALIZATIONS = EncodingVersion.values().length;
     private final ByteBuffer[] cachedSerializations = new ByteBuffer[CACHED_SERIALIZATIONS];
 
-    // We access the scheduler/operationExecutor multiple times for each mutation (at least twice for every replica
+    // We access the scheduler and the executors multiple times for each mutation (at least twice for every replica
     // involved in the request and response executor in Messaging, and potentially for commit log tasks) and re-doing
     // their computation is unnecessary so caching their value here. Note that we don't serialize those in any way, they
     // are just recomputed in the ctor.
     private final transient TPCScheduler scheduler;
-    private final transient TracingAwareExecutor operationExecutor;
+    private final transient TracingAwareExecutor requestExecutor;
+    private final transient TracingAwareExecutor responseExecutor;
 
     public Mutation(String keyspaceName, DecoratedKey key)
     {
@@ -114,7 +115,8 @@ public class Mutation implements IMutation, Schedulable
             cdcEnabled |= pu.metadata().params.cdc;
 
         this.scheduler = createScheduler(keyspaceName, key);
-        this.operationExecutor = scheduler == null ? null : scheduler.forTaskType(TPCTaskType.WRITE);
+        this.requestExecutor = scheduler == null ? null : scheduler.forTaskType(TPCTaskType.WRITE);
+        this.responseExecutor = scheduler == null ? null : scheduler.forTaskType(TPCTaskType.WRITE_RESPONSE);
     }
 
     private static TPCScheduler createScheduler(String keyspaceName, DecoratedKey key)
@@ -127,7 +129,7 @@ public class Mutation implements IMutation, Schedulable
         {
             // Some tests (including ones outside of DSE-DB) create mutations for keyspaces that don't exist and/or on
             // servers that are not initialized, and we will get here when that happens. To not break those tests, we
-            // return null here and simply don't set the scheduler/operationExecutor: it's safe to assume those tests
+            // return null here and simply don't set the scheduler and executors: it's safe to assume those tests
             // are not applying the mutation and that those executors will simply never get used.
             return null;
         }
@@ -273,9 +275,14 @@ public class Mutation implements IMutation, Schedulable
         return scheduler;
     }
 
-    public TracingAwareExecutor getOperationExecutor()
+    public TracingAwareExecutor getRequestExecutor()
     {
-        return operationExecutor;
+        return requestExecutor;
+    }
+
+    public TracingAwareExecutor getResponseExecutor()
+    {
+        return responseExecutor;
     }
 
     public Completable applyAsync(boolean durableWrites, boolean isDroppable)
