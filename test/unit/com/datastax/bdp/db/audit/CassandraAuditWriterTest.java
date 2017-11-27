@@ -85,7 +85,7 @@ public class CassandraAuditWriterTest extends CQLTester
         assertEquals(eventTime.toDateMidnight().toDate(), row.getTimestamp("date"));
         assertEquals(FBUtilities.getBroadcastAddress(), row.getInetAddress("node"));
         assertEquals(eventTime.getHourOfDay() * 60 * 60, row.getInt("day_partition"));
-        assertEquals(UUIDGen.getTimeUUID(event.getTimestamp()).timestamp(), row.getUUID("event_time").timestamp());
+        assertEquals(event.getTimestamp(), UUIDGen.unixTimestamp(row.getUUID("event_time")));
         assertEquals(event.getBatchId(), row.getUUID("batch_id"));
         assertEquals(event.getType().getCategory().toString(), row.getString("category"));
         assertEquals(event.getKeyspace(), row.getString("keyspace_name"));
