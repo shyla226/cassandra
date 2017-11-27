@@ -49,7 +49,13 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     /** The total number of rows remaining to be fetched: this is initialized with the limit count, and capped by it */
     private int remaining;
 
-    /** This is set to true when we want the last returned row to be also part of the query used when fetching a page */
+    /** This is set to true when we want the last row returned by the previous pager to be also part of the query
+     * used when fetching the next page. This is the case when the previous pager returned the row but the consumer
+     * never had a chance to use it. Currently this is only true when
+     * {@link org.apache.cassandra.cql3.continuous.paging.ContinuousPagingService.ContinuousPagingSession} needs to send
+     * a page to the client. It basically means that the client never received the last row written in the paging state.
+     * This row can also be a static row of an empty partition or a static compact table.
+     */
     protected boolean inclusive;
 
     /** This is the last key we've been reading from (or can still be reading within). This is the key for
@@ -132,11 +138,13 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
                 // on the previous page. In which case, we could have the problem that the partition has no more "regular"
                 // rows (but the page size is such we didn't knew before) but it does have a static row. We should then skip
                 // the partition as returning it would means to the upper layer that the partition has "only" static columns,
-                // which is not the case (and we know the static results have been sent on the previous page).
+                // which is not the case (and we know the static results have been sent on the previous page). If inclusive
+                // is true however, then we know at least one row was not sent in the previous page, it could well be the
+                // static row of an empty partition that was not sent.
                 if (internalPager.isFirstPartition)
                 {
                     internalPager.isFirstPartition = false;
-                    if (isPreviouslyReturnedPartition(partition.partitionKey()))
+                    if (isPreviouslyReturnedPartition(partition.partitionKey()) && !inclusive)
                         return partition.content().skipMapEmpty(c -> applyToPartition(partition.withContent(c)));
                 }
 
@@ -185,11 +193,13 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
                 // on the previous page. In which case, we could have the problem that the partition has no more "regular"
                 // rows (but the page size is such we didn't knew before) but it does have a static row. We should then skip
                 // the partition as returning it would means to the upper layer that the partition has "only" static columns,
-                // which is not the case (and we know the static results have been sent on the previous page).
+                // which is not the case (and we know the static results have been sent on the previous page). If inclusive
+                // is true however, then we know at least one row was not sent in the previous page, it could well be the
+                // static row of an empty partition that was not sent.
                 if (internalPager.isFirstPartition)
                 {
                     internalPager.isFirstPartition = false;
-                    if (isPreviouslyReturnedPartition(partition.partitionKey()))
+                    if (isPreviouslyReturnedPartition(partition.partitionKey()) && !inclusive)
                         return partition.content().skipMapEmpty(c -> applyToPartition(partition.withContent(c)));
                 }
 

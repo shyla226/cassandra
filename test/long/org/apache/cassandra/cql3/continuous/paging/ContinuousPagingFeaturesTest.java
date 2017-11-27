@@ -358,6 +358,97 @@ public class ContinuousPagingFeaturesTest extends CQLTester
         }
     }
 
+    @Test
+    public void testStressSchema() throws Throwable
+    {
+        try(TestHelper helper = new TestBuilder(this).schemaSupplier(bld -> new StressSchema(bld.numPartitions, bld.partitionSize))
+                                                     .numPartitions(10000)
+                                                     .partitionSize(40)
+                                                     .build())
+        {
+            helper.testContinuousPaging(1, 100, ContinuousPagingOptions.PageUnit.ROWS);
+        }
+    }
+
+    @Test
+    public void testStressSchemaSlowClient() throws Throwable
+    {
+        try(TestHelper helper = new TestBuilder(this).schemaSupplier(bld -> new StressSchema(bld.numPartitions, bld.partitionSize))
+                                                     .numPartitions(10000)
+                                                     .partitionSize(40)
+                                                     .numClientThreads(1)
+                                                     .clientPauseMillis(100)
+                                                     .build())
+        {
+            helper.testContinuousPaging(1, 100, ContinuousPagingOptions.PageUnit.ROWS);
+        }
+    }
+
+    /**
+     * Test interrupting optimized paging after N pages, and then resuming again.
+     */
+    @Test
+    public void testStressSchemaWithResume() throws Throwable
+    {
+        try(TestHelper helper = new TestBuilder(this).schemaSupplier(bld -> new StressSchema(bld.numPartitions, bld.partitionSize))
+                                                     .numPartitions(10000)
+                                                     .partitionSize(40)
+                                                     .numClientThreads(1)
+                                                     .clientPauseMillis(100)
+                                                     .build())
+        {
+            // interrupt at page boundaries
+            helper.testResumeWithContinuousPaging(100, ContinuousPagingOptions.PageUnit.ROWS, new int [] { 200, 400, 600, 800});
+
+            // interrupt within a page
+            helper.testResumeWithContinuousPaging(200, ContinuousPagingOptions.PageUnit.ROWS, new int [] { 100, 500, 750});
+        }
+    }
+
+    @Test
+    public void testStaticContentSchema() throws Throwable
+    {
+        try(TestHelper helper = new TestBuilder(this).schemaSupplier(bld -> new StaticContentSchema(bld.numPartitions))
+                                                     .numPartitions(10000)
+                                                     .build())
+        {
+            helper.testContinuousPaging(1, 100, ContinuousPagingOptions.PageUnit.ROWS);
+        }
+    }
+
+    @Test
+    public void testStaticContentSchemaSlowClient() throws Throwable
+    {
+        try(TestHelper helper = new TestBuilder(this).schemaSupplier(bld -> new StaticContentSchema(bld.numPartitions))
+                                                     .numPartitions(10000)
+                                                     .numClientThreads(1)
+                                                     .clientPauseMillis(100)
+                                                     .build())
+        {
+            helper.testContinuousPaging(1, 100, ContinuousPagingOptions.PageUnit.ROWS);
+        }
+    }
+
+    /**
+     * Test interrupting optimized paging after N pages, and then resuming again.
+     */
+    @Test
+    public void testStaticContentSchemaWithResume() throws Throwable
+    {
+        try(TestHelper helper = new TestBuilder(this).schemaSupplier(bld -> new StaticContentSchema(bld.numPartitions))
+                                                     .numPartitions(100)
+                                                     .numClientThreads(1)
+                                                     .clientPauseMillis(100)
+                                                     .build())
+        {
+            // interrupt at page boundaries
+            helper.testResumeWithContinuousPaging(10, ContinuousPagingOptions.PageUnit.ROWS, new int [] { 20, 40, 60, 80});
+
+            // interrupt within a page
+            helper.testResumeWithContinuousPaging(20, ContinuousPagingOptions.PageUnit.ROWS, new int [] { 10, 50, 75});
+        }
+    }
+
     /** Cancel after 3 pages, we should end up with an incomplete query (paging state != null) */
     @Test
     public void testCancel() throws Throwable
