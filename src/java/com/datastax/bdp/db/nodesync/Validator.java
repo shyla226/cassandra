@@ -41,6 +41,7 @@ import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestFailureException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
@@ -53,6 +54,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ReadRepairDecision;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.units.SizeUnit;
@@ -258,20 +260,25 @@ class Validator
 
     private boolean isDone(QueryPager pager)
     {
-        return pager.isExhausted() || state.get() == State.CANCELLED || lifecycle.isInvalidated();
+        return pager.isExhausted() || state.get() == State.CANCELLED;
     }
 
     private void handleError(Throwable t, PageProcessingStatsListener listener)
     {
-        if (t instanceof CompletionException)
-            t = t.getCause();
+        t = Throwables.unwrapped(t);
 
         // Cancellation is the one we ignore as we already cancel the completion future when that happens and there is
         // nothing more to do here.
         if (t instanceof CancellationException)
             return;
 
-        if (isException(t, UnknownKeyspaceException.class, RequestFailureReason.UNKNOWN_KEYSPACE))
+        if (t instanceof InvalidatedNodeSyncStateException)
+        {
+            logger.trace("Validation of {} was invalidated by either a topology change or a depth decrease. " +
+                         "The segment will be retried. ", segment());
+            cancel();
+        }
+        else if (isException(t, UnknownKeyspaceException.class, RequestFailureReason.UNKNOWN_KEYSPACE))
         {
             // This means the keyspace has been dropped concurrently from us.
             logger.trace("Keyspace {} has been dropped while validating segment for table {}", table().keyspace, table());

@@ -848,6 +848,26 @@ public class TableState
         }
 
         /**
+         * The current (at the time of this call) state of the segment this is a reference to, or {@code null} if the
+         * ref has been invalidated.
+         */
+        SegmentState currentState()
+        {
+            tableState.lock.readLock().lock();
+            try
+            {
+                if (isInvalidated())
+                    return null;
+
+                return tableState.stateHolder.immutableSegmentState(indexAtCreation);
+            }
+            finally
+            {
+                tableState.lock.readLock().unlock();
+            }
+        }
+
+        /**
          * Lock (locally) the segment in the in-memory state.
          */
         void lock()

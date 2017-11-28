@@ -353,6 +353,11 @@ public class NodeSyncTestTools
 
         private final boolean log;
 
+        int readRecordsCalls;
+        int lockCalls;
+        int forceUnlockCalls;
+        int recordValidationCalls;
+
         public DevNullTableProxy()
         {
             this(false);
@@ -367,6 +372,7 @@ public class NodeSyncTestTools
         {
             if (log)
                 logger.info("Querying node records for {} on range {}", table, range);
+            ++readRecordsCalls;
             return CompletableFuture.completedFuture(Collections.emptyList());
         }
 
@@ -374,18 +380,21 @@ public class NodeSyncTestTools
         {
             if (log)
                 logger.info("Locking segment {} with timeout {} {}", segment, timeout, timeoutUnit);
+            ++lockCalls;
         }
 
         public void forceReleaseNodeSyncSegmentLock(Segment segment)
         {
             if (log)
                 logger.info("Force unlocking segment {}", segment);
+            ++forceUnlockCalls;
         }
 
         public void recordNodeSyncValidation(Segment segment, ValidationInfo info, boolean wasSuccess)
         {
             if (log)
                 logger.info("Recording validation for {}: {}", segment, info);
+            ++recordValidationCalls;
         }
     }
 }

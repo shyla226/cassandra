@@ -47,7 +47,7 @@ public class TestTimeSource implements TimeSource
         maybeAdvance();
         return timeInNanos.get();
     }
-    
+
     @Override
     public void autoAdvance(int calls, long time, TimeUnit unit)
     {

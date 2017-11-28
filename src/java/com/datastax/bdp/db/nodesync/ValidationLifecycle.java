@@ -78,7 +78,6 @@ class ValidationLifecycle
 
     private NodeSyncStatusTableProxy statusTable()
     {
-        // TODO: reach into the service
         return service().statusTableProxy;
     }
 
@@ -92,9 +91,10 @@ class ValidationLifecycle
         segmentRef.lock();
     }
 
-    boolean isInvalidated()
+    private void checkForInvalidation()
     {
-        return segmentRef.isInvalidated();
+        if (segmentRef.isInvalidated())
+            throw new InvalidatedNodeSyncStateException();
     }
 
     /**
@@ -102,8 +102,7 @@ class ValidationLifecycle
      */
     void onNewPage()
     {
-        if (isInvalidated())
-            return;
+        checkForInvalidation();
 
         int nowInSec = NodeSyncHelpers.time().currentTimeSeconds();
         if (nowInSec > nextLockRefreshTimeSec)
@@ -119,11 +118,7 @@ class ValidationLifecycle
      */
     void onCompletion(ValidationInfo info)
     {
-        if (isInvalidated())
-        {
-            cancel();
-            return;
-        }
+        checkForInvalidation();
 
         // This will release the lock.
         statusTable().recordNodeSyncValidation(segment(), info, segmentRef.segmentStateAtCreation().lastValidationWasSuccessful());
