@@ -55,11 +55,13 @@ public class ColumnIdentifier implements IMeasurableMemory, Comparable<ColumnIde
     private static final long EMPTY_SIZE = ObjectSizes.measure(new ColumnIdentifier(ByteBufferUtil.EMPTY_BYTE_BUFFER, "", false));
 
     private static final ConcurrentMap<InternedKey, ColumnIdentifier> internedInstances = new MapMaker().weakValues().makeMap();
+    private int hashCode = -1;
 
     private static final class InternedKey
     {
         private final AbstractType<?> type;
         private final ByteBuffer bytes;
+        private int hashCode = -1;
 
         InternedKey(AbstractType<?> type, ByteBuffer bytes)
         {
@@ -83,7 +85,13 @@ public class ColumnIdentifier implements IMeasurableMemory, Comparable<ColumnIde
         @Override
         public int hashCode()
         {
-            return bytes.hashCode() + 31 * type.hashCode();
+            int currHashCode = this.hashCode;
+            if (currHashCode == -1)
+            {
+                currHashCode = bytes.hashCode() + 31 * type.hashCode();
+                this.hashCode = currHashCode;
+            }
+            return currHashCode;
         }
     }
 
@@ -160,7 +168,13 @@ public class ColumnIdentifier implements IMeasurableMemory, Comparable<ColumnIde
     @Override
     public final int hashCode()
     {
-        return bytes.hashCode();
+        int hashCode = this.hashCode;
+        if (hashCode == -1)
+        {
+            hashCode = bytes.hashCode();
+            this.hashCode = hashCode;
+        }
+        return hashCode;
     }
 
     @Override
