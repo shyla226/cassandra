@@ -54,7 +54,7 @@ public class BigFormat implements SSTableFormat
 
     private static final Pattern VALIDATION = Pattern.compile("[a-z]+");
 
-    private BigFormat()
+    BigFormat()
     {
 
     }
@@ -117,7 +117,7 @@ public class BigFormat implements SSTableFormat
 
         @Override
         public Pair<DecoratedKey, DecoratedKey> getKeyRange(Descriptor descriptor, IPartitioner partitioner)
-                throws IOException
+        throws IOException
         {
             File summariesFile = new File(descriptor.filenameFor(Component.SUMMARY));
             if (!summariesFile.exists())

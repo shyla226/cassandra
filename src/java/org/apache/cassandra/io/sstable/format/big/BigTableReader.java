@@ -226,7 +226,7 @@ public class BigTableReader extends SSTableReader
         assert desc != null && ifile != null && dfile != null && indexSummary != null && bf != null && sstableMetadata != null;
 
         // Make sure the SSTableReader internalOpen part does the same.
-        assert desc.getFormat() == BigFormat.instance;
+        assert desc.getFormat() instanceof BigFormat;
         BigTableReader reader = BigFormat.readerFactory.open(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header);
 
         reader.bf = bf;

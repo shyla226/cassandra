@@ -125,7 +125,7 @@ public class TPCBoundaries
         sb.append("core 0: (min, ").append(boundaries[0]).append(") ");
         for (int i = 0; i < boundaries.length - 1; i++)
             sb.append("core ").append(i+1).append(": (").append(boundaries[i]).append(", ").append(boundaries[i+1]).append("] ");
-        sb.append("core ").append(boundaries.length + 1).append(": (").append(boundaries[boundaries.length-1]).append(", max)");
+        sb.append("core ").append(boundaries.length).append(": (").append(boundaries[boundaries.length-1]).append(", max)");
         return sb.toString();
     }
 

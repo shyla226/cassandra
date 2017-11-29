@@ -30,6 +30,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -50,8 +51,14 @@ public class Upgrader
     private final long estimatedRows;
 
     private final OutputHandler outputHandler;
+    private final SSTableFormat.Type upgradeToType;
 
     public Upgrader(ColumnFamilyStore cfs, LifecycleTransaction txn, OutputHandler outputHandler)
+    {
+        this(cfs, txn, outputHandler, SSTableFormat.Type.current());
+    }
+
+    public Upgrader(ColumnFamilyStore cfs, LifecycleTransaction txn, OutputHandler outputHandler, SSTableFormat.Type upgradeToType)
     {
         this.cfs = cfs;
         this.transaction = txn;
@@ -61,6 +68,7 @@ public class Upgrader
         this.directory = new File(sstable.getFilename()).getParentFile();
 
         this.controller = new UpgradeController(cfs);
+        this.upgradeToType = upgradeToType;
 
         this.strategyManager = cfs.getCompactionStrategyManager();
         long estimatedTotalKeys = Math.max(cfs.metadata().params.minIndexInterval, SSTableReader.getApproximateKeyCount(Arrays.asList(this.sstable)));
@@ -72,7 +80,7 @@ public class Upgrader
     {
         MetadataCollector sstableMetadataCollector = new MetadataCollector(cfs.getComparator());
         sstableMetadataCollector.sstableLevel(sstable.getSSTableLevel());
-        return SSTableWriter.create(cfs.newSSTableDescriptor(directory),
+        return SSTableWriter.create(cfs.newSSTableDescriptor(directory, upgradeToType),
                                     estimatedRows,
                                     repairedAt,
                                     parentRepair,

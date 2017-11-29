@@ -36,7 +36,7 @@ public class Util
                     v += String.format(" %d: %,d(%,d)", i, metrics.completedTaskCount(stage), metrics.blockedTaskCount(stage));
             }
             if (!v.isEmpty())
-                System.out.println(stage + ":" + v);
+                System.out.println(stage.loggedEventName + ":" + v);
         }
     }
 }

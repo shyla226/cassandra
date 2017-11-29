@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.Random;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.LongSupplier;
 
 import io.reactivex.Scheduler;
 import io.reactivex.functions.Consumer;
@@ -30,10 +31,12 @@ import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.IOScheduler;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.openjdk.jmh.annotations.*;
 
@@ -46,27 +49,30 @@ import static org.apache.cassandra.test.microbench.instance.Util.printTPCStats;
 @Fork(value = 1)
 @Threads(1)
 @State(Scope.Benchmark)
-public class ReadWriteTestSmall extends CQLTester
+public class ReadTestSmallPartitions extends CQLTester
 {
     static String keyspace;
     String table;
     String writeStatement;
     String readStatement;
-    long numRows = 0;
     ColumnFamilyStore cfs;
-    static final int count = 1_100_000;
+    static final int count = 2_000_000;
+    Random rand;
 
-    @Param({"10000", "1000", "100"})
     int BATCH = 1_000;
 
-    @Param({"false", "true"})
-    boolean flush = true;
+    public enum Flush
+    {
+        NO, YES, BIG
+    }
 
-    Random rand = new Random(1);
+    @Param({"NO", "YES", "BIG"})
+    Flush flush = Flush.YES;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
+        rand = new Random(1);
         Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(IOScheduler.MAX_POOL_SIZE));
         RxJavaPlugins.setComputationSchedulerHandler((s) -> TPC.bestTPCScheduler());
         RxJavaPlugins.initIoScheduler(() -> ioScheduler);
@@ -80,24 +86,46 @@ public class ReadWriteTestSmall extends CQLTester
         execute("use "+keyspace+";");
         writeStatement = "INSERT INTO "+table+"(userid,picid,commentid)VALUES(?,?,?)";
         readStatement = "SELECT * from "+table+" where userid=?";
-        System.err.println("Prepared.");
+        System.err.println("Prepared, batch " + BATCH + " flush " + flush);
+        System.err.println("Disk access mode " + DatabaseDescriptor.getDiskAccessMode() + " index " + DatabaseDescriptor.getIndexAccessMode() + " aio " + TPC.USE_AIO);
+        System.err.println("Cores " + TPC.getNumCores() + " boundaries " + Keyspace.open(keyspace).getTPCBoundaries());
 
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();
+        cfs.forceBlockingFlush();
 
         //Warm up
         System.err.println("Writing " + count);
-        for (long i = 0; i < count; i++)
-            execute(writeStatement, i, i, i );
+        long i;
+        for (i = 0; i <= count - BATCH; i += BATCH)
+            performWrite(i, BATCH);
+        if (i < count)
+            performWrite(i, count - i);
 
-        if (flush)
+        switch (flush)
+        {
+        case YES:
+        case BIG:
             cfs.forceBlockingFlush();
+            break;
+        default:
+            // don't flush
+        }
 
         // Needed to stabilize sstable count for off-cache sized tests (e.g. count = 100_000_000)
         while (cfs.getLiveSSTables().size() >= 15)
         {
             cfs.enableAutoCompaction(true);
             cfs.disableAutoCompaction();
+        }
+
+        switch (flush)
+        {
+        case BIG:
+            org.apache.cassandra.Util.rewriteToFormat(cfs, SSTableFormat.Type.BIG);
+            break;
+        default:
+            // we are ready
         }
     }
 
@@ -111,39 +139,44 @@ public class ReadWriteTestSmall extends CQLTester
         CQLTester.cleanup();
     }
 
-    @Benchmark
-    public Object write() throws Throwable
+    public Object performRead(LongSupplier supplier) throws Throwable
     {
-        numRows++;
-        return execute(writeStatement, numRows, numRows, numRows );
+        Waiter<UntypedResultSet> waiter = new Waiter<>(BATCH);
+        for (int i = 0; i < BATCH; ++i)
+            executeAsync(readStatement, supplier.getAsLong()).subscribe(waiter);
+        return waiter.get();
     }
 
+    public Object performWrite(long ofs, long count) throws Throwable
+    {
+        Waiter<UntypedResultSet> waiter = new Waiter<>((int) count);
+        for (long i = ofs; i < ofs + count; ++i)
+            executeAsync(writeStatement, i, i, i).subscribe(waiter);
+        return waiter.get();
+    }
 
     @Benchmark
     public Object readRandomInside() throws Throwable
     {
-        Waiter<UntypedResultSet> waiter = new Waiter<>(BATCH);
-        for (int i = 0; i < BATCH; ++i)
-            executeAsync(readStatement, (long) rand.nextInt(count)).subscribe(waiter);
-        return waiter.get();
+        return performRead(() -> rand.nextInt(count));
     }
 
     @Benchmark
     public Object readRandomWOutside() throws Throwable
     {
-        return execute(readStatement, (long) rand.nextInt(count + count / 6));
+        return performRead(() -> rand.nextInt(count + count / 6));
     }
 
     @Benchmark
     public Object readFixed() throws Throwable
     {
-        return execute(readStatement, 1234567890123L % count);
+        return performRead(() -> 1234567890123L % count);
     }
 
     @Benchmark
     public Object readOutside() throws Throwable
     {
-        return execute(readStatement, count + 1234567L);
+        return performRead(() -> count + 1234567L);
     }
 
     @Override

@@ -22,6 +22,7 @@ package org.apache.cassandra;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOError;
+import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
@@ -52,6 +53,9 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.Directories.DataDirectory;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.Upgrader;
+import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -70,7 +74,9 @@ import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.big.WritableBigFormat;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
@@ -80,6 +86,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.flow.Flow;
 
 import static org.junit.Assert.assertEquals;
@@ -709,5 +716,28 @@ public class Util
         PagingState.RowMark mark = PagingState.RowMark.create(metadata, row, protocolVersion);
         boolean inclusive = protocolVersion.isGreaterOrEqualTo(ProtocolVersion.DSE_V1);
         return new PagingState(pk, mark, 10, 0, inclusive);
+    }
+
+    public static void rewriteToFormat(ColumnFamilyStore cfs, SSTableFormat.Type destinationFormat)
+    throws IllegalAccessException, NoSuchFieldException
+    {
+        // Make sure we can write big table files
+        if (SSTableFormat.Type.BIG.info != WritableBigFormat.instance)
+        {
+            Field infoField = SSTableFormat.Type.class.getField("info");
+            infoField.setAccessible(true);
+            infoField.set(SSTableFormat.Type.BIG, WritableBigFormat.instance);
+        }
+
+        OutputHandler handler = new OutputHandler.SystemOutput(true, true);
+        for (SSTableReader sstable : cfs.getLiveSSTables())
+        {
+            try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstable, OperationType.UPGRADE_SSTABLES))
+            {
+                Upgrader upgrader = new Upgrader(cfs, txn, handler, destinationFormat);
+                upgrader.upgrade(false);
+            }
+        }
+
     }
 }

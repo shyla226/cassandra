@@ -1415,7 +1415,7 @@ public class DatabaseDescriptor
     }
 
     @VisibleForTesting
-    public static void setColumnIndexSize(int val)
+    public static void setColumnIndexSizeInKB(int val)
     {
         conf.column_index_size_in_kb = val;
     }
