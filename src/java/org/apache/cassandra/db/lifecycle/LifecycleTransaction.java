@@ -20,7 +20,7 @@ package org.apache.cassandra.db.lifecycle;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.function.BiFunction;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiPredicate;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
@@ -110,7 +110,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional
     // (no other transactions may operate over these readers concurrently)
     private final Set<SSTableReader> originals = new HashSet<>();
     // the set of readers we've marked as compacting (only updated on creation and in checkpoint())
-    private final Set<SSTableReader> marked = new HashSet<>();
+    private final Set<SSTableReader> marked = Collections.newSetFromMap(new ConcurrentHashMap<>());
     // the identity set of readers we've ever encountered; used to ensure we don't accidentally revisit the
     // same version of a reader. potentially a dangerous property if there are reference counting bugs
     // as they won't be caught until the transaction's lifespan is over.
@@ -274,7 +274,9 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional
     protected Throwable doPostCleanup(Throwable accumulate)
     {
         log.close();
-        return unmarkCompacting(marked, accumulate);
+        Throwable throwable = unmarkCompacting(marked, accumulate);
+        tracker.finishTransaction(opId());
+        return throwable;
     }
 
     public boolean isOffline()
@@ -426,6 +428,11 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional
     public Set<SSTableReader> originals()
     {
         return Collections.unmodifiableSet(originals);
+    }
+
+    public Set<SSTableReader> compactingSet()
+    {
+        return Collections.unmodifiableSet(marked);
     }
 
     /**

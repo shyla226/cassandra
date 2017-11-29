@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -148,6 +149,7 @@ public class RealTransactionsTest extends SchemaLoader
     {
         List<SSTableReader> newsstables = null;
         int nowInSec = FBUtilities.nowInSeconds();
+        assertEquals(Sets.newHashSet(txn), cfs.getTracker().getTransactions());
         try (CompactionController controller = new CompactionController(cfs, txn.originals(), cfs.gcBefore(FBUtilities.nowInSeconds())))
         {
             try (SSTableRewriter rewriter = SSTableRewriter.constructKeepingOriginals(txn, false, 1000);
@@ -186,6 +188,7 @@ public class RealTransactionsTest extends SchemaLoader
             }
         }
 
+        assertTrue(cfs.getTracker().getTransactions().isEmpty());
         assertTrue(fail || newsstables != null);
 
         if (newsstables != null)

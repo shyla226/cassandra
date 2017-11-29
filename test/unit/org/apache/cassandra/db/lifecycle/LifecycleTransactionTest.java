@@ -19,9 +19,11 @@
 package org.apache.cassandra.db.lifecycle;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.google.common.base.Predicates;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -32,6 +34,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction.ReaderState.Action;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction.ReaderState;
@@ -50,6 +53,8 @@ import static com.google.common.collect.Iterables.size;
 import static org.apache.cassandra.db.lifecycle.Helpers.idIn;
 import static org.apache.cassandra.db.lifecycle.Helpers.orIn;
 import static org.apache.cassandra.db.lifecycle.Helpers.select;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class LifecycleTransactionTest extends AbstractTransactionalTest
 {
@@ -77,7 +82,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
     public void testUpdates() // (including obsoletion)
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        Tracker tracker = new Tracker(null, false);
+        Tracker tracker = cfs.getTracker();
         SSTableReader[] readers = readersArray(0, 3, cfs);
         SSTableReader[] readers2 = readersArray(0, 4, cfs);
         SSTableReader[] readers3 = readersArray(0, 4, cfs);
@@ -102,7 +107,15 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
         txn.update(readers2[3], false);
 
         Assert.assertEquals(3, tracker.getView().compacting.size());
+        // Check that new sstable is not yet marked as compacting
+        assertFalse(CompactionManager.instance.isCompacting(Collections.singleton(cfs), Predicates.alwaysTrue(),
+                                                           s -> s.equals(readers2[3])));
         txn.checkpoint();
+        // Check that all versions of the new sstables are marked as compacting
+        assertTrue(CompactionManager.instance.isCompacting(Collections.singleton(cfs), Predicates.alwaysTrue(),
+                                                           s -> s.equals(readers2[3])));
+        assertTrue(CompactionManager.instance.isCompacting(Collections.singleton(cfs), Predicates.alwaysTrue(),
+                                                           s -> s.equals(readers3[3])));
         Assert.assertTrue(txn.isObsolete(readers[1]));
         Assert.assertFalse(txn.isObsolete(readers[0]));
         Assert.assertEquals(4, tracker.getView().compacting.size());
@@ -135,18 +148,27 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
         txn.checkpoint();
         Assert.assertEquals(1, tracker.getView().sstables.size());
         Assert.assertEquals(4, tracker.getView().compacting.size());
+        assertTrue(CompactionManager.instance.isCompacting(Collections.singleton(cfs), Predicates.alwaysTrue(),
+                                                           s -> s.equals(readers2[3])));
+        assertTrue(CompactionManager.instance.isCompacting(Collections.singleton(cfs), Predicates.alwaysTrue(),
+                                                           s -> s.equals(readers3[3])));
     }
 
     @Test
     public void testCancellation()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        Tracker tracker = new Tracker(null, false);
+        Tracker tracker = cfs.getTracker();
         List<SSTableReader> readers = readers(0, 3, cfs);
         tracker.addInitialSSTables(readers);
         LifecycleTransaction txn = tracker.tryModify(readers, OperationType.UNKNOWN);
 
         SSTableReader cancel = readers.get(0);
+
+        // Check that sstable to be cancelled is marked as compacting
+        assertTrue(CompactionManager.instance.isCompacting(Collections.singleton(cfs), Predicates.alwaysTrue(),
+                                                            s -> s.equals(cancel)));
+
         SSTableReader update = readers(1, 2, cfs).get(0);
         SSTableReader fresh = readers(3, 4,cfs).get(0);
         SSTableReader notPresent = readers(4, 5, cfs).get(0);
@@ -154,6 +176,10 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
         txn.cancel(cancel);
         txn.update(update, true);
         txn.update(fresh, false);
+
+        // Check that cancelled sstable is no longer marked as compacting
+        assertFalse(CompactionManager.instance.isCompacting(Collections.singleton(cfs), Predicates.alwaysTrue(),
+                                                            s -> s.equals(cancel)));
 
         testBadCancel(txn, cancel);
         testBadCancel(txn, update);

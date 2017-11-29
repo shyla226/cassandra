@@ -19,8 +19,11 @@ package org.apache.cassandra.db.lifecycle;
 
 import java.io.File;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
@@ -43,6 +46,7 @@ import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.notifications.*;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static com.google.common.base.Predicates.and;
@@ -72,6 +76,8 @@ public class Tracker
     final AtomicReference<View> view;
     public final boolean loadsstables;
 
+    private final Map<UUID, LifecycleTransaction> activeTransactions;
+
     /**
      * @param memtable Initial Memtable. Can be null.
      * @param loadsstables true to indicate to load SSTables (TODO: remove as this is only accessed from 2i)
@@ -82,6 +88,7 @@ public class Tracker
         this.view = new AtomicReference<>();
         this.loadsstables = loadsstables;
         this.reset(memtable);
+        this.activeTransactions = new ConcurrentHashMap<>();
     }
 
     public LifecycleTransaction tryModify(SSTableReader sstable, OperationType operationType)
@@ -94,13 +101,26 @@ public class Tracker
      */
     public LifecycleTransaction tryModify(Iterable<SSTableReader> sstables, OperationType operationType)
     {
-        if (Iterables.isEmpty(sstables))
-            return new LifecycleTransaction(this, operationType, sstables);
-        if (null == apply(permitCompacting(sstables), updateCompacting(emptySet(), sstables)))
+        if (!Iterables.isEmpty(sstables) && apply(permitCompacting(sstables), updateCompacting(emptySet(), sstables)) == null)
             return null;
-        return new LifecycleTransaction(this, operationType, sstables);
+
+        LifecycleTransaction txn = new LifecycleTransaction(this, operationType, sstables);
+        activeTransactions.put(txn.opId(), txn);
+        return txn;
     }
 
+    public LifecycleTransaction finishTransaction(UUID id)
+    {
+        return activeTransactions.remove(id);
+    }
+
+    /**
+     * Returns a list of currently active {@link LifecycleTransaction}s.
+     */
+    public Set<LifecycleTransaction> getTransactions()
+    {
+        return new HashSet<>(activeTransactions.values());
+    }
 
     // METHODS FOR ATOMICALLY MODIFYING THE VIEW
 

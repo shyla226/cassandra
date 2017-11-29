@@ -26,6 +26,9 @@ import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
@@ -46,6 +49,8 @@ import static org.junit.Assert.*;
 @RunWith(OrderedJUnit4ClassRunner.class)
 public class CompactionsTest
 {
+    private static final Logger logger = LoggerFactory.getLogger(CompactionsTest.class);
+
     private static final String KEYSPACE1 = "Keyspace1";
     private static final String CF_DENSE1 = "CF_DENSE1";
     private static final String CF_STANDARD1 = "CF_STANDARD1";
@@ -104,10 +109,15 @@ public class CompactionsTest
         // enable compaction, submit background and wait for it to complete
         store.enableAutoCompaction();
         FBUtilities.waitOnFutures(CompactionManager.instance.submitMaximal(store, FBUtilities.nowInSeconds(), false));
+        int retries = 0;
         do
         {
             TimeUnit.SECONDS.sleep(1);
-        } while (CompactionManager.instance.getPendingTasks() > 0 || CompactionManager.instance.getActiveCompactions() > 0);
+            if (retries > 30)
+                throw new AssertionError("Compactions have not settled in 30 seconds.");
+            retries++;
+
+        } while (store.getCompactionStrategyManager().getEstimatedRemainingTasks() > 0 || CompactionManager.instance.getActiveCompactions() > 0);
 
         // and sstable with ttl should be compacted
         assertEquals(1, store.getLiveSSTables().size());

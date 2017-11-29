@@ -2316,7 +2316,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         // and so we only run one major compaction at a time
         synchronized (this)
         {
-            logger.trace("Cancelling in-progress compactions for {}", metadata.name);
+            logger.debug("Cancelling in-progress compactions for {}", metadata.name);
 
             Iterable<ColumnFamilyStore> selfWithAuxiliaryCfs = interruptViews
                                                                ? Iterables.concat(concatWithIndexes(), viewManager.allViewsCfs())
@@ -2327,21 +2327,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             try
             {
                 // interrupt in-progress compactions
-                if (CompactionManager.instance.interruptCompactionForCFs(selfWithAuxiliaryCfs, opPredicate, readerPredicate))
+                CompactionManager.instance.interruptCompactionForCFs(selfWithAuxiliaryCfs, opPredicate, readerPredicate);
+                CompactionManager.instance.waitForCessation(selfWithAuxiliaryCfs, opPredicate, readerPredicate);
+                // doublecheck that we finished, instead of timing out
+                for (ColumnFamilyStore cfs : selfWithAuxiliaryCfs)
                 {
-                    CompactionManager.instance.waitForCessation(selfWithAuxiliaryCfs, readerPredicate);
-
-                    // doublecheck that we finished, instead of timing out
-                    for (ColumnFamilyStore cfs : selfWithAuxiliaryCfs)
+                    if (CompactionManager.instance.isCompacting(ImmutableList.of(cfs), opPredicate, readerPredicate))
                     {
-                        if (CompactionManager.instance.isCompacting(ImmutableList.of(cfs), readerPredicate))
-                        {
-                            logger.warn("Unable to cancel in-progress compactions for {}.  Perhaps there is an unusually large row in progress somewhere, or the system is simply overloaded.", metadata.name);
-                            return null;
-                        }
+                        logger.warn("Unable to cancel in-progress compactions for {}.  Perhaps there is an unusually large row in progress somewhere, or the system is simply overloaded.", metadata.name);
+                        return null;
                     }
-                    logger.trace("Compactions successfully cancelled");
                 }
+                logger.debug("Compactions successfully cancelled");
 
                 // run our task
                 try

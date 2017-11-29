@@ -75,7 +75,7 @@ public interface Transactional extends AutoCloseable
         }
 
         private boolean permitRedundantTransitions;
-        private State state = State.IN_PROGRESS;
+        private volatile State state = State.IN_PROGRESS;
 
         // the methods for actually performing the necessary behaviours, that are themselves protected against
         // improper use by the external implementations provided by this class. empty default implementations
