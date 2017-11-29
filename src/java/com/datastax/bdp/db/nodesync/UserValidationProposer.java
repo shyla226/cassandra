@@ -250,7 +250,7 @@ public class UserValidationProposer extends ValidationProposer implements Iterat
                 startTime = NodeSyncHelpers.time().currentTimeMillis();
 
             logger.trace("Submitting user validation of {} for execution", segment());
-            Validator validator = Validator.create(ValidationLifecycle.createAndStart(segmentRef, false));
+            Validator validator = Validator.create(ValidationLifecycle.createAndStart(segmentRef));
             validator.completionFuture()
                      .thenAccept(i -> onValidationDone(i, validator.metrics()))
                      .exceptionally(e -> { onValidationError(e); return null; });

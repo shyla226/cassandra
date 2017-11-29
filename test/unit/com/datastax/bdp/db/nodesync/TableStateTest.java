@@ -25,7 +25,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.NodeSyncParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableParams;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.TestTimeSource;
 import org.apache.cassandra.utils.TimeSource;
 
@@ -61,15 +60,15 @@ public class TableStateTest
     @Test
     public void testBasicPrioritization() throws Exception
     {
-        TimeSource timeSource = new TestTimeSource();
-        timeSource.autoAdvance(1, 1, TimeUnit.SECONDS);
+        TestTimeSource timeSource = new TestTimeSource();
+        timeSource.reset(0, 0); // Starting the time at 0 make things easier to follow when debugging
         NodeSyncHelpers.setTestParameters(null, null, -1, timeSource);
 
         // Using a very small deadline so that the small delays between the fake validations below account for a
         // comparatively long time.
         TableMetadata table = metadataBuilder("ks", "table")
                               .addPartitionKeyColumn("k", Int32Type.instance)
-                              .params(TableParams.builder().nodeSync(new NodeSyncParams(true, 5, Collections.emptyMap())).build())
+                              .params(TableParams.builder().nodeSync(new NodeSyncParams(true, 10, Collections.emptyMap())).build())
                               .build();
 
         NodeSyncService service = new NodeSyncService(new NodeSyncTestTools.DevNullTableProxy(debugLog));
@@ -84,64 +83,73 @@ public class TableStateTest
 
         log(state);
 
-        TableState.Ref next = state.nextSegmentToValidate().right;
+        TableState.Ref next = state.nextSegmentToValidate();
         assertEquals(s1, next.segment());
         assertEquals(Status.UP_TO_DATE, next.checkStatus());
-        ValidationLifecycle v1 = ValidationLifecycle.createAndStart(next, false);
+        ValidationLifecycle v1 = ValidationLifecycle.createAndStart(next);
 
         log(state);
+        timeSource.sleep(1, TimeUnit.SECONDS);
 
         // We pretended to start validation on the first segment, make sure we get the next one now.
-        next = state.nextSegmentToValidate().right;
+        next = state.nextSegmentToValidate();
         assertEquals(s2, next.segment());
         assertEquals(Status.UP_TO_DATE, next.checkStatus());
-        ValidationLifecycle v2 = ValidationLifecycle.createAndStart(next, false);
+        ValidationLifecycle v2 = ValidationLifecycle.createAndStart(next);
 
         log(state);
+        timeSource.sleep(1, TimeUnit.SECONDS);
 
         // Complete the first one and make sure we still get the next one first.
         v1.onCompletion(fullInSync(0));
 
         log(state);
+        timeSource.sleep(1, TimeUnit.SECONDS);
 
-        next = state.nextSegmentToValidate().right;
+        next = state.nextSegmentToValidate();
         assertEquals(s3, next.segment());
         assertEquals(Status.UP_TO_DATE, next.checkStatus());
-        ValidationLifecycle v3 = ValidationLifecycle.createAndStart(next, false);
+        ValidationLifecycle v3 = ValidationLifecycle.createAndStart(next);
 
         log(state);
+        timeSource.sleep(1, TimeUnit.SECONDS);
 
         // Ask for one more: it should be locally locked because while s1 is unlocked, it just got successfully validated
         // while s2 and s3 haven't be validated at all, so even with lock penalty they come first.
-        assertTrue(state.nextSegmentToValidate().left.isLocallyLocked());
+        assertTrue(state.nextSegmentToValidate().segmentStateAtCreation().isLocallyLocked());
 
         // Complete both the validation on the 2nd and 3rd segment (with the one for 3rd segment not successful)...
         v2.onCompletion(fullInSync(0));
         v3.onCompletion(partialRepaired(0));
 
         log(state);
+        timeSource.sleep(1, TimeUnit.SECONDS);
 
         // ... and the next segment should be the 3rd one (s1 and s2 last were successful, not s3 so it should be retried first).
-        next = state.nextSegmentToValidate().right;
+        next = state.nextSegmentToValidate();
         assertEquals(s3, next.segment());
         assertEquals(Status.UP_TO_DATE, next.checkStatus());
-        ValidationLifecycle v4 = ValidationLifecycle.createAndStart(next, false);
+        ValidationLifecycle v4 = ValidationLifecycle.createAndStart(next);
 
         log(state);
+        timeSource.sleep(1, TimeUnit.SECONDS);
 
         // After that, s1 is now the one having the oldest successful validation
-        next = state.nextSegmentToValidate().right;
+        next = state.nextSegmentToValidate();
         assertEquals(s1, next.segment());
 
-        // Now have s3 validation come back before we check the status of the s1 proposal. It should make the status
-        // return UPDATED
-        v3.onCompletion(partialRepaired(0));
+        // Now have s3 validation come back failing before we check the status of the s1 proposal. Because it is failing,
+        // s3 should be the one with the most priority and checkStatus should indicate that.
+        v4.onCompletion(partialRepaired(0));
+        log(state);
+
         assertEquals(Status.UPDATED, next.checkStatus());
 
         log(state);
+        timeSource.sleep(1, TimeUnit.SECONDS);
 
-        // And because s3 was still failing, it should be the one to retry first
-        next = state.nextSegmentToValidate().right;
+        // And we should get s3 as mentioned above
+        next = state.nextSegmentToValidate();
         assertEquals(s3, next.segment());
     }
 
@@ -187,9 +195,49 @@ public class TableStateTest
         List<Range<Token>> localRanges = asList(range(0, 10), range(10, 20));
         TableState state = TableState.load(service, table, localRanges, 1);
 
-        TableState.Ref ref = state.nextSegmentToValidate().right;
+        TableState.Ref ref = state.nextSegmentToValidate();
         updateOp.accept(state);
 
         assertEquals(shouldInvalidate, ref.isInvalidated());
+    }
+
+    @Test
+    public void testDepthIncrease()
+    {
+        // Depth increase are not invalidating validations (as tested above), but we should also make sure validation
+        // on-flight during such change are still properly taken into account.
+
+        TimeSource timeSource = new TestTimeSource();
+        timeSource.autoAdvance(1, 1, TimeUnit.SECONDS);
+        NodeSyncHelpers.setTestParameters(null, null, -1, timeSource);
+
+        TableMetadata table = metadataBuilder("ks", "table")
+                              .addPartitionKeyColumn("k", Int32Type.instance)
+                              .build();
+
+        NodeSyncService service = new NodeSyncService(new NodeSyncTestTools.DevNullTableProxy(debugLog));
+
+        TableState state = TableState.load(service, table, asList(range(0, 10), range(20, 30)), 0);
+
+        TableState.Ref ref = state.nextSegmentToValidate();
+        // On an initial state, the code will return segments in order initially (even though technically other choice
+        // would be as valid). We do rely on this ordering below however so make sure this doesn't change (if it does,
+        // the test can be adapted but it's a tad more annoying).
+        assertEquals(range(0, 10), ref.segment().range);
+        ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(ref);
+
+        // Increase the depth and _then_ finish the validation
+        state.update(1);
+
+        lifecycle.onCompletion(fullInSync(0));
+
+        // We increased the depth by 1, so all segment got split in 2, and the validation was on the first state, so
+        // the 2 first segment should now have been validated (and the 2 last shouldn't).
+        List<SegmentState> segmentStates = state.dumpSegmentStates();
+        assertEquals(4, segmentStates.size());
+        for (int i = 0; i < 2; i++)
+            assertTrue(segmentStates.get(i).lastValidationTimeMs() > 0);
+        for (int i = 2; i < 4; i++)
+            assertTrue(segmentStates.get(i).lastValidationTimeMs() < 0);
     }
 }

@@ -74,10 +74,8 @@ class ContinuousValidationProposer extends ValidationProposer
         if (cancelled)
             return;
 
-        Pair<SegmentState, TableState.Ref> p = state.nextSegmentToValidate();
-        SegmentState segState = p.left;
-        TableState.Ref ref = p.right;
-        if (segState.isLocallyLocked())
+        TableState.Ref ref = state.nextSegmentToValidate();
+        if (ref.segmentStateAtCreation().isLocallyLocked())
         {
             // We don't want to validate a segment that is already being validated by ourselves. Getting such segment
             // here means however that despite the priority penalty on locked segments, this is still the one with
@@ -89,7 +87,7 @@ class ContinuousValidationProposer extends ValidationProposer
             return;
         }
 
-        Proposal next = new Proposal(ref, segState);
+        Proposal next = new Proposal(ref);
         long now = NodeSyncHelpers.time().currentTimeMillis();
         if (next.minTimeForSubmission() > 0)
            ScheduledExecutors.nonPeriodicTasks.schedule(() -> proposalConsumer.accept(next),
@@ -120,7 +118,6 @@ class ContinuousValidationProposer extends ValidationProposer
      */
     class Proposal extends ValidationProposal implements Comparable<Proposal>
     {
-        private final SegmentState stateAtProposal;
         private final long priority;
 
         /**
@@ -134,12 +131,16 @@ class ContinuousValidationProposer extends ValidationProposer
          */
         private final long minTimeForSubmission;
 
-        private Proposal(TableState.Ref segmentRef, SegmentState currentState)
+        private Proposal(TableState.Ref segmentRef)
         {
             super(segmentRef);
-            this.stateAtProposal = currentState;
-            this.priority = currentState.priority();
-            this.minTimeForSubmission = minTimeForNextValidation(currentState);
+            this.priority = stateAtProposal().priority();
+            this.minTimeForSubmission = minTimeForNextValidation(stateAtProposal());
+        }
+
+        private SegmentState stateAtProposal()
+        {
+            return segmentRef.segmentStateAtCreation();
         }
 
         private long minTimeForNextValidation(SegmentState state)
@@ -193,7 +194,7 @@ class ContinuousValidationProposer extends ValidationProposer
                     // lock penalty to the priority, that segment was still the highest priority, but it is still
                     // locked remotely. In that case, it's probably worth waiting a small delay before retrying
                     // generation to avoid spinning on that segment.
-                    if (stateAtProposal.isRemotelyLocked())
+                    if (stateAtProposal().isRemotelyLocked())
                         ScheduledExecutors.nonPeriodicTasks.schedule(ContinuousValidationProposer.this::generateNextProposal, RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
                     else
                         generateNextProposal();
@@ -204,8 +205,8 @@ class ContinuousValidationProposer extends ValidationProposer
                     generateNextProposal();
                     return null;
                 case UP_TO_DATE:
-                    logger.trace("Submitting validation of {} for execution ({})", segment(), stateAtProposal);
-                    ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(segmentRef, stateAtProposal.lastValidationWasSuccessful());
+                    logger.trace("Submitting validation of {} for execution ({})", segment(), stateAtProposal());
+                    ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(segmentRef);
                     // Note: it's important generating the next proposal is after the lifecycle has been created, as that
                     // is what locks the segment locally and make sure we don't re-generate that same segment.
                     generateNextProposal();
@@ -236,10 +237,10 @@ class ContinuousValidationProposer extends ValidationProposer
         {
             long now = NodeSyncHelpers.time().currentTimeMillis();
             if (minTimeForSubmission <= now)
-                return stateAtProposal.toString();
+                return stateAtProposal().toString();
 
             String delayToSubmission = Units.toString(minTimeForSubmission - now, TimeUnit.MILLISECONDS);
-            return String.format("%s (to be submitted in %s)", stateAtProposal, delayToSubmission);
+            return String.format("%s (to be submitted in %s)", stateAtProposal(), delayToSubmission);
         }
     }
 }

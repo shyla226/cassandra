@@ -105,18 +105,31 @@ abstract class SegmentState
      */
     long priority()
     {
-        long priority = rawPriority();
-        if (isLocallyLocked())
+        return priority(lastValidationTimeMs(),
+                        lastSuccessfulValidationTimeMs(),
+                        deadlineTargetMs(),
+                        isLocallyLocked(),
+                        isRemotelyLocked());
+    }
+
+    static long priority(long lastValidationTimeMs,
+                         long lastSuccessfulValidationTimeMs,
+                         long deadlineTargetMs,
+                         boolean locallyLocked,
+                         boolean remotelyLocked)
+    {
+        long priority = rawPriority(lastValidationTimeMs, lastSuccessfulValidationTimeMs, deadlineTargetMs);
+        if (locallyLocked)
             priority += LOCAL_LOCK_PRIORITY_PENALTY_MS;
-        if (isRemotelyLocked())
+        if (remotelyLocked)
             priority += REMOTE_LOCK_PRIORITY_PENALTY_MS;
         return priority;
     }
 
-    private long rawPriority()
+    private static long rawPriority(long lastValidationTimeMs, long lastSuccessfulValidationTimeMs, long deadlineTargetMs)
     {
-        long priority = lastValidationTimeMs() + deadlineTargetMs();
-        if (lastValidationWasSuccessful())
+        long priority = lastValidationTimeMs + deadlineTargetMs;
+        if (lastValidationTimeMs == lastSuccessfulValidationTimeMs)
             return priority;
 
         // If we denote last validations with l, last successful ones with s and the deadline as d, the idea here is
@@ -135,8 +148,8 @@ abstract class SegmentState
         // distance between l and s become too big, so we cap this number to be both greater than d/10 and lower than
         // d-(d/10). In other words, a failed attempt always at least bump the priority by d/10 and never does so
         // more than 9d/10 (bumping by d would be considering the attempt successful).
-        long diff = (lastValidationTimeMs() - lastSuccessfulValidationTimeMs()) / 2;
-        return priority - Math.max(5000, Math.min((9 * deadlineTargetMs()) / 10, diff));
+        long diff = (lastValidationTimeMs - lastSuccessfulValidationTimeMs) / 2;
+        return priority - Math.max(5000, Math.min((9 * deadlineTargetMs) / 10, diff));
     }
 
     private String durationStr(long now, long time)

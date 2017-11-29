@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collection;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -19,19 +18,20 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 
 /**
@@ -132,6 +132,14 @@ public class TableState
     {
         this.service = service;
         this.table = table;
+
+        // Safety measure: we timestamp acquisition of local lock and force release expired locks here. This should
+        // really never do anything or we have a bug, but avoid keeping a segment locked forever because a bug leaked
+        // a Ref object.
+        ScheduledExecutors.optionalTasks.scheduleAtFixedRate(this::unlockExpiredLocalLocks,
+                                                             ValidationLifecycle.LOCK_TIMEOUT_SEC,
+                                                             ValidationLifecycle.LOCK_TIMEOUT_SEC,
+                                                             TimeUnit.SECONDS);
     }
 
     NodeSyncService service()
@@ -209,13 +217,14 @@ public class TableState
             if (depth < stateHolder.segments.depth())
             {
                 newStateHolder.populateFromStatusTable();
-                updateState(newStateHolder, true);
+                version.major++;
             }
             else
             {
                 newStateHolder.updateFrom(stateHolder);
-                updateState(newStateHolder, false);
+                version.minor++;
             }
+            stateHolder = newStateHolder;
         }
         finally
         {
@@ -240,22 +249,13 @@ public class TableState
                 return;
 
             logger.debug("Updating NodeSync state for {} as local ranges have been updated", table);
-            updateState(emptyState(localRanges, stateHolder.segments.depth()).populateFromStatusTable(), true);
+            stateHolder = emptyState(localRanges, stateHolder.segments.depth()).populateFromStatusTable();
+            version.major++;
         }
         finally
         {
             lock.writeLock().unlock();
         }
-    }
-
-    // Should be called while holding the write lock
-    private void updateState(StateHolder newStateHolder, boolean isMajor)
-    {
-        this.stateHolder = newStateHolder;
-        if (isMajor)
-            this.version.major++;
-        else
-            this.version.minor++;
     }
 
     /**
@@ -277,7 +277,6 @@ public class TableState
 
             logger.debug("Updating NodeSync deadline target for {} following table update", table);
             stateHolder.updateDeadline(deadline);
-            version.minor++;
         }
         finally
         {
@@ -289,11 +288,10 @@ public class TableState
      * Find the next segment that should be validated according to the validation priority defined by
      * {@link SegmentState#priority()}.
      *
-     * @return a pair containing current (immutable) {@link SegmentState} of the segment having the smallest priority
-     * value (so higher priority) as well as a reference to this segment state. Note that it is possible that this
+     * @return a reference to the segment having the smallest priority value. Note that it is possible that this
      * segment is currently locally (or remotely) locked, so this should usually be taken into account by callers.
      */
-    Pair<SegmentState, Ref> nextSegmentToValidate()
+    Ref nextSegmentToValidate()
     {
         lock.readLock().lock();
         try
@@ -346,6 +344,44 @@ public class TableState
         }
     }
 
+    private void unlockExpiredLocalLocks()
+    {
+        int nowInSec = NodeSyncHelpers.time().currentTimeSeconds();
+        if (stateHolder.hasExpiredLocalLocks(nowInSec))
+        {
+            // A local lock should get expired unless we've dropped a Ref object on the floor without cancelling it,
+            // which is a bug. Of course, slowness and bad timing could _theoretically_ make this happen without it
+            // being a bug, but given the lock default timeout, that is more than unlikely. Anyway, at least warning
+            // when that happen make sense.
+            logger.warn("Detected expired (and thus non released) local NodeSync locks. Will force-release them  to " +
+                        "fix, but this should normally not happen and if you see this message with any kind of regularity, " +
+                        "please report it");
+            lock.writeLock().lock();
+            try
+            {
+                stateHolder.expireLocalLocks(nowInSec);
+            }
+            finally
+            {
+                lock.writeLock().unlock();
+            }
+        }
+    }
+
+    /**
+     * A testing method, not meant to be used anywhere else.
+     * @return
+     */
+    @VisibleForTesting
+    List<SegmentState> dumpSegmentStates()
+    {
+        StateHolder current = stateHolder;
+        List<SegmentState> segments = new ArrayList<>(current.size);
+        for (int i = 0; i < current.size; i++)
+            segments.add(current.immutableSegmentState(i));
+        return segments;
+    }
+
     @Override
     public String toString()
     {
@@ -358,7 +394,7 @@ public class TableState
      * Note that all the methods of this expect that the write lock will be held for any operation that update the
      * state and the read one held for any read operation.
      */
-    private class StateHolder implements Iterable<StateHolder.Cursor>
+    private class StateHolder
     {
         private static final int UNLOCKED = Integer.MIN_VALUE;
 
@@ -379,6 +415,10 @@ public class TableState
         // but that does mean we can rely the status table timeout for expiration.
         private final int[] localLocks;
         private final BitSet remoteLocks;
+
+        // The index to the next segment that should be validated. Update to this is what triggers a "priority" version
+        // change.
+        private int nextIdx;
 
         private StateHolder(long deadlineTargetMs,
                             Segments segments,
@@ -417,6 +457,70 @@ public class TableState
             Arrays.fill(localLocks, UNLOCKED);
         }
 
+        private long priority(int i)
+        {
+            return SegmentState.priority(lastValidations[i],
+                                         lastSuccessfulValidations[i],
+                                         deadlineTargetMs,
+                                         localLocks[i] != UNLOCKED,
+                                         remoteLocks.get(i));
+        }
+
+        private void setNextIdx(int i)
+        {
+            nextIdx = i;
+            version.priority++;
+        }
+
+        private boolean isLocalLockExpired(int i, int nowInSec)
+        {
+            // It's expired if it was locked in the first place but the lock expiration is in the past
+            long lock = localLocks[i];
+            return lock != UNLOCKED && lock < nowInSec;
+        }
+
+        private boolean hasExpiredLocalLocks(int nowInSec)
+        {
+            for (int i = 0; i < size; i++)
+            {
+                if (isLocalLockExpired(i, nowInSec))
+                    return true;
+            }
+            return false;
+        }
+
+        private void expireLocalLocks(int nowInSec)
+        {
+            for (int i = 0; i < size; i++)
+            {
+                if (isLocalLockExpired(i, nowInSec))
+                    localLocks[i] = UNLOCKED;
+            }
+            // Force-releasing some expired locks might have change priorities so just recompute. Note that don't
+            // call this unless we know there is expired lock so it's ok to call unconditionally here.
+            updateNextToValidate();
+        }
+
+        private void updateNextToValidate()
+        {
+            // Find the min value (in term of priority value)
+            int minIdx = 0;
+            long minPriority = priority(minIdx);
+            for (int i = 1; i < size; i++)
+            {
+                long p = priority(i);
+                if (p < minPriority)
+                {
+                    minIdx = i;
+                    minPriority = p;
+                }
+            }
+
+            // If that's not the same as the current one, update and bump the minor version
+            if (minIdx != nextIdx)
+                setNextIdx(minIdx);
+        }
+
         private StateHolder populateFromStatusTable()
         {
             // We load record separately for each local ranges for 2 reasons:
@@ -434,6 +538,7 @@ public class TableState
                 else
                     populateRangeFromStatusTable(range);
             });
+            updateNextToValidate();
             return this;
         }
 
@@ -459,30 +564,10 @@ public class TableState
             }
         }
 
-        // Note that the SegmentState returned by the iterator is only valid until the next call to next(), so this
-        // should be used with a little bit of care. That's probably true of this whole class anyway :)
-        public Iterator<Cursor> iterator()
-        {
-            return new Iterator<Cursor>()
-            {
-                private final Cursor cursor = new Cursor(-1);
-
-                public boolean hasNext()
-                {
-                    return cursor.idx < size - 1;
-                }
-
-                public Cursor next()
-                {
-                    ++cursor.idx;
-                    return cursor;
-                }
-            };
-        }
-
         private void updateDeadline(long newDeadlineTargetMs)
         {
             deadlineTargetMs = newDeadlineTargetMs;
+            updateNextToValidate();
         }
 
         private Ref newRef(int i)
@@ -496,24 +581,16 @@ public class TableState
                                              lastValidations[i],
                                              lastSuccessfulValidations[i],
                                              deadlineTargetMs,
-                                             isLocallyLocked(i, NodeSyncHelpers.time().currentTimeSeconds()),
+                                             localLocks[i] != UNLOCKED,
                                              remoteLocks.get(i));
         }
 
         /**
          * Return the segment with the smallest priority value, unless said segment is locally locked.
          */
-        private Pair<SegmentState, Ref> nextSegmentToValidate()
+        private Ref nextSegmentToValidate()
         {
-            Cursor min = new Cursor(0);
-            Cursor s = new Cursor(1);
-            while (s.idx < size)
-            {
-                if (s.priority() < min.priority())
-                    min.idx = s.idx;
-                ++s.idx;
-            }
-            return Pair.create(immutableSegmentState(min.idx), newRef(min.idx));
+            return newRef(nextIdx);
         }
 
         private ImmutableList<Ref> intersectingSegments(List<Range<Token>> localSubRanges)
@@ -521,10 +598,10 @@ public class TableState
             checkAllLocalRanges(localSubRanges);
 
             ImmutableList.Builder<Ref> builder = ImmutableList.builder();
-            for (Cursor s : this)
+            for (int i = 0; i < size; i++)
             {
-                if (localSubRanges.stream().anyMatch(s.segment().range::intersects))
-                    builder.add(newRef(s.idx));
+                if (localSubRanges.stream().anyMatch(segments.get(i).range::intersects))
+                    builder.add(newRef(i));
             }
             return builder.build();
         }
@@ -542,82 +619,86 @@ public class TableState
                                                                  nonLocal, FBUtilities.getBroadcastAddress(), localRanges));
         }
 
-        private void updateFrom(StateHolder other)
+        private void updateFrom(StateHolder o)
         {
-            for (Cursor o : other)
+            for (int i = 0; i < o.size; i++)
             {
-                int[] r = segments.findFullyIncludedIn(o.segment());
-                for (int i = r[0]; i < r[1]; i++)
+                int[] r = segments.findFullyIncludedIn(o.segments.get(i));
+                for (int j = r[0]; j < r[1]; j++)
+                    updateInternal(j, o.lastValidations[i], o.lastSuccessfulValidations[i], o.localLocks[i], o.remoteLocks.get(i));
+            }
+            updateNextToValidate();
+        }
+
+        private void updateInternal(int i, long newLast, long newLastSuccess, int newLocalLock, boolean newRemoteLock)
+        {
+            long previousPriority = priority(i);
+
+            if (newLast > lastValidations[i])
+                lastValidations[i] = newLast;
+            if (newLastSuccess > lastSuccessfulValidations[i])
+                lastSuccessfulValidations[i] = newLastSuccess;
+
+            localLocks[i] = newLocalLock;
+            remoteLocks.set(i, newRemoteLock);
+
+            long newPriority = priority(i);
+
+            // If the priority has changed, it might have impacted the next to validate
+            if (newPriority != previousPriority)
+            {
+                // If it was the next to validate, it may or may not be anymore so we have to recompute to know.
+                // Otherwise, it becomes the next to validate if the new priority is lower than said current next.
+                if (i == nextIdx)
                 {
-                    updateInternal(i, o.lastValidationTimeMs(), o.lastSuccessfulValidationTimeMs(), other.localLocks[o.idx]);
-                    remoteLocks.set(i, o.isRemotelyLocked());
+                    updateNextToValidate();
+                }
+                else
+                {
+                    if (newPriority < priority(nextIdx))
+                        setNextIdx(i);
                 }
             }
         }
 
-        private void updateInternal(int i, long newLast, long newLastSuccess, int newLocalLock)
-        {
-            boolean updated = false;
-            if (newLast > lastValidations[i])
-            {
-                lastValidations[i] = newLast;
-                updated = true;
-            }
-            if (newLastSuccess > lastSuccessfulValidations[i])
-            {
-                lastSuccessfulValidations[i] = newLastSuccess;
-                updated = true;
-            }
-            if (newLocalLock > localLocks[i])
-            {
-                localLocks[i] = newLocalLock;
-                updated = true;
-            }
-            if (updated)
-                version.minor++;
-        }
-
-        private boolean isLocallyLocked(int i, int nowInSec)
-        {
-            return localLocks[i] > nowInSec;
-        }
-
         private void update(int i, NodeSyncRecord record)
         {
-            updateInternal(i, record.lastValidationTimeMs(), record.lastSuccessfulValidationTimeMs(), UNLOCKED);
-            if (record.lockedBy != null)
-            {
-                // We check if the node that locked is alive. If it isn't, we ignore the lock (and in fact clear any
-                // we may have had from a previous read. Because the locks in the status table are timed out, this is
-                // not essential, but it makes the system more reactive and thus easier to reason about and test.
-                remoteLocks.set(i, FailureDetector.instance.isAlive(record.lockedBy));
-                version.minor++;
-            }
+            updateInternal(i,
+                           record.lastValidationTimeMs(),
+                           record.lastSuccessfulValidationTimeMs(),
+                           localLocks[i], // keep whatever local lock we had
+                           // We check if the node that locked is alive. If it isn't, we ignore the lock (and in fact clear any
+                           // we may have had from a previous read. Because the locks in the status table are timed out, this is
+                           // not essential, but it makes the system more reactive and thus easier to reason about and test.
+                           record.lockedBy != null && FailureDetector.instance.isAlive(record.lockedBy));
         }
 
         private void lockLocally(int i)
         {
             localLocks[i] = newLockExpiration();
-            version.minor++;
+            // By design we'll lock the next in line, but doesn't cost us much to check if that changes: as locking
+            // increase the priority, if it wasn't the min, it won't be post-locking.
+            if (nextIdx == i)
+                updateNextToValidate();
         }
 
         private void refreshLocalLock(int i)
         {
-            // Not setting a new lock, so not worth updating the version.
-            if (localLocks[i] > 0)
+            if (localLocks[i] != UNLOCKED)
                 localLocks[i] = newLockExpiration();
         }
 
-        private void updatedCompletedValidation(int i, long last, long lastSuccess)
+        private void updateCompletedValidation(int i, long last, long lastSuccess)
         {
-            updateInternal(i, last, lastSuccess, UNLOCKED);
-            forceLocalUnlock(i);
+            updateInternal(i, last, lastSuccess, UNLOCKED, false);
         }
 
         private void forceLocalUnlock(int i)
         {
             localLocks[i] = UNLOCKED;
-            version.minor++;
+            // This will lower the priority of segment i, so it can now be the smaller one if it wasn't.
+            if (nextIdx != i)
+                updateNextToValidate();
         }
 
         private int newLockExpiration()
@@ -643,14 +724,14 @@ public class TableState
             for (int i = 0; i < LINES; i++)
                 lines.add(new ArrayList<>(size));
 
-            for (Cursor c : this)
+            for (int i = 0; i < size; i++)
             {
-                lines.get(0).add(c.segment().range.toString());
-                lines.get(1).add(Long.toString(c.lastValidationTimeMs()));
-                lines.get(2).add(Long.toString(c.lastSuccessfulValidationTimeMs()));
-                lines.get(3).add(Integer.toString(localLocks[c.idx]));
-                lines.get(4).add(Boolean.toString(c.isRemotelyLocked()));
-                lines.get(5).add(Long.toString(c.priority()));
+                lines.get(0).add(segments.get(i).range.toString());
+                lines.get(1).add(Long.toString(lastValidations[i]));
+                lines.get(2).add(Long.toString(lastSuccessfulValidations[i]));
+                lines.get(3).add(Integer.toString(localLocks[i]));
+                lines.get(4).add(Boolean.toString(remoteLocks.get(i)));
+                lines.get(5).add(Long.toString(priority(i)));
             }
             int[] widths = new int[size];
             for (int i = 0; i < size; i++)
@@ -660,7 +741,7 @@ public class TableState
             }
 
             StringBuilder sb = new StringBuilder();
-            sb.append("Gen = ").append(version).append('\n');
+            sb.append("Version = ").append(version).append(", next to validate = ").append(nextIdx).append('\n');
             sb.append("        ");
             for (int i = 0; i < size; i++)
                 sb.append(" | ").append(pad(lines.get(0).get(i), widths[i]));
@@ -691,47 +772,6 @@ public class TableState
             sb.append(val);
             return sb.toString();
         }
-
-        class Cursor extends SegmentState
-        {
-            private int idx;
-            private final int nowInSec = NodeSyncHelpers.time().currentTimeSeconds();
-
-            private Cursor(int initialIndex)
-            {
-                this.idx = initialIndex;
-            }
-
-            Segment segment()
-            {
-                return segments.get(idx);
-            }
-
-            long lastValidationTimeMs()
-            {
-                return lastValidations[idx];
-            }
-
-            long lastSuccessfulValidationTimeMs()
-            {
-                return lastSuccessfulValidations[idx];
-            }
-
-            long deadlineTargetMs()
-            {
-                return deadlineTargetMs;
-            }
-
-            boolean isLocallyLocked()
-            {
-                return StateHolder.this.isLocallyLocked(idx, nowInSec);
-            }
-
-            boolean isRemotelyLocked()
-            {
-                return remoteLocks.get(idx);
-            }
-        }
     }
 
     /**
@@ -756,7 +796,7 @@ public class TableState
         enum Status { UP_TO_DATE, UPDATED, LOCKED }
 
         private final TableState tableState;
-        private final Segment segment;
+        private final SegmentState segmentAtCreation;
 
         private final Version versionAtCreation;
         private final int indexAtCreation;
@@ -764,9 +804,7 @@ public class TableState
         private Ref(TableState tableState, int indexAtCreation)
         {
             this.tableState = tableState;
-
-            StateHolder holder = tableState.stateHolder;
-            this.segment = holder.segments.get(indexAtCreation);
+            this.segmentAtCreation = tableState.stateHolder.immutableSegmentState(indexAtCreation);
             this.versionAtCreation = tableState.version.copy();
             this.indexAtCreation = indexAtCreation;
         }
@@ -778,7 +816,12 @@ public class TableState
 
         Segment segment()
         {
-            return segment;
+            return segmentAtCreation.segment();
+        }
+
+        SegmentState segmentStateAtCreation()
+        {
+            return segmentAtCreation;
         }
 
         /**
@@ -814,7 +857,7 @@ public class TableState
         void onCompletedValidation(long validationTime, boolean wasSuccessful)
         {
             long lastSuccess = wasSuccessful ? validationTime : NodeSyncHelpers.NO_VALIDATION_TIME;
-            doUpdate((s, i) -> s.updatedCompletedValidation(i, validationTime, lastSuccess));
+            doUpdate((s, i) -> s.updateCompletedValidation(i, validationTime, lastSuccess));
         }
 
         /**
@@ -842,8 +885,8 @@ public class TableState
             try
             {
                 return tableState.statusTable()
-                                 .nodeSyncRecords(segment)
-                                 .thenApply(records -> NodeSyncRecord.consolidate(segment, records))
+                                 .nodeSyncRecords(segment())
+                                 .thenApply(records -> NodeSyncRecord.consolidate(segment(), records))
                                  .thenApply(record -> {
                                      tableState.lock.writeLock().lock();
                                      try
@@ -851,7 +894,7 @@ public class TableState
                                          if (!isInvalidated())
                                              tableState.stateHolder.update(indexAtCreation, record);
 
-                                         return versionAtCreation.minor == tableState.version.minor
+                                         return versionAtCreation.equals(tableState.version)
                                                 ? Status.UP_TO_DATE
                                                 : (record.lockedBy == null ? Status.UPDATED : Status.LOCKED);
                                      }
@@ -874,8 +917,11 @@ public class TableState
             tableState.lock.writeLock().lock();
             try
             {
+                if (isInvalidated())
+                    return;
+
                 StateHolder holder = tableState.stateHolder;
-                if (tableState.version.major == versionAtCreation.major)
+                if (tableState.version.minor == versionAtCreation.minor)
                 {
                     // If the state is still the one on which we created the original proposal, we have the index of that
                     // segment directly and update is constant time.
@@ -888,7 +934,7 @@ public class TableState
                     // invalidating the ref currently is when the depth increase. In that case, we'll the segment we
                     // just validated just happen to cover 2 segments (or 4, 8, ... if the depth augmented by more than
                     // 1 but that's very very unlikely) and we'll simply update those 2 segments.
-                    int[] r = holder.segments.findFullyIncludedIn(segment);
+                    int[] r = holder.segments.findFullyIncludedIn(segment());
                     for (int i = r[0]; i < r[1]; i++)
                         updater.update(holder, i);
                 }
@@ -907,15 +953,18 @@ public class TableState
     }
 
     /**
-     * Track the number of updates made to the state since creation, allowing to easily know if the state has changed
-     * between 2 point in time. Thus a particular "version" uniquely identify a particular "state" of the state. This
-     * distinguishes 2 types of updates:
+     * Track "meaningful" updates made to the state.
+     * <p>
+     * This concretely track 3 numbers, major, minor and priority that are updated in the following way and with the
+     * following meaning:
      * <ul>
-     * <li>major: incremented on updates that should invalidate any {@link Ref} created before the update, and
-     * in practice correspond to change of local range or depth decrease.</li>
-     * <li>minor: incremented on updates that do not invalidate {@link Ref} objects but do have some impact on either
-     * the segments in the state or their priority. This include most updates to a particular segment tracked value,
-     * but also depth increase and change to the table deadline target.</li>
+     * <li>major: incremented on updates to the state that invalidate any in-flight validations (any {@link Ref} objec
+     * created before the update). In practice, corresponds to change of local range or depth decrease.</li>
+     * <li>minor: incremented when the underlying state-holder changes (the segments considered have changed), but
+     * without invalidating in-flight validations. This happen on depth increase, where we can relatively easily
+     * avoid the invalidation.</li>
+     * <li>priority: updated every time the state changes in such a way that this modify which segment has the lowest
+     * priority value (the one that should be validated next).</li>
      * </ul>
      * <p>
      * Note that this class is mutable and so updates to minor/major should be done only while holding the
@@ -925,21 +974,23 @@ public class TableState
     {
         volatile long major;
         volatile long minor;
+        volatile long priority;
 
         private Version()
         {
-            this(0, 0);
+            this(0, 0, 0);
         }
 
-        private Version(long major, long minor)
+        private Version(long major, long minor, long priority)
         {
             this.major = major;
             this.minor = minor;
+            this.priority = priority;
         }
 
         Version copy()
         {
-            return new Version(major, minor);
+            return new Version(major, minor, priority);
         }
 
         @Override
@@ -949,7 +1000,8 @@ public class TableState
             {
                 Version other = (Version) obj;
                 return this.major == other.major
-                       && this.minor == other.minor;
+                       && this.minor == other.minor
+                       && this.priority == other.priority;
             }
             return false;
         }
@@ -957,13 +1009,13 @@ public class TableState
         @Override
         public int hashCode()
         {
-            return Objects.hash(major, minor);
+            return Objects.hash(major, minor, priority);
         }
 
         @Override
         public String toString()
         {
-            return String.format("[%s,%s]", major, minor);
+            return String.format("[%d,%d,%d]", major, minor, priority);
         }
     }
 }

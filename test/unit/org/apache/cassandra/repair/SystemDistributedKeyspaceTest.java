@@ -23,6 +23,7 @@ import org.junit.Test;
 
 import com.datastax.bdp.db.nodesync.Segment;
 
+import com.datastax.bdp.db.nodesync.ValidationInfo;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -43,26 +44,30 @@ public class SystemDistributedKeyspaceTest extends CQLTester
         assertEquals(Collections.emptyList(), SystemDistributedKeyspace.nodeSyncRecords(seg).get());
 
         // Add one and check it gets picked up
-        SystemDistributedKeyspace.recordNodeSyncValidation(seg(table, 0, 50), fullInSync(10), true);
-        assertEquals(records(table).add(0, 50, fullInSync(10)).asList(), SystemDistributedKeyspace.nodeSyncRecords(seg).get());
+        ValidationInfo i1 = fullInSync(10);
+        SystemDistributedKeyspace.recordNodeSyncValidation(seg(table, 0, 50), i1, true);
+        assertEquals(records(table).add(0, 50, i1).asList(), SystemDistributedKeyspace.nodeSyncRecords(seg).get());
 
         // Add one that isn't part of the requested segment and check it isn't picked up
-        SystemDistributedKeyspace.recordNodeSyncValidation(seg(table, 100, 150), fullInSync(15), true);
-        assertEquals(records(table).add(0, 50, fullInSync(10)).asList(), SystemDistributedKeyspace.nodeSyncRecords(seg).get());
+        ValidationInfo i2 = fullInSync(15);
+        SystemDistributedKeyspace.recordNodeSyncValidation(seg(table, 100, 150), i2, true);
+        assertEquals(records(table).add(0, 50, i1).asList(), SystemDistributedKeyspace.nodeSyncRecords(seg).get());
 
         // Add one more within the requested segment and check it's picked up. Also record both a full and an more recent validation
-        SystemDistributedKeyspace.recordNodeSyncValidation(seg(table, 50, 100), fullInSync(7), true);
-        SystemDistributedKeyspace.recordNodeSyncValidation(seg(table, 50, 100), partialRepaired(2, inet(127, 0, 0, 10)), true);
-        assertEquals(records(table).add(0, 50, fullInSync(10))
-                                   .add(50, 100, partialRepaired(2, inet(127, 0, 0, 10)), fullInSync(7))
+        ValidationInfo i3 = fullInSync(7);
+        ValidationInfo i4 = partialRepaired(2, inet(127, 0, 0, 10));
+        SystemDistributedKeyspace.recordNodeSyncValidation(seg(table, 50, 100), i3, true);
+        SystemDistributedKeyspace.recordNodeSyncValidation(seg(table, 50, 100), i4, true);
+        assertEquals(records(table).add(0, 50, i1)
+                                   .add(50, 100, i4, i3)
                                    .asList(),
                      SystemDistributedKeyspace.nodeSyncRecords(seg).get());
 
         // Lastly, test querying with a segment that goes up to min token since that's a separate code path. Make sure
         // it fetches all our insert segments.
-        assertEquals(records(table).add(0, 50, fullInSync(10))
-                                   .add(50, 100, partialRepaired(2, inet(127, 0, 0, 10)), fullInSync(7))
-                                   .add(100, 150, fullInSync(15))
+        assertEquals(records(table).add(0, 50, i1)
+                                   .add(50, 100, i4, i3)
+                                   .add(100, 150, i2)
                                    .asList(),
                      SystemDistributedKeyspace.nodeSyncRecords(seg(table, 0, min())).get());
     }

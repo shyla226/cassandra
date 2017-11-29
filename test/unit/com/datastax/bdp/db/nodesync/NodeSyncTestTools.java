@@ -43,12 +43,6 @@ import static org.junit.Assert.*;
  */
 public class NodeSyncTestTools
 {
-    // When building validation time, we want in test pass human-readable values, but the ValidatioInfo.toString()
-    // assumes that the time is genuine timestamp for proper display, so the methods of this class ends up mixing the
-    // value passed in the/ test with the current time so we get the best of both word. We do use a reference fixed for
-    // a single test execution so things are decently predictable.
-    private static final long NOW = NodeSyncHelpers.time().currentTimeMillis();
-
     private static final IPartitioner PARTITIONER = Murmur3Partitioner.instance;
 
     /**
@@ -181,7 +175,7 @@ public class NodeSyncTestTools
             {
                 ValidationProposal toReturn = next;
                 // Fake an activation and completion of validation to get progress; This will update next.
-                ValidationLifecycle.createAndStart(toReturn.segmentRef, false)
+                ValidationLifecycle.createAndStart(toReturn.segmentRef)
                                    .onCompletion(new ValidationInfo(++clock, ValidationOutcome.FULL_IN_SYNC, null));
                 proposer.generateNextProposal();
                 return toReturn;
@@ -191,7 +185,7 @@ public class NodeSyncTestTools
 
     private static ValidationInfo vInfo(long daysAgo, ValidationOutcome outcome, Set<InetAddress> missingNodes)
     {
-        return new ValidationInfo(NOW - TimeUnit.DAYS.toMillis(daysAgo),
+        return new ValidationInfo(NodeSyncHelpers.time().currentTimeMillis() - TimeUnit.DAYS.toMillis(daysAgo),
                                   outcome,
                                   missingNodes);
     }

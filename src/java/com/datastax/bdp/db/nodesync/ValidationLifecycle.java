@@ -27,20 +27,13 @@ class ValidationLifecycle
     private final TableState.Ref segmentRef;
 
     private final long startTime;
-    // Whether the previous validation was successful (or the segment has had no validation at all) to the best
-    // of our knowledge. This is only used to avoid adding tombstones to the system tables for no reason and
-    // probably shouldn't be relied upon for other things.
-    private final boolean previousValidationWasSuccessful;
 
     private volatile int nextLockRefreshTimeSec;
 
-    private ValidationLifecycle(TableState.Ref segmentRef,
-                                long startTime,
-                                boolean previousValidationWasSuccessful)
+    private ValidationLifecycle(TableState.Ref segmentRef, long startTime)
     {
         this.segmentRef = segmentRef;
         this.startTime = startTime;
-        this.previousValidationWasSuccessful = previousValidationWasSuccessful;
         this.nextLockRefreshTimeSec = computeNextLockRefresh((int)(startTime / 1000));
     }
 
@@ -53,17 +46,11 @@ class ValidationLifecycle
      *
      * @param segmentRef a reference to the state of the segment on which this is a lifecycle. This reference allow to
      *                   update said state based on the progress of the validation lifecycle.
-     * @param previousValidationWasSuccessful whether the previous validation on this segment was successful or not.
-     *                                        The exactitude of this information is not absolutely required but if it
-     *                                        is exact, it will saves us for unnecessarily adding tombstones to the
-     *                                        status table.
-     * @return
+     * @return the newly created and started {@link ValidationLifecycle}.
      */
-    static ValidationLifecycle createAndStart(TableState.Ref segmentRef, boolean previousValidationWasSuccessful)
+    static ValidationLifecycle createAndStart(TableState.Ref segmentRef)
     {
-        ValidationLifecycle lifecycle = new ValidationLifecycle(segmentRef,
-                                                                NodeSyncHelpers.time().currentTimeMillis(),
-                                                                previousValidationWasSuccessful);
+        ValidationLifecycle lifecycle = new ValidationLifecycle(segmentRef, NodeSyncHelpers.time().currentTimeMillis());
         lifecycle.onStart();
         return lifecycle;
     }
@@ -139,7 +126,7 @@ class ValidationLifecycle
         }
 
         // This will release the lock.
-        statusTable().recordNodeSyncValidation(segment(), info, previousValidationWasSuccessful);
+        statusTable().recordNodeSyncValidation(segment(), info, segmentRef.segmentStateAtCreation().lastValidationWasSuccessful());
         segmentRef.onCompletedValidation(info.startedAt, info.wasSuccessful());
     }
 
