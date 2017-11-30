@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -72,15 +73,16 @@ public class MemtableTest extends CQLTester
         memtable.setDiscarding(barrier, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
         barrier.issue();
 
-        List<Range<Token>> ranges = Range.sort(StorageService.instance.getLocalRanges(cfs.keyspace.getName()));
         // this determines the number of flush writers created, the FlushRunnable will convert a null location into an sstable location for us
         Directories.DataDirectory[] locations = new Directories.DataDirectory[24];
+        List<Range<Token>> sortedLocalRanges = Range.sort(StorageService.instance.getLocalRanges(cfs.keyspace.getName()));
+        DiskBoundaries mockDiskBoundary = DiskBoundaryManager.createDiskBoundaries(cfs, locations, sortedLocalRanges);
         ExecutorService executor = Executors.newFixedThreadPool(locations.length / 3);
 
         // abort without starting
         try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.FLUSH))
         {
-            List<Memtable.FlushRunnable> flushRunnables = memtable.createFlushRunnables(ranges, locations, txn);
+            List<Memtable.FlushRunnable> flushRunnables = memtable.createFlushRunnables(txn, mockDiskBoundary);
             assertNotNull(flushRunnables);
 
             for (Memtable.FlushRunnable flushRunnable : flushRunnables)
@@ -96,7 +98,7 @@ public class MemtableTest extends CQLTester
         // abort after starting
         try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.FLUSH))
         {
-            List<Memtable.FlushRunnable> flushRunnables = memtable.createFlushRunnables(ranges, locations, txn);
+            List<Memtable.FlushRunnable> flushRunnables = memtable.createFlushRunnables(txn, mockDiskBoundary);
 
             List<Future<SSTableMultiWriter>> futures = flushRunnables.stream().map(executor::submit).collect(Collectors.toList());
 
@@ -112,7 +114,7 @@ public class MemtableTest extends CQLTester
         // abort before starting
         try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.FLUSH))
         {
-            List<Memtable.FlushRunnable> flushRunnables = memtable.createFlushRunnables(ranges, locations, txn);
+            List<Memtable.FlushRunnable> flushRunnables = memtable.createFlushRunnables(txn, mockDiskBoundary);
 
             for (Memtable.FlushRunnable flushRunnable : flushRunnables)
                 assertNull(flushRunnable.abort(null));

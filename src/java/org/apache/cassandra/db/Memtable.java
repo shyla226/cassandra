@@ -64,7 +64,6 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -616,22 +615,19 @@ public class Memtable implements Comparable<Memtable>
             return getSequentialPartitions(columnFilter, dataRange);
     }
 
-    public List<FlushRunnable> createFlushRunnables(LifecycleTransaction txn)
+    List<FlushRunnable> createFlushRunnables(LifecycleTransaction txn)
     {
-        List<Range<Token>> localRanges = Range.sort(StorageService.instance.getLocalRanges(cfs.keyspace.getName()));
-
-        if (!cfs.getPartitioner().splitter().isPresent() || localRanges.isEmpty())
-            return Collections.singletonList(createFlushRunnable(txn));
-
-        return createFlushRunnables(localRanges, cfs.getDirectories().getWriteableLocations(), txn);
+        return createFlushRunnables(txn, cfs.getDiskBoundaries());
     }
 
     @VisibleForTesting
-    List<FlushRunnable> createFlushRunnables(List<Range<Token>> localRanges, Directories.DataDirectory[] locations, LifecycleTransaction txn)
+    List<FlushRunnable> createFlushRunnables(LifecycleTransaction txn, DiskBoundaries diskBoundaries)
     {
-        assert cfs.getPartitioner().splitter().isPresent();
+        List<PartitionPosition> boundaries = diskBoundaries.positions;
+        List<Directories.DataDirectory> locations = diskBoundaries.directories;
+        if (boundaries == null)
+            return Collections.singletonList(createFlushRunnable(txn));
 
-        List<PartitionPosition> boundaries = StorageService.getDiskBoundaries(localRanges, cfs.getPartitioner(), locations);
         List<FlushRunnable> runnables = new ArrayList<>(boundaries.size());
         PartitionPosition rangeStart = cfs.getPartitioner().getMinimumToken().minKeyBound();
         try
@@ -639,7 +635,7 @@ public class Memtable implements Comparable<Memtable>
             for (int i = 0; i < boundaries.size(); i++)
             {
                 PartitionPosition t = boundaries.get(i);
-                runnables.add(createFlushRunnable(rangeStart, t, locations[i], txn));
+                runnables.add(createFlushRunnable(rangeStart, t, locations.get(i), txn));
                 rangeStart = t;
             }
             return runnables;
