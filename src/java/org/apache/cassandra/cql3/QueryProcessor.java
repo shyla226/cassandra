@@ -226,12 +226,25 @@ public class QueryProcessor implements QueryHandler
                                                   QueryOptions options,
                                                   long queryStartNanoTime)
     {
-        CQLStatement statement = prepared.statement;
+        return processStatement(prepared.statement,
+                                prepared.rawCQLStatement,
+                                prepared.boundNames,
+                                queryState,
+                                options,
+                                queryStartNanoTime);
+    }
 
+    public Single<ResultMessage> processStatement(CQLStatement statement,
+                                                  String rawCQLStatement,
+                                                  List<ColumnSpecification> boundNames,
+                                                  QueryState queryState,
+                                                  QueryOptions options,
+                                                  long queryStartNanoTime)
+    {
         if (logger.isTraceEnabled())
             logger.trace("Process {} @CL.{}", statement, options.getConsistency());
 
-        List<AuditableEvent> events = auditLogger.getEvents(statement, prepared.rawCQLStatement, queryState, options, prepared.boundNames);
+        List<AuditableEvent> events = auditLogger.getEvents(statement, rawCQLStatement, queryState, options, boundNames);
 
         final StagedScheduler scheduler = statement.getScheduler();
 
