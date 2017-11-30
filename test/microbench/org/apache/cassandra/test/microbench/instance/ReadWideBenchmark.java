@@ -19,19 +19,8 @@
 package org.apache.cassandra.test.microbench.instance;
 
 
-import java.util.concurrent.ThreadLocalRandom;
-
-import com.datastax.driver.core.PreparedStatement;
-import com.datastax.driver.core.ResultSetFuture;
-import com.datastax.driver.core.Session;
-import org.openjdk.jmh.annotations.Benchmark;
-import org.openjdk.jmh.annotations.Level;
+import com.datastax.driver.core.*;
 import org.openjdk.jmh.annotations.Param;
-import org.openjdk.jmh.annotations.Scope;
-import org.openjdk.jmh.annotations.Setup;
-import org.openjdk.jmh.annotations.State;
-import org.openjdk.jmh.annotations.TearDown;
-import org.openjdk.jmh.infra.BenchmarkParams;
 
 public class ReadWideBenchmark  extends ReadBenchmark
 {

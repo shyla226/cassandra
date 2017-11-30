@@ -84,7 +84,7 @@ import static org.apache.cassandra.test.microbench.instance.Util.printTPCStats;
 @State(Scope.Benchmark)
 public class BaseBenchmark
 {
-    private AtomicLong opCounter = new AtomicLong();
+    private final AtomicLong opCounter = new AtomicLong();
 
     @Param("1000000")
     long populationSize;
