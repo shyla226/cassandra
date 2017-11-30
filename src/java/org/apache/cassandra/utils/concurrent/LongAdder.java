@@ -21,7 +21,7 @@ package org.apache.cassandra.utils.concurrent;
 import java.util.Arrays;
 
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.utils.memory.MemoryUtil;
+import org.apache.cassandra.utils.UnsafeAccess;
 import sun.misc.Contended;
 
 /**
@@ -44,7 +44,7 @@ public class LongAdder
         try
         {
             Class<?> ak = Cell.class;
-            valueOffset = MemoryUtil.unsafe.objectFieldOffset(ak.getDeclaredField("value"));
+            valueOffset = UnsafeAccess.UNSAFE.objectFieldOffset(ak.getDeclaredField("value"));
         }
         catch (Exception e)
         {
@@ -69,19 +69,19 @@ public class LongAdder
         void add(long x, boolean lazy)
         {
             if (lazy)
-                MemoryUtil.unsafe.putOrderedLong(this, valueOffset, value + x);
+                UnsafeAccess.UNSAFE.putOrderedLong(this, valueOffset, value + x);
             else
-                MemoryUtil.unsafe.getAndAddLong(this, valueOffset, x);
+                UnsafeAccess.UNSAFE.getAndAddLong(this, valueOffset, x);
         }
 
         void set(long x)
         {
-            MemoryUtil.unsafe.getAndSetLong(this, valueOffset, x);
+            UnsafeAccess.UNSAFE.getAndSetLong(this, valueOffset, x);
         }
 
         long get()
         {
-            return MemoryUtil.unsafe.getLongVolatile(this, valueOffset);
+            return UnsafeAccess.UNSAFE.getLongVolatile(this, valueOffset);
         }
     }
 

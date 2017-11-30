@@ -19,10 +19,10 @@
 package org.apache.cassandra.io.util;
 
 import net.nicoulaj.compilecommand.annotations.Inline;
+import org.apache.cassandra.utils.UnsafeMemoryAccess;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseable;
-import org.apache.cassandra.utils.memory.MemoryUtil;
 
 public class SafeMemory extends Memory implements SharedCloseable
 {
@@ -88,7 +88,7 @@ public class SafeMemory extends Memory implements SharedCloseable
         {
             /** see {@link Memory#Memory(long)} re: null pointers*/
             if (peer != 0)
-                MemoryUtil.free(peer);
+                UnsafeMemoryAccess.free(peer);
         }
 
         public String name()

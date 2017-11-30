@@ -29,6 +29,7 @@ import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.NativeCell;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.utils.UnsafeMemoryAccess;
 
 /**
  * This NativeAllocator uses global slab allocation strategy
@@ -134,7 +135,7 @@ public class NativeAllocator extends MemtableAllocator
         size = Math.min(MAX_REGION_SIZE, size);
 
         // first we try and repurpose a previously allocated region
-        Region next = new Region(MemoryUtil.allocate(size), size);
+        Region next = new Region(UnsafeMemoryAccess.allocate(size), size);
 
         // we try to swap in the region we've obtained;
         // if we fail to swap the region, we try to stash it for repurposing later; if we're out of stash room, we free it
@@ -147,7 +148,7 @@ public class NativeAllocator extends MemtableAllocator
     {
         // satisfy large allocations directly from JVM since they don't cause fragmentation
         // as badly, and fill up our regions quickly
-        Region region = new Region(MemoryUtil.allocate(size), size);
+        Region region = new Region(UnsafeMemoryAccess.allocate(size), size);
         regions.add(region);
 
         long peer;
@@ -160,7 +161,7 @@ public class NativeAllocator extends MemtableAllocator
     public void setDiscarded()
     {
         for (Region region : regions)
-            MemoryUtil.free(region.peer);
+            UnsafeMemoryAccess.free(region.peer);
 
         super.setDiscarded();
     }

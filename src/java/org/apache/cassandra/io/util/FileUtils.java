@@ -39,8 +39,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.memory.MemoryUtil;
+import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.UnsafeCopy;
 import sun.nio.ch.DirectBuffer;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -49,10 +49,10 @@ import org.apache.cassandra.io.FSErrorHandler;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
+import static org.apache.cassandra.utils.UnsafeByteBufferAccess.DIRECT_BYTE_BUFFER_CLASS;
 
 public final class FileUtils
 {
@@ -364,9 +364,9 @@ public final class FileUtils
                 // When dealing with sliced buffers we
                 // attach the root buffer we used to align
                 // so we can properly free it
-                if (cleanAttachment && buffer.getClass() == MemoryUtil.DIRECT_BYTE_BUFFER_CLASS)
+                if (cleanAttachment && buffer.isDirect())
                 {
-                    Object attach = MemoryUtil.getAttachment(buffer);
+                    Object attach = UnsafeByteBufferAccess.getAttachment(buffer);
                     if (attach != null && attach instanceof ByteBuffer && attach != buffer)
                         clean((ByteBuffer) attach);
                 }

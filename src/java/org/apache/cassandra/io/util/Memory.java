@@ -17,31 +17,20 @@
  */
 package org.apache.cassandra.io.util;
 
-import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 
 import net.nicoulaj.compilecommand.annotations.Inline;
 
-import org.apache.cassandra.utils.Architecture;
-import org.apache.cassandra.utils.FastByteOperations;
+import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.Ref;
-import org.apache.cassandra.utils.memory.MemoryUtil;
-import sun.misc.Unsafe;
-import sun.nio.ch.DirectBuffer;
+import org.apache.cassandra.utils.UnsafeCopy;
 
 /**
  * An off-heap region of memory that must be manually free'd when no longer needed.
  */
 public class Memory implements AutoCloseable
 {
-    private static final Unsafe unsafe = MemoryUtil.unsafe;
-
-    private static final long BYTE_ARRAY_BASE_OFFSET = unsafe.arrayBaseOffset(byte[].class);
-
-    private static final boolean bigEndian = ByteOrder.nativeOrder().equals(ByteOrder.BIG_ENDIAN);
-
-    public static final ByteBuffer[] NO_BYTE_BUFFERS = new ByteBuffer[0];
+    private static final ByteBuffer[] NO_BYTE_BUFFERS = new ByteBuffer[0];
 
     protected long peer;
     // size of the memory region
@@ -52,7 +41,7 @@ public class Memory implements AutoCloseable
         if (bytes <= 0)
             throw new AssertionError();
         size = bytes;
-        peer = MemoryUtil.allocate(size);
+        peer = UnsafeMemoryAccess.allocate(size);
         // we permit a 0 peer iff size is zero, since such an allocation makes no sense, and an allocator would be
         // justified in returning a null pointer (and permitted to do so: http://www.cplusplus.com/reference/cstdlib/malloc)
         if (peer == 0)
@@ -81,111 +70,25 @@ public class Memory implements AutoCloseable
     public void setByte(long offset, byte b)
     {
         checkBounds(offset, offset + 1);
-        unsafe.putByte(peer + offset, b);
+        UnsafeMemoryAccess.setByte(peer + offset, b);
     }
 
     public void setMemory(long offset, long bytes, byte b)
     {
         checkBounds(offset, offset + bytes);
-        // check if the last element will fit into the memory
-        unsafe.setMemory(peer + offset, bytes, b);
+        UnsafeMemoryAccess.fill(peer + offset, bytes, b);
     }
 
     public void setLong(long offset, long l)
     {
         checkBounds(offset, offset + 8);
-        if (Architecture.IS_UNALIGNED)
-        {
-            unsafe.putLong(peer + offset, l);
-        }
-        else
-        {
-            putLongByByte(peer + offset, l);
-        }
+        UnsafeMemoryAccess.setLong(peer + offset, l);
     }
 
-    private void putLongByByte(long address, long value)
-    {
-        if (bigEndian)
-        {
-            unsafe.putByte(address, (byte) (value >> 56));
-            unsafe.putByte(address + 1, (byte) (value >> 48));
-            unsafe.putByte(address + 2, (byte) (value >> 40));
-            unsafe.putByte(address + 3, (byte) (value >> 32));
-            unsafe.putByte(address + 4, (byte) (value >> 24));
-            unsafe.putByte(address + 5, (byte) (value >> 16));
-            unsafe.putByte(address + 6, (byte) (value >> 8));
-            unsafe.putByte(address + 7, (byte) (value));
-        }
-        else
-        {
-            unsafe.putByte(address + 7, (byte) (value >> 56));
-            unsafe.putByte(address + 6, (byte) (value >> 48));
-            unsafe.putByte(address + 5, (byte) (value >> 40));
-            unsafe.putByte(address + 4, (byte) (value >> 32));
-            unsafe.putByte(address + 3, (byte) (value >> 24));
-            unsafe.putByte(address + 2, (byte) (value >> 16));
-            unsafe.putByte(address + 1, (byte) (value >> 8));
-            unsafe.putByte(address, (byte) (value));
-        }
-    }
-
-    public void setInt(long offset, int l)
+    public void setInt(long offset, int i)
     {
         checkBounds(offset, offset + 4);
-        if (Architecture.IS_UNALIGNED)
-        {
-            unsafe.putInt(peer + offset, l);
-        }
-        else
-        {
-            putIntByByte(peer + offset, l);
-        }
-    }
-
-    private void putIntByByte(long address, int value)
-    {
-        if (bigEndian)
-        {
-            unsafe.putByte(address, (byte) (value >> 24));
-            unsafe.putByte(address + 1, (byte) (value >> 16));
-            unsafe.putByte(address + 2, (byte) (value >> 8));
-            unsafe.putByte(address + 3, (byte) (value));
-        }
-        else
-        {
-            unsafe.putByte(address + 3, (byte) (value >> 24));
-            unsafe.putByte(address + 2, (byte) (value >> 16));
-            unsafe.putByte(address + 1, (byte) (value >> 8));
-            unsafe.putByte(address, (byte) (value));
-        }
-    }
-
-    public void setShort(long offset, short l)
-    {
-        checkBounds(offset, offset + 2);
-        if (Architecture.IS_UNALIGNED)
-        {
-            unsafe.putShort(peer + offset, l);
-        }
-        else
-        {
-            putShortByByte(peer + offset, l);
-        }
-    }
-
-    private void putShortByByte(long address, short value)
-    {
-        if (bigEndian)
-        {
-            unsafe.putByte(address, (byte) (value >> 8));
-            unsafe.putByte(address + 1, (byte) (value));
-        }
-        else
-        {
-            unsafe.putByte(address + 1, (byte) (value >> 8));
-            unsafe.putByte(address, (byte) (value));
-        }
+        UnsafeMemoryAccess.setInt(peer + offset, i);
     }
 
     public void setBytes(long memoryOffset, ByteBuffer buffer)
@@ -196,16 +99,7 @@ public class Memory implements AutoCloseable
             return;
 
         checkBounds(memoryOffset, memoryOffset + buffer.remaining());
-        if (buffer.hasArray())
-        {
-            setBytes(memoryOffset, buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining());
-        }
-        else if (buffer instanceof DirectBuffer)
-        {
-            unsafe.copyMemory(((DirectBuffer) buffer).address() + buffer.position(), peer + memoryOffset, buffer.remaining());
-        }
-        else
-            throw new IllegalStateException();
+        UnsafeCopy.copyBufferToMemory(buffer, buffer.position(), peer + memoryOffset, buffer.remaining());
     }
     /**
      * Transfers count bytes from buffer to Memory
@@ -227,81 +121,25 @@ public class Memory implements AutoCloseable
             return;
 
         checkBounds(memoryOffset, memoryOffset + count);
-        unsafe.copyMemory(buffer, BYTE_ARRAY_BASE_OFFSET + bufferOffset, null, peer + memoryOffset, count);
+        UnsafeCopy.copyArrayToMemory(buffer, bufferOffset, peer + memoryOffset, count);
     }
 
     public byte getByte(long offset)
     {
         checkBounds(offset, offset + 1);
-        return unsafe.getByte(peer + offset);
+        return UnsafeMemoryAccess.getByte(peer + offset);
     }
 
     public long getLong(long offset)
     {
         checkBounds(offset, offset + 8);
-        if (Architecture.IS_UNALIGNED)
-        {
-            return unsafe.getLong(peer + offset);
-        } else {
-            return getLongByByte(peer + offset);
-        }
-    }
-
-    private long getLongByByte(long address)
-    {
-        if (bigEndian)
-        {
-            return  (((long) unsafe.getByte(address    )       ) << 56) |
-                    (((long) unsafe.getByte(address + 1) & 0xff) << 48) |
-                    (((long) unsafe.getByte(address + 2) & 0xff) << 40) |
-                    (((long) unsafe.getByte(address + 3) & 0xff) << 32) |
-                    (((long) unsafe.getByte(address + 4) & 0xff) << 24) |
-                    (((long) unsafe.getByte(address + 5) & 0xff) << 16) |
-                    (((long) unsafe.getByte(address + 6) & 0xff) <<  8) |
-                    (((long) unsafe.getByte(address + 7) & 0xff)      );
-        }
-        else
-        {
-            return  (((long) unsafe.getByte(address + 7)       ) << 56) |
-                    (((long) unsafe.getByte(address + 6) & 0xff) << 48) |
-                    (((long) unsafe.getByte(address + 5) & 0xff) << 40) |
-                    (((long) unsafe.getByte(address + 4) & 0xff) << 32) |
-                    (((long) unsafe.getByte(address + 3) & 0xff) << 24) |
-                    (((long) unsafe.getByte(address + 2) & 0xff) << 16) |
-                    (((long) unsafe.getByte(address + 1) & 0xff) <<  8) |
-                    (((long) unsafe.getByte(address    ) & 0xff)      );
-        }
+        return UnsafeMemoryAccess.getLong(peer + offset);
     }
 
     public int getInt(long offset)
     {
         checkBounds(offset, offset + 4);
-        if (Architecture.IS_UNALIGNED)
-        {
-            return unsafe.getInt(peer + offset);
-        }
-        else
-        {
-            return getIntByByte(peer + offset);
-        }
-    }
-
-    private int getIntByByte(long address)
-    {
-        if (bigEndian)
-        {
-            return  ((unsafe.getByte(address    )       ) << 24) |
-                    ((unsafe.getByte(address + 1) & 0xff) << 16) |
-                    ((unsafe.getByte(address + 2) & 0xff) << 8 ) |
-                    ((unsafe.getByte(address + 3) & 0xff)      );
-        }
-        else
-        {
-            return  ((unsafe.getByte(address + 3)       ) << 24) |
-                    ((unsafe.getByte(address + 2) & 0xff) << 16) |
-                    ((unsafe.getByte(address + 1) & 0xff) <<  8) |
-                    ((unsafe.getByte(address    ) & 0xff)      );
-        }
+        return UnsafeMemoryAccess.getInt(peer + offset);
     }
 
     /**
@@ -322,7 +160,7 @@ public class Memory implements AutoCloseable
             return;
 
         checkBounds(memoryOffset, memoryOffset + count);
-        FastByteOperations.UnsafeOperations.copy(null, peer + memoryOffset, buffer, bufferOffset, count);
+        UnsafeCopy.copyMemoryToArray(peer + memoryOffset, buffer, bufferOffset, count);
     }
 
     @Inline
@@ -336,7 +174,7 @@ public class Memory implements AutoCloseable
     {
         checkBounds(trgOffset, trgOffset + size);
         memory.checkBounds(srcOffset, srcOffset + size);
-        unsafe.copyMemory(memory.peer + srcOffset, peer + trgOffset, size);
+        UnsafeCopy.copyMemoryToMemory(memory.peer + srcOffset, peer + trgOffset, size);
     }
 
     public Memory copy(long newSize)
@@ -348,7 +186,7 @@ public class Memory implements AutoCloseable
 
     public void free()
     {
-        if (peer != 0) MemoryUtil.free(peer);
+        if (peer != 0) UnsafeMemoryAccess.free(peer);
         else assert size == 0;
         peer = 0;
     }
@@ -387,25 +225,25 @@ public class Memory implements AutoCloseable
         int size = (int) (size() / result.length);
         for (int i = 0 ; i < result.length - 1 ; i++)
         {
-            result[i] = MemoryUtil.getByteBuffer(peer + offset, size);
+            result[i] = UnsafeByteBufferAccess.getByteBuffer(peer + offset, size);
             offset += size;
             length -= size;
         }
-        result[result.length - 1] = MemoryUtil.getByteBuffer(peer + offset, (int) length);
+        result[result.length - 1] = UnsafeByteBufferAccess.getByteBuffer(peer + offset, (int) length);
         return result;
     }
 
     public ByteBuffer asByteBuffer(long offset, int length)
     {
         checkBounds(offset, offset + length);
-        return MemoryUtil.getByteBuffer(peer + offset, length);
+        return UnsafeByteBufferAccess.getByteBuffer(peer + offset, length);
     }
 
-    // MUST provide a buffer created via MemoryUtil.getHollowDirectByteBuffer()
+    // MUST provide a buffer created via UnsafeCopy.getHollowDirectByteBuffer()
     public void setByteBuffer(ByteBuffer buffer, long offset, int length)
     {
         checkBounds(offset, offset + length);
-        MemoryUtil.setByteBuffer(buffer, peer + offset, length);
+        UnsafeByteBufferAccess.setByteBuffer(buffer, peer + offset, length);
     }
 
     public String toString()

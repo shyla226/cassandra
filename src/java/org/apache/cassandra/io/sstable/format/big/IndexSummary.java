@@ -29,12 +29,9 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.util.*;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.WrappedSharedCloseable;
-import org.apache.cassandra.utils.memory.MemoryUtil;
 
 import static org.apache.cassandra.io.sstable.format.big.Downsampling.BASE_SAMPLING_LEVEL;
 
@@ -113,7 +110,7 @@ public class IndexSummary extends WrappedSharedCloseable
     public int binarySearch(PartitionPosition key)
     {
         // We will be comparing non-native Keys, so use a buffer with appropriate byte order
-        ByteBuffer hollow = MemoryUtil.getHollowDirectByteBuffer().order(ByteOrder.BIG_ENDIAN);
+        ByteBuffer hollow = UnsafeByteBufferAccess.getHollowDirectByteBuffer().order(ByteOrder.BIG_ENDIAN);
         int low = 0, mid = offsetCount, high = mid - 1, result = -1;
         while (low <= high)
         {

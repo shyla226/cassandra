@@ -25,7 +25,7 @@ import java.nio.ByteOrder;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 
-import org.apache.cassandra.utils.memory.MemoryUtil;
+import org.apache.cassandra.utils.UnsafeByteBufferAccess;
 
 public class MemoryInputStream extends RebufferingInputStream implements DataInput
 {
@@ -71,6 +71,6 @@ public class MemoryInputStream extends RebufferingInputStream implements DataInp
 
     private static ByteBuffer getByteBuffer(long offset, int length)
     {
-        return MemoryUtil.getByteBuffer(offset, length, ByteOrder.BIG_ENDIAN);
+        return UnsafeByteBufferAccess.getByteBuffer(offset, length, ByteOrder.BIG_ENDIAN);
     }
 }

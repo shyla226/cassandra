@@ -21,9 +21,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.memory.MemoryUtil;
+import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.UnsafeCopy;
 import org.apache.cassandra.utils.memory.NativeAllocator;
 
 public class NativeCell extends AbstractCell
@@ -81,12 +80,12 @@ public class NativeCell extends AbstractCell
 
         // cellpath? : timestamp : ttl : localDeletionTime : length : <data> : [cell path length] : [<cell path data>]
         peer = allocator.allocate((int) size);
-        MemoryUtil.setByte(peer + HAS_CELLPATH, (byte)(path == null ? 0 : 1));
-        MemoryUtil.setLong(peer + TIMESTAMP, timestamp);
-        MemoryUtil.setInt(peer + TTL, ttl);
-        MemoryUtil.setInt(peer + DELETION, localDeletionTime);
-        MemoryUtil.setInt(peer + LENGTH, value.remaining());
-        MemoryUtil.setBytes(peer + VALUE, value);
+        UnsafeMemoryAccess.setByte(peer + HAS_CELLPATH, (byte)(path == null ? 0 : 1));
+        UnsafeMemoryAccess.setLong(peer + TIMESTAMP, timestamp);
+        UnsafeMemoryAccess.setInt(peer + TTL, ttl);
+        UnsafeMemoryAccess.setInt(peer + DELETION, localDeletionTime);
+        UnsafeMemoryAccess.setInt(peer + LENGTH, value.remaining());
+        UnsafeCopy.copyBufferToMemory(peer + VALUE, value);
 
         if (path != null)
         {
@@ -94,8 +93,8 @@ public class NativeCell extends AbstractCell
             assert pathbuffer.order() == ByteOrder.BIG_ENDIAN;
 
             long offset = peer + VALUE + value.remaining();
-            MemoryUtil.setInt(offset, pathbuffer.remaining());
-            MemoryUtil.setBytes(offset + 4, pathbuffer);
+            UnsafeMemoryAccess.setInt(offset, pathbuffer.remaining());
+            UnsafeCopy.copyBufferToMemory(offset + 4, pathbuffer);
         }
     }
 
@@ -106,33 +105,33 @@ public class NativeCell extends AbstractCell
 
     public long timestamp()
     {
-        return MemoryUtil.getLong(peer + TIMESTAMP);
+        return UnsafeMemoryAccess.getLong(peer + TIMESTAMP);
     }
 
     public int ttl()
     {
-        return MemoryUtil.getInt(peer + TTL);
+        return UnsafeMemoryAccess.getInt(peer + TTL);
     }
 
     public int localDeletionTime()
     {
-        return MemoryUtil.getInt(peer + DELETION);
+        return UnsafeMemoryAccess.getInt(peer + DELETION);
     }
 
     public ByteBuffer value()
     {
-        int length = MemoryUtil.getInt(peer + LENGTH);
-        return MemoryUtil.getByteBuffer(peer + VALUE, length, ByteOrder.BIG_ENDIAN);
+        int length = UnsafeMemoryAccess.getInt(peer + LENGTH);
+        return UnsafeByteBufferAccess.getByteBuffer(peer + VALUE, length, ByteOrder.BIG_ENDIAN);
     }
 
     public CellPath path()
     {
-        if (MemoryUtil.getByte(peer+ HAS_CELLPATH) == 0)
+        if (UnsafeMemoryAccess.getByte(peer + HAS_CELLPATH) == 0)
             return null;
 
-        long offset = peer + VALUE + MemoryUtil.getInt(peer + LENGTH);
-        int size = MemoryUtil.getInt(offset);
-        return CellPath.create(MemoryUtil.getByteBuffer(offset + 4, size, ByteOrder.BIG_ENDIAN));
+        long offset = peer + VALUE + UnsafeMemoryAccess.getInt(peer + LENGTH);
+        int size = UnsafeMemoryAccess.getInt(offset);
+        return CellPath.create(UnsafeByteBufferAccess.getByteBuffer(offset + 4, size, ByteOrder.BIG_ENDIAN));
     }
 
     public Cell withUpdatedValue(ByteBuffer newValue)

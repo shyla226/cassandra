@@ -23,9 +23,7 @@ import java.io.UTFDataFormatException;
 import java.nio.ByteBuffer;
 import java.nio.channels.WritableByteChannel;
 
-import org.apache.cassandra.utils.memory.MemoryUtil;
-
-import com.google.common.base.Function;
+import org.apache.cassandra.utils.UnsafeByteBufferAccess;
 
 /**
  * Base class for DataOutput implementations that does not have an optimized implementations of Plus methods
@@ -353,7 +351,7 @@ public abstract class UnbufferedDataOutputStreamPlus extends DataOutputStreamPlu
     }
 
     // ByteBuffer to use for defensive copies
-    private final ByteBuffer hollowBufferD = MemoryUtil.getHollowDirectByteBuffer();
+    private final ByteBuffer hollowBufferD = UnsafeByteBufferAccess.getHollowDirectByteBuffer();
 
     @Override
     public void write(ByteBuffer buf) throws IOException
@@ -365,7 +363,7 @@ public abstract class UnbufferedDataOutputStreamPlus extends DataOutputStreamPlu
         else
         {
             assert buf.isDirect();
-            MemoryUtil.duplicateDirectByteBuffer(buf, hollowBufferD);
+            UnsafeByteBufferAccess.duplicateDirectByteBuffer(buf, hollowBufferD);
             while (hollowBufferD.hasRemaining())
                 channel.write(hollowBufferD);
         }

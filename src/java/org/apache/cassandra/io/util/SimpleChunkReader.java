@@ -29,7 +29,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
-import org.apache.cassandra.utils.memory.MemoryUtil;
+import org.apache.cassandra.utils.UnsafeByteBufferAccess;
 
 class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
 {
@@ -52,7 +52,7 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
         return (position & blockMask) == 0
                && buffer.isDirect()
                && (buffer.capacity() & blockMask) == 0
-               && (MemoryUtil.getAddress(buffer) & blockMask) == 0;
+               && (UnsafeByteBufferAccess.getAddress(buffer) & blockMask) == 0;
     }
 
     @Override

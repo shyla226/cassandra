@@ -21,9 +21,8 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
-import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.memory.MemoryUtil;
+import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.UnsafeCopy;
 import org.apache.cassandra.utils.memory.NativeAllocator;
 
 public class NativeClustering extends AbstractClusteringPrefix implements Clustering
@@ -46,30 +45,30 @@ public class NativeClustering extends AbstractClusteringPrefix implements Cluste
 
         peer = allocator.allocate(metadataSize + dataSize + bitmapSize);
         long bitmapStart = peer + metadataSize;
-        MemoryUtil.setShort(peer, (short) count);
-        MemoryUtil.setShort(peer + (metadataSize - 2), (short) dataSize); // goes at the end of the other offsets
+        UnsafeMemoryAccess.setShort(peer, (short) count);
+        UnsafeMemoryAccess.setShort(peer + (metadataSize - 2), (short) dataSize); // goes at the end of the other offsets
 
-        MemoryUtil.setByte(bitmapStart, bitmapSize, (byte) 0);
+        UnsafeMemoryAccess.fill(bitmapStart, bitmapSize, (byte) 0);
         long dataStart = peer + metadataSize + bitmapSize;
         int dataOffset = 0;
         for (int i = 0 ; i < count ; i++)
         {
-            MemoryUtil.setShort(peer + 2 + i * 2, (short) dataOffset);
+            UnsafeMemoryAccess.setShort(peer + 2 + i * 2, (short) dataOffset);
 
             ByteBuffer value = clustering.get(i);
             if (value == null)
             {
                 long boffset = bitmapStart + (i >>> 3);
-                int b = MemoryUtil.getByte(boffset);
+                int b = UnsafeMemoryAccess.getByte(boffset);
                 b |= 1 << (i & 7);
-                MemoryUtil.setByte(boffset, (byte) b);
+                UnsafeMemoryAccess.setByte(boffset, (byte) b);
                 continue;
             }
 
             assert value.order() == ByteOrder.BIG_ENDIAN;
 
             int size = value.remaining();
-            MemoryUtil.setBytes(dataStart + dataOffset, value);
+            UnsafeCopy.copyBufferToMemory(dataStart + dataOffset, value);
             dataOffset += size;
         }
     }
@@ -81,7 +80,7 @@ public class NativeClustering extends AbstractClusteringPrefix implements Cluste
 
     public int size()
     {
-        return MemoryUtil.getShort(peer);
+        return UnsafeMemoryAccess.getUnsignedShort(peer);
     }
 
     public ByteBuffer get(int i)
@@ -94,15 +93,16 @@ public class NativeClustering extends AbstractClusteringPrefix implements Cluste
         int metadataSize = (size * 2) + 4;
         int bitmapSize = ((size + 7) >>> 3);
         long bitmapStart = peer + metadataSize;
-        int b = MemoryUtil.getByte(bitmapStart + (i >>> 3));
+        int b = UnsafeMemoryAccess.getByte(bitmapStart + (i >>> 3));
         if ((b & (1 << (i & 7))) != 0)
             return null;
 
-        int startOffset = MemoryUtil.getShort(peer + 2 + i * 2);
-        int endOffset = MemoryUtil.getShort(peer + 4 + i * 2);
-        return MemoryUtil.getByteBuffer(bitmapStart + bitmapSize + startOffset,
-                                        endOffset - startOffset,
-                                        ByteOrder.BIG_ENDIAN);
+        int startOffset = UnsafeMemoryAccess.getUnsignedShort(peer + 2 + i * 2);
+        int endOffset = UnsafeMemoryAccess.getUnsignedShort(peer + 4 + i * 2);
+
+        long bufferAddress = bitmapStart + bitmapSize + startOffset;
+        int bufferLength = endOffset - startOffset;
+        return UnsafeByteBufferAccess.getByteBuffer(bufferAddress, bufferLength, ByteOrder.BIG_ENDIAN);
     }
 
     public ByteBuffer[] getRawValues()

@@ -36,8 +36,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.BufferPoolMetrics;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 /**
@@ -574,7 +573,7 @@ public class BufferPool
         {
             assert !slab.hasArray();
             this.slab = slab;
-            this.baseAddress = MemoryUtil.getAddress(slab);
+            this.baseAddress = UnsafeByteBufferAccess.getAddress(slab);
 
             // The number of bits by which we need to shift to obtain a unit
             // "31 &" is because numberOfTrailingZeros returns 32 when the capacity is zero
@@ -625,7 +624,7 @@ public class BufferPool
          */
         static Chunk getParentChunk(ByteBuffer buffer)
         {
-            Object attachment = MemoryUtil.getAttachment(buffer);
+            Object attachment = UnsafeByteBufferAccess.getAttachment(buffer);
 
             if (attachment instanceof Chunk)
                 return (Chunk) attachment;
@@ -639,16 +638,16 @@ public class BufferPool
         ByteBuffer setAttachment(ByteBuffer buffer)
         {
             if (Ref.DEBUG_ENABLED)
-                MemoryUtil.setAttachment(buffer, new Ref<>(this, null));
+                UnsafeByteBufferAccess.setAttachment(buffer, new Ref<>(this, null));
             else
-                MemoryUtil.setAttachment(buffer, this);
+                UnsafeByteBufferAccess.setAttachment(buffer, this);
 
             return buffer;
         }
 
         boolean releaseAttachment(ByteBuffer buffer)
         {
-            Object attachment = MemoryUtil.getAttachment(buffer);
+            Object attachment = UnsafeByteBufferAccess.getAttachment(buffer);
             if (attachment == null)
                 return false;
 
@@ -801,7 +800,7 @@ public class BufferPool
             if (!releaseAttachment(buffer))
                 return 1L;
 
-            long address = MemoryUtil.getAddress(buffer);
+            long address = UnsafeByteBufferAccess.getAddress(buffer);
             assert (address >= baseAddress) & (address <= baseAddress + capacity());
 
             int position = (int)(address - baseAddress);
