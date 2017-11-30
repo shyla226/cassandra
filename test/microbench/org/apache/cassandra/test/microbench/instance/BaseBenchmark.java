@@ -240,6 +240,8 @@ public class BaseBenchmark
                 cfs.disableAutoCompaction();
             }
         }
+
+        opCounter.set(populationSize);
     }
 
     protected PreparedStatement prepareWrite(Session session, String table)
