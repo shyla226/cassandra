@@ -97,6 +97,7 @@ class NodeSyncMaintenanceTasks
         {
             if (future != null)
                 future.cancel(true);
+            future = null;
         }
     }
 
