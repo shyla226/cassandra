@@ -122,7 +122,7 @@ public class AbstractCompactionStrategyTest
         }
 
         // now remove sstables on the tracker, to simulate a concurrent transaction
-        cfs.clearUnsafe();
+        cfs.getTracker().removeUnsafe(cfs.getLiveSSTables());
 
         // verify the compaction strategy will return null
         Assert.assertNull(strategy.getNextBackgroundTask(FBUtilities.nowInSeconds()));
@@ -134,7 +134,7 @@ public class AbstractCompactionStrategyTest
         long timestamp = System.currentTimeMillis();
         DecoratedKey dk = Util.dk(String.format("%03d", key));
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(table);
-        new RowUpdateBuilder(cfs.metadata.get(), timestamp, dk.getKey())
+        new RowUpdateBuilder(cfs.metadata(), timestamp, dk.getKey())
         .clustering(String.valueOf(key))
         .add("val", "val")
         .build()
