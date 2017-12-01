@@ -90,6 +90,6 @@ public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
     @Override
     public String toString()
     {
-        return String.format("TPC scheduler for core %d",coreId());
+        return String.format("TPC scheduler for core %d", coreId());
     }
 }

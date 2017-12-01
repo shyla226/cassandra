@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
+
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -452,10 +453,21 @@ public class SinglePartitionReadCommand extends ReadCommand
     {
         SSTableReadMetricsCollector metricsCollector = new SSTableReadMetricsCollector();
 
+        // Pick which thread to run this query on.  We don't want to execute all requests on the same core
+        // since we can have a single client doing all the requests.
+        int localCore = TPC.getCoreId();
+        int coreId =  TPC.getNextCore();
+        boolean isLocalCore = coreId == localCore;
+
+        if (isLocalCore)
+        {
+            return queryMemtableAndDisk(cfs, executionController, metricsCollector)
+                   .doOnClose(() -> updateMetrics(cfs.metric, metricsCollector));
+        }
+
         return Threads.deferOnCore(() -> queryMemtableAndDisk(cfs, executionController, metricsCollector)
                                          .doOnClose(() -> updateMetrics(cfs.metric, metricsCollector)),
-                                   TPC.getCoreForKey(cfs.keyspace, partitionKey),
-                                   TPCTaskType.READ);
+                                   coreId, TPCTaskType.READ_DEFERRED);
     }
 
     private void updateMetrics(TableMetrics metrics, SSTableReadMetricsCollector metricsCollector)

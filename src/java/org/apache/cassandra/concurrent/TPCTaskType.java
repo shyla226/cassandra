@@ -43,6 +43,8 @@ public enum TPCTaskType
     UNKNOWN,
     /** Single-partition read request */
     READ(Features.PENDABLE),
+    /** Single-partition read request that will be first scheduled on an eventloop */
+    READ_DEFERRED(Features.PENDABLE),
     /** Single-partition read response, not always counted */
     READ_RESPONSE("READ_SWITCH_FOR_RESPONSE"),
     /** Partition range read request */
