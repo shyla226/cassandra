@@ -53,6 +53,21 @@ public interface ChunkReader extends RebuffererFactory
      */
     BufferType preferredBufferType();
 
+    /**
+     * @return true if this chunk reader is using memory mapped regions instead of a file channel for reading.
+     */
+    boolean isMmap();
+
+    /**
+     * Return a new chunk reader identical to the current chunk reader but using the new channel, if possible.
+     * This is currently not supported for {@link CompressedChunkReader.Mmap} because it is not required and
+     * it would require new memory mapped regions. Therefore if {@link #isMmap()} returns true, this method
+     * will throw an unsupported operation exception.
+     *
+     * @throws UnsupportedOperationException for {@link CompressedChunkReader.Mmap}
+     * @return a copy of the chunk reader using the new channel.
+     */
+    ChunkReader withChannel(AsynchronousChannelProxy channel);
 
     // Scratch buffers for performing unaligned reads of chunks, where buffers need to be larger than 64k and thus
     // unsuitable for BufferPool.

@@ -23,6 +23,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinPool;
 
 import org.apache.cassandra.io.util.AsynchronousChannelProxy;
+import org.apache.cassandra.io.util.FileAccessType;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 
@@ -73,15 +74,9 @@ public class ChunkCacheMocks
             return wrapped.getCrcCheckChance();
         }
 
-        public Rebufferer instantiateRebufferer()
+        public Rebufferer instantiateRebufferer(FileAccessType accessType)
         {
-            return new TestRebufferer(wrapped.instantiateRebufferer(), rand);
-        }
-
-        @Override
-        public boolean supportsPrefetch()
-        {
-            return false;
+            return new TestRebufferer(wrapped.instantiateRebufferer(accessType), rand);
         }
     }
 

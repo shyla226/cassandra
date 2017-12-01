@@ -1663,16 +1663,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return sstableMetadata;
     }
 
-    public RandomAccessReader openDataReader(RateLimiter limiter)
+    public RandomAccessReader openDataReader(RateLimiter limiter, FileAccessType accessType)
     {
         assert limiter != null;
-        return dataFile.createReader(limiter);
-    }
-
-    public RandomAccessReader openDataReader(RateLimiter limiter, int prefetch)
-    {
-        assert limiter != null;
-        return dataFile.createReader(limiter, prefetch);
+        return dataFile.createReader(limiter, accessType);
     }
 
     public RandomAccessReader openDataReader()
@@ -1680,14 +1674,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return dataFile.createReader();
     }
 
-    public RandomAccessReader openDataReader(int prefetch)
+    public RandomAccessReader openDataReader(FileAccessType accessType)
     {
-        return dataFile.createReader(Rebufferer.ReaderConstraint.NONE, prefetch);
+        return dataFile.createReader(Rebufferer.ReaderConstraint.NONE, accessType);
     }
 
-    public RandomAccessReader openDataReader(Rebufferer.ReaderConstraint rc, int prefetch)
+    public RandomAccessReader openDataReader(Rebufferer.ReaderConstraint rc, FileAccessType accessType)
     {
-        return dataFile.createReader(rc, prefetch);
+        return dataFile.createReader(rc, accessType);
     }
 
     public AsynchronousChannelProxy getDataChannel()

@@ -29,6 +29,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.DataIntegrityMetadata.FileDigestValidator;
+import org.apache.cassandra.io.util.FileAccessType;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -73,8 +74,8 @@ public class Verifier implements Closeable
         this.controller = new VerifyController(cfs);
 
         this.dataFile = isOffline
-                        ? sstable.openDataReader()
-                        : sstable.openDataReader(CompactionManager.instance.getRateLimiter());
+                        ? sstable.openDataReader(FileAccessType.FULL_FILE)
+                        : sstable.openDataReader(CompactionManager.instance.getRateLimiter(), FileAccessType.FULL_FILE);
         this.verifyInfo = new VerifyInfo(dataFile, sstable);
     }
 

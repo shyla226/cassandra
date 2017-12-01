@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 
 import javax.annotation.Nullable;
 
@@ -165,7 +166,7 @@ public class FileHandle extends SharedCloseableImpl
      */
     public RandomAccessReader createReader(Rebufferer.ReaderConstraint constraint)
     {
-        return new RandomAccessReader(instantiateRebufferer(0, null), constraint);
+        return new RandomAccessReader(instantiateRebufferer(FileAccessType.RANDOM, null), constraint);
     }
 
     /**
@@ -173,9 +174,9 @@ public class FileHandle extends SharedCloseableImpl
      *
      * @return RandomAccessReader for the file
      */
-    public RandomAccessReader createReader(Rebufferer.ReaderConstraint constraint, int prefetch)
+    public RandomAccessReader createReader(Rebufferer.ReaderConstraint constraint, FileAccessType accessType)
     {
-        return new RandomAccessReader(instantiateRebufferer(prefetch, null), constraint);
+        return new RandomAccessReader(instantiateRebufferer(accessType, null), constraint);
     }
 
     /**
@@ -187,21 +188,20 @@ public class FileHandle extends SharedCloseableImpl
      */
     public RandomAccessReader createReader(RateLimiter limiter)
     {
-        return createReader(limiter, 0);
+        return createReader(limiter, FileAccessType.RANDOM);
     }
 
     /**
      * Create {@link RandomAccessReader} with configured method of reading content of the file.
-     * Reading from file will be rate limited by given {@link RateLimiter} and a prefetch factor
-     * given by {@code prefetch}.
+     * Reading from file will be rate limited by given {@link RateLimiter}.
      *
      * @param limiter RateLimiter to use for rate limiting read
-     * @param prefetch the number of buffers to prefetch or zero to disable prefetch
+     * @param accessType The type of file access
      * @return RandomAccessReader for the file
      */
-    public RandomAccessReader createReader(RateLimiter limiter, int prefetch)
+    public RandomAccessReader createReader(RateLimiter limiter, FileAccessType accessType)
     {
-        return new RandomAccessReader(instantiateRebufferer(prefetch, limiter), Rebufferer.ReaderConstraint.NONE);
+        return new RandomAccessReader(instantiateRebufferer(accessType, limiter), Rebufferer.ReaderConstraint.NONE);
     }
 
     public FileDataInput createReader(long position, Rebufferer.ReaderConstraint rc)
@@ -228,13 +228,17 @@ public class FileHandle extends SharedCloseableImpl
         channel.tryToSkipCache(0, position);
     }
 
-    private Rebufferer instantiateRebufferer(int prefetch, RateLimiter limiter)
+    /**
+     * Create a new rebufferer by asking the rebufferer factory that was created when the file was created.
+     *
+     * @param accessType The file access type, which determines things like read-ahead.
+     * @param limiter A rate limiter, this may be null.
+     *
+     * @return the rebufferer to be used for a read operation.
+     */
+    private Rebufferer instantiateRebufferer(FileAccessType accessType, RateLimiter limiter)
     {
-        Rebufferer rebufferer = rebuffererFactory.instantiateRebufferer();
-
-        if (prefetch > 0 && rebuffererFactory.supportsPrefetch())
-            rebufferer = new PrefetchingRebufferer(rebufferer, prefetch);
-
+        Rebufferer rebufferer = rebuffererFactory.instantiateRebufferer(accessType);
         if (limiter != null)
             rebufferer = new LimitingRebufferer(rebufferer, limiter, BufferPool.CHUNK_SIZE);
         return rebufferer;

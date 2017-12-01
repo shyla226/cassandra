@@ -38,4 +38,10 @@ class SpinningDiskOptimizationStrategy extends DiskOptimizationStrategy
     {
         return roundBufferSize(recordSize + minBufferSize);
     }
+
+    @Override
+    public int readAheadSizeKb()
+    {
+        return 256;
+    }
 }

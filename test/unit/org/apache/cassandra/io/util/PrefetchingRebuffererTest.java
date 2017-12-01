@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.io.util;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
@@ -47,8 +46,10 @@ import static org.psjava.util.AssertStatus.assertTrue;
 public class PrefetchingRebuffererTest
 {
     final int PAGE_SIZE = 4096;
-    File file;
+    final int READ_AHEAD_KB = PAGE_SIZE * 2;
+    final double READ_AHEAD_WINDOW = 0.5;
     AsynchronousChannelProxy channel;
+
     final Map<Long, TestBufferHolder> buffers = new HashMap();
 
     Rebufferer source;
@@ -62,10 +63,7 @@ public class PrefetchingRebuffererTest
     @Before
     public void setUp() throws IOException
     {
-        file = File.createTempFile("CachingRebuffererTest", "");
-        file.deleteOnExit();
-
-        channel = new AsynchronousChannelProxy(file.getPath(), false);
+        channel = Mockito.mock(AsynchronousChannelProxy.class);
         source = Mockito.mock(Rebufferer.class);
         when(source.rebufferSize()).thenReturn(PAGE_SIZE);
         when(source.channel()).thenReturn(channel);
@@ -85,7 +83,7 @@ public class PrefetchingRebuffererTest
     @Test
     public void testPrefetchSamePage()
     {
-        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, 2);
+        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, channel, READ_AHEAD_KB, READ_AHEAD_WINDOW);
         assertNotNull(rebufferer);
 
         when(source.rebufferAsync(anyLong())).thenAnswer(mock -> CompletableFuture.completedFuture(makeBuffer((long)mock.getArguments()[0])));
@@ -122,9 +120,13 @@ public class PrefetchingRebuffererTest
     {
         PrefetchingRebufferer.metrics.reset();
 
-        final int numToPrefetch = 2;
+        final int prefetchSize = 8;
+        final int windowSize = 4;
         final int numPages = 10;
-        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, numToPrefetch);
+        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source,
+                                                                     channel,
+                                                                     prefetchSize * PAGE_SIZE,
+                                                                     (double)windowSize / prefetchSize);
         assertNotNull(rebufferer);
 
         when(source.rebufferAsync(anyLong())).thenAnswer(mock -> CompletableFuture.completedFuture(makeBuffer((long)mock.getArguments()[0])));
@@ -137,7 +139,7 @@ public class PrefetchingRebuffererTest
             assertEquals(PAGE_SIZE, buf.buffer().capacity());
             buf.release();
 
-            for (int k = i; k <= i + numToPrefetch; k ++)
+            for (int k = i; k <= i + windowSize; k ++)
             {
                 assertTrue(buffers.containsKey((long)k * PAGE_SIZE));
                 assertEquals(1, buffers.get((long)k * PAGE_SIZE).numRequested);
@@ -146,8 +148,13 @@ public class PrefetchingRebuffererTest
 
         rebufferer.close();
 
-        assertEquals(numPages + 1, PrefetchingRebufferer.metrics.prefetched.getCount()); // we prefetch 2 the first time and then 1 each time
-        assertEquals(2, PrefetchingRebufferer.metrics.unused.getCount());
+        assertTrue(numPages + windowSize <= PrefetchingRebufferer.metrics.prefetched.getCount(),
+                   String.format("We should have prefetched at least num pages + window size (%d + %d = %d), but instead got %d",
+                                 numPages, windowSize, numPages + windowSize, PrefetchingRebufferer.metrics.prefetched.getCount()));
+
+        assertTrue(windowSize <= PrefetchingRebufferer.metrics.unused.getCount(),
+                   String.format("We should have not used at least window size (%d), not %d",
+                   windowSize, PrefetchingRebufferer.metrics.unused.getCount()));
     }
 
     @Test
@@ -157,23 +164,23 @@ public class PrefetchingRebuffererTest
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
         final TPCScheduler scheduler =  TPC.bestTPCScheduler();
 
-        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, 2);
+        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, channel, READ_AHEAD_KB, READ_AHEAD_WINDOW);
         assertNotNull(rebufferer);
 
         final CompletableFuture<Rebufferer.BufferHolder> bufferFuture = new CompletableFuture<>();
         when(source.rebufferAsync(anyLong())).thenAnswer(mock -> bufferFuture);
 
-       try
-       {
-           rebufferer.rebuffer(0L, Rebufferer.ReaderConstraint.ASYNC);
-           fail("Should have thrown a NotInCacheException");
-       }
-       catch (Rebufferer.NotInCacheException ex)
-       {
-           ex.accept(() -> completed.countDown(),
-                     throwable -> { completed.countDown(); error.set(throwable); return null; },
-                     scheduler);
-       }
+        try
+        {
+            rebufferer.rebuffer(0L, Rebufferer.ReaderConstraint.ASYNC);
+            fail("Should have thrown a NotInCacheException");
+        }
+        catch (Rebufferer.NotInCacheException ex)
+        {
+            ex.accept(() -> completed.countDown(),
+                      throwable -> { completed.countDown(); error.set(throwable); return null; },
+                      scheduler);
+        }
 
         bufferFuture.complete(makeBuffer(0L));
 
@@ -193,7 +200,9 @@ public class PrefetchingRebuffererTest
     @Test
     public void testNonSequentialAccess()
     {
-        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, 2);
+        PrefetchingRebufferer.metrics.reset();
+
+        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, channel, READ_AHEAD_KB, READ_AHEAD_WINDOW);
         assertNotNull(rebufferer);
 
         when(source.rebufferAsync(anyLong())).thenAnswer(mock -> CompletableFuture.completedFuture(makeBuffer((long)mock.getArguments()[0])));
@@ -230,9 +239,13 @@ public class PrefetchingRebuffererTest
     {
         PrefetchingRebufferer.metrics.reset();
 
-        final int numToPrefetch = 8;
+        final int prefetchSize = 8;
+        final int windowSize = 4;
         final int numPages = 24;
-        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, numToPrefetch);
+        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source,
+                                                                     channel,
+                                                                     prefetchSize * PAGE_SIZE,
+                                                                     (double)windowSize / prefetchSize);
         assertNotNull(rebufferer);
 
         when(source.rebufferAsync(anyLong())).thenAnswer(mock -> CompletableFuture.completedFuture(makeBuffer((long)mock.getArguments()[0])));
@@ -245,7 +258,7 @@ public class PrefetchingRebuffererTest
             assertEquals(PAGE_SIZE, buf.buffer().capacity());
             buf.release();
 
-            for (int k = i; k <= i + numToPrefetch; k ++)
+            for (int k = i; k <= i + windowSize; k ++)
             {
                 assertTrue(buffers.containsKey((long)k * PAGE_SIZE));
                 assertEquals(1, buffers.get((long)k * PAGE_SIZE).numRequested);
@@ -257,17 +270,41 @@ public class PrefetchingRebuffererTest
         // we skip every other page so we requested this many buffers
         int numBuffersRequested = numPages / 2;
 
-        // the first request prefetched numToPrefetch and then every other request prefetches 2 buffers (one discarded, one used)
-        assertEquals(numToPrefetch + 2 * (numBuffersRequested - 1), PrefetchingRebufferer.metrics.prefetched.getCount());
+        assertTrue(numBuffersRequested + windowSize <= PrefetchingRebufferer.metrics.prefetched.getCount(),
+                   String.format("We should have prefetched at least num pages + window size (%d + %d = %d), but instead got %d",
+                                 numPages, windowSize, numPages + windowSize, PrefetchingRebufferer.metrics.prefetched.getCount()));
 
-        // each request discards 1 buffer, plus there is an initial read-ahead of numToPrefetch of which only 1 ever gets used
-        assertEquals(numBuffersRequested + numToPrefetch - 1, PrefetchingRebufferer.metrics.unused.getCount());
+        // each request discards 1 buffer
+        assertTrue(numBuffersRequested + windowSize <= PrefetchingRebufferer.metrics.unused.getCount(),
+                   String.format("We should have not used at least window size (%d), not %d",
+                                 windowSize, PrefetchingRebufferer.metrics.unused.getCount()));
     }
+
+    @Test
+    public void testBatchesAreSubmitted()
+    {
+        PrefetchingRebufferer.metrics.reset();
+
+        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, channel, READ_AHEAD_KB, READ_AHEAD_WINDOW);
+        assertNotNull(rebufferer);
+
+        final long offset = PAGE_SIZE;
+        final CompletableFuture<Rebufferer.BufferHolder> bufferFuture = new CompletableFuture<>();
+        when(source.rebufferAsync(anyLong())).thenAnswer(mock -> bufferFuture);
+
+        CompletableFuture<Rebufferer.BufferHolder> ret = rebufferer.rebufferAsync(offset);
+        bufferFuture.complete(makeBuffer(offset));
+
+        ret.join();
+
+        verify(channel, times(2)).submitBatch(); // one call for the requested buffer and one for read-ahead
+    }
+
 
     @Test(expected = CorruptSSTableException.class)
     public void testExceptionInSourceRebuffer()
     {
-        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, 2);
+        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, channel, READ_AHEAD_KB, READ_AHEAD_WINDOW);
         assertNotNull(rebufferer);
 
         when(source.rebufferAsync(anyLong())).thenThrow(CorruptSSTableException.class);
@@ -279,9 +316,9 @@ public class PrefetchingRebuffererTest
     public void testReadChunkReturnsFutureCompletedExceptionally()
     {
         CompletableFuture<Rebufferer.BufferHolder> bufferFuture = new CompletableFuture<>();
-        bufferFuture.completeExceptionally(new CorruptSSTableException(null, file.getPath()));
+        bufferFuture.completeExceptionally(new CorruptSSTableException(null, ""));
 
-        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, 2);
+        PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, channel, READ_AHEAD_KB, READ_AHEAD_WINDOW);
         assertNotNull(rebufferer);
 
         when(source.rebufferAsync(anyLong())).thenReturn(bufferFuture);

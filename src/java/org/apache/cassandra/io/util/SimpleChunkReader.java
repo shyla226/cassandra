@@ -145,18 +145,34 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
     }
 
     @Override
-    public Rebufferer instantiateRebufferer()
+    public boolean isMmap()
     {
-        if (Integer.bitCount(bufferSize) == 1)
-            return new BufferManagingRebufferer.Aligned(this);
-        else
-            return new BufferManagingRebufferer.Unaligned(this);
+        return false;
     }
 
     @Override
-    public boolean supportsPrefetch()
+    public ChunkReader withChannel(AsynchronousChannelProxy channel)
     {
-        return Integer.bitCount(bufferSize) == 1;
+        return new SimpleChunkReader(channel, fileLength, bufferType, bufferSize);
+    }
+
+    @Override
+    @SuppressWarnings("resource") // channel closed by the PrefetchingRebufferer
+    public Rebufferer instantiateRebufferer(FileAccessType accessType)
+    {
+        if (accessType == FileAccessType.RANDOM || Integer.bitCount(bufferSize) != 1)
+            return instantiateRebufferer(this);
+
+        AsynchronousChannelProxy channel = this.channel.maybeBatched(PrefetchingRebufferer.READ_AHEAD_VECTORED);
+        return new PrefetchingRebufferer(instantiateRebufferer(withChannel(channel)), channel);
+    }
+
+    private Rebufferer instantiateRebufferer(ChunkReader reader)
+    {
+        if (Integer.bitCount(bufferSize) == 1)
+            return new BufferManagingRebufferer.Aligned(reader);
+        else
+            return new BufferManagingRebufferer.Unaligned(reader);
     }
 
     @Override

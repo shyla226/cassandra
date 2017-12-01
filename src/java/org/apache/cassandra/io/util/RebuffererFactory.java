@@ -28,10 +28,10 @@ package org.apache.cassandra.io.util;
  */
 public interface RebuffererFactory extends ReaderFileProxy
 {
-    Rebufferer instantiateRebufferer();
+    default Rebufferer instantiateRebufferer()
+    {
+        return instantiateRebufferer(FileAccessType.RANDOM);
+    }
 
-    /**
-     * @return true if the rebufferers instantiated by this factory support pre-fetch.
-     */
-    boolean supportsPrefetch();
+    Rebufferer instantiateRebufferer(FileAccessType accessType);
 }

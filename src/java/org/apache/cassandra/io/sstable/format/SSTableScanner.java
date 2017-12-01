@@ -21,8 +21,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.apache.cassandra.io.util.DiskOptimizationStrategy;
-import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.FileAccessType;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.Iterators;
@@ -101,7 +100,7 @@ public class SSTableScanner implements ISSTableScanner
     {
         assert sstable != null;
 
-        this.dfile = sstable.openDataReader(DiskOptimizationStrategy.NUM_READ_AHEAD_BUFFERS);
+        this.dfile = sstable.openDataReader(FileAccessType.SEQUENTIAL);
         this.sstable = sstable;
         this.columns = columns;
         this.dataRange = dataRange;

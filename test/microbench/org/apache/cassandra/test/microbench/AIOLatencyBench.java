@@ -62,17 +62,28 @@ public class AIOLatencyBench
     private ByteBuffer[] buffers;
     private File file;
     private AsynchronousChannelProxy channel;
+    private AsynchronousChannelProxy batchedChannel;
     private ChunkReader chunkReader;
     private CompletableFuture<ByteBuffer>[] futures;
 
-    @Param({ "4096", "8192", "16384", "32768", "65536", /*"131072", "262144", "524288"*/})
+    public enum BatchingType
+    {
+        NONE,
+        SIMPLE,
+        VECTORED
+    }
+
+    @Param({ "4096", "8192"})
     private int chunkSize = 4096;
 
-    //@Param({ "1", "2", "4"})
-    private int numRequests = 1;
+    @Param({"8", "16"})
+    private int numBuffers = 8;
 
-    @Param({"1", "5", "10"})
-    private int backOffMillis = 1;
+    @Param({"NONE", "SIMPLE", "VECTORED"})
+    private BatchingType batchingType = BatchingType.NONE;
+
+    //@Param({"1", "5", "10"})
+    //private int backOffMillis = 1;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable
@@ -80,8 +91,8 @@ public class AIOLatencyBench
         DatabaseDescriptor.daemonInitialization();
 
         random = new Random(System.currentTimeMillis());
-        buffers = new ByteBuffer[numRequests];
-        for (int i = 0; i < numRequests; i++)
+        buffers = new ByteBuffer[numBuffers];
+        for (int i = 0; i < numBuffers; i++)
             buffers[i] = ByteBuffer.allocateDirect(chunkSize);
 
         if (!TPC.USE_AIO)
@@ -93,7 +104,7 @@ public class AIOLatencyBench
 
         try(FileChannel writeChannel = new FileOutputStream(file, false).getChannel())
         {
-            for (int i = 0; i < numRequests; i++)
+            for (int i = 0; i < numBuffers; i++)
             {
                 byte[] data = new byte[chunkSize];
                 random.nextBytes(data);
@@ -103,29 +114,43 @@ public class AIOLatencyBench
         }
 
         channel = new AsynchronousChannelProxy(file, false);
-        chunkReader = ChunkReader.simple(channel, file.length(), BufferType.OFF_HEAP, chunkSize);
+        if (batchingType == BatchingType.NONE)
+        {
+            chunkReader = ChunkReader.simple(channel, file.length(), BufferType.OFF_HEAP, chunkSize);
+        }
+        else
+        {
+            batchedChannel = channel.maybeBatched(batchingType == BatchingType.VECTORED);
+            chunkReader = ChunkReader.simple(batchedChannel, file.length(), BufferType.OFF_HEAP, chunkSize);
+        }
 
-        futures = new CompletableFuture[numRequests];
+        futures = new CompletableFuture[numBuffers];
     }
 
-    @Setup(Level.Invocation)
-    public void backoff() throws InterruptedException
-    {
-        Thread.sleep(backOffMillis);
-    }
+//    @Setup(Level.Invocation)
+//    public void backoff() throws InterruptedException
+//    {
+//        Thread.sleep(backOffMillis);
+//    }
 
     @TearDown(Level.Trial)
     public void teardown() throws IOException, ExecutionException, InterruptedException
     {
         channel.close();
         chunkReader.close();
+
+        if (batchedChannel != null)
+            batchedChannel.close();
     }
 
     @Benchmark
-    public void readChunk() throws Throwable
+    public void readBuffers() throws Throwable
     {
-        for (int i = 0; i < numRequests; i++)
+        for (int i = 0; i < numBuffers; i++)
             futures[i] = chunkReader.readChunk(chunkSize * i, buffers[i]);
+
+        if (batchedChannel != null)
+            batchedChannel.submitBatch();
 
         CompletableFuture.allOf(futures).join();
     }

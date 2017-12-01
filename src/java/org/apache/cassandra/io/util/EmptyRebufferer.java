@@ -45,15 +45,9 @@ public class EmptyRebufferer implements Rebufferer, RebuffererFactory
         return 0;
     }
 
-    public Rebufferer instantiateRebufferer()
+    public Rebufferer instantiateRebufferer(FileAccessType accessType)
     {
         return this;
-    }
-
-    @Override
-    public boolean supportsPrefetch()
-    {
-        return false; // nothing to prefetch
     }
 
     public BufferHolder rebuffer(long position)

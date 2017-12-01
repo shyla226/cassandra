@@ -29,6 +29,7 @@ import com.google.common.base.Throwables;
 
 import org.apache.cassandra.db.partitions.ArrayBackedPartition;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.util.FileAccessType;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -123,8 +124,8 @@ public class Scrubber implements Closeable
         // row header (key or data size) is corrupt. (This means our position in the index file will be one row
         // "ahead" of the data file.)
         this.dataFile = transaction.isOffline()
-                        ? sstable.openDataReader()
-                        : sstable.openDataReader(CompactionManager.instance.getRateLimiter());
+                        ? sstable.openDataReader(FileAccessType.FULL_FILE)
+                        : sstable.openDataReader(CompactionManager.instance.getRateLimiter(), FileAccessType.FULL_FILE);
 
         this.scrubInfo = new ScrubInfo(dataFile, sstable);
     }

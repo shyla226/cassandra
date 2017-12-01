@@ -335,8 +335,6 @@ public class ChunkCache
                 asyncBuffer = cache.get(key);
             }
 
-            metrics.misses.mark();
-
             /**
              * Notify the caller this page isn't ready
              * but don't give them the buffer because it has not been referenced.
@@ -393,15 +391,14 @@ public class ChunkCache
         }
 
         @Override
-        public Rebufferer instantiateRebufferer()
+        @SuppressWarnings("resource") // channel closed by the PrefetchingRebufferer
+        public Rebufferer instantiateRebufferer(FileAccessType accessType)
         {
-            return this;
-        }
+            if (accessType == FileAccessType.RANDOM || source.isMmap())
+                return this;
 
-        @Override
-        public boolean supportsPrefetch()
-        {
-            return source.supportsPrefetch();
+            AsynchronousChannelProxy channel = this.source.channel().maybeBatched(PrefetchingRebufferer.READ_AHEAD_VECTORED);
+            return new PrefetchingRebufferer(new CachingRebufferer(source.withChannel(channel)), channel);
         }
 
         @Override

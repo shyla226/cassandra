@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.channel.ChannelException;
+import io.netty.channel.epoll.AIOContext;
 import io.netty.channel.epoll.AIOEpollFileChannel;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.channel.unix.FileDescriptor;
@@ -55,7 +55,7 @@ import org.apache.cassandra.utils.NativeLibrary;
  *
  * Tested by RandomAccessReaderTest.
  */
-public final class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousFileChannel>
+public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousFileChannel>
 {
     private static final Logger logger = LoggerFactory.getLogger(AsynchronousChannelProxy.class);
 
@@ -133,9 +133,11 @@ public final class AsynchronousChannelProxy extends AbstractChannelProxy<Asynchr
 
     static final int MAX_RETRIES = 10;
 
-    public void read(ByteBuffer dest, long offset, CompletionHandler<Integer, ByteBuffer> onComplete)
+    CompletionHandler<Integer, ByteBuffer> makeRetryingHandler(ByteBuffer dest,
+                                                               long offset,
+                                                               CompletionHandler<Integer, ByteBuffer> onComplete)
     {
-        CompletionHandler<Integer, ByteBuffer> retryingHandler = new CompletionHandler<Integer, ByteBuffer>()
+        return new CompletionHandler<Integer, ByteBuffer>()
         {
             int retries = 0;
 
@@ -146,10 +148,11 @@ public final class AsynchronousChannelProxy extends AbstractChannelProxy<Asynchr
 
             public void failed(Throwable exc, ByteBuffer attachment)
             {
-                if (exc instanceof ChannelException && exc.getMessage().contains("Resource temporarily unavailable"))
+                //new RuntimeException("Too many pending requests")
+                if (exc instanceof RuntimeException && exc.getMessage().contains("Too many pending requests"))
                 {
-                    // This is EAGAIN, there are too many concurrent requests. As we limit the number of concurrent
-                    // tasks in the queue, this should not normally be hit. However, it can happen if the node is
+                    // This error is thrown if there are too many pending requests in the queue.
+                    // This should not normally be hit. However, it can happen if the node is
                     // heavily pounded by read requests. Rather than immediately failing (and even marking the sstable
                     // as suspect), retry the read, backing off exponentially longer with each retry.
                     if (++retries < MAX_RETRIES)
@@ -168,6 +171,10 @@ public final class AsynchronousChannelProxy extends AbstractChannelProxy<Asynchr
                 onComplete.failed(exc, attachment);
             }
         };
+    }
+    public void read(ByteBuffer dest, long offset, CompletionHandler<Integer, ByteBuffer> onComplete)
+    {
+        CompletionHandler<Integer, ByteBuffer> retryingHandler = makeRetryingHandler(dest, offset, onComplete);
 
         try
         {
@@ -228,5 +235,70 @@ public final class AsynchronousChannelProxy extends AbstractChannelProxy<Asynchr
         }
 
         NativeLibrary.trySkipCache(fd, offset, len, filePath);
+    }
+
+    /**
+     * Submit a batch of reads. By default each read is submitted immediately and so this is a no-op but
+     * {@link AIOEpollBatchedChannelProxy} implements this method by submitting a batch.
+     */
+    public void submitBatch()
+    {
+        //no op for non-batched channels, since each read request is submitted immediately
+    }
+
+    /**
+     * Return a {@link AIOEpollBatchedChannelProxy} if it's possible to create one, otherwise return a copy
+     * of this channel, with ref. counting incremented.
+     *
+     * @param vectored - true if vectored IO should be used in addition to batching.
+     * @return a channel proxy that supports batching or a copy of this channel.
+     */
+    public AsynchronousChannelProxy maybeBatched(boolean vectored)
+    {
+        if (!(channel instanceof AIOEpollFileChannel))
+            return sharedCopy();
+
+        return new AIOEpollBatchedChannelProxy(this, vectored);
+    }
+
+    /**
+     * Extends {@link AsynchronousChannelProxy} to provide batching functionality.
+     * <p>
+     * Instead of being sent directly, reads are added to a batch, which must be submitted later on
+     * by calling {@link #submitBatch()}.
+     * <p>
+     * Note that unlike {@link AsynchronousChannelProxy}, this class is not thread safe since it contains some state,
+     * the batch. So it must be use only by a single thread or synchronized externally.
+     */
+    private static class AIOEpollBatchedChannelProxy extends AsynchronousChannelProxy
+    {
+        private final boolean vectored;
+        private final AIOEpollFileChannel epollChannel;
+        private AIOContext.Batch<ByteBuffer> batch;
+
+        private AIOEpollBatchedChannelProxy(AsynchronousChannelProxy inner, boolean vectored)
+        {
+            super(inner);
+            this.vectored = vectored;
+            this.epollChannel = (AIOEpollFileChannel) inner.channel;
+            this.batch = epollChannel.newBatch(vectored);
+        }
+
+        @Override
+        public void read(ByteBuffer dest, long offset, CompletionHandler<Integer, ByteBuffer> onComplete)
+        {
+            // we don't batch retries, it would be too complex and there shouldn't be any retries anyway
+            batch.add(offset, dest, dest, makeRetryingHandler(dest, offset, onComplete));
+        }
+
+        @Override
+        public void submitBatch()
+        {
+            if (batch.numRequests() == 0)
+                return;
+
+            epollChannel.read(batch);
+            batch = epollChannel.newBatch(vectored);
+        }
     }
 }
