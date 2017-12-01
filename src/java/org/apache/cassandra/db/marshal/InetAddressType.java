@@ -36,7 +36,7 @@ public class InetAddressType extends AbstractType<InetAddress>
 
     private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
-    InetAddressType() {super(ComparisonType.BYTE_ORDER);} // singleton
+    InetAddressType() {super(ComparisonType.BYTE_ORDER, VARIABLE_LENGTH);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {

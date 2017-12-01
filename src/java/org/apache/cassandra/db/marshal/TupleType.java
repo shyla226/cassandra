@@ -62,7 +62,7 @@ public class TupleType extends AbstractType<ByteBuffer>
 
     protected TupleType(List<AbstractType<?>> types, boolean freezeInner)
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, VARIABLE_LENGTH);
         if (freezeInner)
             this.types = types.stream().map(AbstractType::freeze).collect(Collectors.toList());
         else
@@ -119,11 +119,9 @@ public class TupleType extends AbstractType<ByteBuffer>
         return true;
     }
 
+    @Override
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
-        if (!o1.hasRemaining() || !o2.hasRemaining())
-            return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
-
         ByteBuffer bb1 = o1.duplicate();
         ByteBuffer bb2 = o2.duplicate();
 

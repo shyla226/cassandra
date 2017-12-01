@@ -39,7 +39,7 @@ public class UTF8Type extends AbstractType<String>
 
     private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
-    UTF8Type() {super(ComparisonType.BYTE_ORDER);} // singleton
+    UTF8Type() {super(ComparisonType.BYTE_ORDER, VARIABLE_LENGTH);} // singleton
 
     public ByteBuffer fromString(String source)
     {
