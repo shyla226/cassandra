@@ -21,7 +21,7 @@ import java.text.DecimalFormat;
 import java.util.concurrent.TimeUnit;
 import java.util.Locale;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 
@@ -145,7 +145,7 @@ public final class SpeculativeRetryParam
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(kind, threshold);
+        return Objects.hash(kind, threshold);
     }
 
     @Override

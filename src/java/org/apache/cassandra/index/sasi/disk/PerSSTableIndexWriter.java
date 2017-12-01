@@ -46,7 +46,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.Futures;
@@ -372,13 +372,13 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
 
             Index other = (Index) obj;
 
-            return Objects.equal(columnIndex, other.columnIndex) &&
-                   Objects.equal(descriptor, other.descriptor);
+            return Objects.equals(columnIndex, other.columnIndex) &&
+                   Objects.equals(descriptor, other.descriptor);
         }
 
         public int hashCode()
         {
-            return Objects.hashCode(columnIndex, descriptor);
+            return Objects.hash(columnIndex, descriptor);
         }
     }
 

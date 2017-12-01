@@ -24,7 +24,7 @@ import java.util.*;
 import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.base.Splitter;
 
 import org.apache.cassandra.db.Directories;
@@ -96,7 +96,7 @@ public class Descriptor
         this.generation = generation;
         this.formatType = formatType;
 
-        hashCode = Objects.hashCode(version, this.directory, generation, ksname, cfname, formatType);
+        hashCode = Objects.hash(version, this.directory, generation, ksname, cfname, formatType);
     }
 
     public Descriptor withGeneration(int newGeneration)

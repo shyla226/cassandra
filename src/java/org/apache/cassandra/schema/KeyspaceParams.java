@@ -21,7 +21,7 @@ import java.util.Map;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 /**
  * An immutable class representing keyspace parameters (durability and replication).
@@ -106,7 +106,7 @@ public final class KeyspaceParams
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(durableWrites, replication);
+        return Objects.hash(durableWrites, replication);
     }
 
     @Override

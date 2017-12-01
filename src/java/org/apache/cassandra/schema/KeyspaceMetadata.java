@@ -24,7 +24,7 @@ import java.util.Set;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -129,7 +129,7 @@ public final class KeyspaceMetadata
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(name, params, tables, views, functions, types);
+        return Objects.hash(name, params, tables, views, functions, types);
     }
 
     @Override

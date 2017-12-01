@@ -24,7 +24,7 @@ package org.apache.cassandra.service.paxos;
 import java.io.IOException;
 import java.util.UUID;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
@@ -100,7 +100,7 @@ public class Commit
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(ballot, update);
+        return Objects.hash(ballot, update);
     }
 
     @Override

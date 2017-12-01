@@ -20,7 +20,7 @@ package org.apache.cassandra.config;
 import java.util.List;
 import java.util.Map;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 public class ParameterizedClass
 {
@@ -51,7 +51,7 @@ public class ParameterizedClass
 
     public boolean equals(ParameterizedClass that)
     {
-        return Objects.equal(class_name, that.class_name) && Objects.equal(parameters, that.parameters);
+        return Objects.equals(class_name, that.class_name) && Objects.equals(parameters, that.parameters);
     }
 
     @Override

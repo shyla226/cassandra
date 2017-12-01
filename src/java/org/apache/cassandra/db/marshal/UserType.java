@@ -21,7 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.rows.Cell;
@@ -311,7 +311,7 @@ public class UserType extends TupleType
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(keyspace, name, fieldNames, types, isMultiCell);
+        return Objects.hash(keyspace, name, fieldNames, types, isMultiCell);
     }
 
     @Override

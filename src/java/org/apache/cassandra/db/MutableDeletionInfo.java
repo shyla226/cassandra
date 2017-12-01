@@ -20,7 +20,7 @@ package org.apache.cassandra.db;
 import java.util.Collections;
 import java.util.Iterator;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.rows.EncodingStats;
@@ -235,13 +235,13 @@ public class MutableDeletionInfo implements DeletionInfo
         if(!(o instanceof MutableDeletionInfo))
             return false;
         MutableDeletionInfo that = (MutableDeletionInfo)o;
-        return partitionDeletion.equals(that.partitionDeletion) && Objects.equal(ranges, that.ranges);
+        return partitionDeletion.equals(that.partitionDeletion) && Objects.equals(ranges, that.ranges);
     }
 
     @Override
     public final int hashCode()
     {
-        return Objects.hashCode(partitionDeletion, ranges);
+        return Objects.hash(partitionDeletion, ranges);
     }
 
     @Override

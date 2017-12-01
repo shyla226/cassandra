@@ -25,7 +25,7 @@ import java.util.Map;
 import javax.crypto.Cipher;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.config.TransparentDataEncryptionOptions;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -130,8 +130,8 @@ public class EncryptionContext
 
     public boolean equals(EncryptionContext other)
     {
-        return Objects.equal(tdeOptions, other.tdeOptions)
-               && Objects.equal(compressor, other.compressor)
+        return Objects.equals(tdeOptions, other.tdeOptions)
+               && Objects.equals(compressor, other.compressor)
                && Arrays.equals(iv, other.iv);
     }
 

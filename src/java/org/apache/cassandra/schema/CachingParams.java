@@ -21,7 +21,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.collect.ImmutableMap;
 import org.apache.commons.lang3.StringUtils;
 
@@ -193,6 +193,6 @@ public final class CachingParams
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(cacheKeys, rowsPerPartitionToCache);
+        return Objects.hash(cacheKeys, rowsPerPartitionToCache);
     }
 }

@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.reflect.TypeToken;
 
 import com.datastax.driver.core.DataType;
@@ -152,7 +152,7 @@ public final class UDFDataType
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(abstractType, javaType);
+        return Objects.hash(abstractType, javaType);
     }
 
     @Override

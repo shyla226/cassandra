@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.utils;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 public class Pair<T1, T2>
 {
@@ -44,7 +44,7 @@ public class Pair<T1, T2>
             return false;
         Pair that = (Pair)o;
         // handles nulls properly
-        return Objects.equal(left, that.left) && Objects.equal(right, that.right);
+        return Objects.equals(left, that.left) && Objects.equals(right, that.right);
     }
 
     @Override

@@ -21,7 +21,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLongArray;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.ISerializer;
@@ -362,7 +362,7 @@ public class EstimatedHistogram
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(getBucketOffsets(), getBuckets(false));
+        return Objects.hash(getBucketOffsets(), getBuckets(false));
     }
 
     public static class EstimatedHistogramSerializer implements ISerializer<EstimatedHistogram>

@@ -20,7 +20,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.hash.Hasher;
 
 import org.apache.cassandra.cache.IMeasurableMemory;
@@ -101,7 +101,7 @@ public class DeletionTime implements Comparable<DeletionTime>, IMeasurableMemory
     @Override
     public final int hashCode()
     {
-        return Objects.hashCode(markedForDeleteAt(), localDeletionTime());
+        return Objects.hash(markedForDeleteAt(), localDeletionTime());
     }
 
     @Override

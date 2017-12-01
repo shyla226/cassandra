@@ -24,7 +24,7 @@ import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -188,13 +188,13 @@ public final class IndexMetadata
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(id, name, kind, options);
+        return Objects.hash(id, name, kind, options);
     }
 
     public boolean equalsWithoutName(IndexMetadata other)
     {
-        return Objects.equal(kind, other.kind)
-               && Objects.equal(options, other.options);
+        return Objects.equals(kind, other.kind)
+               && Objects.equals(options, other.options);
     }
 
     @Override
@@ -208,7 +208,7 @@ public final class IndexMetadata
 
         IndexMetadata other = (IndexMetadata) obj;
 
-        return Objects.equal(id, other.id) && Objects.equal(name, other.name) && equalsWithoutName(other);
+        return Objects.equals(id, other.id) && Objects.equals(name, other.name) && equalsWithoutName(other);
     }
 
     @Override

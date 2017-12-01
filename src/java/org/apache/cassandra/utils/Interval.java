@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.utils;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 public class Interval<C, D>
 {
@@ -51,7 +51,7 @@ public class Interval<C, D>
     @Override
     public final int hashCode()
     {
-        return Objects.hashCode(min, max, data);
+        return Objects.hash(min, max, data);
     }
 
     @Override
@@ -62,7 +62,7 @@ public class Interval<C, D>
 
         Interval that = (Interval)o;
         // handles nulls properly
-        return Objects.equal(min, that.min) && Objects.equal(max, that.max) && Objects.equal(data, that.data);
+        return Objects.equals(min, that.min) && Objects.equals(max, that.max) && Objects.equals(data, that.data);
     }
 
     private static final AsymmetricOrdering<Interval<Comparable, Object>, Comparable> minOrdering

@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.exceptions.ConfigurationException;

@@ -20,7 +20,7 @@ package org.apache.cassandra.cql3.functions;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -249,18 +249,18 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
             return false;
 
         UDAggregate that = (UDAggregate) o;
-        return Objects.equal(name, that.name)
+        return Objects.equals(name, that.name)
             && Functions.typesMatch(argTypes, that.argTypes)
             && Functions.typesMatch(returnType, that.returnType)
-            && Objects.equal(stateFunction, that.stateFunction)
-            && Objects.equal(finalFunction, that.finalFunction)
+            && Objects.equals(stateFunction, that.stateFunction)
+            && Objects.equals(finalFunction, that.finalFunction)
             && ((stateType == that.stateType) || ((stateType != null) && stateType.equals(that.stateType)))
-            && Objects.equal(initcond, that.initcond);
+            && Objects.equals(initcond, that.initcond);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(name, Functions.typeHashCode(argTypes), Functions.typeHashCode(returnType), stateFunction, finalFunction, stateType, initcond);
+        return Objects.hash(name, Functions.typeHashCode(argTypes), Functions.typeHashCode(returnType), stateFunction, finalFunction, stateType, initcond);
     }
 }

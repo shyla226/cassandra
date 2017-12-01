@@ -18,7 +18,7 @@
 package org.apache.cassandra.cql3;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ReversedType;
@@ -91,7 +91,7 @@ public class ColumnSpecification
 
     public int hashCode()
     {
-        return Objects.hashCode(ksName, cfName, name, type);
+        return Objects.hash(ksName, cfName, name, type);
     }
 
     @Override

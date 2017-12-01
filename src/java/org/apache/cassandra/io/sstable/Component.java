@@ -20,7 +20,7 @@ package org.apache.cassandra.io.sstable;
 import java.util.EnumSet;
 import java.util.regex.Pattern;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 /**
  * SSTables are made up of multiple components in separate files. Components are
@@ -108,7 +108,7 @@ public class Component
         assert name != null : "Component name cannot be null";
         this.type = type;
         this.name = name;
-        this.hashCode = Objects.hashCode(type, name);
+        this.hashCode = Objects.hash(type, name);
     }
 
     /**

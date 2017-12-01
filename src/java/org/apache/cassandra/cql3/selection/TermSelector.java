@@ -20,7 +20,7 @@ package org.apache.cassandra.cql3.selection;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -108,14 +108,14 @@ public class TermSelector extends Selector
 
         TermSelector s = (TermSelector) o;
 
-        return Objects.equal(value, s.value)
-            && Objects.equal(type, s.type);
+        return Objects.equals(value, s.value)
+            && Objects.equals(type, s.type);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(value, type);
+        return Objects.hash(value, type);
     }
 
     public void addFetchedColumns(ColumnFilter.Builder builder)

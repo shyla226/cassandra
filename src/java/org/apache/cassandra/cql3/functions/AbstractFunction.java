@@ -19,7 +19,7 @@ package org.apache.cassandra.cql3.functions;
 
 import java.util.List;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
@@ -76,9 +76,9 @@ public abstract class AbstractFunction implements Function
             return false;
 
         AbstractFunction that = (AbstractFunction)o;
-        return Objects.equal(this.name, that.name)
-            && Objects.equal(this.argTypes, that.argTypes)
-            && Objects.equal(this.returnType, that.returnType);
+        return Objects.equals(this.name, that.name)
+            && Objects.equals(this.argTypes, that.argTypes)
+            && Objects.equals(this.returnType, that.returnType);
     }
 
     public void addFunctionsTo(List<Function> functions)
@@ -94,7 +94,7 @@ public abstract class AbstractFunction implements Function
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(name, argTypes, returnType);
+        return Objects.hash(name, argTypes, returnType);
     }
 
     public final AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)

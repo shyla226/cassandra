@@ -19,7 +19,7 @@ package org.apache.cassandra.auth;
 
 import java.util.Set;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.collect.ComparisonChain;
 
 /**
@@ -72,14 +72,14 @@ public class PermissionDetails implements Comparable<PermissionDetails>
             return false;
 
         PermissionDetails pd = (PermissionDetails) o;
-        return Objects.equal(grantee, pd.grantee)
-            && Objects.equal(resource, pd.resource)
-            && Objects.equal(permission, pd.permission);
+        return Objects.equals(grantee, pd.grantee)
+            && Objects.equals(resource, pd.resource)
+            && Objects.equals(permission, pd.permission);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(grantee, resource, permission);
+        return Objects.hash(grantee, resource, permission);
     }
 }

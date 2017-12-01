@@ -23,7 +23,7 @@ import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.collect.Collections2;
 
 import org.apache.cassandra.cql3.*;
@@ -263,12 +263,12 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
 
         ColumnMetadata cd = (ColumnMetadata) o;
 
-        return Objects.equal(ksName, cd.ksName)
-            && Objects.equal(cfName, cd.cfName)
-            && Objects.equal(name, cd.name)
-            && Objects.equal(type, cd.type)
-            && Objects.equal(kind, cd.kind)
-            && Objects.equal(position, cd.position);
+        return Objects.equals(ksName, cd.ksName)
+            && Objects.equals(cfName, cd.cfName)
+            && Objects.equals(name, cd.name)
+            && Objects.equals(type, cd.type)
+            && Objects.equals(kind, cd.kind)
+            && Objects.equals(position, cd.position);
     }
 
     @Override

@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Function;
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
@@ -277,7 +277,7 @@ public class CounterMutation implements IMutation, SchedulableMessage
                         {
                             public Object apply(final ColumnData data)
                             {
-                                return Objects.hashCode(update.metadata().id, key(), row.clustering(), data.column());
+                                return Objects.hash(update.metadata().id, key(), row.clustering(), data.column());
                             }
                         }));
                     }

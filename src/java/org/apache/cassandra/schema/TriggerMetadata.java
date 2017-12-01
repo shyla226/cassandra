@@ -19,7 +19,7 @@
 package org.apache.cassandra.schema;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 public final class TriggerMetadata
 {
@@ -59,7 +59,7 @@ public final class TriggerMetadata
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(name, classOption);
+        return Objects.hash(name, classOption);
     }
 
     @Override

@@ -21,7 +21,7 @@ import java.util.*;
 import java.util.Optional;
 
 import com.google.common.base.*;
-import com.google.common.base.Objects;
+import java.util.Objects;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -308,16 +308,16 @@ public class FunctionResource implements IResource
 
         FunctionResource f = (FunctionResource) o;
 
-        return Objects.equal(level, f.level)
-               && Objects.equal(keyspace, f.keyspace)
-               && Objects.equal(name, f.name)
-               && Objects.equal(argTypes, f.argTypes);
+        return Objects.equals(level, f.level)
+               && Objects.equals(keyspace, f.keyspace)
+               && Objects.equals(name, f.name)
+               && Objects.equals(argTypes, f.argTypes);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(level, keyspace, name, argTypes);
+        return Objects.hash(level, keyspace, name, argTypes);
     }
 
     private String argListAsString()

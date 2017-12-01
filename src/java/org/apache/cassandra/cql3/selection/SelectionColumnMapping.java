@@ -23,7 +23,7 @@ package org.apache.cassandra.cql3.selection;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.collect.*;
 
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -97,8 +97,8 @@ public class SelectionColumnMapping implements SelectionColumns
             return false;
 
         SelectionColumns other = (SelectionColumns)obj;
-        return Objects.equal(columnMappings, other.getMappings())
-            && Objects.equal(columnSpecifications, other.getColumnSpecifications());
+        return Objects.equals(columnMappings, other.getMappings())
+            && Objects.equals(columnSpecifications, other.getColumnSpecifications());
     }
 
     public int hashCode()

@@ -23,7 +23,7 @@ import javax.management.MBeanServer;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -174,12 +174,12 @@ public class JMXResource implements IResource
 
         JMXResource j = (JMXResource) o;
 
-        return Objects.equal(level, j.level) && Objects.equal(name, j.name);
+        return Objects.equals(level, j.level) && Objects.equals(name, j.name);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(level, name);
+        return Objects.hash(level, name);
     }
 }

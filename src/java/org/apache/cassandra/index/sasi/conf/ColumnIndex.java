@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
@@ -274,13 +274,13 @@ public class ColumnIndex
 
         ColumnIndex other = (ColumnIndex) obj;
 
-        return Objects.equal(column, other.column) &&
-               Objects.equal(config, other.config) &&
-               Objects.equal(keyValidator, other.keyValidator);
+        return Objects.equals(column, other.column) &&
+               Objects.equals(config, other.config) &&
+               Objects.equals(keyValidator, other.keyValidator);
     }
 
     public int hashCode()
     {
-        return Objects.hashCode(column, config, keyValidator);
+        return Objects.hash(column, config, keyValidator);
     }
 }

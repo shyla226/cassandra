@@ -20,7 +20,7 @@ package org.apache.cassandra.streaming;
 import java.io.Serializable;
 import java.net.InetAddress;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 /**
  * ProgressInfo contains file transfer progress.
@@ -96,7 +96,7 @@ public class ProgressInfo implements Serializable
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(peer, sessionIndex, fileName, direction, totalBytes);
+        return Objects.hash(peer, sessionIndex, fileName, direction, totalBytes);
     }
 
     @Override

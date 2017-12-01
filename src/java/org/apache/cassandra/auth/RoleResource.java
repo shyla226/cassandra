@@ -20,7 +20,7 @@ package org.apache.cassandra.auth;
 import java.io.IOException;
 import java.util.Set;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -195,13 +195,13 @@ public class RoleResource implements IResource, Comparable<RoleResource>
 
         RoleResource rs = (RoleResource) o;
 
-        return Objects.equal(level, rs.level) && Objects.equal(name, rs.name);
+        return Objects.equals(level, rs.level) && Objects.equals(name, rs.name);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(level, name);
+        return Objects.hash(level, name);
     }
 
     public static final class RoleResourceSerializer extends VersionDependent<EncodingVersion> implements Serializer<RoleResource>

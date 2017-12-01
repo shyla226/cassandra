@@ -23,7 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import com.google.common.collect.Iterables;
 
@@ -274,15 +274,15 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
 
         AbstractFunctionSelector<?> s = (AbstractFunctionSelector<?>) o;
 
-        return Objects.equal(fun.name(), s.fun.name())
-            && Objects.equal(fun.argTypes(), s.fun.argTypes())
-            && Objects.equal(argSelectors, s.argSelectors);
+        return Objects.equals(fun.name(), s.fun.name())
+            && Objects.equals(fun.argTypes(), s.fun.argTypes())
+            && Objects.equals(argSelectors, s.argSelectors);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(fun.name(), fun.argTypes(), argSelectors);
+        return Objects.hash(fun.name(), fun.argTypes(), argSelectors);
     }
 
     @Override

@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Sets;
@@ -155,14 +155,14 @@ final class SetSelector extends Selector
 
         SetSelector s = (SetSelector) o;
 
-        return Objects.equal(type, s.type)
-            && Objects.equal(elements, s.elements);
+        return Objects.equals(type, s.type)
+            && Objects.equals(elements, s.elements);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(type, elements);
+        return Objects.hash(type, elements);
     }
 
     @Override

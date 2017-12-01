@@ -19,7 +19,7 @@ package org.apache.cassandra.cache;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 /**
  * A sentinel object for row caches.  See comments to getThroughCache and CASSANDRA-3862.
