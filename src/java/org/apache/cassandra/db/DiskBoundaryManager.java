@@ -37,12 +37,17 @@ import org.apache.cassandra.utils.FBUtilities;
 
 public class DiskBoundaryManager
 {
+    /**
+     * Whether partitioning sstables by token range is enabled when there are multiple disk
+     */
+    private static final boolean SPLIT_SSTABLES_BY_TOKEN_RANGE = Boolean.parseBoolean(System.getProperty("cassandra.split_sstables_by_token_range", "true"));
+
     private static final Logger logger = LoggerFactory.getLogger(DiskBoundaryManager.class);
     private volatile DiskBoundaries diskBoundaries;
 
     public DiskBoundaries getDiskBoundaries(ColumnFamilyStore cfs)
     {
-        if (!cfs.getPartitioner().splitter().isPresent())
+        if (!cfs.getPartitioner().splitter().isPresent() || !SPLIT_SSTABLES_BY_TOKEN_RANGE)
             return new DiskBoundaries(cfs.getDirectories().getWriteableLocations(), null, -1, -1);
         // copy the reference to avoid getting nulled out by invalidate() below
         // - it is ok to race, compaction will move any incorrect tokens to their correct places, but

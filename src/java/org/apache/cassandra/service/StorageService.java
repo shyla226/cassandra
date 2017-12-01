@@ -223,11 +223,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private static final boolean joinRing = Boolean.parseBoolean(System.getProperty("cassandra.join_ring", "true"));
     private boolean replacing;
 
-    /**
-     * Whether partitioning sstables by token range is enabled when there are multiple disk
-     */
-    private static final boolean SPLIT_SSTABLES_BY_TOKEN_RANGE = Boolean.parseBoolean(System.getProperty("cassandra.split_sstables_by_token_range", "true"));
-
     private final StreamStateStore streamStateStore = new StreamStateStore();
 
     private final AtomicBoolean doneAuthSetup = new AtomicBoolean(false);
