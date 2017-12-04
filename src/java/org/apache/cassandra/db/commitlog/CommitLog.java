@@ -116,9 +116,20 @@ public class CommitLog implements CommitLogMBean
             this.archiver = archiver;
             metrics = new CommitLogMetrics();
 
-            executor = DatabaseDescriptor.getCommitLogSync() == Config.CommitLogSync.batch
-                   ? new BatchCommitLogService(this, timeSource)
-                   : new PeriodicCommitLogService(this, timeSource);
+            switch (DatabaseDescriptor.getCommitLogSync())
+            {
+                case periodic:
+                    executor = new PeriodicCommitLogService(this, timeSource);
+                    break;
+                case batch:
+                    executor = new BatchCommitLogService(this, timeSource);
+                    break;
+                case group:
+                    executor = new GroupCommitLogService(this, timeSource);
+                    break;
+                default:
+                    throw new IllegalArgumentException("Unknown commitlog service type: " + DatabaseDescriptor.getCommitLogSync());
+            }
 
             segmentManager = DatabaseDescriptor.isCDCEnabled()
                          ? new CommitLogSegmentManagerCDC(this, DatabaseDescriptor.getCommitLogLocation())

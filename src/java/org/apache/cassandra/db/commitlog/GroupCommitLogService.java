@@ -15,28 +15,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.db.commitlog;
 
 import java.util.concurrent.TimeUnit;
 
 import io.reactivex.Completable;
+
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.TimeSource;
 import org.apache.cassandra.utils.flow.RxThreads;
 
-class BatchCommitLogService extends AbstractCommitLogService
+/**
+ * A commitlog service that will block returning an ACK back to the a coordinator/client
+ * for a minimum amount of time as we wait until the the commit log segment is flushed.
+ */
+public class GroupCommitLogService extends AbstractCommitLogService
 {
-    /**
-     * Batch mode does not rely on the sync thread in {@link AbstractCommitLogService} to wake up for triggering
-     * the disk sync. Instead we trigger it explicitly in {@link #maybeWaitForSync(CommitLogSegment.Allocation)}.
-     * This value here is largely irrelevant, but should high enough so the sync thread is not continually waking up.
-     */
-    private static final int POLL_TIME_MILLIS = 1000;
-
-    public BatchCommitLogService(CommitLog commitLog, TimeSource timeSource)
+    public GroupCommitLogService(CommitLog commitLog, TimeSource timeSource)
     {
-        super(commitLog, "COMMIT-LOG-WRITER", POLL_TIME_MILLIS, timeSource);
+        super(commitLog, "GROUP-COMMIT-LOG-WRITER", (int) DatabaseDescriptor.getCommitLogSyncGroupWindow(), timeSource);
     }
 
     protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc, StagedScheduler observeOn)
@@ -44,7 +44,6 @@ class BatchCommitLogService extends AbstractCommitLogService
         // wait until record has been safely persisted to disk
         pending.incrementAndGet();
         long startTime = timeSource.nanoTime();
-        requestExtraSync();
 
         Completable sync = awaitSyncAt(startTime)
                            .doOnComplete(() ->
@@ -56,3 +55,4 @@ class BatchCommitLogService extends AbstractCommitLogService
         return RxThreads.awaitAndContinueOn(sync, observeOn, TPCTaskType.WRITE_POST_COMMIT_LOG_SYNC);
     }
 }
+

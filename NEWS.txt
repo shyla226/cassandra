@@ -137,6 +137,11 @@ Upgrading
 	- the miniumum value for internode message timeouts is 10ms. Previously, any
 	  positive value was allowed. See cassandra.yaml entries like
 	  read_request_timeout_in_ms for more details.
+	- Config option commitlog_sync_batch_window_in_ms has been deprecated as it's
+	  documentation has been incorrect and the setting itself near useless.
+	  Batch mode remains a valid commit log mode, however.
+	- There is a new commit log mode, group, which is similar to batch mode
+	  but blocks for up to a configurable number of milliseconds between disk flushes.
 
 3.11.0
 ======
