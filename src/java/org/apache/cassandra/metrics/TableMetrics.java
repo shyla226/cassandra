@@ -305,16 +305,14 @@ public class TableMetrics
             return EMPTY;
         }
         long[] firstBucket = getHistogram.getHistogram(iterator.next()).getBuckets(false);
-        long[] values = new long[firstBucket.length];
-        System.arraycopy(firstBucket, 0, values, 0, values.length);
+        long[] values = Arrays.copyOf(firstBucket, firstBucket.length);
 
         while (iterator.hasNext())
         {
             long[] nextBucket = getHistogram.getHistogram(iterator.next()).getBuckets(false);
             if (nextBucket.length > values.length)
             {
-                long[] newValues = new long[nextBucket.length];
-                System.arraycopy(firstBucket, 0, newValues, 0, firstBucket.length);
+                long[] newValues = Arrays.copyOf(firstBucket, nextBucket.length);
                 for (int i = 0; i < newValues.length; i++)
                 {
                     newValues[i] += nextBucket[i];

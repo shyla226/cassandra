@@ -42,7 +42,7 @@ public abstract class CompletableFutures
         if (futures.isEmpty())
             return CompletableFuture.completedFuture(null);
 
-        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[futures.size()]));
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
     }
 
     /**

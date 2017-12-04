@@ -258,7 +258,7 @@ public class JavaDriverClient
         {
             stmt.setConsistencyLevel(from(consistency));
         }
-        BoundStatement bstmt = stmt.bind((Object[]) queryParams.toArray(new Object[queryParams.size()]));
+        BoundStatement bstmt = stmt.bind((Object[]) queryParams.toArray(new Object[0]));
         return execute(bstmt);
     }
 

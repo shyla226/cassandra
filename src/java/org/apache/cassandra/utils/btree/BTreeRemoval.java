@@ -331,13 +331,11 @@ public class BTreeRemoval
     private static Object[] copyIfNeeded(final Object[] node, boolean needCopy)
     {
         if (!needCopy) return node;
-        final Object[] copy = new Object[node.length];
-        System.arraycopy(node, 0, copy, 0, node.length);
+        final Object[] copy = Arrays.copyOf(node, node.length);
         if (!BTree.isLeaf(node))
         {
             final int[] sizeMap = BTree.getSizeMap(node);
-            final int[] copySizeMap = new int[sizeMap.length];
-            System.arraycopy(sizeMap, 0, copySizeMap, 0, sizeMap.length);
+            final int[] copySizeMap = Arrays.copyOf(sizeMap, sizeMap.length);
             copy[copy.length - 1] = copySizeMap;
         }
         return copy;

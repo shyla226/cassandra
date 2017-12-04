@@ -178,7 +178,7 @@ public class BigRowIndexEntry extends RowIndexEntry
         // construct an IndexedEntry object. (note: indexSamples.size() and columnIndexCount have the same meaning)
         if (indexSamples != null && indexSamples.size() > 1)
             return new IndexedEntry(dataFilePosition, deletionTime, headerLength,
-                                    indexSamples.toArray(new IndexInfo[indexSamples.size()]), offsets,
+                                    indexSamples.toArray(new IndexInfo[0]), offsets,
                                     indexedPartSize, idxInfoSerializer);
         // Here we have to decide whether we have serialized IndexInfo objects that exceeds
         // Config.column_index_cache_size_in_kb (not exceeding case covered above).

@@ -172,7 +172,7 @@ public class DynamicCompositeType extends AbstractCompositeType
             srcs.add(ByteSource.oneByte(bb.get())); // end-of-component also takes part in comparison
         }
 
-        return ByteSource.of(srcs.toArray(new ByteSource[srcs.size()]));
+        return ByteSource.of(srcs.toArray(new ByteSource[0]));
     }
 
     protected AbstractType<?> getAndAppendComparator(int i, ByteBuffer bb, StringBuilder sb)

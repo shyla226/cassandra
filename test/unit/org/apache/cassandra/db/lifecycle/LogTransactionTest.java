@@ -996,7 +996,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
         testCorruptRecord((t, s) -> t.logFiles().forEach(f -> {
             List<String> lines = FileUtils.readLines(f);
             lines.add(0, "add:[a,b,c][12345678]");
-            FileUtils.replace(f, lines.toArray(new String[lines.size()]));
+            FileUtils.replace(f, lines.toArray(new String[0]));
         }), false);
     }
 

@@ -77,7 +77,7 @@ public class TraceStateImpl extends TraceState
         if (WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS <= 0)
             return Completable.complete();
 
-        CompletableFuture<Void> fut = CompletableFuture.allOf(pendingFutures.toArray(new CompletableFuture<?>[pendingFutures.size()]));
+        CompletableFuture<Void> fut = CompletableFuture.allOf(pendingFutures.toArray(new CompletableFuture<?>[0]));
         return Completable.create(subscriber -> fut.whenComplete((result, error) -> {
                               if (error != null)
                                   subscriber.onError(error);

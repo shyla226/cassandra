@@ -328,7 +328,7 @@ public class PagingState
                                           ? CompositeType.splitName(value)
                                           : Collections.singletonList(value);
 
-            return Clustering.make(components.subList(0, Math.min(csize, components.size())).toArray(new ByteBuffer[csize]));
+            return Clustering.make(components.subList(0, Math.min(csize, components.size())).toArray(new ByteBuffer[0]));
         }
 
         @Override

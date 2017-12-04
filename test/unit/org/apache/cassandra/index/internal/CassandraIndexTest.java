@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.internal;
 
 import java.util.List;
+import java.util.Arrays;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -518,7 +519,7 @@ public class CassandraIndexTest extends CQLTester
     // CFS inherits from the base CFS. This has the 'wrong' partitioner (the index table
     // uses LocalPartition, the base table a real one, so we cannot read from the index
     // table with executeInternal
-    private void assertIndexRowTtl(ColumnFamilyStore indexCfs, int indexedValue, int ttl) throws Throwable
+    private void assertIndexRowTtl(ColumnFamilyStore indexCfs, int indexedValue, int ttl)
     {
         DecoratedKey indexKey = indexCfs.decorateKey(ByteBufferUtil.bytes(indexedValue));
         ClusteringIndexFilter filter = new ClusteringIndexSliceFilter(Slices.with(indexCfs.metadata().comparator,
@@ -794,9 +795,7 @@ public class CassandraIndexTest extends CQLTester
 
         private Object[] copyValuesFromRow(Object[] row, int length)
         {
-            Object[] values = new Object[length];
-            System.arraycopy(row, 0, values, 0, length);
-            return values;
+            return Arrays.copyOf(row, length);
         }
 
         private boolean includesUpdate()

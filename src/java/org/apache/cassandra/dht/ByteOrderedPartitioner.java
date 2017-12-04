@@ -264,10 +264,8 @@ public class ByteOrderedPartitioner implements IPartitioner
     {
         byte[] b;
         if (sigbytes != bytes.length)
-        {
-            b = new byte[sigbytes];
-            System.arraycopy(bytes, 0, b, 0, bytes.length);
-        } else
+            b = Arrays.copyOf(bytes, sigbytes);
+        else
             b = bytes;
         return new BigInteger(1, b);
     }
