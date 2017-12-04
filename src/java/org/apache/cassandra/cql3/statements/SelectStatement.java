@@ -23,11 +23,11 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
+import com.google.common.collect.Maps;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.concurrent.StagedScheduler;
@@ -1622,8 +1622,8 @@ public class SelectStatement implements CQLStatement
 
             Map<ColumnIdentifier, Integer> orderingIndexes = getOrderingIndex(metadata, selection, orderingColumns);
 
-            List<Integer> idToSort = new ArrayList<Integer>();
-            List<Comparator<ByteBuffer>> sorters = new ArrayList<Comparator<ByteBuffer>>();
+            List<Integer> idToSort = new ArrayList<Integer>(orderingColumns.size());
+            List<Comparator<ByteBuffer>> sorters = new ArrayList<Comparator<ByteBuffer>>(orderingColumns.size());
 
             for (ColumnMetadata orderingColumn : orderingColumns.keySet())
             {
@@ -1638,7 +1638,7 @@ public class SelectStatement implements CQLStatement
                                                                 Selection selection,
                                                                 Map<ColumnMetadata, Boolean> orderingColumns)
         {
-            Map<ColumnIdentifier, Integer> orderingIndexes = new HashMap<>();
+            Map<ColumnIdentifier, Integer> orderingIndexes = Maps.newHashMapWithExpectedSize(orderingColumns.size());
             for (ColumnMetadata def : orderingColumns.keySet())
             {
                 int index = selection.getResultSetIndex(def);

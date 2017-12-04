@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.Striped;
 
 import org.slf4j.Logger;
@@ -40,6 +41,7 @@ import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
+import org.apache.cassandra.schema.Views;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.CoordinatedAction;
@@ -108,8 +110,9 @@ public class ViewManager
 
     public void reload()
     {
-        Map<String, ViewMetadata> newViewsByName = new HashMap<>();
-        for (ViewMetadata definition : keyspace.getMetadata().views)
+        Views views = keyspace.getMetadata().views;
+        Map<String, ViewMetadata> newViewsByName = Maps.newHashMapWithExpectedSize(views.size());
+        for (ViewMetadata definition : views)
         {
             newViewsByName.put(definition.name, definition);
         }
