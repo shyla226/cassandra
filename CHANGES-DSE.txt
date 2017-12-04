@@ -1,4 +1,5 @@
 DSE 5.1.6
+ * Allow DiskBoundaryManager to cache different Directories (DB-1454)
  * Do not apply read timeouts to aggregated queries and use a minimum internal page size (DB-1381)
  * Handle cont paging state for empty partitions with static rows (DB-1352)
  * Skip building views during base table streams on range movements (Backport CASSANDRA-13065) (DB-1311)
