@@ -133,6 +133,7 @@ public class LocalPartitioner implements IPartitioner
     public class LocalToken extends ComparableObjectToken<ByteBuffer>
     {
         static final long serialVersionUID = 8437543776403014875L;
+        private int hashCode = -1;
 
         private LocalToken()
         {
@@ -165,8 +166,13 @@ public class LocalPartitioner implements IPartitioner
         @Override
         public int hashCode()
         {
-            final int prime = 31;
-            return prime + token.hashCode();
+            int currHashCode = this.hashCode;
+            if (currHashCode == -1)
+            {
+                currHashCode = 31 + token.hashCode();
+                this.hashCode = currHashCode;
+            }
+            return currHashCode;
         }
 
         @Override

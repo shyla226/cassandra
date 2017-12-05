@@ -46,6 +46,7 @@ public abstract class DecoratedKey extends PartitionPosition implements FilterKe
             return o1.compareTo(o2);
         }
     };
+    private int hashCode = -1;
 
     public DecoratedKey(Token token)
     {
@@ -56,7 +57,14 @@ public abstract class DecoratedKey extends PartitionPosition implements FilterKe
     @Override
     public int hashCode()
     {
-        return getKey().hashCode(); // hash of key is enough
+        int currHashCode = this.hashCode;
+        if (currHashCode == -1)
+        {
+            // hash of key is enough
+            currHashCode = getKey().hashCode();
+            this.hashCode = currHashCode;
+        }
+        return currHashCode;
     }
 
     @Override

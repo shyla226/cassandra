@@ -25,6 +25,7 @@ import org.apache.cassandra.db.SystemKeyspace;
 public class CounterId implements Comparable<CounterId>
 {
     public static final int LENGTH = 16; // we assume a fixed length size for all CounterIds
+    private int hashCode = -1;
 
     // Lazy holder because this opens the system keyspace and we want to avoid
     // having this triggered during class initialization
@@ -127,7 +128,13 @@ public class CounterId implements Comparable<CounterId>
     @Override
     public int hashCode()
     {
-        return id.hashCode();
+        int currHashCode = this.hashCode;
+        if (currHashCode == -1)
+        {
+            currHashCode = id.hashCode();
+            this.hashCode = currHashCode;
+        }
+        return currHashCode;
     }
 
     private static class LocalCounterIdHolder

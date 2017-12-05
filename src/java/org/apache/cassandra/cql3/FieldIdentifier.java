@@ -30,6 +30,7 @@ import org.apache.cassandra.serializers.MarshalException;
 public class FieldIdentifier
 {
     public final ByteBuffer bytes;
+    private int hashCode = -1;
 
     public FieldIdentifier(ByteBuffer bytes)
     {
@@ -83,7 +84,13 @@ public class FieldIdentifier
     @Override
     public final int hashCode()
     {
-        return bytes.hashCode();
+        int currHashCode = this.hashCode;
+        if (currHashCode == -1)
+        {
+            currHashCode = bytes.hashCode();
+            this.hashCode = currHashCode;
+        }
+        return currHashCode;
     }
 
     @Override
