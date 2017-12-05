@@ -361,6 +361,9 @@ public class TableState
 
     private void unlockExpiredLocalLocks()
     {
+        if (stateHolder == null)
+            return;
+
         int nowInSec = NodeSyncHelpers.time().currentTimeSeconds();
         if (stateHolder.hasExpiredLocalLocks(nowInSec))
         {
