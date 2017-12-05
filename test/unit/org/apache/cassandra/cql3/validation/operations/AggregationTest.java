@@ -27,6 +27,7 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.TimeZone;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -42,6 +43,7 @@ import ch.qos.logback.classic.joran.ReconfigureOnChangeTask;
 import ch.qos.logback.classic.spi.TurboFilterList;
 import ch.qos.logback.classic.turbo.ReconfigureOnChangeFilter;
 import ch.qos.logback.classic.turbo.TurboFilter;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.CQLTester;
@@ -2121,5 +2123,30 @@ public class AggregationTest extends CQLTester
 
         assertRows(execute("select sum(v1), sum(v2), sum(v3) from %s;"),
                    row((float) 15.3, 15.3, BigDecimal.valueOf(15.3)));
+    }
+
+    @Test
+    public void testAggregateTimeout() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a int, b int, c double, primary key (a, b))");
+
+        for (int i = 0; i < 1000; i++)
+            execute("INSERT INTO %s (a, b, c) VALUES (?, 1, 1)", i);
+
+        assertRows(execute("SELECT COUNT(*) FROM %s"), row(1000L));
+
+        long oldTimeout = DatabaseDescriptor.getAggregatedQueryTimeout();
+        DatabaseDescriptor.setAggregatedQueryTimeout(1);
+        try
+        {
+            assertInvalidThrowMessage(Optional.of(ProtocolVersion.CURRENT),
+                                      null,
+                                      com.datastax.driver.core.exceptions.ReadTimeoutException.class,
+                                      "SELECT COUNT(*) FROM %s");
+        }
+        finally
+        {
+            DatabaseDescriptor.setAggregatedQueryTimeout(oldTimeout);
+        }
     }
 }

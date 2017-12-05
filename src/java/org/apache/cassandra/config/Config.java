@@ -95,6 +95,8 @@ public class Config
 
     public volatile long range_request_timeout_in_ms = 10000L;
 
+    public volatile long aggregated_request_timeout_in_ms = 120000L;
+
     public volatile long write_request_timeout_in_ms = 2000L;
 
     public volatile long cross_dc_rtt_in_ms = 0L;

@@ -69,6 +69,8 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.ReadFailureException;
+import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -748,6 +750,11 @@ public class SelectStatement implements CQLStatement
                 // exception, we know that the builder is not completed
                 assert !builder.isCompleted() : "session should not have been paused if already completed";
             }
+            else if (error instanceof ReadFailureException || error instanceof ReadTimeoutException)
+            {
+                logger.debug("Continuous paging query failed: {}", error.getMessage());
+                builder.complete(error);
+            }
             else
             {
                 JVMStabilityInspector.inspectThrowable(error);
@@ -818,7 +825,10 @@ public class SelectStatement implements CQLStatement
         if (aggregationSpecFactory == null || query.isEmpty())
             return pager;
 
-        return new AggregationQueryPager(pager, query.limits());
+        return new AggregationQueryPager(pager,
+                                         query.limits(),
+                                         DatabaseDescriptor.getAggregatedQueryTimeout(),
+                                         ResultSet.estimatedRowSize(table, selection.getColumnMapping()));
     }
 
     /**

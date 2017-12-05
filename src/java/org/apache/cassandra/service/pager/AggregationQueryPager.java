@@ -20,6 +20,7 @@ package org.apache.cassandra.service.pager;
 import java.nio.ByteBuffer;
 
 import javax.annotation.Nullable;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +31,7 @@ import org.apache.cassandra.db.aggregation.GroupingState;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.flow.Flow;
 
@@ -47,17 +49,36 @@ public final class AggregationQueryPager implements QueryPager
 {
     private static final Logger logger = LoggerFactory.getLogger(AggregationQueryPager.class);
 
+    /**
+     * For aggregated queries the user may specify a small page size. In this case we
+     * want to use a minimum value for inner paging across replicas to avoid too many
+     * network round trips. For example, a client wants a count or a sum with a page size
+     * of 100 rows (which is the default used by cqlsh) but the aggregation is over a large range,
+     * in this case we are better off fetching larger pages from replicas.
+     *
+     * Here we set a size of 2 MB, we then converted to an estimated number of rows.
+     */
+    private static final PageSize MIN_SUB_PAGE_SIZE = PageSize.bytesSize(2 * 1024 * 1024);
+
     private static final int DEFAULT_GROUPS = 100;
-    
+
     private final DataLimits limits;
 
     // The sub-pager, used to retrieve the next sub-page.
     private QueryPager subPager;
 
-    public AggregationQueryPager(QueryPager subPager, DataLimits limits)
+    // the timeout in nanoseconds, if more time has elapsed, a ReadTimeoutException will be raised
+    private final long timeout;
+
+    // the smallest number of rows to fetch for sub-pages
+    private final int minSubPageSizeRows;
+
+    public AggregationQueryPager(QueryPager subPager, DataLimits limits, long timeoutMillis, int avgRowSize)
     {
         this.subPager = subPager;
         this.limits = limits;
+        this.timeout = TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        this.minSubPageSizeRows = MIN_SUB_PAGE_SIZE.inEstimatedRows(avgRowSize);
     }
 
     @Override
@@ -178,6 +199,8 @@ public final class AggregationQueryPager implements QueryPager
             if (logger.isTraceEnabled())
                 logger.trace("{} applyToPartition {}", hashCode(), ByteBufferUtil.bytesToHex(partition.header().partitionKey.getKey()));
 
+            checkTimeout();
+
             lastPartitionKey = partition.partitionKey().getKey();
             lastClustering = null;
             return partition.mapContent(this::applyToRow);
@@ -187,6 +210,8 @@ public final class AggregationQueryPager implements QueryPager
         {
             if (logger.isTraceEnabled())
                 logger.trace("{} - applyToRow {}", hashCode(), row.clustering() == null ? "null" : row.clustering().toBinaryString());
+
+            checkTimeout();
 
             lastClustering = row.clustering();
             return row;
@@ -230,6 +255,18 @@ public final class AggregationQueryPager implements QueryPager
         protected boolean isDone(int pageSize, int counted)
         {
             return counted == pageSize;
+        }
+
+        protected void checkTimeout()
+        {
+            // internal queries are not guarded by a timeout because cont. paging queries can be aborted
+            // and system queries should not be aborted
+            if (ctx == null)
+                return;
+
+            long elapsed = System.nanoTime() - ctx.queryStartNanos;
+            if (elapsed > timeout)
+                throw new ReadTimeoutException(ctx.consistencyLevel);
         }
 
         /**
@@ -276,7 +313,7 @@ public final class AggregationQueryPager implements QueryPager
 
             return ctx == null
                  ? subPager.fetchPageInternal(PageSize.rowsSize(subPageSize))
-                 : subPager.fetchPage(PageSize.rowsSize(subPageSize), ctx);
+                 : subPager.fetchPage(PageSize.rowsSize(subPageSize), ctx.withStartTime(System.nanoTime()));
         }
     }
 
@@ -311,7 +348,7 @@ public final class AggregationQueryPager implements QueryPager
         @Override
         protected int computeSubPageSize(int pageSize, int counted)
         {
-            return pageSize;
+            return Math.max(minSubPageSizeRows, pageSize);
         }
     }
 }

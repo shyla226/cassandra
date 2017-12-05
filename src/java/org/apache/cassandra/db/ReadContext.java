@@ -106,6 +106,22 @@ public class ReadContext
     }
 
     /**
+     * Returns a copy of this {@code ReadContext} with the provided start time.
+     */
+    public ReadContext withStartTime(long queryStartNanos)
+    {
+        return new ReadContext(keyspace,
+                               consistencyLevel,
+                               clientState,
+                               queryStartNanos,
+                               withDigests,
+                               forContinuousPaging,
+                               blockForAllReplicas,
+                               readObserver,
+                               readRepairDecision);
+    }
+
+    /**
      * A copy of this {@code ReadContext} suitable for doing a new query.
      * <p>
      * This basically is the same context than {@code this} but with an updated query start time. This must be used when

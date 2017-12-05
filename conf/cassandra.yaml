@@ -787,11 +787,16 @@ sstable_preemptive_open_interval_in_mb: 50
 # inter_dc_stream_throughput_outbound_megabits_per_sec: 200
 
 # How long the coordinator should wait for read operations to complete.
-# Lowest acceptable value is 10 ms.
+# Lowest acceptable value is 10 ms. This timeout does not apply to
+# aggregated queries such as SELECT COUNT(*), MIN(x), etc.
 read_request_timeout_in_ms: 5000
 # How long the coordinator should wait for seq or index scans to complete.
-# Lowest acceptable value is 10 ms.
+# Lowest acceptable value is 10 ms. This timeout does not apply to
+# aggregated queries such as SELECT COUNT(*), MIN(x), etc.
 range_request_timeout_in_ms: 10000
+# How long the coordinator should wait for aggregated read operations to complete,
+# such as SELECT COUNT(*), MIN(x), etc.
+aggregated_request_timeout_in_ms: 120000
 # How long the coordinator should wait for writes to complete.
 # Lowest acceptable value is 10 ms.
 write_request_timeout_in_ms: 2000
