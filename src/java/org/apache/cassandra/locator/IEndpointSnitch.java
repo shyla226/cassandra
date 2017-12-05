@@ -21,6 +21,8 @@ import java.net.InetAddress;
 import java.util.Collection;
 import java.util.List;
 
+import org.apache.cassandra.utils.FBUtilities;
+
 /**
  * This interface helps determine location of node in the datacenter relative to another node.
  * Give a node A and another node B it can tell if A and B are on the same rack or in the same
@@ -38,6 +40,40 @@ public interface IEndpointSnitch
      * returns a String representing the datacenter this endpoint belongs to
      */
     public String getDatacenter(InetAddress endpoint);
+
+    /**
+     * get the node's local datacenter name
+     */
+    public default String getLocalDatacenter()
+    {
+        return getDatacenter(FBUtilities.getBroadcastAddress());
+    }
+
+    /**
+     * get the node's local rack name
+     */
+    public default String getLocalRack()
+    {
+        return getRack(FBUtilities.getBroadcastAddress());
+    }
+
+    /**
+     * check whether the given {@code endpoint} is in the same datacenter as the local node
+     */
+    public default boolean isInLocalDatacenter(InetAddress endpoint)
+    {
+        return FBUtilities.getBroadcastAddress().equals(endpoint) ||
+               getLocalDatacenter().equals(getDatacenter(endpoint));
+    }
+
+    /**
+     * check whether the given {@code endpoint} is in the same datacenter and rack as the local node
+     */
+    public default boolean isInLocalRack(InetAddress endpoint)
+    {
+        return isInLocalDatacenter(endpoint) &&
+               getLocalRack().equals(getRack(endpoint));
+    }
 
     /**
      * returns a new <tt>List</tt> sorted by proximity to the given endpoint

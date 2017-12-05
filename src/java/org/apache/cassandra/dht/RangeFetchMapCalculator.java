@@ -409,7 +409,7 @@ public class RangeFetchMapCalculator
 
     private boolean isInLocalDC(InetAddress endpoint)
     {
-        return DatabaseDescriptor.getLocalDataCenter().equals(DatabaseDescriptor.getEndpointSnitch().getDatacenter(endpoint));
+        return DatabaseDescriptor.getEndpointSnitch().isInLocalDatacenter(endpoint);
     }
 
     /**

@@ -169,13 +169,12 @@ public class OutboundTcpConnectionPool
             case all:
                 break;
             case dc:
-                if (snitch.getDatacenter(address).equals(snitch.getDatacenter(FBUtilities.getBroadcastAddress())))
+                if (snitch.isInLocalDatacenter(address))
                     return false;
                 break;
             case rack:
                 // for rack then check if the DC's are the same.
-                if (snitch.getRack(address).equals(snitch.getRack(FBUtilities.getBroadcastAddress()))
-                        && snitch.getDatacenter(address).equals(snitch.getDatacenter(FBUtilities.getBroadcastAddress())))
+                if (snitch.isInLocalRack(address))
                     return false;
                 break;
         }

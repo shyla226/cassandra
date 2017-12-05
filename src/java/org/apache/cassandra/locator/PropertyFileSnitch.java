@@ -57,6 +57,7 @@ public class PropertyFileSnitch extends AbstractNetworkTopologySnitch
 
     private static volatile Map<InetAddress, String[]> endpointMap;
     private static volatile String[] defaultDCRack;
+    private static volatile String[] localDCRack;
 
     private volatile boolean gossipStarted;
 
@@ -138,6 +139,16 @@ public class PropertyFileSnitch extends AbstractNetworkTopologySnitch
         return info[1];
     }
 
+    public String getLocalDatacenter()
+    {
+        return (localDCRack != null ? localDCRack : defaultDCRack)[0];
+    }
+
+    public String getLocalRack()
+    {
+        return (localDCRack != null ? localDCRack : defaultDCRack)[1];
+    }
+
     public void reloadConfiguration(boolean isUpdate) throws ConfigurationException
     {
         HashMap<InetAddress, String[]> reloadedMap = new HashMap<>();
@@ -209,8 +220,8 @@ public class PropertyFileSnitch extends AbstractNetworkTopologySnitch
             logger.trace("Loaded network topology from property file: {}", StringUtils.removeEnd(sb.toString(), ", "));
         }
 
-
         defaultDCRack = reloadedDefaultDCRack;
+        localDCRack = localInfo;
         endpointMap = reloadedMap;
         if (StorageService.instance != null) // null check tolerates circular dependency; see CASSANDRA-4145
         {

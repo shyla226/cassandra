@@ -408,7 +408,7 @@ public class StartupChecks
                 String storedRack = TPCUtils.blockingGet(SystemKeyspace.getRack());
                 if (storedRack != null)
                 {
-                    String currentRack = DatabaseDescriptor.getEndpointSnitch().getRack(FBUtilities.getBroadcastAddress());
+                    String currentRack = DatabaseDescriptor.getLocalRack();
                     if (!storedRack.equals(currentRack))
                     {
                         String formatMessage = "Cannot start node if snitch's rack (%s) differs from previous rack (%s). " +

@@ -88,12 +88,6 @@ public abstract class AbstractEndpointSnitch implements IEndpointSnitch
     {
         long crossDCLatency = DatabaseDescriptor.getCrossDCRttLatency();
         assert crossDCLatency >= 0;
-        return (crossDCLatency == 0 || isLocalDC(endpoint)) ? 0 : crossDCLatency;
-    }
-
-    private static boolean isLocalDC(InetAddress target)
-    {
-        return Objects.equals(DatabaseDescriptor.getLocalDataCenter(),
-                              DatabaseDescriptor.getEndpointSnitch().getDatacenter(target));
+        return (crossDCLatency == 0 || isInLocalDatacenter(endpoint)) ? 0 : crossDCLatency;
     }
 }

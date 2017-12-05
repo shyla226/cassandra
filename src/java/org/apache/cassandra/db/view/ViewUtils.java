@@ -62,7 +62,7 @@ public final class ViewUtils
     {
         AbstractReplicationStrategy replicationStrategy = Keyspace.open(keyspaceName).getReplicationStrategy();
 
-        String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
+        String localDataCenter = DatabaseDescriptor.getLocalDataCenter();
         List<InetAddress> baseEndpoints = new ArrayList<>();
         List<InetAddress> viewEndpoints = new ArrayList<>();
         for (InetAddress baseEndpoint : replicationStrategy.getNaturalEndpoints(baseToken))

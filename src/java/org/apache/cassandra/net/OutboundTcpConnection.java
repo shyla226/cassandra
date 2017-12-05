@@ -170,9 +170,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
 
     private static boolean isLocalDC(InetAddress targetHost)
     {
-        String remoteDC = DatabaseDescriptor.getEndpointSnitch().getDatacenter(targetHost);
-        String localDC = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
-        return remoteDC.equals(localDC);
+        return DatabaseDescriptor.getEndpointSnitch().isInLocalDatacenter(targetHost);
     }
 
     public void enqueue(Message message)

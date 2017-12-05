@@ -131,6 +131,16 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
         return DEFAULT_RACK;
     }
 
+    public String getLocalDatacenter()
+    {
+        return myDC;
+    }
+
+    public String getLocalRack()
+    {
+        return myRack;
+    }
+
     public void gossiperStarting()
     {
         super.gossiperStarting();

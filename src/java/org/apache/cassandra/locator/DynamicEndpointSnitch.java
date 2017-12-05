@@ -194,6 +194,31 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         return subsnitch.getDatacenter(endpoint);
     }
 
+    public String getLocalDatacenter()
+    {
+        return subsnitch.getLocalDatacenter();
+    }
+
+    public String getLocalRack()
+    {
+        return subsnitch.getLocalRack();
+    }
+
+    public boolean isInLocalDatacenter(InetAddress endpoint)
+    {
+        return subsnitch.isInLocalDatacenter(endpoint);
+    }
+
+    public boolean isInLocalRack(InetAddress endpoint)
+    {
+        return subsnitch.isInLocalRack(endpoint);
+    }
+
+    public long getCrossDcRttLatency(InetAddress endpoint)
+    {
+        return subsnitch.getCrossDcRttLatency(endpoint);
+    }
+
     public List<InetAddress> getSortedListByProximity(final InetAddress address, Collection<InetAddress> addresses)
     {
         List<InetAddress> list = new ArrayList<>(addresses);

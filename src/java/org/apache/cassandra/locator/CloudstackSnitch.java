@@ -118,6 +118,16 @@ public class CloudstackSnitch extends AbstractNetworkTopologySnitch
         return DEFAULT_DC;
     }
 
+    public String getLocalDatacenter()
+    {
+        return csZoneDc;
+    }
+
+    public String getLocalRack()
+    {
+        return csZoneRack;
+    }
+
     String csQueryMetadata(String url) throws ConfigurationException, IOException
     {
         HttpURLConnection conn = null;

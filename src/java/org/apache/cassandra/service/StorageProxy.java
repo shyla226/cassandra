@@ -499,7 +499,6 @@ public class StorageProxy implements StorageProxyMBean
     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
     {
         Tracing.trace("Determining replicas for mutation");
-        final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
         long startTime = System.nanoTime();
         List<WriteHandler> responseHandlers = new ArrayList<>(mutations.size());
@@ -510,12 +509,12 @@ public class StorageProxy implements StorageProxyMBean
             {
                 if (mutation instanceof CounterMutation)
                 {
-                    responseHandlers.add(mutateCounter((CounterMutation) mutation, localDataCenter, queryStartNanoTime));
+                    responseHandlers.add(mutateCounter((CounterMutation) mutation, queryStartNanoTime));
                 }
                 else
                 {
                     WriteType wt = mutations.size() <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
-                    responseHandlers.add(mutateStandard((Mutation)mutation, consistencyLevel, localDataCenter, wt, queryStartNanoTime));
+                    responseHandlers.add(mutateStandard((Mutation)mutation, consistencyLevel, wt, queryStartNanoTime));
                 }
             }
         }
@@ -637,7 +636,6 @@ public class StorageProxy implements StorageProxyMBean
     throws UnavailableException, OverloadedException, WriteTimeoutException
     {
         Tracing.trace("Determining replicas for mutation");
-        final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
         long startTime = System.nanoTime();
         final UUID batchUUID = UUIDGen.getTimeUUID();
@@ -725,7 +723,7 @@ public class StorageProxy implements StorageProxyMBean
         completables.addAll(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
 
         // now actually perform the writes
-        writeBatchedMutations(mutationsAndEndpoints, handlers, localDataCenter, Verbs.WRITES.VIEW_WRITE);
+        writeBatchedMutations(mutationsAndEndpoints, handlers, Verbs.WRITES.VIEW_WRITE);
 
         return Completable.concat(completables)
                           .doFinally(() -> viewWriteMetrics.addNano(System.nanoTime() - startTime));
@@ -781,8 +779,6 @@ public class StorageProxy implements StorageProxyMBean
         Tracing.trace("Determining replicas for atomic batch");
         long startTime = System.nanoTime();
 
-        String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
-
         // Computes the final endpoints right away to check availability before writing the batchlog
         List<MutationAndEndpoints> mutationsAndEndpoints = new ArrayList<>(mutations.size());
 
@@ -809,7 +805,7 @@ public class StorageProxy implements StorageProxyMBean
                                                  ? ConsistencyLevel.QUORUM
                                                  : consistencyLevel;
 
-        WriteEndpoints batchlogEndpoints = getBatchlogEndpoints(localDataCenter, batchConsistencyLevel);
+        WriteEndpoints batchlogEndpoints = getBatchlogEndpoints(batchConsistencyLevel);
         UUID batchUUID = UUIDGen.getTimeUUID();
 
         // write to the batchlog
@@ -833,7 +829,7 @@ public class StorageProxy implements StorageProxyMBean
 
         // now actually perform the writes
         Completable ret = batchlogCompletable.andThen(Completable.defer(() -> {
-            writeBatchedMutations(mutationsAndEndpoints, handlers, localDataCenter, Verbs.WRITES.WRITE);
+            writeBatchedMutations(mutationsAndEndpoints, handlers, Verbs.WRITES.WRITE);
             return Completable.concat(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
         }));
 
@@ -923,7 +919,6 @@ public class StorageProxy implements StorageProxyMBean
 
     private static void writeBatchedMutations(List<MutationAndEndpoints> mutationsAndEndpoints,
                                               List<WriteHandler> handlers,
-                                              String localDataCenter,
                                               Verb.AckedRequest<Mutation> verb)
     throws OverloadedException
     {
@@ -931,14 +926,13 @@ public class StorageProxy implements StorageProxyMBean
         {
             Mutation mutation = mutationsAndEndpoints.get(i).mutation;
             WriteHandler handler = handlers.get(i);
-            sendToHintedEndpoints(mutation, handler.endpoints(), handler, localDataCenter, verb);
+            sendToHintedEndpoints(mutation, handler.endpoints(), handler, verb);
         }
     }
 
 
     private static WriteHandler mutateStandard(Mutation mutation,
                                                ConsistencyLevel consistencyLevel,
-                                               String localDataCenter,
                                                WriteType writeType,
                                                long queryStartNanoTime)
     {
@@ -950,7 +944,7 @@ public class StorageProxy implements StorageProxyMBean
                                            .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
                                            .hintOnTimeout(mutation)
                                            .build();
-        sendToHintedEndpoints(mutation, handler.endpoints(), handler, localDataCenter, Verbs.WRITES.WRITE);
+        sendToHintedEndpoints(mutation, handler.endpoints(), handler, Verbs.WRITES.WRITE);
         return handler;
     }
 
@@ -974,12 +968,12 @@ public class StorageProxy implements StorageProxyMBean
      * - choose min(2, number of qualifying candidates above)
      * - allow the local node to be the only replica only if it's a single-node DC
      */
-    private static WriteEndpoints getBatchlogEndpoints(String localDataCenter, ConsistencyLevel consistencyLevel)
+    private static WriteEndpoints getBatchlogEndpoints(ConsistencyLevel consistencyLevel)
     throws UnavailableException
     {
         TokenMetadata.Topology topology = StorageService.instance.getTokenMetadata().cachedOnlyTokenMap().getTopology();
-        Multimap<String, InetAddress> localEndpoints = HashMultimap.create(topology.getDatacenterRacks().get(localDataCenter));
-        String localRack = DatabaseDescriptor.getEndpointSnitch().getRack(FBUtilities.getBroadcastAddress());
+        Multimap<String, InetAddress> localEndpoints = HashMultimap.create(topology.getDatacenterRacks().get(DatabaseDescriptor.getLocalDataCenter()));
+        String localRack = DatabaseDescriptor.getLocalRack();
 
         Keyspace keyspace = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME);
         Collection<InetAddress> chosenEndpoints = BatchlogManager.filterEndpoints(consistencyLevel, localRack, localEndpoints);
@@ -1008,7 +1002,6 @@ public class StorageProxy implements StorageProxyMBean
     private static void sendToHintedEndpoints(final Mutation mutation,
                                               WriteEndpoints targets,
                                               WriteHandler handler,
-                                              String localDataCenter,
                                               Verb.AckedRequest<Mutation> messageDefinition)
     throws OverloadedException
     {
@@ -1028,7 +1021,7 @@ public class StorageProxy implements StorageProxyMBean
             if (!endpointsToHint.isEmpty())
                 submitHint(mutation, endpointsToHint, handler);
 
-            MessagingService.instance().send(messageDefinition.newForwardingDispatcher(targets.live(), localDataCenter, mutation),
+            MessagingService.instance().send(messageDefinition.newForwardingDispatcher(targets.live(), DatabaseDescriptor.getLocalDataCenter(), mutation),
                                              handler);
         });
     }
@@ -1070,10 +1063,10 @@ public class StorageProxy implements StorageProxyMBean
      * quicker response and because the WriteResponseHandlers don't make it easy to send back an error. We also always gather
      * the write latencies at the coordinator node to make gathering point similar to the case of standard writes.
      */
-    private static WriteHandler mutateCounter(CounterMutation cm, String localDataCenter, long queryStartNanoTime) throws UnavailableException, OverloadedException
+    private static WriteHandler mutateCounter(CounterMutation cm, long queryStartNanoTime) throws UnavailableException, OverloadedException
     {
         Keyspace keyspace = Keyspace.open(cm.getKeyspaceName());
-        InetAddress endpoint = findSuitableEndpoint(keyspace, cm.key(), localDataCenter, cm.consistency());
+        InetAddress endpoint = findSuitableEndpoint(keyspace, cm.key(), cm.consistency());
 
         // Check availability for the whole query before forwarding to the leader
         WriteEndpoints.compute(cm).checkAvailability(cm.consistency());
@@ -1103,7 +1096,7 @@ public class StorageProxy implements StorageProxyMBean
      * is unclear we want to mix those latencies with read latencies, so this
      * may be a bit involved.
      */
-    private static InetAddress findSuitableEndpoint(Keyspace keyspace, DecoratedKey key, String localDataCenter, ConsistencyLevel cl) throws UnavailableException
+    private static InetAddress findSuitableEndpoint(Keyspace keyspace, DecoratedKey key, ConsistencyLevel cl) throws UnavailableException
     {
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
         List<InetAddress> endpoints = new ArrayList<>();
@@ -1119,7 +1112,7 @@ public class StorageProxy implements StorageProxyMBean
         List<InetAddress> localEndpoints = new ArrayList<>(endpoints.size());
 
         for (InetAddress endpoint : endpoints)
-            if (snitch.getDatacenter(endpoint).equals(localDataCenter))
+            if (snitch.isInLocalDatacenter(endpoint))
                 localEndpoints.add(endpoint);
 
         if (localEndpoints.isEmpty())
@@ -1137,7 +1130,7 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     // Must be called on a replica of the mutation. This replica becomes the leader of this mutation.
-    public static CompletableFuture<Void> applyCounterMutationOnLeader(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
+    public static CompletableFuture<Void> applyCounterMutationOnLeader(CounterMutation cm, long queryStartNanoTime)
     throws UnavailableException, OverloadedException
     {
        CompletableFuture<Void> ret = new CompletableFuture<>();
@@ -1156,7 +1149,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 WriteEndpoints remainingEndpoints = handler.endpoints().withoutLocalhost(true);
                 if (!remainingEndpoints.isEmpty())
-                    sendToHintedEndpoints(result, remainingEndpoints, handler, localDataCenter, Verbs.WRITES.WRITE);
+                    sendToHintedEndpoints(result, remainingEndpoints, handler, Verbs.WRITES.WRITE);
 
                 handler.whenComplete((r, t) -> {
                     if (t != null)

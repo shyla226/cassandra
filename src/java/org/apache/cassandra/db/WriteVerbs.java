@@ -37,7 +37,6 @@ import org.apache.cassandra.net.*;
 import org.apache.cassandra.net.Verb.AckedRequest;
 import org.apache.cassandra.net.Verb.OneWay;
 import org.apache.cassandra.service.StorageProxy;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.versioning.Version;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -76,10 +75,9 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
         long queryStartNanoTime = System.nanoTime();
         logger.trace("Applying forwarded {}", mutation);
 
-        String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
         // We should not wait for the result of the write in this thread, otherwise we could have a distributed
         // deadlock between replicas running this handler (see #4578).
-        return StorageProxy.applyCounterMutationOnLeader(mutation, localDataCenter, queryStartNanoTime)
+        return StorageProxy.applyCounterMutationOnLeader(mutation, queryStartNanoTime)
                            .exceptionally(t -> {
 
                                if (t instanceof CompletionException && t.getCause() != null)

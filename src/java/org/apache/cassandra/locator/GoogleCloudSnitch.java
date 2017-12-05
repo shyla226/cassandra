@@ -128,4 +128,14 @@ public class GoogleCloudSnitch extends AbstractNetworkTopologySnitch
             return savedEndpoints.get(endpoint).get("data_center");
         return DEFAULT_DC;
     }
+
+    public String getLocalDatacenter()
+    {
+        return gceRegion;
+    }
+
+    public String getLocalRack()
+    {
+        return gceZone;
+    }
 }

@@ -190,9 +190,7 @@ public class WriteEndpoints implements Iterable<InetAddress>
      */
     public WriteEndpoints restrictToLocalDC()
     {
-        IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
-        String localDc = snitch.getDatacenter(FBUtilities.getBroadcastAddress());
-        Predicate<InetAddress> isLocalDc = host -> localDc.equals(snitch.getDatacenter(host));
+        Predicate<InetAddress> isLocalDc = host -> DatabaseDescriptor.getEndpointSnitch().isInLocalDatacenter(host);
         return new WriteEndpoints(keyspace,
                                   ImmutableList.copyOf(Iterables.filter(natural, isLocalDc)),
                                   pending.isEmpty() // pending empty is frequent enough

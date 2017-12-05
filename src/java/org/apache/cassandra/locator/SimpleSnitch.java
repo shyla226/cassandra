@@ -39,6 +39,16 @@ public class SimpleSnitch extends AbstractEndpointSnitch
         return "datacenter1";
     }
 
+    public boolean isInLocalDatacenter(InetAddress endpoint)
+    {
+        return true;
+    }
+
+    public boolean isInLocalRack(InetAddress endpoint)
+    {
+        return true;
+    }
+
     @Override
     public void sortByProximity(final InetAddress address, List<InetAddress> addresses)
     {

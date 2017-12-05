@@ -77,8 +77,7 @@ public class StreamManager implements StreamManagerMBean
             mayUpdateThroughput(interDCThroughput, interDCLimiter);
 
             if (DatabaseDescriptor.getLocalDataCenter() != null && DatabaseDescriptor.getEndpointSnitch() != null)
-                isLocalDC = DatabaseDescriptor.getLocalDataCenter().equals(
-                            DatabaseDescriptor.getEndpointSnitch().getDatacenter(peer));
+                isLocalDC = DatabaseDescriptor.getEndpointSnitch().isInLocalDatacenter(peer);
             else
                 isLocalDC = true;
         }

@@ -254,7 +254,7 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
      */
     private boolean waitingFor(InetAddress from)
     {
-        return !consistency().isDatacenterLocal() || DatabaseDescriptor.getLocalDataCenter().equals(DatabaseDescriptor.getEndpointSnitch().getDatacenter(from));
+        return !consistency().isDatacenterLocal() || DatabaseDescriptor.getEndpointSnitch().isInLocalDatacenter(from);
     }
 
     void assureSufficientLiveNodes() throws UnavailableException
