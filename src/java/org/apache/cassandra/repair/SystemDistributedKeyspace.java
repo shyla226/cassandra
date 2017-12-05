@@ -441,9 +441,9 @@ public final class SystemDistributedKeyspace
     {
         Throwable cleaned = Throwables.unwrapped(error);
         if (cleaned instanceof UnavailableException)
-            noSpamLogger.warn("No replica available for {}: {}", operationDescription, NODESYNC_ERROR_IMPACT_MSG);
+            noSpamLogger.warn("No replica available for {} ({}): {}", operationDescription, cleaned.getMessage(), NODESYNC_ERROR_IMPACT_MSG);
         else if (cleaned instanceof RequestTimeoutException)
-            noSpamLogger.warn("Timeout while {}: {}", operationDescription, NODESYNC_ERROR_IMPACT_MSG);
+            noSpamLogger.warn("Timeout while {} ({}): {}", operationDescription, cleaned.getMessage(), NODESYNC_ERROR_IMPACT_MSG);
         else
             logger.error(String.format("Unexpected error while %s: %s", operationDescription, NODESYNC_ERROR_IMPACT_MSG), error);
     }
