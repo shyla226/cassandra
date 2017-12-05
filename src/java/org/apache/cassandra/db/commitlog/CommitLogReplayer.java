@@ -30,7 +30,7 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import io.reactivex.*;
 import org.apache.commons.lang3.StringUtils;
-import org.cliffc.high_scale_lib.NonBlockingHashSet;
+import org.jctools.maps.NonBlockingHashSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

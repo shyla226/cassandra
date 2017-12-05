@@ -20,7 +20,7 @@ package org.apache.cassandra.utils;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.cliffc.high_scale_lib.NonBlockingHashMap;
+import org.jctools.maps.NonBlockingHashMap;
 import org.slf4j.Logger;
 
 import com.google.common.annotations.VisibleForTesting;

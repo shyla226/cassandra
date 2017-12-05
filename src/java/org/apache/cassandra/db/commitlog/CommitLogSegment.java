@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
 
-import org.cliffc.high_scale_lib.NonBlockingHashMap;
+import org.jctools.maps.NonBlockingHashMap;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.Config;
