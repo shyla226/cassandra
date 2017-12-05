@@ -20,7 +20,7 @@ package org.apache.cassandra.cql3.selection;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -187,14 +187,14 @@ public final class SimpleSelector extends Selector
 
         SimpleSelector s = (SimpleSelector) o;
 
-        return Objects.equal(column, s.column)
-            && Objects.equal(idx, s.idx);
+        return Objects.equals(column, s.column)
+            && Objects.equals(idx, s.idx);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(column, idx);
+        return Objects.hash(column, idx);
     }
 
     @Override

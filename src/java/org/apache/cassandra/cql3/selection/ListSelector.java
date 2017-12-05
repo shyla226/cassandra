@@ -22,7 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cql3.Lists;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -153,14 +153,14 @@ final class ListSelector extends Selector
 
         ListSelector s = (ListSelector) o;
 
-        return Objects.equal(type, s.type)
-            && Objects.equal(elements, s.elements);
+        return Objects.equals(type, s.type)
+            && Objects.equals(elements, s.elements);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(type, elements);
+        return Objects.hash(type, elements);
     }
 
     @Override

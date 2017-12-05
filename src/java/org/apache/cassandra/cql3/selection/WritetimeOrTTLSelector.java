@@ -20,7 +20,7 @@ package org.apache.cassandra.cql3.selection;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -167,15 +167,15 @@ final class WritetimeOrTTLSelector extends Selector
 
         WritetimeOrTTLSelector s = (WritetimeOrTTLSelector) o;
 
-        return Objects.equal(column, s.column)
-            && Objects.equal(idx, s.idx)
-            && Objects.equal(isWritetime, s.isWritetime);
+        return Objects.equals(column, s.column)
+            && Objects.equals(idx, s.idx)
+            && Objects.equals(isWritetime, s.isWritetime);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(column, idx, isWritetime);
+        return Objects.hash(column, idx, isWritetime);
     }
 
     @Override

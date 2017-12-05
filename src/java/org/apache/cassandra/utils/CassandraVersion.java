@@ -21,7 +21,7 @@ import java.util.Arrays;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import org.apache.commons.lang3.StringUtils;
 
 /**
@@ -213,7 +213,7 @@ public class CassandraVersion implements Comparable<CassandraVersion>
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(major, minor, patch, preRelease, build);
+        return Objects.hash(major, minor, patch, preRelease, build);
     }
 
     @Override

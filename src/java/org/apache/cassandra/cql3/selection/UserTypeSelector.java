@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.FieldIdentifier;
@@ -249,14 +249,14 @@ final class UserTypeSelector extends Selector
 
         UserTypeSelector s = (UserTypeSelector) o;
 
-        return Objects.equal(type, s.type)
-            && Objects.equal(fields, s.fields);
+        return Objects.equals(type, s.type)
+            && Objects.equals(fields, s.fields);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(type, fields);
+        return Objects.hash(type, fields);
     }
 
     @Override

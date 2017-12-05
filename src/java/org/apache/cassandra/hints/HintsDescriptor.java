@@ -30,7 +30,7 @@ import java.util.zip.CRC32;
 import javax.crypto.Cipher;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -266,16 +266,16 @@ final class HintsDescriptor
 
         HintsDescriptor hd = (HintsDescriptor) o;
 
-        return Objects.equal(hostId, hd.hostId)
-            && Objects.equal(version, hd.version)
-            && Objects.equal(timestamp, hd.timestamp)
-            && Objects.equal(parameters, hd.parameters);
+        return Objects.equals(hostId, hd.hostId)
+            && Objects.equals(version, hd.version)
+            && Objects.equals(timestamp, hd.timestamp)
+            && Objects.equals(parameters, hd.parameters);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(hostId, version, timestamp, parameters);
+        return Objects.hash(hostId, version, timestamp, parameters);
     }
 
     void serialize(DataOutputPlus out) throws IOException

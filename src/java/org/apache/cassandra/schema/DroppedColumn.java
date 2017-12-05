@@ -18,7 +18,7 @@
 package org.apache.cassandra.schema;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 public final class DroppedColumn
 {
@@ -48,7 +48,7 @@ public final class DroppedColumn
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(column, droppedTime);
+        return Objects.hash(column, droppedTime);
     }
 
     @Override

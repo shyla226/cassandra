@@ -20,7 +20,7 @@ package org.apache.cassandra.cql3.selection;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -317,14 +317,14 @@ abstract class ElementsSelector extends Selector
 
             ElementSelector s = (ElementSelector) o;
 
-            return Objects.equal(selected, s.selected)
-                && Objects.equal(key, s.key);
+            return Objects.equals(selected, s.selected)
+                && Objects.equals(key, s.key);
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hashCode(selected, key);
+            return Objects.hash(selected, key);
         }
 
         @Override
@@ -417,15 +417,15 @@ abstract class ElementsSelector extends Selector
 
             SliceSelector s = (SliceSelector) o;
 
-            return Objects.equal(selected, s.selected)
-                && Objects.equal(from, s.from)
-                && Objects.equal(to, s.to);
+            return Objects.equals(selected, s.selected)
+                && Objects.equals(from, s.from)
+                && Objects.equals(to, s.to);
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hashCode(selected, from, to);
+            return Objects.hash(selected, from, to);
         }
 
         @Override

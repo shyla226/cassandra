@@ -20,7 +20,7 @@ package org.apache.cassandra.repair;
 import java.io.IOException;
 import java.net.InetAddress;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -58,7 +58,7 @@ public class NodePair
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(endpoint1, endpoint2);
+        return Objects.hash(endpoint1, endpoint2);
     }
 
     public static class NodePairSerializer implements Serializer<NodePair>

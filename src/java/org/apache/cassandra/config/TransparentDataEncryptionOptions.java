@@ -18,7 +18,7 @@
 package org.apache.cassandra.config;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 public class TransparentDataEncryptionOptions
 {
@@ -70,7 +70,7 @@ public class TransparentDataEncryptionOptions
     public boolean equals(TransparentDataEncryptionOptions other)
     {
         // not sure if this is a great equals() impl....
-        return Objects.equal(cipher, other.cipher) &&
-               Objects.equal(key_alias, other.key_alias);
+        return Objects.equals(cipher, other.cipher) &&
+               Objects.equals(key_alias, other.key_alias);
     }
 }

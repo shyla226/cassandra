@@ -19,9 +19,9 @@ package org.apache.cassandra.schema;
 
 import java.nio.ByteBuffer;
 import java.util.Map;
+import java.util.Objects;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -244,23 +244,23 @@ public final class TableParams
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(comment,
-                                readRepairChance,
-                                dcLocalReadRepairChance,
-                                bloomFilterFpChance,
-                                crcCheckChance,
-                                gcGraceSeconds,
-                                defaultTimeToLive,
-                                memtableFlushPeriodInMs,
-                                minIndexInterval,
-                                maxIndexInterval,
-                                speculativeRetry,
-                                caching,
-                                compaction,
-                                compression,
-                                extensions,
-                                cdc,
-                                nodeSync);
+        return Objects.hash(comment,
+                            readRepairChance,
+                            dcLocalReadRepairChance,
+                            bloomFilterFpChance,
+                            crcCheckChance,
+                            gcGraceSeconds,
+                            defaultTimeToLive,
+                            memtableFlushPeriodInMs,
+                            minIndexInterval,
+                            maxIndexInterval,
+                            speculativeRetry,
+                            caching,
+                            compaction,
+                            compression,
+                            extensions,
+                            cdc,
+                            nodeSync);
     }
 
     @Override

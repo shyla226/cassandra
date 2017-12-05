@@ -21,7 +21,7 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Map;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
@@ -139,7 +139,7 @@ public class AuthenticatedUser
 
         AuthenticatedUser u = (AuthenticatedUser) o;
 
-        return Objects.equal(name, u.name);
+        return Objects.equals(name, u.name);
     }
 
     @Override

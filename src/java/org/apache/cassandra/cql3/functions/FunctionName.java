@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql3.functions;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.schema.SchemaConstants;
 
@@ -51,7 +51,7 @@ public final class FunctionName
     @Override
     public final int hashCode()
     {
-        return Objects.hashCode(keyspace, name);
+        return Objects.hash(keyspace, name);
     }
 
     @Override
@@ -61,8 +61,8 @@ public final class FunctionName
             return false;
 
         FunctionName that = (FunctionName)o;
-        return Objects.equal(this.keyspace, that.keyspace)
-            && Objects.equal(this.name, that.name);
+        return Objects.equals(this.keyspace, that.keyspace)
+            && Objects.equals(this.name, that.name);
     }
 
     public final boolean equalsNativeFunction(FunctionName nativeFunction)
@@ -71,7 +71,7 @@ public final class FunctionName
         if (this.hasKeyspace() && !this.keyspace.equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
             return false;
 
-        return Objects.equal(this.name, nativeFunction.name);
+        return Objects.equals(this.name, nativeFunction.name);
     }
 
     @Override

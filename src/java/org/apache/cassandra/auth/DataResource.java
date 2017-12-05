@@ -20,7 +20,7 @@ package org.apache.cassandra.auth;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -72,7 +72,7 @@ public class DataResource implements IResource
         this.keyspace = keyspace;
         this.table = table;
 
-        this.hash = Objects.hashCode(level, keyspace, table);
+        this.hash = Objects.hash(level, keyspace, table);
     }
 
     /**
@@ -266,9 +266,9 @@ public class DataResource implements IResource
 
         DataResource ds = (DataResource) o;
 
-        return Objects.equal(level, ds.level)
-            && Objects.equal(keyspace, ds.keyspace)
-            && Objects.equal(table, ds.table);
+        return Objects.equals(level, ds.level)
+            && Objects.equals(keyspace, ds.keyspace)
+            && Objects.equals(table, ds.table);
     }
 
     @Override

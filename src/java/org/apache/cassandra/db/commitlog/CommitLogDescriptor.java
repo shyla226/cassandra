@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.EncodingVersion;
@@ -256,7 +256,7 @@ public class CommitLogDescriptor
 
     public boolean equals(CommitLogDescriptor that)
     {
-        return equalsIgnoringCompression(that) && Objects.equal(this.compression, that.compression)
-                && Objects.equal(encryptionContext, that.encryptionContext);
+        return equalsIgnoringCompression(that) && Objects.equals(this.compression, that.compression)
+                && Objects.equals(encryptionContext, that.encryptionContext);
     }
 }

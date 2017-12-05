@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -490,16 +490,16 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
             Expression that = (Expression)o;
 
-            return Objects.equal(this.kind(), that.kind())
-                && Objects.equal(this.column.name, that.column.name)
-                && Objects.equal(this.operator, that.operator)
-                && Objects.equal(this.value, that.value);
+            return Objects.equals(this.kind(), that.kind())
+                && Objects.equals(this.column.name, that.column.name)
+                && Objects.equals(this.operator, that.operator)
+                && Objects.equals(this.value, that.value);
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hashCode(column.name, operator, value);
+            return Objects.hash(column.name, operator, value);
         }
 
         private static class Serializer extends VersionDependent<ReadVersion>
@@ -847,16 +847,16 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
             MapEqualityExpression that = (MapEqualityExpression)o;
 
-            return Objects.equal(this.column.name, that.column.name)
-                && Objects.equal(this.operator, that.operator)
-                && Objects.equal(this.key, that.key)
-                && Objects.equal(this.value, that.value);
+            return Objects.equals(this.column.name, that.column.name)
+                && Objects.equals(this.operator, that.operator)
+                && Objects.equals(this.key, that.key)
+                && Objects.equals(this.value, that.value);
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hashCode(column.name, operator, key, value);
+            return Objects.hash(column.name, operator, key, value);
         }
 
         @Override

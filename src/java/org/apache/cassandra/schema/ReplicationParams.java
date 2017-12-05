@@ -21,7 +21,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
+import java.util.Objects;
 import com.google.common.collect.ImmutableMap;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -106,7 +106,7 @@ public final class ReplicationParams
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(klass, options);
+        return Objects.hash(klass, options);
     }
 
     @Override

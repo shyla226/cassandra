@@ -25,7 +25,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.*;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -524,18 +524,18 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
             return false;
 
         UDFunction that = (UDFunction)o;
-        return Objects.equal(name, that.name)
-            && Objects.equal(argNames, that.argNames)
+        return Objects.equals(name, that.name)
+            && Objects.equals(argNames, that.argNames)
             && Functions.typesMatch(argTypes, that.argTypes)
             && Functions.typesMatch(returnType, that.returnType)
-            && Objects.equal(language, that.language)
-            && Objects.equal(body, that.body);
+            && Objects.equals(language, that.language)
+            && Objects.equals(body, that.body);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(name, Functions.typeHashCode(argTypes), returnType, language, body);
+        return Objects.hash(name, Functions.typeHashCode(argTypes), returnType, language, body);
     }
 
     private static class UDFClassLoader extends ClassLoader

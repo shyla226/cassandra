@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.UUID;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -95,7 +95,7 @@ public class RepairJobDesc
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(sessionId, keyspace, columnFamily, ranges);
+        return Objects.hash(sessionId, keyspace, columnFamily, ranges);
     }
 
     private static class RepairJobDescSerializer extends VersionDependent<RepairVersion> implements Serializer<RepairJobDesc>

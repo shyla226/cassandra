@@ -25,7 +25,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.Maps;
@@ -273,14 +273,14 @@ final class MapSelector extends Selector
 
         MapSelector s = (MapSelector) o;
 
-        return Objects.equal(type, s.type)
-            && Objects.equal(elements, s.elements);
+        return Objects.equals(type, s.type)
+            && Objects.equals(elements, s.elements);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(type, elements);
+        return Objects.hash(type, elements);
     }
 
     @Override

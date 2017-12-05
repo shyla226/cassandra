@@ -20,7 +20,7 @@ package org.apache.cassandra.streaming;
 import java.io.IOException;
 import java.io.Serializable;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -65,7 +65,7 @@ public class StreamSummary implements Serializable
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(tableId, files, totalSize);
+        return Objects.hash(tableId, files, totalSize);
     }
 
     @Override

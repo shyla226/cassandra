@@ -23,7 +23,7 @@ import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import io.netty.util.concurrent.FastThreadLocal;
 
@@ -333,7 +333,7 @@ public final class Duration
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(days, months, nanoseconds);
+        return Objects.hash(days, months, nanoseconds);
     }
 
     @Override

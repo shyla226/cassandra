@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.db;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.utils.ObjectSizes;
@@ -64,7 +64,7 @@ public class ClockAndCount implements IMeasurableMemory
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(clock, count);
+        return Objects.hash(clock, count);
     }
 
     @Override

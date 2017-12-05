@@ -22,7 +22,7 @@ import java.net.InetSocketAddress;
 import java.util.Iterator;
 import java.util.List;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 import io.netty.buffer.ByteBuf;
 
 public abstract class Event
@@ -153,7 +153,7 @@ public abstract class Event
         @Override
         public int hashCode()
         {
-            return Objects.hashCode(change, node);
+            return Objects.hash(change, node);
         }
 
         @Override
@@ -163,8 +163,8 @@ public abstract class Event
                 return false;
 
             TopologyChange tpc = (TopologyChange)other;
-            return Objects.equal(change, tpc.change)
-                && Objects.equal(node, tpc.node);
+            return Objects.equals(change, tpc.change)
+                && Objects.equals(node, tpc.node);
         }
     }
 
@@ -219,7 +219,7 @@ public abstract class Event
         @Override
         public int hashCode()
         {
-            return Objects.hashCode(status, node);
+            return Objects.hash(status, node);
         }
 
         @Override
@@ -229,8 +229,8 @@ public abstract class Event
                 return false;
 
             StatusChange stc = (StatusChange)other;
-            return Objects.equal(status, stc.status)
-                && Objects.equal(node, stc.node);
+            return Objects.equals(status, stc.status)
+                && Objects.equals(node, stc.node);
         }
     }
 
@@ -414,7 +414,7 @@ public abstract class Event
         @Override
         public int hashCode()
         {
-            return Objects.hashCode(change, target, keyspace, name, argTypes);
+            return Objects.hash(change, target, keyspace, name, argTypes);
         }
 
         @Override
@@ -424,11 +424,11 @@ public abstract class Event
                 return false;
 
             SchemaChange scc = (SchemaChange)other;
-            return Objects.equal(change, scc.change)
-                && Objects.equal(target, scc.target)
-                && Objects.equal(keyspace, scc.keyspace)
-                && Objects.equal(name, scc.name)
-                && Objects.equal(argTypes, scc.argTypes);
+            return Objects.equals(change, scc.change)
+                && Objects.equals(target, scc.target)
+                && Objects.equals(keyspace, scc.keyspace)
+                && Objects.equals(name, scc.name)
+                && Objects.equals(argTypes, scc.argTypes);
         }
     }
 }

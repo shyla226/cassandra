@@ -20,7 +20,7 @@ package org.apache.cassandra.cql3.selection;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
 
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -153,15 +153,15 @@ final class FieldSelector extends Selector
 
         FieldSelector s = (FieldSelector) o;
 
-        return Objects.equal(type, s.type)
-            && Objects.equal(field, s.field)
-            && Objects.equal(selected, s.selected);
+        return Objects.equals(type, s.type)
+            && Objects.equals(field, s.field)
+            && Objects.equals(selected, s.selected);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(type, field, selected);
+        return Objects.hash(type, field, selected);
     }
 
     @Override
