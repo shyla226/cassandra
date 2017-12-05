@@ -19,7 +19,6 @@ package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Maybe;
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
@@ -33,6 +32,7 @@ import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.Event;
+import org.apache.cassandra.utils.Streams;
 
 public class AlterKeyspaceStatement extends SchemaAlteringStatement
 {
@@ -96,7 +96,29 @@ public class AlterKeyspaceStatement extends SchemaAlteringStatement
                                                                                                         DatabaseDescriptor.getEndpointSnitch(),
                                                                                                         params.replication.options);
         if (newStrategy.getReplicationFactor() > oldStrategy.getReplicationFactor())
-            ClientWarn.instance.warn("When increasing replication factor you need to run a a non-incremental repair on all nodes to distribute the data (nodetool repair -pr).");
+        {
+            // Note that up to this point, the RF may have had a replication factor of 1, so we shouldn't rely on
+            // NodeSyncHelpers.nodeSyncEnabledTables(Keyspace) below as that would skip all tables in that case. Hence
+            // our slightly more manual check of metadata.
+            long tablesWithNodeSync = StorageService.instance.nodeSyncService.isRunning()
+                                      ? Streams.of(ksm.tables).filter(t -> t.params.nodeSync.isEnabled(t)).count()
+                                      : 0;
+            if (tablesWithNodeSync > 0)
+            {
+                String baseWarn = "After a replication factor increase, data will need to be replicated to achieve the new factor. ";
+                if (tablesWithNodeSync == ksm.tables.size())
+                    ClientWarn.instance.warn(baseWarn + "This will be done automatically by NodeSync, but can be prioritized " +
+                                             "on specific tables by triggering user validations ('nodesync help validation submit').");
+                else
+                    ClientWarn.instance.warn(baseWarn + "For the table with NodeSync enabled, NodeSync will do so automatically, " +
+                                             "though you can prioritize specific tables by triggering user validations ('nodesync help validation submit'). " +
+                                             "For other tables you need to run a non-incremental repair on all nodes (nodetool repair -pr).");
+            }
+            else
+            {
+                ClientWarn.instance.warn("When increasing replication factor you need to run a a non-incremental repair on all nodes to distribute the data (nodetool repair -pr).");
+            }
+        }
     }
 
     public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
