@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.utils.versioning;
 
-import java.util.EnumMap;
 import java.util.function.Function;
 
 public class Versioned<V extends Enum<V> & Version<V>, T>
