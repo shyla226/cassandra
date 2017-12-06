@@ -40,8 +40,8 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.metrics.CacheMissMetrics;
 import org.apache.cassandra.metrics.Timer;
+import org.apache.cassandra.utils.UnsafeByteBufferAccess;
 import org.apache.cassandra.utils.memory.BufferPool;
-import org.apache.cassandra.utils.memory.MemoryUtil;
 
 public class ChunkCache
         implements AsyncCacheLoader<ChunkCache.Key, ChunkCache.Buffer>, RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
@@ -185,7 +185,7 @@ public class ChunkCache
         {
             ByteBuffer buffer = BufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
             assert buffer != null;
-            assert !buffer.isDirect() || (MemoryUtil.getAddress(buffer) & (512 - 1)) == 0 : "Buffer from pool is not properly aligned!";
+            assert !buffer.isDirect() || (UnsafeByteBufferAccess.getAddress(buffer) & (512 - 1)) == 0 : "Buffer from pool is not properly aligned!";
 
             return rebufferer.readChunk(key.position, buffer)
                              .thenApply(b -> new Buffer(key, b, key.position))

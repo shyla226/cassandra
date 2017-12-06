@@ -24,13 +24,12 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.WritableByteChannel;
 
-import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
 
 import org.apache.cassandra.config.Config;
-import org.apache.cassandra.utils.memory.MemoryUtil;
+import org.apache.cassandra.utils.UnsafeByteBufferAccess;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 /**
@@ -134,7 +133,7 @@ public class BufferedDataOutputStreamPlus extends DataOutputStreamPlus
     }
 
     // ByteBuffer to use for defensive copies
-    private final ByteBuffer hollowBuffer = MemoryUtil.getHollowDirectByteBuffer();
+    private final ByteBuffer hollowBuffer = UnsafeByteBufferAccess.getHollowDirectByteBuffer();
 
     /*
      * Makes a defensive copy of the incoming ByteBuffer and don't modify the position or limit
@@ -151,8 +150,8 @@ public class BufferedDataOutputStreamPlus extends DataOutputStreamPlus
         }
         else
         {
-            assert toWrite.isDirect();
-            MemoryUtil.duplicateDirectByteBuffer(toWrite, hollowBuffer);
+            assert toWrite.isDirect(); // TODO: Will fail for read-only buffers
+            UnsafeByteBufferAccess.duplicateDirectByteBuffer(toWrite, hollowBuffer);
             int toWriteRemaining = toWrite.remaining();
 
             if (toWriteRemaining > buffer.remaining())

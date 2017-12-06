@@ -29,10 +29,11 @@ import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.utils.UnsafeByteBufferAccess;
+import org.apache.cassandra.utils.UnsafeMemoryAccess;
 
 import static org.junit.Assert.*;
 
@@ -96,8 +97,8 @@ public class BufferPoolTest
         assertEquals(size, buffer.capacity());
         assertTrue(buffer.isDirect());
 
-        long address = MemoryUtil.getAddress(buffer);
-        assertTrue((address % MemoryUtil.pageSize()) == 0);
+        long address = UnsafeByteBufferAccess.getAddress(buffer);
+        assertTrue((address % UnsafeMemoryAccess.pageSize()) == 0);
 
         BufferPool.put(buffer);
     }
@@ -423,7 +424,7 @@ public class BufferPoolTest
         {
             ByteBuffer buffer = BufferPool.get(size);
             buffers.add(buffer);
-            addresses.add(MemoryUtil.getAddress(buffer));
+            addresses.add(UnsafeByteBufferAccess.getAddress(buffer));
         }
 
         for (int i = numBuffersInChunk - 1; i >= 0; i--)
@@ -436,7 +437,7 @@ public class BufferPoolTest
             ByteBuffer buffer = BufferPool.get(size);
             assertNotNull(buffer);
             assertEquals(size, buffer.capacity());
-            addresses.remove(MemoryUtil.getAddress(buffer));
+            addresses.remove(UnsafeByteBufferAccess.getAddress(buffer));
 
             buffers.add(buffer);
         }

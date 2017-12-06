@@ -525,7 +525,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         logger.debug("Starting shadow gossip round to check for endpoint collision");
         Map<InetAddress, EndpointState> epStates = Gossiper.instance.doShadowRound();
-        // If bootstrapping, check whether any previously known status for the endpoint makes it unsafe to do so.
+        // If bootstrapping, check whether any previously known status for the endpoint makes it UNSAFE to do so.
         // If not bootstrapping, compare the host id for this endpoint learned from gossip (if any) with the local
         // one, which was either read from system.local or generated at startup. If a learned id is present &
         // doesn't match the local, then the node needs replacing

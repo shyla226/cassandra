@@ -19,10 +19,8 @@ package org.apache.cassandra.io.compress;
 
 import java.nio.ByteBuffer;
 
-import io.netty.util.internal.PlatformDependent;
-import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.memory.MemoryUtil;
-import org.hyperic.sigar.Mem;
+import org.apache.cassandra.utils.UnsafeByteBufferAccess;
+import org.apache.cassandra.utils.UnsafeMemoryAccess;
 import sun.misc.VM;
 
 public enum BufferType
@@ -54,7 +52,7 @@ public enum BufferType
     public static BufferType typeOf(ByteBuffer buffer)
     {
         return buffer.isDirect()
-               ? ((MemoryUtil.getAddress(buffer) & -MemoryUtil.pageSize()) == 0
+               ? ((UnsafeByteBufferAccess.getAddress(buffer) & -UnsafeMemoryAccess.pageSize()) == 0
                   ? OFF_HEAP_ALIGNED
                   : OFF_HEAP)
                : ON_HEAP;
@@ -65,12 +63,12 @@ public enum BufferType
         if (VM.isDirectMemoryPageAligned())
             return ByteBuffer.allocateDirect(capacity);
 
-        int align = MemoryUtil.pageSize();
+        int align = UnsafeMemoryAccess.pageSize();
         if (Integer.bitCount(align) != 1)
             throw new IllegalArgumentException("Alignment must be a power of 2");
 
         ByteBuffer buffer = ByteBuffer.allocateDirect(capacity + align);
-        long address = MemoryUtil.getAddress(buffer);
+        long address = UnsafeByteBufferAccess.getAddress(buffer);
         long offset = address & (align -1); // (address % align)
 
         if (offset == 0)

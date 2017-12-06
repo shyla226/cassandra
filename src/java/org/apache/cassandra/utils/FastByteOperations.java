@@ -17,18 +17,15 @@
  */
 package org.apache.cassandra.utils;
 
-import java.lang.reflect.Field;
-import java.nio.Buffer;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 import com.google.common.primitives.*;
 
 import net.nicoulaj.compilecommand.annotations.Inline;
-import org.apache.cassandra.utils.memory.MemoryUtil;
-import sun.misc.Unsafe;
+
+import static org.apache.cassandra.utils.UnsafeAccess.UNSAFE;
+import static org.apache.cassandra.utils.UnsafeByteBufferAccess.BYTE_ARRAY_BASE_OFFSET;
+import static org.apache.cassandra.utils.UnsafeCopy.*;
 
 /**
  * Utility code to do optimized byte-array comparison.
@@ -87,7 +84,7 @@ public class FastByteOperations
 
     /**
      * Provides a lexicographical comparer implementation; either a Java
-     * implementation or a faster implementation based on {@link Unsafe}.
+     * implementation or a faster implementation based on {@link sun.misc.Unsafe}.
      * <p/>
      * <p>Uses reflection to gracefully fall back to the Java implementation if
      * {@code Unsafe} isn't available.
@@ -127,177 +124,68 @@ public class FastByteOperations
     @SuppressWarnings("unused") // used via reflection
     public static final class UnsafeOperations implements ByteOperations
     {
-        static final Unsafe theUnsafe;
-        /**
-         * The offset to the first element in a byte array.
-         */
-        static final long BYTE_ARRAY_BASE_OFFSET;
-        static final long DIRECT_BUFFER_ADDRESS_OFFSET;
-
-        static
-        {
-            theUnsafe = MemoryUtil.unsafe;
-
-            try
-            {
-                BYTE_ARRAY_BASE_OFFSET = theUnsafe.arrayBaseOffset(byte[].class);
-                DIRECT_BUFFER_ADDRESS_OFFSET = theUnsafe.objectFieldOffset(Buffer.class.getDeclaredField("address"));
-            }
-            catch (Exception e)
-            {
-                throw new AssertionError(e);
-            }
-
-            // sanity check - this should never fail
-            if (theUnsafe.arrayIndexScale(byte[].class) != 1)
-            {
-                throw new AssertionError();
-            }
-        }
-
-        static final boolean BIG_ENDIAN = ByteOrder.nativeOrder().equals(ByteOrder.BIG_ENDIAN);
-
+        @Override
         public int compare(byte[] buffer1, int offset1, int length1, byte[] buffer2, int offset2, int length2)
         {
-            return compareTo(buffer1, BYTE_ARRAY_BASE_OFFSET + offset1, length1,
-                             buffer2, BYTE_ARRAY_BASE_OFFSET + offset2, length2);
+            return compare0(buffer1, BYTE_ARRAY_BASE_OFFSET + offset1, length1,
+                            buffer2, BYTE_ARRAY_BASE_OFFSET + offset2, length2);
         }
 
-        public int compare(ByteBuffer buffer1, byte[] buffer2, int offset2, int length2)
+        @Override
+        public int compare(ByteBuffer buffer1, byte[] array2, int offset2, int length2)
         {
-            Object obj1;
-            long offset1;
-            if (buffer1.hasArray())
-            {
-                obj1 = buffer1.array();
-                offset1 = BYTE_ARRAY_BASE_OFFSET + buffer1.arrayOffset();
-            }
-            else
-            {
-                obj1 = null;
-                offset1 = theUnsafe.getLong(buffer1, DIRECT_BUFFER_ADDRESS_OFFSET);
-            }
-            int length1;
-            {
-                int position = buffer1.position();
-                int limit = buffer1.limit();
-                length1 = limit - position;
-                offset1 += position;
-            }
-            return compareTo(obj1, offset1, length1, buffer2, BYTE_ARRAY_BASE_OFFSET + offset2, length2);
+            return compare0(buffer1, array2, BYTE_ARRAY_BASE_OFFSET + offset2, length2);
         }
 
+        @Override
         public int compare(ByteBuffer buffer1, ByteBuffer buffer2)
         {
-            return compareTo(buffer1, buffer2);
+            // strip out data from buffer2
+            Object array2 = UnsafeByteBufferAccess.getArray(buffer2);
+            int position2 = buffer2.position();
+            long offset2 = UnsafeByteBufferAccess.bufferOffset(buffer2, array2) + position2;
+
+            int length2 = buffer2.limit() - position2;
+
+            return compare0(buffer1, array2, offset2, length2);
         }
 
-        public void copy(ByteBuffer src, int srcPosition, byte[] trg, int trgPosition, int length)
+        @Override
+        public void copy(ByteBuffer srcBuf, int srcPosition, byte[] trg, int trgPosition, int length)
         {
-            if (src.hasArray())
-                System.arraycopy(src.array(), src.arrayOffset() + srcPosition, trg, trgPosition, length);
-            else
-                copy(null, srcPosition + theUnsafe.getLong(src, DIRECT_BUFFER_ADDRESS_OFFSET), trg, trgPosition, length);
+            Object src = UnsafeByteBufferAccess.getArray(srcBuf);
+            long srcOffset = UnsafeByteBufferAccess.bufferOffset(srcBuf, src) + srcPosition;
+            copy0(src, srcOffset, trg, BYTE_ARRAY_BASE_OFFSET + trgPosition, length);
         }
 
+        @Override
         public void copy(ByteBuffer srcBuf, int srcPosition, ByteBuffer trgBuf, int trgPosition, int length)
         {
-            Object src;
-            long srcOffset;
-            if (srcBuf.hasArray())
+            if (trgBuf.isReadOnly())
             {
-                src = srcBuf.array();
-                srcOffset = BYTE_ARRAY_BASE_OFFSET + srcBuf.arrayOffset();
+                throw new IllegalArgumentException("Cannot copy into a read only ByteBuffer");
             }
-            else
-            {
-                src = null;
-                srcOffset = theUnsafe.getLong(srcBuf, DIRECT_BUFFER_ADDRESS_OFFSET);
-            }
-            copy(src, srcOffset + srcPosition, trgBuf, trgPosition, length);
-        }
 
-        public static void copy(Object src, long srcOffset, ByteBuffer trgBuf, int trgPosition, int length)
-        {
-            if (trgBuf.hasArray())
-                copy(src, srcOffset, trgBuf.array(), trgBuf.arrayOffset() + trgPosition, length);
-            else
-                copy(src, srcOffset, null, trgPosition + theUnsafe.getLong(trgBuf, DIRECT_BUFFER_ADDRESS_OFFSET), length);
-        }
+            Object src = UnsafeByteBufferAccess.getArray(srcBuf);
+            long srcOffset = UnsafeByteBufferAccess.bufferOffset(srcBuf, src) + srcPosition;
 
-        public static void copy(Object src, long srcOffset, byte[] trg, int trgPosition, int length)
-        {
-            if (length <= MIN_COPY_THRESHOLD)
-            {
-                for (int i = 0 ; i < length ; i++)
-                    trg[trgPosition + i] = theUnsafe.getByte(src, srcOffset + i);
-            }
-            else
-            {
-                copy(src, srcOffset, trg, BYTE_ARRAY_BASE_OFFSET + trgPosition, length);
-            }
-        }
+            Object trg = UnsafeByteBufferAccess.getArray(trgBuf);
+            long trgOffset = UnsafeByteBufferAccess.bufferOffset(trgBuf, trg) + trgPosition;
 
-        // 1M, copied from java.nio.Bits (unfortunately a package-private class)
-        private static final long UNSAFE_COPY_THRESHOLD = 1 << 20;
-        private static final long MIN_COPY_THRESHOLD = 6;
-
-        public static void copy(Object src, long srcOffset, Object dst, long dstOffset, long length)
-        {
-            while (length > 0)
-            {
-                long size = (length > UNSAFE_COPY_THRESHOLD) ? UNSAFE_COPY_THRESHOLD : length;
-                // if src or dst are null, the offsets are absolute base addresses:
-                theUnsafe.copyMemory(src, srcOffset, dst, dstOffset, size);
-                length -= size;
-                srcOffset += size;
-                dstOffset += size;
-            }
+            copy0(src, srcOffset, trg, trgOffset, length);
         }
 
         @Inline
-        public static int compareTo(ByteBuffer buffer1, ByteBuffer buffer2)
+        public static int compare0(ByteBuffer buffer1, Object array2, long offset2, int length2)
         {
-            Object obj1;
-            long offset1;
-            int length1;
-            if (buffer1.hasArray())
-            {
-                obj1 = buffer1.array();
-                offset1 = BYTE_ARRAY_BASE_OFFSET + buffer1.arrayOffset();
-            }
-            else
-            {
-                obj1 = null;
-                offset1 = theUnsafe.getLong(buffer1, DIRECT_BUFFER_ADDRESS_OFFSET);
-            }
-            offset1 += buffer1.position();
-            length1 = buffer1.remaining();
-            return compareTo(obj1, offset1, length1, buffer2);
-        }
+            // strip out data from buffer1
+            Object array1 = UnsafeByteBufferAccess.getArray(buffer1);
+            int position1 = buffer1.position();
+            long offset1 = UnsafeByteBufferAccess.bufferOffset(buffer1, array1) + position1;
 
-        @Inline
-        public static int compareTo(Object buffer1, long offset1, int length1, ByteBuffer buffer)
-        {
-            Object obj2;
-            long offset2;
+            int length1 = buffer1.limit() - position1;
 
-            int position = buffer.position();
-            int limit = buffer.limit();
-            if (buffer.hasArray())
-            {
-                obj2 = buffer.array();
-                offset2 = BYTE_ARRAY_BASE_OFFSET + buffer.arrayOffset();
-            }
-            else
-            {
-                obj2 = null;
-                offset2 = theUnsafe.getLong(buffer, DIRECT_BUFFER_ADDRESS_OFFSET);
-            }
-            int length2 = limit - position;
-            offset2 += position;
-
-            return compareTo(buffer1, offset1, length1, obj2, offset2, length2);
+            return compare0(array1, offset1, length1, array2, offset2, length2);
         }
 
         /**
@@ -312,8 +200,8 @@ public class FastByteOperations
          * @return 0 if equal, {@code < 0} if left is less than right, etc.
          */
         @Inline
-        public static int compareTo(Object buffer1, long memoryOffset1, int length1,
-                             Object buffer2, long memoryOffset2, int length2)
+        public static int compare0(Object buffer1, long memoryOffset1, int length1,
+                                   Object buffer2, long memoryOffset2, int length2)
         {
             int minLength = Math.min(length1, length2);
 
@@ -325,22 +213,23 @@ public class FastByteOperations
             int wordComparisons = minLength & ~7;
             for (int i = 0; i < wordComparisons ; i += Longs.BYTES)
             {
-                long lw = theUnsafe.getLong(buffer1, memoryOffset1 + i);
-                long rw = theUnsafe.getLong(buffer2, memoryOffset2 + i);
+                long lw = UNSAFE.getLong(buffer1, memoryOffset1 + i);
+                long rw = UNSAFE.getLong(buffer2, memoryOffset2 + i);
+
 
                 if (lw != rw)
                 {
-                    if (BIG_ENDIAN)
-                        return UnsignedLongs.compare(lw, rw);
-
-                    return UnsignedLongs.compare(Long.reverseBytes(lw), Long.reverseBytes(rw));
+                    if (UnsafeMemoryAccess.BIG_ENDIAN)
+                        return Long.compareUnsigned(lw, rw);
+                    else
+                        return Long.compareUnsigned(Long.reverseBytes(lw), Long.reverseBytes(rw));
                 }
             }
 
             for (int i = wordComparisons ; i < minLength ; i++)
             {
-                int b1 = theUnsafe.getByte(buffer1, memoryOffset1 + i) & 0xFF;
-                int b2 = theUnsafe.getByte(buffer2, memoryOffset2 + i) & 0xFF;
+                int b1 = UNSAFE.getByte(buffer1, memoryOffset1 + i) & 0xFF;
+                int b2 = UNSAFE.getByte(buffer2, memoryOffset2 + i) & 0xFF;
                 if (b1 != b2)
                     return b1 - b2;
             }
@@ -375,6 +264,7 @@ public class FastByteOperations
             return length1 - length2;
         }
 
+        @Override
         public int compare(ByteBuffer buffer1, byte[] buffer2, int offset2, int length2)
         {
             if (buffer1.hasArray())
@@ -383,6 +273,7 @@ public class FastByteOperations
             return compare(buffer1, ByteBuffer.wrap(buffer2, offset2, length2));
         }
 
+        @Override
         public int compare(ByteBuffer buffer1, ByteBuffer buffer2)
         {
             int end1 = buffer1.limit();
@@ -399,6 +290,7 @@ public class FastByteOperations
             return buffer1.remaining() - buffer2.remaining();
         }
 
+        @Override
         public void copy(ByteBuffer src, int srcPosition, byte[] trg, int trgPosition, int length)
         {
             if (src.hasArray())
@@ -411,6 +303,7 @@ public class FastByteOperations
             src.get(trg, trgPosition, length);
         }
 
+        @Override
         public void copy(ByteBuffer src, int srcPosition, ByteBuffer trg, int trgPosition, int length)
         {
             if (src.hasArray() && trg.hasArray())

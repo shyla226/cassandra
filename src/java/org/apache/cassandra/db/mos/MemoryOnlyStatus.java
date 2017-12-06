@@ -27,9 +27,7 @@ import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.db.compaction.MemoryOnlyStrategy;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.NativeLibrary;
-import org.apache.cassandra.utils.memory.MemoryUtil;
+import org.apache.cassandra.utils.*;
 
 public class MemoryOnlyStatus implements MemoryOnlyStatusMXBean
 {
@@ -73,7 +71,7 @@ public class MemoryOnlyStatus implements MemoryOnlyStatusMXBean
 
     public MemoryLockedBuffer lock(MappedByteBuffer buffer)
     {
-        long address = MemoryUtil.getAddress(buffer);
+        long address = UnsafeByteBufferAccess.getAddress(buffer);
 
         long length = buffer.capacity();
         long lengthRoundedTo4k = FBUtilities.align(length, 4096);

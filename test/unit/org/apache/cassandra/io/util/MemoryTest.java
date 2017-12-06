@@ -28,7 +28,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import org.junit.Test;
 
 import junit.framework.Assert;
-import org.apache.cassandra.utils.memory.MemoryUtil;
+import org.apache.cassandra.utils.UnsafeByteBufferAccess;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -84,7 +84,7 @@ public class MemoryTest
 
     private static void test(ByteBuffer canon, Memory memory)
     {
-        ByteBuffer hollow = MemoryUtil.getHollowDirectByteBuffer();
+        ByteBuffer hollow = UnsafeByteBufferAccess.getHollowDirectByteBuffer();
         test(canon, hollow, memory, 0, 1000);
         test(canon, hollow, memory, 33, 100);
         test(canon, hollow, memory, 77, 77);
