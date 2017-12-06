@@ -1025,4 +1025,22 @@ public class Directories
                 && !toSkip.contains(file);
         }
     }
+
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        Directories that = (Directories) o;
+
+        if (!metadata.id.equals(that.metadata.id)) return false;
+        return Arrays.equals(paths, that.paths);
+    }
+
+    public int hashCode()
+    {
+        int result = metadata.hashCode();
+        result = 31 * result + Arrays.hashCode(paths);
+        return result;
+    }
 }
