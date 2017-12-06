@@ -126,8 +126,10 @@ public interface NodeSyncServiceMBean
      * @param table the name of the table to validate.
      * @param ranges the ranges to validate (see {@link UserValidationOptions} for format) or {@code null} to validate
      *               all local ranges.
+     * @param rateInKB the maximum rate in kilobytes per second to be used during this validation, or {@code null} to
+     *                 use the current rate.
      */
-    public void startUserValidation(String id, String keyspace, String table, String ranges);
+    public void startUserValidation(String id, String keyspace, String table, String ranges, Integer rateInKB);
 
     /**
      * Cancel a user validation given the validation identifier.

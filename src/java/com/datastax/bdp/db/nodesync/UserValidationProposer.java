@@ -7,6 +7,7 @@ package com.datastax.bdp.db.nodesync;
 
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
@@ -34,6 +35,8 @@ import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.units.RateUnit;
+import org.apache.cassandra.utils.units.RateValue;
 import org.apache.cassandra.utils.units.TimeValue;
 
 /**
@@ -76,6 +79,10 @@ public class UserValidationProposer extends ValidationProposer implements Iterat
     @Nullable
     private final ImmutableList<Range<Token>> validatedRanges;
 
+    // The maximum validation rate in kilobytes per second
+    @Nullable
+    private final Integer rateInKB;
+
     // The segments to validate
     private final ImmutableList<TableState.Ref> toValidate;
     private volatile int nextIdx; // volatile because while users of this class should validate that the iterator methods
@@ -92,13 +99,15 @@ public class UserValidationProposer extends ValidationProposer implements Iterat
     private UserValidationProposer(String id,
                                    TableState state,
                                    ImmutableList<Range<Token>> validatedRanges,
-                                   ImmutableList<TableState.Ref> toValidate)
+                                   ImmutableList<TableState.Ref> toValidate,
+                                   Integer rateInKB)
     {
         super(state);
         this.id = id;
         this.validatedRanges = validatedRanges;
         this.toValidate = toValidate;
         this.remaining = new AtomicInteger(toValidate.size());
+        this.rateInKB = rateInKB;
     }
 
     /**
@@ -107,6 +116,16 @@ public class UserValidationProposer extends ValidationProposer implements Iterat
     public String id()
     {
         return id;
+    }
+
+    /**
+     * Returns the maximum rate to be used during this validation.
+     *
+     * @return the maximum rate, or {@link Optional#EMPTY} if the default rate should be used
+     */
+    Optional<RateValue> rate()
+    {
+        return Optional.ofNullable(rateInKB == null ? null : RateValue.of(rateInKB, RateUnit.KB_S));
     }
 
     /**
@@ -136,7 +155,8 @@ public class UserValidationProposer extends ValidationProposer implements Iterat
         UserValidationProposer proposer =  new UserValidationProposer(options.id,
                                                                       tableState,
                                                                       options.validatedRanges,
-                                                                      toValidate);
+                                                                      toValidate,
+                                                                      options.rateInKB);
         SystemDistributedKeyspace.recordNodeSyncUserValidation(proposer);
         return proposer;
     }

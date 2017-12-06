@@ -69,7 +69,7 @@ public class UserValidationProposerTest extends AbstractValidationProposerTester
 
         NodeSyncService service = new NodeSyncService(); // Not even started, just here because we need a reference below
         NodeSyncState state = new NodeSyncState(service);
-        UserValidationOptions options = new UserValidationOptions("test", table, requested);
+        UserValidationOptions options = new UserValidationOptions("test", table, requested, null);
         UserValidationProposer proposer = UserValidationProposer.create(state, options);
 
         assertSegments(segs(table).addAll(expected).asList(), proposer);

@@ -1668,9 +1668,9 @@ public class NodeProbe implements AutoCloseable
         nodeSyncProxy.startUserValidation(optionMap);
     }
 
-    public void startUserValidation(String id, String keyspace, String table, String ranges)
+    public void startUserValidation(String id, String keyspace, String table, String ranges, Integer rateInKB)
     {
-        nodeSyncProxy.startUserValidation(id, keyspace, table, ranges);
+        nodeSyncProxy.startUserValidation(id, keyspace, table, ranges, rateInKB);
     }
 
     public void cancelUserValidation(String idStr)

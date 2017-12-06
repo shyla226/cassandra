@@ -410,10 +410,16 @@ public class NodeSyncService implements NodeSyncServiceMBean
      */
     public void setRate(int kbPerSecond)
     {
-        config.setRate(RateValue.of(kbPerSecond, RateUnit.KB_S));
         Instance current = instance;
         if (current != null)
+        {
+            current.scheduler.setRate(RateValue.of(kbPerSecond, RateUnit.KB_S));
             current.maintenanceTasks.onRateUpdate();
+        }
+        else
+        {
+            config.setRate(RateValue.of(kbPerSecond, RateUnit.KB_S));
+        }
     }
 
     /**
@@ -442,7 +448,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
         current.scheduler.addUserValidation(UserValidationOptions.fromMap(optionMap));
     }
 
-    public void startUserValidation(String id, String keyspace, String table, String ranges)
+    public void startUserValidation(String id, String keyspace, String table, String ranges, Integer rateInKB)
     {
         HashMap<String, String> m = new HashMap<>();
         m.put(UserValidationOptions.ID, id);
@@ -450,6 +456,8 @@ public class NodeSyncService implements NodeSyncServiceMBean
         m.put(UserValidationOptions.TABLE_NAME, table);
         if (ranges != null && !ranges.isEmpty())
             m.put(UserValidationOptions.REQUESTED_RANGES, ranges);
+        if (rateInKB != null)
+            m.put(UserValidationOptions.RATE_IN_KB, rateInKB.toString());
         startUserValidation(m);
     }
 

@@ -9,13 +9,13 @@ import io.airlift.airline.Command;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool;
 
-@Command(name = "getrate", description = "Retrieve the configured synchronization rate")
+@Command(name = "getrate", description = "Retrieve the current synchronization rate limit")
 public class GetRate extends NodeTool.NodeToolCmd
 {
     @Override
     public void execute(NodeProbe probe)
     {
-        System.out.println(String.format("Configured rate=%d KB/s", probe.getNodeSyncRate()));
+        System.out.println(String.format("Current rate limit=%d KB/s", probe.getNodeSyncRate()));
     }
 }
 

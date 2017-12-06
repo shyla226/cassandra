@@ -39,6 +39,7 @@ class UserValidationOptions
     static final String KEYSPACE_NAME = "keyspace";
     static final String TABLE_NAME = "table";
     static final String REQUESTED_RANGES = "ranges";
+    static final String RATE_IN_KB = "rate";
 
     /** Identifier for the validation. This can be anything as long as no other user validation on the node reuse that
      * same id at the time of submission. */
@@ -49,13 +50,18 @@ class UserValidationOptions
      * user validation is on all local ranges (this cannot be empty however). */
     @Nullable
     final ImmutableList<Range<Token>> validatedRanges;
+    /** The maximum rate in kilobytes per second to be used during the validation. This can be {@code null} in which
+     * case the current rate will be used. */
+    @Nullable
+    final Integer rateInKB;
 
-    UserValidationOptions(String id, TableMetadata table, Collection<Range<Token>> validatedRanges)
+    UserValidationOptions(String id, TableMetadata table, Collection<Range<Token>> validatedRanges, Integer rateInKB)
     {
         assert validatedRanges == null || !validatedRanges.isEmpty();
         this.id = id;
         this.table = table;
         this.validatedRanges = validatedRanges == null ? null : ImmutableList.copyOf(Range.normalize(validatedRanges));
+        this.rateInKB = rateInKB;
     }
 
     /**
@@ -75,6 +81,8 @@ class UserValidationOptions
      *   the form {@code <start token>:<end token>} (so, for instance, a value for this option could be
      *   "1231:42143,4432155:223"). Note that the ranges, if present, should all be ranges local to the node (and table)
      *   on which the validation with those option is started.
+     * - "rate": the maximum rate in kilobytes per second to be used during the validation. If present, this should be a
+     +   positive integer.
      * <p>
      * Please note that every option name and value is case sensitive.
      *
@@ -115,7 +123,27 @@ class UserValidationOptions
                 throw new IllegalArgumentException("Invalid empty list of ranges to validate (if you want to validate "
                                                    + "all local ranges, do not specify the " + REQUESTED_RANGES + " option)");
         }
-        return new UserValidationOptions(id, table, ranges);
+
+        String rateStr = optionMap.get(RATE_IN_KB);
+        Integer rateInKB = null;
+        if (rateStr != null)
+        {
+            try
+            {
+                rateInKB = Integer.parseInt(rateStr);
+            }
+            catch (NumberFormatException e)
+            {
+                throw new IllegalArgumentException(String.format("Cannot parse %s option: got %s but expected a positive integer",
+                                                                 RATE_IN_KB, rangesStr));
+            }
+            if (rateInKB <= 0)
+            {
+                throw new IllegalArgumentException(RATE_IN_KB + " option must be positive");
+            }
+        }
+
+        return new UserValidationOptions(id, table, ranges, rateInKB);
     }
 
     private static Collection<Range<Token>> parseTokenRanges(String str, IPartitioner partitioner)

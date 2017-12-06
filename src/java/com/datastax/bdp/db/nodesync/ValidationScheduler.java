@@ -35,6 +35,8 @@ import org.slf4j.LoggerFactory;
 import com.datastax.bdp.db.utils.concurrent.CompletableFutures;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.NodeSyncConfig;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.UnknownTableException;
@@ -45,6 +47,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.IEndpointLifecycleSubscriber;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.units.RateValue;
 
 /**
  * Continuously schedules the segment validations to be ran (by an {@link ValidationExecutor}) for NodeSync.
@@ -75,18 +78,22 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     private static final Logger logger = LoggerFactory.getLogger(ValidationScheduler.class);
 
     final NodeSyncState state;
+    private final NodeSyncConfig config = DatabaseDescriptor.getNodeSyncConfig();
 
     private final Map<TableId, ContinuousValidationProposer> continuousValidations = new ConcurrentHashMap<>();
     private final PriorityQueue<ContinuousValidationProposer.Proposal> continuousProposals = new PriorityQueue<>();
 
-    private final Map<String, UserValidationProposer> userValidations= new ConcurrentHashMap<>();
+    private final Map<String, UserValidationProposer> userValidations = new ConcurrentHashMap<>();
     private final Queue<UserValidationProposer> pendingUserValidations = new ArrayDeque<>();
     private UserValidationProposer currentUserValidation;
-
 
     // Note: we rely on the lock being re-entrant in queueProposal() below
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition hasProposals = lock.newCondition();
+    private final Condition hasNonRate = lock.newCondition();
+
+    @Nullable
+    private RateValue rateToRestore = null;
 
     private final AtomicLong scheduledValidations = new AtomicLong();
 
@@ -396,6 +403,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
 
             isShutdown = true;
             hasProposals.signalAll();
+            hasNonRate.signalAll();
         }
         finally
         {
@@ -410,7 +418,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         lock.lock();
         try
         {
-            while ((proposal = nextProposal()) == null)
+            while ((proposal = nextProposal(blockUntilAvailable)) == null)
             {
                 if (!blockUntilAvailable)
                     return null;
@@ -428,24 +436,57 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     }
 
     // This *must* be called while holding the lock
-    private ValidationProposal nextProposal()
+    private ValidationProposal nextProposal(boolean blockUntilAvailable)
     {
-        ValidationProposal p = nextUserValidationProposal();
+        ValidationProposal p = nextUserValidationProposal(blockUntilAvailable);
         if (p != null)
             return p;
 
         return continuousProposals.poll();
     }
 
-    private ValidationProposal nextUserValidationProposal()
+    private ValidationProposal nextUserValidationProposal(boolean blockUntilAvailable)
     {
         if (currentUserValidation == null || !currentUserValidation.hasNext())
         {
             do
             {
+                // Wait for completion of any previous validation with rate
+                while (rateToRestore != null)
+                {
+                    if (!blockUntilAvailable)
+                        return null;
+                    if (isShutdown)
+                        throw new ShutdownException();
+
+                    hasNonRate.awaitUninterruptibly();
+                }
+
                 currentUserValidation = pendingUserValidations.poll();
                 if (currentUserValidation == null)
                     return null;
+
+
+                // If the new validation has rate we apply it and add a callback to restore the previous rate
+                currentUserValidation.rate().ifPresent(rate -> {
+
+                    rateToRestore = config.getRate();
+                    config.setRate(rate);
+
+                    currentUserValidation.completionFuture().whenComplete((s, e) -> {
+                        lock.lock();
+                        try
+                        {
+                            config.setRate(rateToRestore);
+                            rateToRestore = null;
+                            hasNonRate.signal();
+                        }
+                        finally
+                        {
+                            lock.unlock();
+                        }
+                    });
+                });
 
                 logger.info("Starting user triggered validation #{} on table {}",
                             currentUserValidation.id(), currentUserValidation.table());
@@ -453,6 +494,29 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
             } while (!currentUserValidation.hasNext());
         }
         return currentUserValidation.next();
+    }
+
+    /**
+     * Sets the gobal validation rate ensuring that there are no running user validations with custom rate.
+     *
+     * @param rate the validation rate to set
+     * @throws IllegalArgumentException if the there is a running user validation with custom rate
+     */
+    void setRate(RateValue rate)
+    {
+        lock.lock();
+        try
+        {
+            if (rateToRestore == null)
+                config.setRate(rate);
+            else
+                throw new IllegalStateException("Cannot set NodeSync rate because a user triggered validation with " +
+                                                "custom rate is running: " + currentUserValidation.id());
+        }
+        finally
+        {
+            lock.unlock();
+        }
     }
 
     // This needs the lock but may or may not be called while already holding it, so we acquire said lock and rely

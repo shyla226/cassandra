@@ -27,6 +27,8 @@ import com.datastax.driver.core.TableMetadata;
 import com.datastax.driver.core.TokenRange;
 import io.airlift.airline.Arguments;
 import io.airlift.airline.Command;
+import io.airlift.airline.Option;
+import io.airlift.airline.OptionType;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.tools.NodeProbe;
@@ -59,6 +61,11 @@ public class SubmitValidation extends NodeSyncCommand
                              "If no token ranges are specified, then all the tokens will be validated.")
     List<String> args = new ArrayList<>();
 
+    @Option(type = OptionType.COMMAND,
+            name = { "-r", "--rate" },
+            description = "Rate to be used just for this validation, in KB per second")
+    private Integer rateInKB = null;
+
     @Override
     @SuppressWarnings("resource")
     public final void execute(Metadata metadata, Session session, NodeProbes probes)
@@ -77,6 +84,9 @@ public class SubmitValidation extends NodeSyncCommand
         // Get replicas
         Map<Range<Token>, Set<InetAddress>> rangeReplicas = liveRangeReplicas(metadata, keyspaceName, requestedRanges);
         Set<InetAddress> allReplicas = rangeReplicas.values().stream().flatMap(Set::stream).collect(toSet());
+
+        // Validate rate
+        validateRate(rateInKB);
 
         String id = UUIDGen.getTimeUUID().toString();
         Set<InetAddress> successfulReplicas = new HashSet<>();
@@ -97,7 +107,7 @@ public class SubmitValidation extends NodeSyncCommand
             try
             {
                 probe = probeSupplier.get();
-                probe.startUserValidation(id, keyspaceName, tableName, format(ranges));
+                probe.startUserValidation(id, keyspaceName, tableName, format(ranges), rateInKB);
 
                 ranges.forEach(rangeReplicas::remove);
                 successfulReplicas.add(address);
@@ -208,6 +218,13 @@ public class SubmitValidation extends NodeSyncCommand
             System.err.printf("Validation %s has been successfully cancelled%n", id);
         else
             System.err.printf("Validation %s is still running in nodes %s%n", id, failed);
+    }
+
+    @VisibleForTesting
+    static void validateRate(Integer rateInKB)
+    {
+        if (rateInKB != null && rateInKB <= 0)
+            throw new NodeSyncException("Rate must be positive");
     }
 
     /**

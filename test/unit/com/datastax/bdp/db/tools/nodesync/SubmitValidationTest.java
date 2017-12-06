@@ -12,8 +12,6 @@ import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 
-import com.datastax.bdp.db.tools.nodesync.NodeSyncException;
-import com.datastax.bdp.db.tools.nodesync.SubmitValidation;
 import com.datastax.driver.core.Metadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
@@ -21,7 +19,7 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 
-import static com.datastax.bdp.db.tools.nodesync.SubmitValidation.*;
+import static com.datastax.bdp.db.tools.nodesync.SubmitValidation.UNSUPPORTED_RANGE_MESSAGE;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.fail;
@@ -150,5 +148,30 @@ public class SubmitValidationTest extends CQLTester
     private static Token token(long n)
     {
         return new Murmur3Partitioner.LongToken(n);
+    }
+
+    @Test
+    public void testValidateRatePositive()
+    {
+        SubmitValidation.validateRate(1);
+        SubmitValidation.validateRate(123);
+    }
+
+    @Test
+    public void testValidateRateNull()
+    {
+        SubmitValidation.validateRate(null);
+    }
+
+    @Test(expected = NodeSyncException.class)
+    public void testValidateRateNegative()
+    {
+        SubmitValidation.validateRate(-1);
+    }
+
+    @Test(expected = NodeSyncException.class)
+    public void testValidateRateZero()
+    {
+        SubmitValidation.validateRate(0);
     }
 }
