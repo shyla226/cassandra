@@ -5,7 +5,6 @@
  */
 package com.datastax.bdp.db.audit.cql3;
 
-import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -15,14 +14,8 @@ import org.slf4j.LoggerFactory;
 import org.antlr.runtime.ANTLRStringStream;
 import org.antlr.runtime.CharStream;
 import org.antlr.runtime.Token;
-import org.apache.cassandra.cql3.BatchQueryOptions;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.CqlLexer;
 import org.apache.cassandra.cql3.CqlParser;
-import org.apache.cassandra.cql3.statements.ParsedStatement;
-import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.utils.MD5Digest;
 
 public class BatchStatementUtils
 {
@@ -119,32 +112,6 @@ public class BatchStatementUtils
             }
         }
         return stmts;
-    }
-
-    public static List<String> decomposeBatchStatement(QueryState queryState, BatchQueryOptions queryOptions)
-    {
-        List<String> cqlStrings = new ArrayList<>();
-        List<Object> queryOrIdList = queryOptions.getQueryOrIdList();
-
-        for (Object queryOrId : queryOrIdList)
-        {
-            if (queryOrId instanceof String)
-            {
-                cqlStrings.add((String) queryOrId);
-            }
-            else if (queryOrId instanceof MD5Digest)
-            {
-                // prepared statement
-                // lookup the original prepared stmt from QP's cache
-                // then use it as the key to fetch CQL string & column
-                // specs for bind vars from our own cache
-                CQLStatement prepared = ClientState.getCQLQueryHandler()
-                    .getPrepared((MD5Digest) queryOrId).statement;
-                String queryString = ((ParsedStatement.Prepared) prepared).rawCQLStatement;
-                cqlStrings.add(queryString);
-            }
-        }
-        return cqlStrings;
     }
 
     private static boolean isStatementStart(Token t)
