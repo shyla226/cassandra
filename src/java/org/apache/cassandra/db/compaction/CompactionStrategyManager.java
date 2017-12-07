@@ -451,13 +451,6 @@ public class CompactionStrategyManager implements INotificationConsumer
         startup();
     }
 
-    public void replaceFlushed(Memtable memtable, Collection<SSTableReader> sstables)
-    {
-        cfs.getTracker().replaceFlushed(memtable, sstables);
-        if (sstables != null && !sstables.isEmpty())
-            CompactionManager.instance.submitBackground(cfs);
-    }
-
     public int getUnleveledSSTables()
     {
         readLock.lock();
@@ -722,12 +715,6 @@ public class CompactionStrategyManager implements INotificationConsumer
         writeLock.lock();
         try
         {
-            if (repaired != null)
-                repaired.forEach(AbstractCompactionStrategy::enable);
-            if (unrepaired != null)
-                unrepaired.forEach(AbstractCompactionStrategy::enable);
-            if (pendingRepairs != null)
-                pendingRepairs.forEach(PendingRepairManager::enable);
             // enable this last to make sure the strategies are ready to get calls.
             enabled = true;
         }
@@ -742,14 +729,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         writeLock.lock();
         try
         {
-            // disable this first avoid asking disabled strategies for compaction tasks
             enabled = false;
-            if (repaired != null)
-                repaired.forEach(AbstractCompactionStrategy::disable);
-            if (unrepaired != null)
-                unrepaired.forEach(AbstractCompactionStrategy::disable);
-            if (pendingRepairs != null)
-                pendingRepairs.forEach(PendingRepairManager::disable);
         }
         finally
         {
@@ -992,18 +972,6 @@ public class CompactionStrategyManager implements INotificationConsumer
         {
             readLock.unlock();
         }
-    }
-
-    /**
-     * @deprecated use {@link #getUserDefinedTasks(Collection, int)} instead.
-     */
-    @Deprecated()
-    public AbstractCompactionTask getUserDefinedTask(Collection<SSTableReader> sstables, int gcBefore)
-    {
-        validateForCompaction(sstables, cfs, getDirectories());
-        List<AbstractCompactionTask> tasks = getUserDefinedTasks(sstables, gcBefore);
-        assert tasks.size() == 1;
-        return tasks.get(0);
     }
 
     public int getEstimatedRemainingTasks()

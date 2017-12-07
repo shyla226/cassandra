@@ -171,7 +171,8 @@ public class CompressedInputStream extends InputStream
 
         // validate crc randomly
         double crcCheckChance = this.crcCheckChanceSupplier.getAsDouble();
-        if (crcCheckChance > 0d && crcCheckChance > ThreadLocalRandom.current().nextDouble())
+        if (crcCheckChance >= 1d ||
+            (crcCheckChance > 0d && crcCheckChance > ThreadLocalRandom.current().nextDouble()))
         {
             int checksum = (int) checksumType.of(compressed, 0, compressed.length - checksumBytes.length);
 

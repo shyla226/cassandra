@@ -1,5 +1,9 @@
 4.0
+ * Remove unused and deprecated methods from AbstractCompactionStrategy (CASSANDRA-14081)
+ * Fix Distribution.average in cassandra-stress (CASSANDRA-14090)
+ * Presize collections (CASSANDRA-13760)
  * Add GroupCommitLogService (CASSANDRA-13530)
+ * Parallelize initial materialized view build (CASSANDRA-12245)
  * Fix flaky SecondaryIndexManagerTest.assert[Not]MarkedAsBuilt (CASSANDRA-13965)
  * Make LWTs send resultset metadata on every request (CASSANDRA-13992)
  * Fix flaky indexWithFailedInitializationIsNotQueryableAfterPartialRebuild (CASSANDRA-13963)
@@ -162,6 +166,9 @@
  * Update jackson JSON jars (CASSANDRA-13949)
  * Avoid locks when checking LCS fanout and if we should defrag (CASSANDRA-13930)
 Merged from 3.0:
+ * Optimize CRC check chance probability calculations (CASSANDRA-14094)
+ * Fix cleanup on keyspace with no replicas (CASSANDRA-13526)
+ * Fix updating base table rows with TTL not removing materialized view entries (CASSANDRA-14071)
  * Fix serialized size of DataLimits (CASSANDRA-14057)
  * Add flag to allow dropping oversized read repair mutations (CASSANDRA-13975)
  * Fix SSTableLoader logger message (CASSANDRA-14003)
