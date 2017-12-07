@@ -88,9 +88,9 @@ class ContinuousValidationProposer extends ValidationProposer
 
         Proposal next = new Proposal(ref);
         long now = NodeSyncHelpers.time().currentTimeMillis();
-        if (next.minTimeForSubmission() > 0)
-           ScheduledExecutors.nonPeriodicTasks.schedule(() -> proposalConsumer.accept(next),
-                                                        next.minTimeForSubmission() - now, TimeUnit.MILLISECONDS);
+        if (next.minTimeForSubmission() > now)
+            ScheduledExecutors.nonPeriodicTasks.schedule(() -> proposalConsumer.accept(next),
+                                                         next.minTimeForSubmission() - now, TimeUnit.MILLISECONDS);
         else
             proposalConsumer.accept(next);
     }

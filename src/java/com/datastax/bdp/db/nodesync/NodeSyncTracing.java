@@ -152,6 +152,25 @@ class NodeSyncTracing
         return new SegmentTracing(current, id, level);
     }
 
+    /**
+     * Trace a message if tracing is currently enabled.
+     * <p>
+     * This is meant only for events impacting NodeSync but not related to a particular segment validation (otherwise
+     * the proper {@link SegmentTracing} object should be used). All those message at output at {@link TracingLevel#LOW},
+     * so is meant for rare events primarily.
+     *
+     * @param message the message to trace, which can have '{}' placeholders.
+     * @param args argument for the message.
+     */
+    void trace(String message, Object... args)
+    {
+        TraceState current = state;
+        if (current == null)
+            return;
+
+        current.trace(message, args);
+    }
+
     static class SegmentTracing
     {
         @VisibleForTesting

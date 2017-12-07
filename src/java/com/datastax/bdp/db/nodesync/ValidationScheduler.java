@@ -124,6 +124,11 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         this.state = state;
     }
 
+    private NodeSyncTracing tracing()
+    {
+        return state.service().tracing();
+    }
+
     /**
      * Add a new user validation.
      * <p>
@@ -306,6 +311,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
 
         ContinuousValidationProposer proposer = new ContinuousValidationProposer(tableState, this::queueProposal);
         continuousValidations.put(id, proposer);
+        tracing().trace("Adding continuous proposer for {}", tableState.table());
         proposer.start();
         return null;
     }
@@ -317,6 +323,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         if (proposer == null)
             return false;
 
+        tracing().trace("Removing continuous proposer for {}", table);
         proposer.cancel();
         return true;
     }

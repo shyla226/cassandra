@@ -36,6 +36,7 @@ import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.units.Units;
 
 /**
  * Holds the NodeSync state for a specific (NodeSync-enabled) table.
@@ -209,6 +210,11 @@ public class TableState
         return stateHolder.segments.localRanges();
     }
 
+    private NodeSyncTracing tracing()
+    {
+        return service.tracing();
+    }
+
     /**
      * Updates the state so that it uses the provided depth for its segments. If the state already uses this depth, this
      * is a no-op.
@@ -225,7 +231,7 @@ public class TableState
             if (depth == stateHolder.segments.depth())
                 return;
 
-            logger.debug("Updating NodeSync state for {} as depth have been updated", table);
+            logger.debug("Updating NodeSync state for {} to {} as depth have been updated", table, depth);
             StateHolder newStateHolder = emptyState(stateHolder.segments.localRanges(), depth);
             // If we increase the depth, we don't really need to reload from disk, the copyTo() call below will fully
             // populate the new state properly. If the depth is decreased, we could theoretically also populate the new
@@ -242,6 +248,8 @@ public class TableState
                 newStateHolder.updateFrom(stateHolder);
                 version.minor++;
             }
+            tracing().trace("Updating depth from {} to {} for {} (segments count: {} -> {})",
+                            stateHolder.segments.depth(), depth, table, stateHolder.size, newStateHolder.size);
             stateHolder = newStateHolder;
         }
         finally
@@ -267,7 +275,10 @@ public class TableState
                 return;
 
             logger.debug("Updating NodeSync state for {} as local ranges have been updated", table);
-            stateHolder = emptyState(localRanges, stateHolder.segments.depth()).populateFromStatusTable();
+            StateHolder newStateHolder = emptyState(localRanges, stateHolder.segments.depth()).populateFromStatusTable();
+            tracing().trace("Updating local ranges from {} to {} for {} (segments count: {} -> {})",
+                            stateHolder.segments.localRanges(), localRanges, table, stateHolder.size, newStateHolder.size);
+            stateHolder = newStateHolder;
             version.major++;
         }
         finally
@@ -294,6 +305,10 @@ public class TableState
                 return;
 
             logger.debug("Updating NodeSync deadline target for {} following table update", table);
+            tracing().trace("Updating deadline from {} to {} for {}",
+                            Units.toString(stateHolder.deadlineTargetMs, TimeUnit.MILLISECONDS),
+                            Units.toString(deadline, TimeUnit.MILLISECONDS),
+                            table);
             stateHolder.updateDeadline(deadline);
         }
         finally

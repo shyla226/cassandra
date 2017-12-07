@@ -68,6 +68,11 @@ class NodeSyncState
         this.service = service;
     }
 
+    NodeSyncService service()
+    {
+        return service;
+    }
+
     /**
      * Get a reference to the state for a particular table, or {@code null} if said state is not loaded (typically
      * because the table isn't NodeSync-enabled).
