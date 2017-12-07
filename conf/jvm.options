@@ -253,3 +253,7 @@
 -XX:+UseGCLogFileRotation
 -XX:NumberOfGCLogFiles=10
 -XX:GCLogFileSize=10M
+
+# Netty queue limit (per core). Effectively acts as an amount of "pending" requests scheduled by Netty
+# and tasks scheduled from TPC tasks.
+-Dio.netty.eventLoop.maxPendingTasks=65536
