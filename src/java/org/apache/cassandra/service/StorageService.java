@@ -560,7 +560,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     // for testing only
     public void unsafeInitialize() throws ConfigurationException
     {
-        doInitialize();
+        initialized = true;
         gossipActive = true;
         Gossiper.instance.register(this);
         Gossiper.instance.start((int) (System.currentTimeMillis() / 1000)); // needed for node-ring gathering.
@@ -637,8 +637,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.info("Not starting gossip as requested.");
             // load ring state in preparation for starting gossip later
             loadRingState();
-            doInitialize();
-
+            initialized = true;
             return;
         }
 
@@ -675,22 +674,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.info("Not joining ring as requested. Use JMX (StorageService->joinRing()) to initiate ring joining");
         }
 
-        doInitialize();
-    }
-
-    private void doInitialize()
-    {
-        // Invalidate the cached ring information so that the next call to get the TPC boundaries will find a new
-        // ring version and recompute:
-        StorageService.instance.getTokenMetadata().invalidateCachedRings();
-
-        // During initialization memtables do not know the correct token boundaries to use.
-        // Flush all to make sure they get updated (DB-939).
-        // There should be no data in the tables at this time, so this should complete very quickly.
-        // Wait for it before signalling we are ready.
-        FBUtilities.waitOnFutures(Iterables.concat(Iterables.transform(Keyspace.all(), Keyspace::flush)));
-
-        // All is ready:
         initialized = true;
     }
 

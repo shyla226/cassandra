@@ -457,6 +457,28 @@ public class CassandraDaemon
         nativeTransportService = new NativeTransportService();
 
         completeSetup();
+
+        // Invalidate the cached ring information so that the next call to get the TPC boundaries will find a new
+        // ring version and recompute:
+        StorageService.instance.getTokenMetadata().invalidateCachedRings();
+
+        // During initialization memtables do not know the correct token boundaries to use.
+        // Flush all to make sure they get updated and don't get stuck on core 0 (DB-939).
+        // Hopefully the tables will be empty at this time, but as we can't avoid receiving mutations while we are
+        // initializing due to bootstrapping, this is not guaranteed.
+        // This flush is done _after_ switching the setupCompleted flag because failures during this should not break
+        // start-up (see DB-1212).
+        try
+        {
+            FBUtilities.waitOnFutures(Iterables.concat(Iterables.transform(Keyspace.all(),
+                                                                           Keyspace::flush)));
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Error during initial flush after setup", t);
+            // do not propagate failure
+        }
     }
 
     private void setDefaultTPCBoundaries()
