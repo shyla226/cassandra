@@ -468,7 +468,7 @@ public class CassandraDaemon
 
             logger.info("Computing default TPC core assignments for {} based on ranges {}...", ks.getName(), ranges);
 
-            ks.setDefaultTPCBoundaries(!ranges.isEmpty() ? ranges : null);
+            ks.setDefaultTPCBoundaries(!ranges.isEmpty() ? ranges : StorageService.getStartupTokenRanges(ks));
         }
         
         // Flush the memtables to have future writes use the new boundaries:
