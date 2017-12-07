@@ -976,7 +976,7 @@ public abstract class CQLTester
             state.setKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME);
             QueryState queryState = new QueryState(state, UserRolesAndPermissions.SYSTEM);
 
-            ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(query, queryState);
+            ParsedStatement.Prepared prepared = QueryProcessor.getStatement(query, queryState);
             prepared.statement.validate(queryState);
 
             QueryOptions options = QueryOptions.forInternalCalls(Collections.<ByteBuffer>emptyList());

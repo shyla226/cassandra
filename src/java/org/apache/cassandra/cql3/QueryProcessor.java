@@ -264,8 +264,7 @@ public class QueryProcessor implements QueryHandler
                 {
                     if (!TPCUtils.isWouldBlockException(ex))
                     {
-                        auditLogger.logFailedQuery(events, ex);
-                        throw ex;
+                        return auditLogger.logFailedQuery(events, ex).andThen(Single.error(ex));
                     }
  
                     if (logger.isTraceEnabled())
@@ -284,8 +283,7 @@ public class QueryProcessor implements QueryHandler
         }
         catch (Exception ex)
         {
-            auditLogger.logFailedQuery(events, ex);
-            throw ex;
+            return auditLogger.logFailedQuery(events, ex).andThen(Single.error(ex));
         }
     }
 
@@ -315,8 +313,7 @@ public class QueryProcessor implements QueryHandler
         }
         catch (Exception e)
         {
-            auditLogger.logFailedQuery(queryString, state, e);
-            throw e;
+            return auditLogger.logFailedQuery(queryString, state, e).andThen(Single.error(e));
         }
 
         if (!queryState.isSystem())
@@ -331,7 +328,16 @@ public class QueryProcessor implements QueryHandler
 
     public static ParsedStatement.Prepared parseStatement(String queryStr, QueryState queryState) throws RequestValidationException
     {
-        return getStatement(queryStr, queryState);
+        try
+        {
+            return getStatement(queryStr, queryState);
+        }
+        catch (Exception e)
+        {
+            // We trigger the logging and continue.
+            auditLogger.logFailedQuery(queryStr, queryState, e).subscribe();
+            throw e;
+        }
     }
 
     public static UntypedResultSet processBlocking(String query, ConsistencyLevel cl) throws RequestExecutionException
@@ -376,7 +382,7 @@ public class QueryProcessor implements QueryHandler
         if (existing != null)
             return existing;
 
-        ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
+        ParsedStatement.Prepared prepared = getStatement(query, internalQueryState());
         prepared.statement.validate(internalQueryState());
         internalStatements.putIfAbsent(query, prepared);
         return prepared;
@@ -479,7 +485,7 @@ public class QueryProcessor implements QueryHandler
      */
     public static Single<UntypedResultSet> executeOnceInternal(String query, Object... values)
     {
-        final ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
+        final ParsedStatement.Prepared prepared = getStatement(query, internalQueryState());
         final StagedScheduler scheduler = prepared.statement.getScheduler();
 
         Single<? extends ResultMessage> observable = Single.defer(() -> {
@@ -562,14 +568,9 @@ public class QueryProcessor implements QueryHandler
         {
             // RequestValidationException can come out before the events could be created.
             if (events.isEmpty())
-            {
-                auditLogger.logFailedQuery(queryString, state, e);
-            }
-            else
-            {
-                auditLogger.logFailedQuery(events, e);
-            }
-            throw e;
+                return auditLogger.logFailedQuery(queryString, state, e).andThen(Single.error(e));
+
+            return auditLogger.logFailedQuery(events, e).andThen(Single.error(e));
         }
     }
 
@@ -701,11 +702,8 @@ public class QueryProcessor implements QueryHandler
             catch (RuntimeException ex)
             {
                 if (!TPCUtils.isWouldBlockException(ex))
-                {
-                    auditLogger.logFailedQuery(events, ex);
-                    throw ex;
-                }
-    
+                    return auditLogger.logFailedQuery(events, ex).andThen(Single.error(ex));
+
                 return RxThreads.subscribeOnIo(
                     Single.defer(() -> {
                         batch.checkAccess(state);
@@ -956,11 +954,7 @@ public class QueryProcessor implements QueryHandler
         if (events.isEmpty())
             return Single::error;
 
-        return e ->
-        {
-            auditLogger.logFailedQuery(events, e);
-            return Single.error(e);
-        };
+        return e -> auditLogger.logFailedQuery(events, e).andThen(Single.error(e));
     }
 
     public static Completable maybeAuditLog(List<AuditableEvent> events)

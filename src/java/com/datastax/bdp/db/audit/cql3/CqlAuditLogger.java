@@ -19,6 +19,8 @@ import com.datastax.bdp.db.audit.AuditableEventType;
 import com.datastax.bdp.db.audit.CoreAuditableEventType;
 
 import io.reactivex.Completable;
+
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.BatchQueryOptions;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -59,7 +61,14 @@ public class CqlAuditLogger
                 result = result.andThen(recordEvent);
         }
 
-        return result;
+        // The Completable returned by the AuditLogger might not be scheduled on the expected scheduler.
+        // By consequence, we might need to set back the scheduler for the rest of the pipeline.
+
+        // We only need to change the scheduler if we are on an IO thread while building the pipeline.
+        if (TPC.isTPCThread())
+            return result;
+
+        return result.observeOn(TPC.ioScheduler());
     }
 
     public Completable logFailedQuery(String queryString, QueryState state, Throwable e)
@@ -70,8 +79,11 @@ public class CqlAuditLogger
         AuditableEventType type = e instanceof UnauthorizedException ? CoreAuditableEventType.UNAUTHORIZED_ATTEMPT
                                                                      : CoreAuditableEventType.REQUEST_FAILURE;
 
+        String operation = getOperationForm(queryString, e);
+
         AuditableEvent auditable = AuditableEvent.Builder.fromQueryState(state)
                                                          .type(type)
+                                                         .operation(operation)
                                                          .build();
         return auditLogger.recordEvent(auditable);
     }
@@ -87,9 +99,7 @@ public class CqlAuditLogger
 
         for (AuditableEvent event: events)
         {
-            String operation = event.getOperation();
-            operation = e.getLocalizedMessage() + (operation != null ? " " + operation : "");
-
+            String operation = getOperationForm(event.getOperation(), e);
             AuditableEvent auditable = AuditableEvent.Builder.fromEvent(event)
                                                              .type(type)
                                                              .operation(operation)
@@ -104,6 +114,14 @@ public class CqlAuditLogger
         }
 
         return result;
+    }
+
+    private String getOperationForm(String query, Throwable e)
+    {
+        if (query == null)
+            return e.getLocalizedMessage();
+
+        return new StringBuilder(e.getLocalizedMessage()).append(' ').append(query).toString();
     }
 
     /**

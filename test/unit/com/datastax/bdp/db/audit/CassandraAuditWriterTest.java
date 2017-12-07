@@ -170,7 +170,7 @@ public class CassandraAuditWriterTest extends CQLTester
 
         logger.recordEvent(event).blockingAwait();
 
-        waitForEventsToBeWritten(1, 10000);
+        waitForEventsToBeWritten(1, 2000);
     }
 
     @Test
@@ -190,7 +190,7 @@ public class CassandraAuditWriterTest extends CQLTester
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
         logger.recordEvent(event).blockingAwait();
 
-        waitForEventsToBeWritten(2, 10000);
+        waitForEventsToBeWritten(2, 2000);
     }
 
     @Test
@@ -210,7 +210,7 @@ public class CassandraAuditWriterTest extends CQLTester
         // no records should be written until the timer says the flush period has been exceeded
         assertEquals(0, getLoggedEventCount());
 
-        waitForEventsToBeWritten(1, 10000);
+        waitForEventsToBeWritten(1, 2000);
     }
 
     @Test
@@ -341,7 +341,7 @@ public class CassandraAuditWriterTest extends CQLTester
 
         logger.recordEvent(event).blockingAwait();
 
-        waitForEventsToBeWritten(2, 10000);
+        waitForEventsToBeWritten(2, 2000);
         Assert.assertEquals(2, batches.size());
     }
 
