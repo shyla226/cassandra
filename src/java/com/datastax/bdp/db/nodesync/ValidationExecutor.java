@@ -9,6 +9,7 @@ import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
@@ -115,6 +116,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     private final AtomicLong limiterWaitTimeNanos = new AtomicLong();
     private final AtomicLong dataValidatedBytes = new AtomicLong();
     private final AtomicLong blockedOnNewTaskTimeNanos = new AtomicLong();
+    private final ConcurrentMap<Thread, Long> waitingOnTaskThreads = new ConcurrentHashMap<>();
 
     ValidationExecutor(ValidationScheduler scheduler, NodeSyncConfig config)
     {
@@ -250,9 +252,17 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                     // we shouldn't block as, given that we can have more threads than segments, we could end up
                     // starving the processing of an ongoing segment otherwise). And we have nothing else to do if
                     // there is no other in-flight validations (keeping in mind we do have a permit ourselves).
-                    long start = System.nanoTime();
-                    Validator validator = scheduler.getNextValidation(inFlightValidations.get() <= 1);
-                    blockedOnNewTaskTimeNanos.addAndGet(System.nanoTime() - start);
+                    Validator validator;
+                    Thread currentThread = Thread.currentThread();
+                    waitingOnTaskThreads.put(currentThread, System.nanoTime());
+                    try
+                    {
+                        validator = scheduler.getNextValidation(inFlightValidations.get() <= 1);
+                    }
+                    finally
+                    {
+                        blockedOnNewTaskTimeNanos.addAndGet(System.nanoTime() - waitingOnTaskThreads.remove(currentThread));
+                    }
                     if (validator != null)
                     {
                         submit(validator);
@@ -412,12 +422,25 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             return limiterWaitTimeMsDiff.currentDiff() > LIMITER_WAIT_TIME_THRESHOLD_MS;
         }
 
-        private boolean hasSignificantBlockOnNewTaskSinceLastCheck()
+        private long perThreadAvgBlockTime()
         {
             // blockedOnNewTaskMsDiff is the total time waited by all threads, so divide by our number of threads so
             // it can be more meaningfully compared to the controller interval
-            long perThreadAvgBlockTime = blockedOnNewTaskMsDiff.currentDiff() / validationExecutor.getCorePoolSize();
-            return perThreadAvgBlockTime > BLOCKED_ON_NEW_TASK_THRESHOLD_MS;
+            return blockedOnNewTaskMsDiff.currentDiff() / validationExecutor.getCorePoolSize();
+        }
+
+        // What percentage of the interval each thread doing something (not being blocked waiting on task) on average.
+        private int threadAvgOccupationPercentage()
+        {
+            long timeOccupied = CONTROLLER_INTERVAL_MS - perThreadAvgBlockTime();
+            float occupationPercentage = 100f * ((float)timeOccupied / (float)CONTROLLER_INTERVAL_MS);
+            int value = Math.round(occupationPercentage);
+            return value < 0 ? 0 : (value > 100 ? 100 : value);
+        }
+
+        private boolean hasSignificantBlockOnNewTaskSinceLastCheck()
+        {
+            return perThreadAvgBlockTime() > BLOCKED_ON_NEW_TASK_THRESHOLD_MS;
         }
 
         private boolean canIncreaseThreads()
@@ -476,7 +499,17 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             processingWaitTimeMsDiff.update(TimeUnit.NANOSECONDS.toMillis(processingWaitTimeNanos.get()));
             limiterWaitTimeMsDiff.update(TimeUnit.NANOSECONDS.toMillis(limiterWaitTimeNanos.get()));
             dataValidatedBytesDiff.update(dataValidatedBytes.get());
+
+            // We want to know how long thread have spend blocking for new task during the interval. This is composed
+            // of 2 parts: what has been reported in blockedOnNewTaskTimeNanos, and those thread that are currently
+            // waiting and haven't reported how long they are blocked.
+            // Note that the following is racy, but the reporter is not so precise that this should really matter.
             blockedOnNewTaskMsDiff.update(TimeUnit.NANOSECONDS.toMillis(blockedOnNewTaskTimeNanos.get()));
+            for (long start : waitingOnTaskThreads.values())
+            {
+                long totalBlockedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+                blockedOnNewTaskMsDiff.addToCurrentDiff(Math.min(totalBlockedMs, CONTROLLER_INTERVAL_MS));
+            }
         }
 
         public void run()
@@ -530,11 +563,13 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             }
 
             if (logger.isDebugEnabled())
-                logger.debug("NodeSync executor controller: recent rate={} (configured={}), {} threads and {} in-flight validations: {}",
+                logger.debug("NodeSync executor controller: recent rate={} (configured={}), {} thread(s) and {} maximum " +
+                             "in-flight validation(s), ~{}% avg thread occupation: {}",
                              Units.toString((long)recentRate, RateUnit.B_S),
                              Units.toString((long)targetRate, RateUnit.B_S),
                              validationExecutor.getCorePoolSize(),
                              maxInFlightValidations,
+                             threadAvgOccupationPercentage(),
                              action);
 
             switch (action)
@@ -622,6 +657,11 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         {
             currentDiff = currentTotal - previousTotal;
             previousTotal = currentTotal;
+        }
+
+        private void addToCurrentDiff(long value)
+        {
+            this.currentDiff += value;
         }
 
         private long currentDiff()
