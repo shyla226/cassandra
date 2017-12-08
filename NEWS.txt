@@ -91,6 +91,8 @@ Deprecation
 
 New features
 ------------
+   - SSTableDump now supports the -l option to output each partition as it's own json object
+     See CASSANDRA-13848 for more detail
    - The currentTimestamp, currentDate, currentTime and currentTimeUUID functions have been added.
      See CASSANDRA-13132
    - Support for arithmetic operations between `timestamp`/`date` and `duration` has been added.

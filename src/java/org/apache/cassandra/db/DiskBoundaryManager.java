@@ -49,39 +49,25 @@ public class DiskBoundaryManager
     public DiskBoundaries getDiskBoundaries(ColumnFamilyStore cfs, Directories directories)
     {
         if (!cfs.getPartitioner().splitter().isPresent() || !SPLIT_SSTABLES_BY_TOKEN_RANGE)
-            return new DiskBoundaries(directories.getWriteableLocations(), null, -1, -1);
-        // copy the reference to avoid getting nulled out by invalidate() below
-        // - it is ok to race, compaction will move any incorrect tokens to their correct places, but
-        // returning null would be bad
-        DiskBoundaries db = diskBoundaries.get(directories);
-        if (isOutOfDate(db))
+            return new DiskBoundaries(cfs.getDirectories().getWriteableLocations(), BlacklistedDirectories.getDirectoriesVersion());
+
+        DiskBoundaries boundaries = diskBoundaries.get(directories);
+        if (boundaries == null || boundaries.isOutOfDate())
         {
             synchronized (this)
             {
-                db = diskBoundaries.get(directories);
-                if (isOutOfDate(db))
+                boundaries = diskBoundaries.get(directories);
+                if (boundaries == null || boundaries.isOutOfDate())
                 {
-                    logger.debug("Refreshing disk boundary cache of {} for {}.{}", directories, cfs.keyspace.getName(), cfs.getTableName());
-                    DiskBoundaries oldBoundaries = db;
-                    db = getDiskBoundaryValue(cfs, directories);
-                    diskBoundaries.put(directories, db);
-                    logger.debug("Updating boundaries of {} from {} to {} for {}.{}", directories, oldBoundaries, diskBoundaries, cfs.keyspace.getName(), cfs.getTableName());
+                    logger.debug("Refreshing disk boundary cache for {}.{}", cfs.keyspace.getName(), cfs.getTableName());
+                    DiskBoundaries oldBoundaries = boundaries;
+                    boundaries = getDiskBoundaryValue(cfs, directories);
+                    diskBoundaries.put(directories, boundaries);
+                    logger.debug("Updating boundaries from {} to {} for {}.{}", oldBoundaries, boundaries, cfs.keyspace.getName(), cfs.getTableName());
                 }
             }
         }
-        return db;
-    }
-
-    /**
-     * check if the given disk boundaries are out of date due not being set or to having too old diskVersion/ringVersion
-     */
-    private boolean isOutOfDate(DiskBoundaries db)
-    {
-        if (db == null)
-            return true;
-        long currentRingVersion = StorageService.instance.getTokenMetadata().getRingVersion();
-        int currentDiskVersion = BlacklistedDirectories.getDirectoriesVersion();
-        return currentRingVersion != db.ringVersion || currentDiskVersion != db.directoriesVersion;
+        return boundaries;
     }
 
     private static DiskBoundaries getDiskBoundaryValue(ColumnFamilyStore cfs, Directories directories)
@@ -123,10 +109,8 @@ public class DiskBoundaryManager
             return new DiskBoundaries(dirs, null, ringVersion, directoriesVersion);
 
         List<Range<Token>> sortedLocalRanges = Range.sort(localRanges);
-
-        return createDiskBoundaries(cfs, ringVersion, directoriesVersion, dirs, sortedLocalRanges);
+        return createDiskBoundaries(cfs, directories.getWriteableLocations(), sortedLocalRanges);
     }
-
 
     @VisibleForTesting
     public static DiskBoundaries createDiskBoundaries(ColumnFamilyStore cfs, Directories.DataDirectory[] dirs,
@@ -135,13 +119,6 @@ public class DiskBoundaryManager
         List<PartitionPosition> positions = getDiskBoundaries(sortedLocalRanges, cfs.getPartitioner(), dirs);
         return new DiskBoundaries(dirs, positions, StorageService.instance.getTokenMetadata().getRingVersion(),
                                   BlacklistedDirectories.getDirectoriesVersion());
-    }
-
-    private static DiskBoundaries createDiskBoundaries(ColumnFamilyStore cfs, long ringVersion, int directoriesVersion,
-                                                       Directories.DataDirectory[] dirs, List<Range<Token>> sortedLocalRanges)
-    {
-        List<PartitionPosition> positions = getDiskBoundaries(sortedLocalRanges, cfs.getPartitioner(), dirs);
-        return new DiskBoundaries(dirs, positions, ringVersion, directoriesVersion);
     }
 
     /**
@@ -172,6 +149,7 @@ public class DiskBoundaryManager
 
     public void invalidate()
     {
+        diskBoundaries.forEach((k, v) -> v.invalidate());
         diskBoundaries.clear();
     }
 }
