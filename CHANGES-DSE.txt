@@ -118,6 +118,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no internal DB ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no internal DB ticket)
 Merged from dse5.0:
+ * Register SizeEstimatesRecorder earlier and enable cleanup of invalid entries (DB-913)
  * Only serialize failed batchlog replay mutations to hints (DB-1377)
  * nodetool arguments with spaces print script errors (DB-1183)
  * Change token allocation to use RF=1 method when RF equals rack count (DB-1253)

@@ -1047,7 +1047,7 @@ public final class SystemKeyspace
                                    tokenMap.putAll(peer, deserializeTokens(row.getSet("tokens", UTF8Type.instance)));
                            }
                            return tokenMap;
-                         });
+                       });
     }
 
     /**
@@ -1581,6 +1581,33 @@ public final class SystemKeyspace
     {
         String cql = format("DELETE FROM %s WHERE keyspace_name = ? AND table_name = ?", SizeEstimates.toString());
         return TPCUtils.toFutureVoid(executeInternalAsync(cql, keyspace, table));
+    }
+
+    /**
+     * Clears size estimates for a keyspace (used to manually clean when we miss a keyspace drop)
+     */
+    public static CompletableFuture<Void> clearSizeEstimates(String keyspace)
+    {
+        String cql = String.format("DELETE FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SYSTEM_KEYSPACE_NAME, SIZE_ESTIMATES);
+        return TPCUtils.toFutureVoid(executeInternalAsync(cql, keyspace));
+    }
+
+    /**
+     * @return A multimap from keyspace to table for all tables with entries in size estimates
+     */
+    public static synchronized CompletableFuture<SetMultimap<String, String>> getTablesWithSizeEstimates()
+    {
+        SetMultimap<String, String> keyspaceTableMap = HashMultimap.create();
+        String cql = String.format("SELECT keyspace_name, table_name FROM %s.%s", SchemaConstants.SYSTEM_KEYSPACE_NAME, SIZE_ESTIMATES);
+
+        return TPCUtils.toFuture(executeInternalAsync(cql))
+                       .thenApply(resultSet -> {
+                           for (UntypedResultSet.Row row : resultSet)
+                           {
+                               keyspaceTableMap.put(row.getString("keyspace_name"), row.getString("table_name"));
+                           }
+                           return keyspaceTableMap;
+                       });
     }
 
     public static CompletableFuture<Void> updateAvailableRanges(String keyspace, Collection<Range<Token>> completedRanges)
