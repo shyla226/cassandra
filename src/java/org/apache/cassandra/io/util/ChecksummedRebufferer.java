@@ -19,6 +19,8 @@
 package org.apache.cassandra.io.util;
 
 import java.io.IOException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -35,25 +37,44 @@ class ChecksummedRebufferer extends BufferManagingRebufferer
     }
 
     @Override
+    public CompletableFuture<BufferHolder> rebufferAsync(long position)
+    {
+        throw new UnsupportedOperationException("Not yet implemented");
+    }
+
+    @Override
     public BufferHolder rebuffer(long desiredPosition)
     {
-        if (desiredPosition != offset + buffer.position())
+        if (desiredPosition != validator.getFilePointer())
             validator.seek(desiredPosition);
 
         // align with buffer size, as checksums were computed in chunks of buffer size each.
-        offset = alignedPosition(desiredPosition);
-        source.readChunk(offset, buffer).join();
+        BufferHolder ret = newBufferHolder(alignedPosition(desiredPosition));
 
         try
         {
-            validator.validate(ByteBufferUtil.getArray(buffer), 0, buffer.remaining());
+            source.readChunk(ret.offset(), ret.buffer()).join();
+        }
+        catch (CompletionException t)
+        {
+            ret.release();
+            if (t.getCause() != null && t.getCause() instanceof RuntimeException)
+                throw (RuntimeException) t.getCause();
+
+            throw t;
+        }
+
+        try
+        {
+            validator.validate(ByteBufferUtil.getArray(ret.buffer()), 0, ret.buffer().remaining());
         }
         catch (IOException e)
         {
+            ret.release();
             throw new CorruptFileException(e, channel().filePath());
         }
 
-        return this;
+        return ret;
     }
 
     @Override
@@ -72,6 +93,6 @@ class ChecksummedRebufferer extends BufferManagingRebufferer
     @Override
     long alignedPosition(long desiredPosition)
     {
-        return (desiredPosition / buffer.capacity()) * buffer.capacity();
+        return (desiredPosition / source.chunkSize()) * source.chunkSize();
     }
 }

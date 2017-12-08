@@ -18,14 +18,24 @@
 
 package org.apache.cassandra.io.util;
 
-public class SpinningDiskOptimizationStrategy implements DiskOptimizationStrategy
+class SpinningDiskOptimizationStrategy extends DiskOptimizationStrategy
 {
+    SpinningDiskOptimizationStrategy(int minBufferSize, int maxBufferSize)
+    {
+        super(minBufferSize, maxBufferSize);
+    }
+
+    public String diskType()
+    {
+        return "Spinning disks (non-SSD)";
+    }
+
     /**
      * For spinning disks always add one page.
      */
     @Override
     public int bufferSize(long recordSize)
     {
-        return roundBufferSize(recordSize + 4096);
+        return roundBufferSize(recordSize + minBufferSize);
     }
 }

@@ -219,7 +219,7 @@ public class DatabaseDescriptor
 
         Config.setClientMode(true);
         conf = new Config();
-        diskOptimizationStrategy = new SpinningDiskOptimizationStrategy();
+        diskOptimizationStrategy = DiskOptimizationStrategy.create(conf);
     }
 
     public static boolean isClientInitialized()
@@ -448,7 +448,7 @@ public class DatabaseDescriptor
             throw new ConfigurationException("native_transport_max_frame_size_in_mb must be positive, but was " + conf.native_transport_max_frame_size_in_mb, false);
         else if (conf.native_transport_max_frame_size_in_mb >= 2048)
             throw new ConfigurationException("native_transport_max_frame_size_in_mb must be smaller than 2048, but was "
-                    + conf.native_transport_max_frame_size_in_mb, false);
+                                             + conf.native_transport_max_frame_size_in_mb, false);
 
         // if data dirs, commitlog dir, or saved caches dir are set in cassandra.yaml, use that.  Otherwise,
         // use -Dcassandra.storagedir (set in cassandra-env.sh) as the parent dir for data/, commitlog/,
@@ -679,10 +679,10 @@ public class DatabaseDescriptor
 
         if (conf.commitlog_segment_size_in_mb <= 0)
             throw new ConfigurationException("commitlog_segment_size_in_mb must be positive, but was "
-                    + conf.commitlog_segment_size_in_mb, false);
+                                             + conf.commitlog_segment_size_in_mb, false);
         else if (conf.commitlog_segment_size_in_mb >= 2048)
             throw new ConfigurationException("commitlog_segment_size_in_mb must be smaller than 2048, but was "
-                    + conf.commitlog_segment_size_in_mb, false);
+                                             + conf.commitlog_segment_size_in_mb, false);
 
         if (conf.max_mutation_size_in_kb == null)
             conf.max_mutation_size_in_kb = conf.commitlog_segment_size_in_mb * 1024 / 2;
@@ -701,20 +701,12 @@ public class DatabaseDescriptor
             throw new ConfigurationException("max_value_size_in_mb must be positive", false);
         else if (conf.max_value_size_in_mb >= 2048)
             throw new ConfigurationException("max_value_size_in_mb must be smaller than 2048, but was "
-                    + conf.max_value_size_in_mb, false);
+                                             + conf.max_value_size_in_mb, false);
 
-        switch (conf.disk_optimization_strategy)
-        {
-            case ssd:
-                diskOptimizationStrategy = new SsdDiskOptimizationStrategy(conf.disk_optimization_page_cross_chance);
-                break;
-            case spinning:
-                diskOptimizationStrategy = new SpinningDiskOptimizationStrategy();
-                break;
-        }
+        diskOptimizationStrategy = DiskOptimizationStrategy.create(conf);
         logger.info("Assuming {} based on disk_optimization_strategy YAML property. Please update this property if this is "
                     + "incorrect as a number of optimizations depend on it and an incorrect value may result in degraded performances.",
-                    diskOptimizationStrategy instanceof SsdDiskOptimizationStrategy ? "Solid-State drives (SSD)" : "Spinning disks (non-SSD)");
+                    diskOptimizationStrategy.diskType());
 
         if (conf.max_memory_to_lock_mb < 0)
             throw new ConfigurationException("max_memory_to_lock_mb must be be >= 0");
@@ -1696,7 +1688,10 @@ public class DatabaseDescriptor
         conf.compaction_throughput_mb_per_sec = value;
     }
 
-    public static long getCompactionLargePartitionWarningThreshold() { return conf.compaction_large_partition_warning_threshold_mb * 1024L * 1024L; }
+    public static long getCompactionLargePartitionWarningThreshold()
+    {
+        return conf.compaction_large_partition_warning_threshold_mb * 1024L * 1024L;
+    }
 
     public static int getConcurrentValidations()
     {
@@ -2263,7 +2258,7 @@ public class DatabaseDescriptor
 
     public static boolean isSSD()
     {
-        return FileUtils.isSSD();
+        return FileUtils.isSSD(conf.disk_optimization_strategy == Config.DiskOptimizationStrategy.ssd, getAllDataFileLocations());
     }
 
     public static double getDiskOptimizationEstimatePercentile()

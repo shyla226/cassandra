@@ -20,6 +20,12 @@
  */
 package org.apache.cassandra.io.util;
 
+import java.util.concurrent.CompletableFuture;
+
+import com.google.common.primitives.Ints;
+
+import org.apache.cassandra.concurrent.TPCUtils;
+
 /**
  * Rebufferer for memory-mapped files. Thread-safe and shared among reader instances.
  * This is simply a thin wrapper around MmappedRegions as the buffers there can be used directly after duplication.
@@ -40,6 +46,16 @@ public class MmapRebufferer extends AbstractReaderFileProxy implements Rebuffere
         return regions.floor(position);
     }
 
+    public CompletableFuture<BufferHolder> rebufferAsync(long position)
+    {
+        return TPCUtils.completedFuture(rebuffer(position));
+    }
+
+    public int rebufferSize()
+    {
+        return Ints.checkedCast(fileLength);
+    }
+
     @Override
     public BufferHolder rebuffer(long position, ReaderConstraint constraint)
     {
@@ -52,6 +68,12 @@ public class MmapRebufferer extends AbstractReaderFileProxy implements Rebuffere
     public Rebufferer instantiateRebufferer()
     {
         return this;
+    }
+
+    @Override
+    public boolean supportsPrefetch()
+    {
+        return false; // no need to prefetch for mmap, OS does that
     }
 
     @Override

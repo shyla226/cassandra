@@ -22,6 +22,9 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
@@ -30,6 +33,7 @@ import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.Throwables;
@@ -44,6 +48,8 @@ import org.apache.cassandra.utils.flow.FlowSubscriptionRecipient;
  */
 public class AsyncSSTableScanner extends FlowSource<FlowableUnfilteredPartition> implements FlowSubscriptionRecipient
 {
+    private static final Logger logger = LoggerFactory.getLogger(AsyncSSTableScanner.class);
+
     private final SSTableReader sstable;
     private final RandomAccessReader dfile;
     private final List<AbstractBounds<PartitionPosition>> ranges;
@@ -63,12 +69,15 @@ public class AsyncSSTableScanner extends FlowSource<FlowableUnfilteredPartition>
         assert sstable != null;
 
         this.sstable = sstable;
-        this.dfile = sstable.openDataReader(Rebufferer.ReaderConstraint.ASYNC);
+        this.dfile = sstable.openDataReader(Rebufferer.ReaderConstraint.ASYNC, DiskOptimizationStrategy.NUM_READ_AHEAD_BUFFERS);
         this.columns = columns;
         this.dataRange = dataRange;
         this.ranges = ranges;
         this.listener = listener;
         this.sourceFlow = flow();
+
+        if (logger.isTraceEnabled())
+            logger.trace("Scanning {} with {}", dfile.getPath(), dfile);
     }
 
     public static AsyncSSTableScanner getScanner(SSTableReader sstable)

@@ -63,6 +63,11 @@ public class DataIntegrityMetadata
             reader.seek(((start / chunkSize) * 4L) + 4); // 8 byte checksum per chunk + 4 byte header/chunkLength
         }
 
+        public long getFilePointer()
+        {
+            return reader.getFilePointer();
+        }
+
         public long chunkStart(long offset)
         {
             long startChunk = offset / chunkSize;

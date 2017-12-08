@@ -77,6 +77,12 @@ public class ChunkCacheMocks
         {
             return new TestRebufferer(wrapped.instantiateRebufferer(), rand);
         }
+
+        @Override
+        public boolean supportsPrefetch()
+        {
+            return false;
+        }
     }
 
     private static final class TestRebufferer implements Rebufferer
@@ -115,6 +121,16 @@ public class ChunkCacheMocks
             return wrapped.rebuffer(position);
         }
 
+        public CompletableFuture<BufferHolder> rebufferAsync(long position)
+        {
+            return wrapped.rebufferAsync(position);
+        }
+
+        public int rebufferSize()
+        {
+            return wrapped.rebufferSize();
+        }
+
         public void closeReader()
         {
             wrapped.closeReader();
@@ -124,7 +140,7 @@ public class ChunkCacheMocks
         {
             if (constraint == ReaderConstraint.ASYNC && rand.nextDouble() < 0.25)
             {
-                CompletableFuture<ChunkCache.Buffer> buf = new CompletableFuture<>();
+                CompletableFuture<Void> buf = new CompletableFuture<>();
 
                 if (rand.nextDouble() < 0.5)
                     buf.complete(null); // mark ready, so that reload starts immediately

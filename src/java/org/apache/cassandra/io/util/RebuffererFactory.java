@@ -29,4 +29,9 @@ package org.apache.cassandra.io.util;
 public interface RebuffererFactory extends ReaderFileProxy
 {
     Rebufferer instantiateRebufferer();
+
+    /**
+     * @return true if the rebufferers instantiated by this factory support pre-fetch.
+     */
+    boolean supportsPrefetch();
 }

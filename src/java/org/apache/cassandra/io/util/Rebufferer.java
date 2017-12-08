@@ -45,6 +45,20 @@ public interface Rebufferer extends ReaderFileProxy
     }
 
     /**
+     * Same as {@link #rebuffer(long)} but asynchronous. All observations for that method still hold.
+     *
+     * @param position - the position to which to rebuffer to.
+     *
+     * @return a future that upon completion has a valid {@link BufferHolder}.
+     */
+    CompletableFuture<BufferHolder> rebufferAsync(long position);
+
+    /**
+     * @return - the size of the buffers that will be returned.
+     */
+    int rebufferSize();
+
+    /**
      * Called when a reader is closed. Should clean up reader-specific data.
      */
     void closeReader();
@@ -75,12 +89,14 @@ public interface Rebufferer extends ReaderFileProxy
     {
         private static final long serialVersionUID = 1L;
 
-        private final CompletableFuture<ChunkCache.Buffer> asyncBuffer;
+        private final CompletableFuture<Void> cacheReady;
 
-        public NotInCacheException(CompletableFuture<ChunkCache.Buffer> asyncBuffer, String path, long position)
+        public NotInCacheException(CompletableFuture<Void> cacheReady, String path, long position)
         {
             super(String.format("Requested data (%s@%d) is not in cache.", path, position));
-            this.asyncBuffer = asyncBuffer;
+            this.cacheReady = cacheReady;
+
+            ChunkCache.instance.metrics.notInCacheExceptions.mark();
         }
 
         @Override
@@ -99,9 +115,9 @@ public interface Rebufferer extends ReaderFileProxy
         public void accept(Runnable onReady, Function<Throwable, Void> onError, TPCScheduler scheduler)
         {
             //Registers a callback to be issued when the async buffer is ready
-            assert asyncBuffer != null;
+            assert cacheReady != null;
 
-            if (asyncBuffer.isDone() && !asyncBuffer.isCompletedExceptionally())
+            if (cacheReady.isDone() && !cacheReady.isCompletedExceptionally())
             {
                 onReady.run();
             }
@@ -110,14 +126,14 @@ public interface Rebufferer extends ReaderFileProxy
                 //Track the ThreadLocals
                 Runnable wrappedOnReady = TPCRunnable.wrap(onReady, ExecutorLocals.create(), TPCTaskType.READ_DISK_ASYNC, scheduler);
 
-                asyncBuffer.thenRunAsync(wrappedOnReady, scheduler.getExecutor())
-                           .exceptionally(onError);
+                cacheReady.thenRunAsync(wrappedOnReady, scheduler.getExecutor())
+                          .exceptionally(onError);
             }
         }
 
         public String toString()
         {
-            return "NotInCache " + asyncBuffer;
+            return "NotInCache " + cacheReady;
         }
     }
 

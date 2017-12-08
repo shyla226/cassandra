@@ -20,9 +20,11 @@ package org.apache.cassandra.io.tries;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.CompletableFuture;
 
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.io.util.AsynchronousChannelProxy;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.Rebufferer;
@@ -185,6 +187,16 @@ public class TrieBuilderTest
         public BufferHolder rebuffer(long position, ReaderConstraint rc)
         {
             return this;
+        }
+
+        public CompletableFuture<BufferHolder> rebufferAsync(long position)
+        {
+            return TPCUtils.completedFuture(rebuffer(position));
+        }
+
+        public int rebufferSize()
+        {
+            return buffer.capacity();
         }
 
         public ByteBuffer buffer()
