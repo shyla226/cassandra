@@ -33,7 +33,7 @@ public class TimeUUIDType extends TemporalType<UUID>
 
     TimeUUIDType()
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, 16);
     } // singleton
 
     public boolean isEmptyValueMeaningless()
@@ -41,6 +41,7 @@ public class TimeUUIDType extends TemporalType<UUID>
         return true;
     }
 
+    @Override
     public int compareCustom(ByteBuffer b1, ByteBuffer b2)
     {
         // Compare for length
@@ -143,12 +144,6 @@ public class TimeUUIDType extends TemporalType<UUID>
     public TypeSerializer<UUID> getSerializer()
     {
         return TimeUUIDSerializer.instance;
-    }
-
-    @Override
-    public int valueLengthIfFixed()
-    {
-        return 16;
     }
 
     @Override

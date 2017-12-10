@@ -18,9 +18,7 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.List;
+import java.util.*;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Term;
@@ -60,18 +58,13 @@ public class ReversedType<T> extends AbstractType<T>
 
     private ReversedType(AbstractType<T> baseType)
     {
-        super(ComparisonType.CUSTOM);
+        super(baseType.comparisonType, baseType.valueLengthIfFixed(), baseType.fixedSizeType, baseType.fixedCompareReturns, true);
         this.baseType = baseType;
     }
 
     public boolean isEmptyValueMeaningless()
     {
         return baseType.isEmptyValueMeaningless();
-    }
-
-    public int compareCustom(ByteBuffer o1, ByteBuffer o2)
-    {
-        return baseType.compare(o2, o1);
     }
 
     /**
@@ -157,18 +150,6 @@ public class ReversedType<T> extends AbstractType<T>
     public boolean referencesUserType(String userTypeName)
     {
         return baseType.referencesUserType(userTypeName);
-    }
-
-    @Override
-    public int valueLengthIfFixed()
-    {
-        return baseType.valueLengthIfFixed();
-    }
-
-    @Override
-    public boolean isReversed()
-    {
-        return true;
     }
 
     @Override

@@ -27,9 +27,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnSpecification;
@@ -48,7 +45,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ByteSource;
 
-import static org.apache.cassandra.db.marshal.AbstractType.ComparisonType.CUSTOM;
+import static org.apache.cassandra.db.marshal.AbstractType.ComparisonType.*;
 
 /**
  * Specifies a Comparator for a specific type of ByteBuffer.
@@ -61,9 +58,7 @@ import static org.apache.cassandra.db.marshal.AbstractType.ComparisonType.CUSTOM
 @Unmetered
 public abstract class AbstractType<T> implements Comparator<ByteBuffer>, AssignmentTestable
 {
-    private static final Logger logger = LoggerFactory.getLogger(AbstractType.class);
-
-    public final Comparator<ByteBuffer> reverseComparator;
+    public static final int VARIABLE_LENGTH = -1;
 
     public enum ComparisonType
     {
@@ -71,10 +66,22 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
          * This type should never be compared
          */
         NOT_COMPARABLE,
+
         /**
          * This type is always compared by its sequence of unsigned bytes
          */
         BYTE_ORDER,
+
+        /**
+         * Fixed return comparison.
+         */
+        FIXED_COMPARE,
+
+        /**
+         * This type can be compared by deserializing the value and comparing.
+         */
+        FIXED_SIZE_VALUE,
+
         /**
          * This type can only be compared by calling the type's compareCustom() method, which may be expensive.
          * Support for this may be removed in a major release of Cassandra, however upgrade facilities will be
@@ -83,18 +90,49 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         CUSTOM
     }
 
-    public final ComparisonType comparisonType;
-    public final boolean isByteOrderComparable;
+    public enum FixedSizeType
+    {
+        BOOLEAN, BYTE, SHORT, INT32, LONG, FLOAT, DOUBLE, NONE
+    }
 
-    protected AbstractType(ComparisonType comparisonType)
+    protected final ComparisonType comparisonType;
+    private final int valueLength;
+    protected final FixedSizeType fixedSizeType;
+    protected final int fixedCompareReturns;
+    private final boolean isReversed;
+
+    protected AbstractType(ComparisonType comparisonType, int valueLength)
+    {
+        this(comparisonType, valueLength, false);
+    }
+
+    protected AbstractType(ComparisonType comparisonType, int valueLength, boolean isReversed)
+    {
+        this(comparisonType, valueLength, FixedSizeType.NONE, 0, isReversed);
+    }
+
+    protected AbstractType(ComparisonType comparisonType, int valueLength, FixedSizeType fixedSizeType, int fixedCompareReturns)
+    {
+        this(comparisonType, valueLength, fixedSizeType, fixedCompareReturns, false);
+    }
+
+    protected AbstractType(ComparisonType comparisonType, int valueLength, FixedSizeType fixedSizeType, int fixedCompareReturns, boolean isReversed)
     {
         this.comparisonType = comparisonType;
-        this.isByteOrderComparable = comparisonType == ComparisonType.BYTE_ORDER;
-        reverseComparator = (o1, o2) -> AbstractType.this.compare(o2, o1);
+        this.valueLength = valueLength;
+        this.fixedSizeType = fixedSizeType;
+        this.fixedCompareReturns = fixedCompareReturns;
+        this.isReversed = isReversed;
+
+        if (comparisonType == FIXED_SIZE_VALUE && fixedSizeType == FixedSizeType.NONE)
+            throw new IllegalArgumentException("FIXED_SIZE_VALUE must have valid type");
+        if (comparisonType != FIXED_SIZE_VALUE && fixedSizeType != FixedSizeType.NONE)
+            throw new IllegalArgumentException("only FIXED_SIZE_VALUE can have fixed sized type");
+
         try
         {
             Method custom = getClass().getMethod("compareCustom", ByteBuffer.class, ByteBuffer.class);
-            if ((custom.getDeclaringClass() == AbstractType.class) == (comparisonType == CUSTOM))
+            if ((custom.getDeclaringClass() == AbstractType.class) == (comparisonType == CUSTOM) && !isReversed)
                 throw new IllegalStateException((comparisonType == CUSTOM ? "compareCustom must be overridden if ComparisonType is CUSTOM"
                                                                          : "compareCustom should not be overridden if ComparisonType is not CUSTOM")
                                                 + " (" + getClass().getSimpleName() + ")");
@@ -164,19 +202,61 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         getSerializer().validate(bytes);
     }
 
+    @Override
     public final int compare(ByteBuffer left, ByteBuffer right)
     {
-        return isByteOrderComparable
-               ? FastByteOperations.compareUnsigned(left, right)
-               : compareCustom(left, right);
+        if (comparisonType == FIXED_COMPARE)
+            return fixedCompareReturns;
+
+        if (isReversed)
+        {
+            ByteBuffer t = left;
+            left = right;
+            right = t;
+        }
+
+        if (!left.hasRemaining() || !right.hasRemaining())
+            return left.hasRemaining() ? 1 : right.hasRemaining() ? -1 : 0;
+
+        if (comparisonType == FIXED_SIZE_VALUE)
+        {
+            switch (fixedSizeType)
+            {
+                case BOOLEAN:
+                    return BooleanType.compareType(left, right);
+                case BYTE:
+                    return ByteType.compareType(left, right);
+                case SHORT:
+                    return ShortType.compareType(left, right);
+                case INT32:
+                    return Int32Type.compareType(left, right);
+                case FLOAT:
+                    return FloatType.compareType(left, right);
+                case LONG:
+                    return LongType.compareType(left, right);
+                case DOUBLE:
+                    return DoubleType.compareType(left, right);
+                default:
+                    throw new IllegalStateException();
+            }
+        }
+
+        if (comparisonType == BYTE_ORDER)
+            return FastByteOperations.compareUnsigned(left, right);
+
+        if(isReversed)
+            return ((ReversedType)this).baseType.compareCustom(left, right);
+        else
+            return compareCustom(left, right);
     }
 
     /**
-     * Implement IFF ComparisonType is CUSTOM
+     * Implement IFF ComparisonType is CUSTOM. <p>
      *
-     * Compares the ByteBuffer representation of two instances of this class,
-     * for types where this cannot be done by simple in-order comparison of the
-     * unsigned bytes
+     * No need to handle the common empty buffer case, which is tackled in {@link #compare(ByteBuffer, ByteBuffer)}. <p>
+     *
+     * Compares the ByteBuffer representation of two instances of this class, for types where this cannot be done by
+     * simple in-order comparison of the unsigned bytes. <p>
      *
      * Standard Java compare semantics
      */
@@ -247,9 +327,9 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return isCollection() && !isMultiCell();
     }
 
-    public boolean isReversed()
+    public final boolean isReversed()
     {
-        return false;
+        return isReversed;
     }
 
     public static AbstractType<?> parseDefaultParameters(AbstractType<?> baseType, TypeParser parser) throws SyntaxException
@@ -409,9 +489,9 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     /**
      * The length of values for this type if all values are of fixed length, -1 otherwise.
      */
-    public int valueLengthIfFixed()
+    public final int valueLengthIfFixed()
     {
-        return -1;
+        return valueLength;
     }
 
     // This assumes that no empty values are passed
@@ -430,11 +510,6 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return valueLengthIfFixed() >= 0
              ? value.remaining()
              : TypeSizes.sizeofWithVIntLength(value);
-    }
-
-    public ByteBuffer readValue(DataInputPlus in) throws IOException
-    {
-        return readValue(in, Integer.MAX_VALUE);
     }
 
     public ByteBuffer readValue(DataInputPlus in, int maxValueSize) throws IOException
@@ -479,9 +554,6 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
 
     /**
      * Tests whether a CQL value having this type can be assigned to the provided receiver.
-     *
-     * @param keyspace the keyspace from which the receiver is.
-     * @param receiver the receiver for which we want to test type compatibility with.
      */
     public AssignmentTestable.TestResult testAssignment(AbstractType<?> receiverType)
     {
@@ -529,11 +601,9 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
 
     public void checkComparable()
     {
-        switch (comparisonType)
-        {
-            case NOT_COMPARABLE:
-                throw new IllegalArgumentException(this + " cannot be used in comparisons, so cannot be used as a clustering column");
-        }
+        if (comparisonType == NOT_COMPARABLE)
+            throw new IllegalArgumentException(this + " cannot be used in comparisons, so cannot be used as a clustering column");
+
     }
 
     public final AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
@@ -547,14 +617,11 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      */
     public ByteSource asByteComparableSource(ByteBuffer byteBuffer)
     {
-        switch (comparisonType)
-        {
-        case BYTE_ORDER:
+        if (comparisonType == BYTE_ORDER)
             return ByteSource.of(byteBuffer);
-        default:
+        else
             // default is only good for byte comparable
             throw new UnsupportedOperationException(getClass().getSimpleName() + " does not implement asByteComparableSource");
-        }
     }
 
     /**

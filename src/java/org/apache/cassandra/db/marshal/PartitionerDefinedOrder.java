@@ -40,7 +40,7 @@ public class PartitionerDefinedOrder extends AbstractType<ByteBuffer>
 
     public PartitionerDefinedOrder(IPartitioner partitioner)
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, VARIABLE_LENGTH);
         this.partitioner = partitioner;
     }
 
@@ -90,6 +90,7 @@ public class PartitionerDefinedOrder extends AbstractType<ByteBuffer>
         throw new UnsupportedOperationException();
     }
 
+    @Override
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
         // o1 and o2 can be empty so we need to use PartitionPosition, not DecoratedKey

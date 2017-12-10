@@ -21,16 +21,11 @@ import java.nio.ByteBuffer;
 
 import org.apache.commons.lang3.mutable.MutableShort;
 
-import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.Constants;
-import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
-import org.apache.cassandra.serializers.MarshalException;
-import org.apache.cassandra.serializers.ShortSerializer;
-import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.serializers.*;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.ByteSource;
+import org.apache.cassandra.utils.*;
 
 public class ShortType extends NumberType<Short>
 {
@@ -38,16 +33,12 @@ public class ShortType extends NumberType<Short>
 
     ShortType()
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.FIXED_SIZE_VALUE, 2, FixedSizeType.SHORT);
     } // singleton
 
-    public int compareCustom(ByteBuffer o1, ByteBuffer o2)
+    public static int compareType(ByteBuffer o1, ByteBuffer o2)
     {
-        int diff = o1.get(o1.position()) - o2.get(o2.position());
-        if (diff != 0)
-            return diff;
-
-        return ByteBufferUtil.compareUnsigned(o1, o2);
+        return Short.compare(UnsafeByteBufferAccess.getShort(o1), UnsafeByteBufferAccess.getShort(o2));
     }
 
     public ByteBuffer fromString(String source) throws MarshalException
