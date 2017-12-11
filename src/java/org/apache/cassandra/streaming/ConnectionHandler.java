@@ -316,10 +316,12 @@ public class ConnectionHandler
                     {
                         session.messageReceived(message);
                     }
+                    logger.debug("[Stream #{}] Processed {}", session.planId(), message);
                 }
             }
             catch (Throwable t)
             {
+                logger.debug("[Stream #{}] Error", session.planId(), t);
                 JVMStabilityInspector.inspectThrowable(t);
                 session.onError(t);
             }
@@ -378,21 +380,32 @@ public class ConnectionHandler
                     {
                         logger.debug("[Stream #{}] Sending {}", session.planId(), next);
                         sendMessage(out, next);
+                        logger.debug("[Stream #{}] Sent {}", session.planId(), next);
                         if (next.type == StreamMessage.Type.SESSION_FAILED)
+                        {
+                            logger.debug("[Stream #{}] Closing due to SESSION_FAILED", session.planId());
                             close();
+                        }
                     }
                 }
+                logger.debug("[Stream #{}] Closed - {} messages left in queue", session.planId(), messageQueue.size());
 
                 // Sends the last messages on the queue
                 while ((next = messageQueue.poll()) != null)
+                {
+                    logger.debug("[Stream #{}] Closed - Trying to send message {}", session.planId(), next);
                     sendMessage(out, next);
+                }
+                logger.debug("[Stream #{}] Done", session.planId());
             }
             catch (InterruptedException e)
             {
+                logger.debug("[Stream #{}] Interrupted", session.planId());
                 throw new AssertionError(e);
             }
             catch (Throwable e)
             {
+                logger.debug("[Stream #{}] Error", session.planId(), e);
                 session.onError(e);
             }
             finally
