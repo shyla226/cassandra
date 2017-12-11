@@ -96,4 +96,14 @@ public class StreamRequest
         this.ranges = ranges;
         this.columnFamilies.addAll(columnFamilies);
     }
+
+    public String toString()
+    {
+        final StringBuilder sb = new StringBuilder("StreamRequest{");
+        sb.append("keyspace='").append(keyspace).append('\'');
+        sb.append(", ranges=").append(ranges);
+        sb.append(", columnFamilies=").append(columnFamilies);
+        sb.append('}');
+        return sb.toString();
+    }
 }

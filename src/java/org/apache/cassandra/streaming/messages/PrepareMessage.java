@@ -82,12 +82,36 @@ public class PrepareMessage extends StreamMessage
     public String toString()
     {
         final StringBuilder sb = new StringBuilder("Prepare (");
-        sb.append(requests.size()).append(" requests, ");
+        sb.append(requests.size()).append(" requests:[");
+        boolean first = true;
+        for (StreamRequest request : requests)
+        {
+            if (first)
+                first = false;
+            else
+                sb.append(',');
+            sb.append(request);
+        }
+        sb.append("], ");
         int totalFile = 0;
+        long totalSize = 0L;
         for (StreamSummary summary : summaries)
+        {
             totalFile += summary.files;
-        sb.append(" ").append(totalFile).append(" files");
-        sb.append('}');
+            totalSize += summary.totalSize;
+        }
+        sb.append(" ").append(totalFile).append(" files, ");
+        sb.append(" ").append(totalSize).append(" bytes, summaries:[");
+        first = true;
+        for (StreamSummary summary : summaries)
+        {
+            if (first)
+                first = false;
+            else
+                sb.append(',');
+            sb.append(summary.toString());
+        }
+        sb.append("]}");
         return sb.toString();
     }
 }
