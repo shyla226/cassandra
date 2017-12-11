@@ -130,11 +130,7 @@ public class AuditLogger
 
     public void setup()
     {
-        if( writer instanceof CassandraAuditWriter )
-        {
-            CassandraAuditKeyspace.maybeConfigure();
-            CassandraAuditWriter cassandraAuditWriter = (CassandraAuditWriter) this.writer;
-            cassandraAuditWriter.setup();
-        }
+        if (writer != null)
+            writer.setUp();
     }
 }

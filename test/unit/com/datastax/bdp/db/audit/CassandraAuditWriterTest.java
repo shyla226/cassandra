@@ -69,7 +69,7 @@ public class CassandraAuditWriterTest extends CQLTester
     public void testEventLoggingSuccess() throws Exception
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
-        logger.setup();
+        logger.setUp();
         AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl")
                 .consistencyLevel(ConsistencyLevel.SERIAL).build();
@@ -107,7 +107,7 @@ public class CassandraAuditWriterTest extends CQLTester
     public void testNoClEventLoggingSuccess() throws Exception
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
-        logger.setup();
+        logger.setUp();
         AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
 
@@ -143,7 +143,7 @@ public class CassandraAuditWriterTest extends CQLTester
     public void testRetention() throws Exception
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(1, ConsistencyLevel.ONE, BatchingOptions.SYNC);
-        logger.setup();
+        logger.setUp();
         AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
 
@@ -164,7 +164,7 @@ public class CassandraAuditWriterTest extends CQLTester
     {
         // Logging synchronously to avoid sporadic timeouts (DSP-12301)
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
-        logger.setup();
+        logger.setUp();
         AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
 
@@ -178,7 +178,7 @@ public class CassandraAuditWriterTest extends CQLTester
     {
         BatchingOptions options = new BatchingOptions(20, 1, () -> new DefaultBatchController(100, 2));
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
-        logger.setup();
+        logger.setUp();
 
         AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
@@ -201,7 +201,7 @@ public class CassandraAuditWriterTest extends CQLTester
         BatchingOptions options = new BatchingOptions(20, 1, () -> new DefaultBatchController(flushPeriod, batchSize));
 
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
-        logger.setup();
+        logger.setUp();
 
         AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
@@ -217,7 +217,7 @@ public class CassandraAuditWriterTest extends CQLTester
     public void checkNullKeyspace() throws Exception
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
-        logger.setup();
+        logger.setUp();
         AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
                 .batch(UUID.randomUUID()).keyspace(null).operation("insert this").columnFamily("tbl").build();
 
@@ -248,7 +248,7 @@ public class CassandraAuditWriterTest extends CQLTester
 
         Set<Long> uniqueTimes = new HashSet<>();
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
-        logger.setup();
+        logger.setUp();
         for (AuditableEvent event : events)
         {
             logger.recordEvent(event).blockingAwait();
@@ -322,7 +322,7 @@ public class CassandraAuditWriterTest extends CQLTester
             }
         };
 
-        logger.setup();
+        logger.setUp();
 
         Assert.assertEquals(0, batches.size());
 

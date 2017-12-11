@@ -5,15 +5,11 @@
  */
 package com.datastax.bdp.db.audit;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.datastax.bdp.db.audit.cql3.AuditUtils;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Tables;
-import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class CassandraAuditKeyspace
@@ -21,10 +17,6 @@ public class CassandraAuditKeyspace
 
     public static final String NAME = "dse_audit";
     public static final String AUDIT_LOG = "audit_log";
-
-    public static volatile boolean isRecordingConsistency;
-
-    public static final CassandraVersion MIN_LOG_CONSISTENCY_VERSION = new CassandraVersion("5.0.0");
 
     /**
      * Table partitions rows by node/date/day_partition. Currently, day partition is updated
@@ -52,8 +44,6 @@ public class CassandraAuditKeyspace
                     "PRIMARY KEY ((date, node, day_partition), event_time))" +
                     " WITH COMPACTION={'class':'TimeWindowCompactionStrategy'}"
     );
-
-    private static final Logger logger = LoggerFactory.getLogger(CassandraAuditKeyspace.class);
 
     private static Tables tables()
     {

@@ -1110,24 +1110,15 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (doneAuditLoggingSetup.getAndSet(true))
             return Completable.complete();
 
-        AuditLoggingOptions auditLoggingOptions = DatabaseDescriptor.getAuditLoggingOptions();
+        // The setUp is blocking so once it is done everything is ready.
+        DatabaseDescriptor.getAuditLogger().setup();
+        auditLoggingSetupComplete = true;
 
-        if(!auditLoggingOptions.logger.equals(CassandraAuditWriter.class.getName()))
-        {
-            auditLoggingSetupComplete = true;
-            return Completable.complete();
-        }
-
-        return maybeAddOrUpdateKeyspace(CassandraAuditKeyspace.metadata())
-               .doOnComplete(() -> {
-                   DatabaseDescriptor.getAuditLogger().setup();
-                   auditLoggingSetupComplete = true;
-               });
+        return Completable.complete();
     }
 
     public boolean isAuditLoggingSetupComplete() {
-        return auditLoggingSetupComplete ||
-               DatabaseDescriptor.getAuditLoggingOptions().logger != CassandraAuditWriter.class.getName();
+        return auditLoggingSetupComplete;
     }
 
     private Completable maybeAddKeyspace(KeyspaceMetadata ksm)

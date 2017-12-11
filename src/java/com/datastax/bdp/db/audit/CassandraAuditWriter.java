@@ -82,8 +82,10 @@ public class CassandraAuditWriter implements IAuditWriter
 
     private final BatchingOptions batchingOptions;
 
-    public void setup()
+    @Override
+    public void setUp()
     {
+        CassandraAuditKeyspace.maybeConfigure();
         insertStatement = prepareInsertBlocking(retentionPeriod > 0);
     }
 

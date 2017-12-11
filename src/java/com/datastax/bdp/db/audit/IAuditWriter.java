@@ -9,6 +9,15 @@ import io.reactivex.Completable;
 
 public interface IAuditWriter
 {
-    public Completable recordEvent(AuditableEvent event);
-    public boolean isLoggingEnabled();
+    Completable recordEvent(AuditableEvent event);
+
+    boolean isLoggingEnabled();
+
+    /**
+     * Prepares this writer.
+     */
+    default void setUp()
+    {
+        
+    }
 }
