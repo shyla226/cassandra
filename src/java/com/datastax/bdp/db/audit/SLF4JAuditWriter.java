@@ -10,7 +10,6 @@ import java.util.Iterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.Appender;
 import io.reactivex.Completable;
@@ -29,9 +28,8 @@ public class SLF4JAuditWriter implements IAuditWriter
         Logger rootLogger = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
         if (rootLogger == logger)
         {
-            // no explicit logger configured, so disable the plugin
-            // this is a a bit paranoid, as it can't really happen, but
-            // its a pretty cheap test & only done once
+            // no explicit logger configured, so disable the plugin this is a a bit paranoid, as it can't really happen,
+            // but its a pretty cheap test & only done once
             loggingEnabled = false;
             logger.debug("Audit logging disabled (should not use root logger)");
             return;
@@ -39,7 +37,6 @@ public class SLF4JAuditWriter implements IAuditWriter
 
         if (AUDIT_LOG instanceof ch.qos.logback.classic.Logger)
         {
-            LoggerContext ctx = (LoggerContext) LoggerFactory.getILoggerFactory();
             final ch.qos.logback.classic.Logger logbackLogger = (ch.qos.logback.classic.Logger) AUDIT_LOG;
 
 
@@ -55,9 +52,8 @@ public class SLF4JAuditWriter implements IAuditWriter
 
             loggingEnabled = true;
 
-            // We get optimal performance from logback with appenders which write
-            // to file by turning on buffered IO. This ensures that the buffer
-            // is flushed when the server is shutdown.
+            // We get optimal performance from logback with appenders which write to file by turning on buffered IO.
+            // This ensures that the buffer is flushed when the server is shutdown.
             Thread logFlusher = new Thread(new WrappedRunnable(){
                 @Override
                 protected void runMayThrow() throws Exception
