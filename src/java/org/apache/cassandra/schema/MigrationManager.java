@@ -51,7 +51,8 @@ public class MigrationManager
 
     private static final RuntimeMXBean runtimeMXBean = ManagementFactory.getRuntimeMXBean();
 
-    private static final int MIGRATION_DELAY_IN_MS = 60000;
+    private static final int MIGRATION_DELAY_IN_MS = Integer.getInteger("cassandra.migration_delay_in_ms", 60000);
+    private static final int INITIAL_MIGRATION_DELAY_IN_MS = Integer.getInteger("cassandra.initial_migration_delay_in_ms", MIGRATION_DELAY_IN_MS);
 
     public static final int MIGRATION_TASK_WAIT_IN_SECONDS = Integer.getInteger("cassandra.migration_task_wait_in_seconds", 1);
 
@@ -79,7 +80,7 @@ public class MigrationManager
             return;
         }
 
-        if (SchemaConstants.emptyVersion.equals(Schema.instance.getVersion()) || runtimeMXBean.getUptime() < MIGRATION_DELAY_IN_MS)
+        if (SchemaConstants.emptyVersion.equals(Schema.instance.getVersion()) || runtimeMXBean.getUptime() < INITIAL_MIGRATION_DELAY_IN_MS)
         {
             // If we think we may be bootstrapping or have recently started, submit MigrationTask immediately
             logger.debug("Submitting migration task for {} due to {}", endpoint, reason);
