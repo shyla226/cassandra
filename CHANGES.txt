@@ -159,6 +159,7 @@
 
 
 3.11.2
+ * Fix imbalanced disks when replacing node with same address with JBOD (CASSANDRA-14084)
  * Reload compaction strategies when disk boundaries are invalidated (CASSANDRA-13948)
  * Remove OpenJDK log warning (CASSANDRA-13916)
  * Prevent compaction strategies from looping indefinitely (CASSANDRA-14079)
@@ -182,6 +183,8 @@ Merged from 3.0:
  * Provide a JMX call to sync schema with local storage (CASSANDRA-13954)
  * Mishandling of cells for removed/dropped columns when reading legacy files (CASSANDRA-13939)
  * Deserialise sstable metadata in nodetool verify (CASSANDRA-13922)
+Merged from 2.2:
+ * Grab refs during scrub/index redistribution/cleanup (CASSANDRA-13873)
 
 
 3.11.1
