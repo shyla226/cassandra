@@ -1112,7 +1112,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         AuditLoggingOptions auditLoggingOptions = DatabaseDescriptor.getAuditLoggingOptions();
 
-        if(auditLoggingOptions.logger != CassandraAuditWriter.class.getName())
+        if(!auditLoggingOptions.logger.equals(CassandraAuditWriter.class.getName()))
         {
             auditLoggingSetupComplete = true;
             return Completable.complete();
