@@ -726,9 +726,11 @@ public class StreamSession
     private void flushSSTables(Iterable<ColumnFamilyStore> stores)
     {
         List<Future<?>> flushes = new ArrayList<>();
+        logger.debug("[Stream #{}] Flusing {}.", planId(), stores);
         for (ColumnFamilyStore cfs : stores)
             flushes.add(cfs.forceFlush());
         FBUtilities.waitOnFutures(flushes);
+        logger.debug("[Stream #{}] Finished flusing {}.", planId(), stores);
     }
 
     private synchronized void prepareReceiving(StreamSummary summary)
