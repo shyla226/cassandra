@@ -1244,6 +1244,7 @@ public final class SystemKeyspace
 
     public static CompletableFuture<Void> setBootstrapState(BootstrapState state)
     {
+        logger.debug("Setting bootstrap state to {}", state.name());
         return TPCUtils.withLock(GLOBAL_LOCK, () -> {
             if (getBootstrapState() == state)
                 return TPCUtils.completedFuture();

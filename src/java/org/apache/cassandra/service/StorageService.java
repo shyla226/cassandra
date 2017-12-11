@@ -819,6 +819,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void waitForSchema(int delay)
     {
+        logger.debug("Waiting for schema (max {} seconds)", delay);
         // first sleep the delay to make sure we see all our peers
         for (int i = 0; i < delay; i += 1000)
         {
@@ -838,6 +839,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             setMode(Mode.JOINING, "waiting for schema information to complete", true);
             MigrationManager.waitUntilReadyForBootstrap();
         }
+        logger.info("Has schema with version {}", Schema.instance.getVersion());
     }
 
     private void joinTokenRing(int delay) throws ConfigurationException
@@ -882,7 +884,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             PendingRangeCalculatorService.instance.blockUntilFinished();
             setMode(Mode.JOINING, "calculation complete, ready to bootstrap", true);
 
-            logger.debug("... got ring + schema info");
+            logger.debug("... got ring + schema info ({})", Schema.instance.getVersion());
 
             if (useStrictConsistency && !allowSimultaneousMoves() &&
                     (
@@ -988,6 +990,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     for (InetAddress existing : current)
                         Gossiper.instance.replacedEndpoint(existing);
                 }
+
+                logger.info("Startup with data available + schema info ({})", Schema.instance.getVersion());
             }
             else
             {
@@ -2175,7 +2179,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         break;
                     case SCHEMA:
                         updatePeerInfoBlocking(endpoint, "schema_version", UUID.fromString(value.value));
-                        MigrationManager.instance.scheduleSchemaPull(endpoint, epState);
+                        MigrationManager.instance.scheduleSchemaPull(endpoint, epState, String.format("gossip schema version change to %s", value.value));
                         break;
                     case HOST_ID:
                         updatePeerInfoBlocking(endpoint, "host_id", UUID.fromString(value.value));
@@ -2964,12 +2968,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             onChange(endpoint, entry.getKey(), entry.getValue());
         }
-        MigrationManager.instance.scheduleSchemaPull(endpoint, epState);
+        MigrationManager.instance.scheduleSchemaPull(endpoint, epState, "endpoint joined");
     }
 
     public void onAlive(InetAddress endpoint, EndpointState state)
     {
-        MigrationManager.instance.scheduleSchemaPull(endpoint, state);
+        MigrationManager.instance.scheduleSchemaPull(endpoint, state, "endpoint alive");
 
         if (tokenMetadata.isMember(endpoint))
             notifyUp(endpoint);
