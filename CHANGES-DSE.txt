@@ -7,6 +7,7 @@ DSE 5.1.6
  * Do not leak body buffer in case of protocol exceptions and upgrade Netty to 4.0.52 (DB-1257)
  * Ensure that the list and set selectors elements are all of the same type (DB-905)
 Merged from dse5.0:
+ * Make migration-delay configurable (DB-1404)
  * Improved schema migration logging (DB-1410)
  * Register SizeEstimatesRecorder earlier and enable cleanup of invalid entries (DB-913)
  * Only serialize failed batchlog replay mutations to hints (DB-1377)
