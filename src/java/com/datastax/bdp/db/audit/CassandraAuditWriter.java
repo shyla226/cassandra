@@ -373,7 +373,7 @@ public class CassandraAuditWriter implements IAuditWriter
                         interrupt = true;
                         break;
                     }
-                    logger.debug("batching event {} into partition {}", event, event.partition);
+                    logger.trace("batching event {} into partition {}", event, event.partition);
 
                     EventBatch batch = batches.get(event.partition);
                     if (batch == null)
