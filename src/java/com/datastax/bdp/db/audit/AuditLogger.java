@@ -72,7 +72,7 @@ public class AuditLogger
 
         String name = System.getProperty("cassandra.audit_writer", auditLoggingOptions.logger);
         if (!name.contains("."))
-            name = "org.apache.cassandra.audit." + name;
+            name = "com.datastax.bdp.db.audit." + name;
 
         logger.info("Using logger implementation : " + name);
         try
