@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Fix AssertionError in ReadResponse$Serializer.serializedSize (DB-1471)
  * Backport ColumnFilters unit tests and reduce scope of DB-1444 to the case where queried == null (DB-1607)
  * Allow ALTER of system_distributed keyspace tables (DB-1604)
  * Do not fetch columns that are not in the filter fetched set (DB-1444)

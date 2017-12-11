@@ -346,13 +346,28 @@ public abstract class ReadResponse
                     assert response.command != null; // we only serialize LocalDataResponse, which always has the command set
                     try (UnfilteredPartitionIterator iter = response.makeIterator(response.command))
                     {
-                        assert iter.hasNext();
-                        try (UnfilteredRowIterator partition = iter.next())
+                        if (iter.hasNext())
                         {
-                            ByteBufferUtil.writeWithShortLength(partition.partitionKey().getKey(), out);
-                            LegacyLayout.serializeAsLegacyPartition(response.command, partition, out, version);
+                            try (UnfilteredRowIterator partition = iter.next())
+                            {
+                                ByteBufferUtil.writeWithShortLength(partition.partitionKey().getKey(), out);
+                                LegacyLayout.serializeAsLegacyPartition(response.command, partition, out, version);
+                            }
+                            assert !iter.hasNext();
                         }
-                        assert !iter.hasNext();
+                        else
+                        {
+                            if (response.command instanceof SinglePartitionReadCommand)
+                            {
+                                SinglePartitionReadCommand singleRead = (SinglePartitionReadCommand) response.command;
+                                ByteBufferUtil.writeWithShortLength(singleRead.partitionKey().getKey(), out);
+                                out.writeBoolean(false);
+                            }
+                            else
+                            {
+                                throw new AssertionError();
+                            }
+                        }
                     }
                 }
                 return;
@@ -420,13 +435,28 @@ public abstract class ReadResponse
                     assert response.command != null; // we only serialize LocalDataResponse, which always has the command set
                     try (UnfilteredPartitionIterator iter = response.makeIterator(response.command))
                     {
-                        assert iter.hasNext();
-                        try (UnfilteredRowIterator partition = iter.next())
+                        if (iter.hasNext())
                         {
-                            size += ByteBufferUtil.serializedSizeWithShortLength(partition.partitionKey().getKey());
-                            size += LegacyLayout.serializedSizeAsLegacyPartition(response.command, partition, version);
+                            try (UnfilteredRowIterator partition = iter.next())
+                            {
+                                size += ByteBufferUtil.serializedSizeWithShortLength(partition.partitionKey().getKey());
+                                size += LegacyLayout.serializedSizeAsLegacyPartition(response.command, partition, version);
+                            }
+                            assert !iter.hasNext();
                         }
-                        assert !iter.hasNext();
+                        else
+                        {
+                            if (response.command instanceof SinglePartitionReadCommand)
+                            {
+                                SinglePartitionReadCommand singleRead = (SinglePartitionReadCommand) response.command;
+                                size += ByteBufferUtil.serializedSizeWithShortLength(singleRead.partitionKey().getKey());
+                                size += TypeSizes.sizeof(false);
+                            }
+                            else
+                            {
+                                throw new AssertionError();
+                            }
+                        }
                     }
                 }
                 return size;
