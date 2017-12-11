@@ -138,18 +138,18 @@ public class RateSimulator
             log("  - Deadline target=%s%s.", Units.toString(adjustedTarget, TimeUnit.SECONDS), adjustedTargetFrom);
 
             long tableSize = table.dataSize.in(SizeUnit.BYTES);
-            long size = ignoreReplicationFactor ? tableSize : tableSize / table.replicationFactor;
-            long adjustedSize = parameters.adjustedSize(size);
-            String adjustedSizeFrom = size == adjustedSize
+            long adjustedSize = parameters.adjustedSize(tableSize);
+            long size = ignoreReplicationFactor ? adjustedSize : adjustedSize / table.replicationFactor;
+            String adjustedSizeFrom = tableSize == adjustedSize
                                       ? ""
-                                      : String.format(", adjusted from %s for future growth", table.dataSize);
+                                      : String.format(" (adjusted from %s for future growth)", table.dataSize);
             if (ignoreReplicationFactor)
                 log("  - Size=%s%s.", Units.toString(adjustedSize, SizeUnit.BYTES), adjustedSizeFrom);
             else
-                log("  - Size=%s total, so %s to validate (RF=%d)%s.",
-                    table.dataSize, Units.toString(size, SizeUnit.BYTES), table.replicationFactor, adjustedSizeFrom);
+                log("  - Size=%s to validate (%s total%s but RF=%d).",
+                    Units.toString(size, SizeUnit.BYTES), Units.toString(adjustedSize, SizeUnit.BYTES), adjustedSizeFrom,  table.replicationFactor);
 
-            cumulativeSize += adjustedSize;
+            cumulativeSize += size;
             long rate = rate(cumulativeSize, adjustedTarget);
             log("  - Added to previous tables, %s to validate in %s => %s",
                 Units.toString(cumulativeSize, SizeUnit.BYTES),

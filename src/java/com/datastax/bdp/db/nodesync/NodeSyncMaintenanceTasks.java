@@ -36,7 +36,7 @@ import org.apache.cassandra.utils.units.Units;
  */
 class NodeSyncMaintenanceTasks
 {
-    private static final long LOG_REPORTING_DELAY_SEC = Long.getLong("dse.nodesync.log_reporter_interval_sec", TimeUnit.SECONDS.toSeconds(20));
+    private static final long LOG_REPORTING_DELAY_SEC = Long.getLong("dse.nodesync.log_reporter_interval_sec", TimeUnit.MINUTES.toSeconds(10));
     private static final long RATE_CHECKING_DELAY_SEC = Long.getLong("dse.nodesync.rate_checker_interval_sec", TimeUnit.MINUTES.toSeconds(30));
     private static final long SIZE_CHECKING_DELAY_SEC = Long.getLong("dse.nodesync.size_checker_interval_sec", TimeUnit.HOURS.toSeconds(2));
 
