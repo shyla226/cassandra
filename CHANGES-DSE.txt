@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Make migration-delay configurable (DB-1404)
  * Improved schema migration logging (DB-1410)
  * Register SizeEstimatesRecorder earlier and enable cleanup of invalid entries (DB-913)
  * Only serialize failed batchlog replay mutations to hints (DB-1377)
