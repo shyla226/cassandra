@@ -253,7 +253,7 @@ public abstract class Message
 
         protected void checkIsLoggedIn(QueryState state)
         {
-            if (state.getUser() == null)
+            if (!state.hasUser())
                 throw new UnauthorizedException("You have not logged in");
         }
     }

@@ -17,7 +17,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.FBUtilities;
@@ -209,7 +208,7 @@ public class AuditableEvent
 
         public Builder(AuthenticatedUser user, String source)
         {
-            this(null, user.getName(), user.getName(), source);
+            this(null, user.getName(), user.getAuthenticatedName(), source);
         }
 
         public Builder(AuditableEventType type, String user, String source)

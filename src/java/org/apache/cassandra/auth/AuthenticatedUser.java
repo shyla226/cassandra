@@ -74,18 +74,39 @@ public class AuthenticatedUser
     }
 
     private final String name;
+
+    /**
+     * The name used for the authentification.
+     */
+    private final String authenticatedName;
+
     // primary Role of the logged in user
     private final RoleResource role;
 
     public AuthenticatedUser(String name)
     {
+        this(name, name);
+    }
+
+    public AuthenticatedUser(String name, String authenticatedName)
+    {
         this.name = name;
+        this.authenticatedName = authenticatedName;
         this.role = RoleResource.role(name);
     }
 
     public String getName()
     {
         return name;
+    }
+
+    /**
+     * Returns the name used for the authentification.
+     * @return the name used for the authentification
+     */
+    public String getAuthenticatedName()
+    {
+        return authenticatedName;
     }
 
     /**

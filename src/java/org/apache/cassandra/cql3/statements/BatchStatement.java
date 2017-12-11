@@ -175,9 +175,8 @@ public class BatchStatement implements CQLStatement
     @Override
     public void checkAccess(QueryState state)
     {
-        if (state.hasUser())
-            for (ModificationStatement statement : statements)
-                statement.checkAccess(state);
+        for (ModificationStatement statement : statements)
+            statement.checkAccess(state);
     }
 
     // Validates a prepared batch statement without validating its nested statements.
