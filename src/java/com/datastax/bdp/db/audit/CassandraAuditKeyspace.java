@@ -19,7 +19,7 @@ import org.apache.cassandra.utils.FBUtilities;
 public class CassandraAuditKeyspace
 {
 
-    public static final String NAME = "cassandra_audit";
+    public static final String NAME = "dse_audit";
     public static final String AUDIT_LOG = "audit_log";
 
     public static volatile boolean isRecordingConsistency;
