@@ -20,13 +20,11 @@ package org.apache.cassandra.dht;
 import static org.junit.Assert.*;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.junit.Test;
 
 public class SplitterTest
