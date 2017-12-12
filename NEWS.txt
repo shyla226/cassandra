@@ -28,9 +28,21 @@ Upgrading
 
 Operations
 ----------
-   - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
-     The command must be executed on the node where the rebuild operation is running. Streams
-     may continue until they finish or timeout.
+    - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
+      The command must be executed on the node where the rebuild operation is running. Streams
+      may continue until they finish or timeout.
+
+Upgrading
+---------
+    - Upgrades from DSE 5.0 might have produced unnecessary schema migrations while
+      there was at least one DSE 5.0 node in the cluster. It is therefore highly
+      recommended to upgrade from DSE 5.0 to at least DSE 5.1.6. The root cause of
+      this schema mismatch was a difference in the way how schema digests were computed
+      in DSE 5.0 and DSE 5.1. To mitigate this issue, DSE 5.1.6 and newer announce
+      DSE 5.0 compatible digests as long as there is at least one DSE 5.0 node in the
+      cluster. Once all nodes have been upgraded, the "real" schema version will be
+      announced. Note: this fix is only necessary in DSE 5.1 and therefore only applies
+      to DSE 5.1. (DB-1477)
 
 DSE 5.1.3
 =========
