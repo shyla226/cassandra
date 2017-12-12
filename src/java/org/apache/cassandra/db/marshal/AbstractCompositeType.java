@@ -40,12 +40,14 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
 {
     protected AbstractCompositeType()
     {
-        super(ComparisonType.CUSTOM, VARIABLE_LENGTH);
+        super(ComparisonType.CUSTOM);
     }
 
-    @Override
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
+        if (!o1.hasRemaining() || !o2.hasRemaining())
+            return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
+
         ByteBuffer bb1 = o1.duplicate();
         ByteBuffer bb2 = o2.duplicate();
 

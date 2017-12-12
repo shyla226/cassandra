@@ -52,7 +52,7 @@ public class UUIDType extends AbstractType<UUID>
 
     UUIDType()
     {
-        super(ComparisonType.CUSTOM, 16);
+        super(ComparisonType.CUSTOM);
     }
 
     public boolean isEmptyValueMeaningless()
@@ -60,7 +60,6 @@ public class UUIDType extends AbstractType<UUID>
         return true;
     }
 
-    @Override
     public int compareCustom(ByteBuffer b1, ByteBuffer b2)
     {
         // Compare for length
@@ -194,6 +193,12 @@ public class UUIDType extends AbstractType<UUID>
     static int version(ByteBuffer uuid)
     {
         return (uuid.get(6) & 0xf0) >> 4;
+    }
+
+    @Override
+    public int valueLengthIfFixed()
+    {
+        return 16;
     }
 
     @Override

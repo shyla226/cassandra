@@ -187,15 +187,6 @@ public class UnsafeByteBufferAccess
 
     }
 
-    /**
-     * Why do this? because the JDK only bothers optimising DirectByteBuffer for the unaligned case.
-     */
-    @Inline
-    public static float getFloat(ByteBuffer bb)
-    {
-        return Float.intBitsToFloat(getInt(bb));
-    }
-
     public static ByteBuffer getByteBuffer(long address, int length)
     {
         return getByteBuffer(address, length, ByteOrder.nativeOrder());

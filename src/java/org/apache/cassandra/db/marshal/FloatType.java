@@ -29,14 +29,15 @@ import org.apache.cassandra.serializers.FloatSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 
 public class FloatType extends NumberType<Float>
 {
     public static final FloatType instance = new FloatType();
 
-    FloatType() {super(ComparisonType.FIXED_SIZE_VALUE, 4, FixedSizeType.FLOAT);} // singleton
+    FloatType() {super(ComparisonType.CUSTOM);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
@@ -49,9 +50,12 @@ public class FloatType extends NumberType<Float>
         return true;
     }
 
-    public static int compareType(ByteBuffer o1, ByteBuffer o2)
+    public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
-        return Float.compare(UnsafeByteBufferAccess.getFloat(o1), UnsafeByteBufferAccess.getFloat(o2));
+        if (!o1.hasRemaining() || !o2.hasRemaining())
+            return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
+
+        return compose(o1).compareTo(compose(o2));
     }
 
     public ByteSource asByteComparableSource(ByteBuffer buf)
@@ -106,6 +110,12 @@ public class FloatType extends NumberType<Float>
     public TypeSerializer<Float> getSerializer()
     {
         return FloatSerializer.instance;
+    }
+
+    @Override
+    public int valueLengthIfFixed()
+    {
+        return 4;
     }
 
     @Override
