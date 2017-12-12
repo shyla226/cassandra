@@ -18,10 +18,7 @@
 package org.apache.cassandra.gms;
 
 import java.io.*;
-import java.util.Collections;
-import java.util.EnumMap;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
@@ -29,6 +26,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.Serializer;
 
 /**
@@ -153,6 +151,22 @@ public class EndpointState
         String[] pieces = status.value.split(VersionedValue.DELIMITER_STR, -1);
         assert (pieces.length > 0);
         return pieces[0];
+    }
+
+    public UUID getSchemaVersion()
+    {
+        VersionedValue applicationState = getApplicationState(ApplicationState.SCHEMA);
+        return applicationState != null
+               ? UUID.fromString(applicationState.value)
+               : null;
+    }
+
+    public CassandraVersion getReleaseVersion()
+    {
+        VersionedValue applicationState = getApplicationState(ApplicationState.RELEASE_VERSION);
+        return applicationState != null
+               ? new CassandraVersion(applicationState.value)
+               : null;
     }
 
     public String toString()
