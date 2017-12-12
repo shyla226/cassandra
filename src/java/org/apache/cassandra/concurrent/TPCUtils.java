@@ -148,7 +148,7 @@ public class TPCUtils
                     if (err == null)
                         observer.onComplete();
                     else
-                        observer.onError(err);
+                        observer.onError(Throwables.unwrapped(err));
                 });
             }
         };
@@ -165,7 +165,7 @@ public class TPCUtils
                     if (err == null)
                         observer.onSuccess(res);
                     else
-                        observer.onError(err);
+                        observer.onError(Throwables.unwrapped(err));
                 });
             }
         };
