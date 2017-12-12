@@ -20,7 +20,6 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 import java.util.*;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.SortedSetMultimap;
@@ -33,7 +32,6 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingVersion;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.versioning.VersionDependent;
@@ -79,6 +77,13 @@ public class ColumnFilter
                                            // static and regular columns are both _fetched_ and _queried_).
     private final SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections; // can be null
 
+    // true when any columns this filter may be asked to filter will be part of fetched. This is the case when
+    // the schemas match, but may not be the case if the schema has changed or this is the filter of
+    // a stale prepared statement. When this is false, even if fetchAllRegulars is true, we cannot assume
+    // that this filter will select all columns, it must therefore check that the column is part of the fetched set
+    // even when fetchAllRegulars is true.
+    private final boolean fetchedIncludesAllColumns;
+
     private ColumnFilter(boolean fetchAllRegulars,
                          TableMetadata metadata,
                          RegularAndStaticColumns queried,
@@ -87,6 +92,7 @@ public class ColumnFilter
         assert !fetchAllRegulars || metadata != null;
         assert fetchAllRegulars || queried != null;
         this.fetchAllRegulars = fetchAllRegulars;
+        this.fetchedIncludesAllColumns = true;
 
         if (fetchAllRegulars)
         {
@@ -111,7 +117,8 @@ public class ColumnFilter
     private ColumnFilter(boolean fetchAllRegulars,
                          RegularAndStaticColumns fetched,
                          RegularAndStaticColumns queried,
-                         SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections)
+                         SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections,
+                         boolean fetchedIncludesAllColumns)
     {
         assert !fetchAllRegulars || fetched != null;
         assert fetchAllRegulars || queried != null;
@@ -119,6 +126,7 @@ public class ColumnFilter
         this.fetched = fetchAllRegulars ? fetched : queried;
         this.queried = queried;
         this.subSelections = subSelections;
+        this.fetchedIncludesAllColumns = fetchedIncludesAllColumns;
     }
 
     /**
@@ -148,6 +156,30 @@ public class ColumnFilter
     public static ColumnFilter selection(TableMetadata metadata, RegularAndStaticColumns queried)
     {
         return new ColumnFilter(true, metadata, queried, null);
+    }
+
+    /**
+     * Return this column filter if {@link #fetchedIncludesAllColumns} is correct with regard to the
+     * partition columns received as a parameter, that is {@link #fetchedIncludesAllColumns} is true
+     * if all partition columns are contained in {@link #fetched} or false otherwise.
+     * Return a copy with {@link #fetchedIncludesAllColumns} set accordingly if it doesn't already
+     * reflect the correct status for these partition columns.
+     *
+     * This is required because occasionally a filter columns may not contain partition columns, for example
+     * if a coordinator has sent a request bound to an older schema version, or if a prepared statement
+     * hasn't been updated. In this case, fetching such columns will cause a serialization exception since
+     * it is assumed that the selection filter is a superset of all columns to serialize, see DB-1444.
+     *
+     * @param partitionColumns - the columns of the partition that will use this filter
+     * @return this filter or a copy with {@link #fetchedIncludesAllColumns} amended accordingly.
+     */
+    public ColumnFilter withPartitionColumnsVerified(RegularAndStaticColumns partitionColumns)
+    {
+        boolean fetchedIncludesAllColumns = fetched.includes(partitionColumns);
+        if (fetchedIncludesAllColumns == this.fetchedIncludesAllColumns)
+            return this;
+
+        return new ColumnFilter(fetchAllRegulars, fetched, queried, subSelections, fetchedIncludesAllColumns);
     }
 
     /**
@@ -185,7 +217,7 @@ public class ColumnFilter
      */
     public boolean fetchesAllColumns(boolean isStatic)
     {
-        return isStatic ? queried == null : fetchAllRegulars;
+        return fetchedIncludesAllColumns && (isStatic ? queried == null : fetchAllRegulars);
     }
 
     /**
@@ -206,8 +238,13 @@ public class ColumnFilter
         if (column.isStatic())
             return queried == null || queried.contains(column);
 
-        // For regulars, if 'fetchAllRegulars', then it's included automatically. Otherwise, it depends on _queried_.
-        return fetchAllRegulars || queried.contains(column);
+        // For regulars, if 'fetchAllRegulars', then it's included automatically if fetchedIncludesAllColumns
+        // is true, else check if the column is contained in fetched. Otherwise, it depends on _queried_.
+
+        if (fetchAllRegulars)
+            return fetchedIncludesAllColumns || fetched.contains(column);
+        else
+            return queried.contains(column);
     }
 
     /**
@@ -468,14 +505,15 @@ public class ColumnFilter
         return otherCf.fetchAllRegulars == this.fetchAllRegulars &&
                Objects.equals(otherCf.fetched, this.fetched) &&
                Objects.equals(otherCf.queried, this.queried) &&
-               Objects.equals(otherCf.subSelections, this.subSelections);
+               Objects.equals(otherCf.subSelections, this.subSelections) &&
+               otherCf.fetchedIncludesAllColumns == this.fetchedIncludesAllColumns;
     }
 
     @Override
     public String toString()
     {
         if (fetchAllRegulars && queried == null)
-            return "*";
+            return fetchedIncludesAllColumns ? "*" : fetched.toString();
 
         if (queried.isEmpty())
             return "";
@@ -585,6 +623,7 @@ public class ColumnFilter
             boolean hasQueried = (header & HAS_QUERIED_MASK) != 0;
             boolean hasSubSelections = (header & HAS_SUB_SELECTIONS_MASK) != 0;
 
+            boolean fetchedIncludesAllColumns = true;
             RegularAndStaticColumns fetched = null;
             RegularAndStaticColumns queried = null;
 
@@ -595,6 +634,7 @@ public class ColumnFilter
                     Columns statics = Columns.serializer.deserialize(in, metadata);
                     Columns regulars = Columns.serializer.deserialize(in, metadata);
                     fetched = new RegularAndStaticColumns(statics, regulars);
+                    fetchedIncludesAllColumns = fetched.includes(metadata.regularAndStaticColumns());
                 }
                 else
                 {
@@ -630,7 +670,7 @@ public class ColumnFilter
             if (version == ReadVersion.OSS_30 && isFetchAll && queried != null)
                 queried = new RegularAndStaticColumns(metadata.staticColumns(), queried.regulars);
 
-            return new ColumnFilter(isFetchAll, fetched, queried, subSelections);
+            return new ColumnFilter(isFetchAll, fetched, queried, subSelections, fetchedIncludesAllColumns);
         }
 
         public long serializedSize(ColumnFilter selection)

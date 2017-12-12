@@ -54,12 +54,11 @@ public class SerializationHelper
     private final Map<ByteBuffer, DroppedColumn> droppedColumns;
     private DroppedColumn currentDroppedComplex;
 
-
     public SerializationHelper(TableMetadata metadata, EncodingVersion version, Flag flag, ColumnFilter columnsToFetch)
     {
         this.flag = flag;
         this.version = version;
-        this.columnsToFetch = columnsToFetch;
+        this.columnsToFetch = columnsToFetch == null ? null : columnsToFetch.withPartitionColumnsVerified(metadata.regularAndStaticColumns());
         this.droppedColumns = metadata.droppedColumns;
     }
 

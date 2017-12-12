@@ -72,7 +72,7 @@ public class PartitionHeader
     public String toString()
     {
         String cfs = String.format("table %s.%s", metadata.keyspace, metadata.name);
-        return String.format("partition key %s deletion %s %s", partitionKey, partitionLevelDeletion, cfs);
+        return String.format("partition key %s deletion %s %s, columns: %s", partitionKey, partitionLevelDeletion, cfs, columns);
     }
 
     public static PartitionHeader merge(List<PartitionHeader> sources, MergeListener listener)
