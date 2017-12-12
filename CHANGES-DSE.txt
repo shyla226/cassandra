@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Support frozen collection list and set in stress (DB-1464)
  * Improved streams logging (DB-1409)
  * Make migration-delay configurable (DB-1404)
  * Improved schema migration logging (DB-1410)
