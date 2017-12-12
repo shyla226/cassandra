@@ -26,6 +26,7 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.schema.Schema;
 import org.jboss.byteman.contrib.bmunit.BMRule;
@@ -113,6 +114,27 @@ public class CompactionsBytemanTest extends CQLTester
         createPossiblyExpiredSSTable(cfs, false);
         cfs.forceMajorCompaction(false);
         dropTable("DROP TABLE %s");
+    }
+
+    @Test
+    @BMRule(name = "Delay background compaction task future check",
+            targetClass = "CompactionManager",
+            targetMethod = "submitBackground",
+            targetLocation = "AT INVOKE java.util.concurrent.Future.isCancelled",
+            condition = "!$cfs.keyspace.getName().contains(\"system\")",
+            action = "Thread.sleep(1000)")
+    public void testCompactingCFCounting() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k INT, c INT, v INT, PRIMARY KEY (k, c))");
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.enableAutoCompaction();
+
+        execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", 0, 1, 1);
+        assertEquals(0, CompactionManager.instance.compactingCF.count(cfs));
+        cfs.forceBlockingFlush();
+
+        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(cfs));
+        assertEquals(0, CompactionManager.instance.compactingCF.count(cfs));
     }
 
     private void createPossiblyExpiredSSTable(final ColumnFamilyStore cfs, final boolean expired) throws Throwable
