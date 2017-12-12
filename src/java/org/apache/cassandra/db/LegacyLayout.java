@@ -1275,7 +1275,7 @@ public abstract class LegacyLayout
             return true;
         }
 
-        private boolean addRangeTombstone(LegacyRangeTombstone tombstone)
+        public boolean addRangeTombstone(LegacyRangeTombstone tombstone)
         {
             if (tombstone.isRowDeletion(metadata))
                 return addRowTombstone(tombstone);
@@ -1301,7 +1301,9 @@ public abstract class LegacyLayout
                         builder.addRowDeletion(Row.Deletion.regular(tombstone.deletionTime));
                         rowDeletion = tombstone;
                     }
-                    return true;
+
+                    // If we're already within a row and there was no delete written before that one, it can't be the same one
+                    return false;
                 }
 
                 // If we're already within a row and there was no delete written before that one, it can't be the same one
