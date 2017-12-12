@@ -22,7 +22,6 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,7 +29,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -51,7 +49,10 @@ import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.transport.Frame.Header;
+import org.apache.cassandra.transport.Frame.Header.HeaderFlag;
 import org.apache.cassandra.transport.messages.*;
+import org.apache.cassandra.utils.Flags;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
@@ -316,9 +317,10 @@ public abstract class Message
         public void decode(ChannelHandlerContext ctx, Frame frame, List results)
         {
             boolean isRequest = frame.header.type.direction == Direction.REQUEST;
-            boolean isTracing = frame.header.flags.contains(Frame.Header.Flag.TRACING);
-            boolean isCustomPayload = frame.header.flags.contains(Frame.Header.Flag.CUSTOM_PAYLOAD);
-            boolean hasWarning = frame.header.flags.contains(Frame.Header.Flag.WARNING);
+            int flags = frame.header.flags;
+            boolean isTracing = Flags.contains(flags, HeaderFlag.TRACING);
+            boolean isCustomPayload = Flags.contains(flags, HeaderFlag.CUSTOM_PAYLOAD);
+            boolean hasWarning = Flags.contains(flags, HeaderFlag.WARNING);
 
             UUID tracingId = isRequest || !isTracing ? null : CBUtil.readUUID(frame.body);
             List<String> warnings = isRequest || !hasWarning ? null : CBUtil.readStringList(frame.body);
@@ -392,7 +394,7 @@ public abstract class Message
 
         public static Frame makeFrame(Message message, int messageSize, ProtocolVersion version)
         {
-            EnumSet<Frame.Header.Flag> flags = EnumSet.noneOf(Frame.Header.Flag.class);
+            int flags = 0;
             ByteBuf body = null;
             try
             {
@@ -419,24 +421,24 @@ public abstract class Message
                     if (tracingId != null)
                     {
                         CBUtil.writeUUID(tracingId, body);
-                        flags.add(Frame.Header.Flag.TRACING);
+                        flags = Flags.add(flags, HeaderFlag.TRACING);
                     }
                     if (warnings != null)
                     {
                         CBUtil.writeStringList(warnings, body);
-                        flags.add(Frame.Header.Flag.WARNING);
+                        flags = Flags.add(flags, HeaderFlag.WARNING);
                     }
                     if (customPayload != null)
                     {
                         CBUtil.writeBytesMap(customPayload, body);
-                        flags.add(Frame.Header.Flag.CUSTOM_PAYLOAD);
+                        flags = Flags.add(flags, HeaderFlag.CUSTOM_PAYLOAD);
                     }
                 }
                 else
                 {
                     assert message instanceof Request;
                     if (((Request) message).isTracingRequested())
-                        flags.add(Frame.Header.Flag.TRACING);
+                        flags = Flags.add(flags, HeaderFlag.TRACING);
                     Map<String, ByteBuffer> payload = message.getCustomPayload();
                     if (payload != null)
                         messageSize += CBUtil.sizeOfBytesMap(payload);
@@ -444,7 +446,7 @@ public abstract class Message
                     if (payload != null)
                     {
                         CBUtil.writeBytesMap(payload, body);
-                        flags.add(Frame.Header.Flag.CUSTOM_PAYLOAD);
+                        flags = Flags.add(flags, HeaderFlag.CUSTOM_PAYLOAD);
                     }
                 }
 
@@ -455,7 +457,7 @@ public abstract class Message
                                                   : message.forcedProtocolVersion;
 
                 if (responseVersion.isBeta())
-                    flags.add(Frame.Header.Flag.USE_BETA);
+                    flags = Flags.add(flags, HeaderFlag.USE_BETA);
 
                 return Frame.create(message.type, message.getStreamId(), responseVersion, flags, body);
             }

@@ -1,7 +1,5 @@
 package org.apache.cassandra.cql3.continuous.paging;
 
-import java.util.EnumSet;
-
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -97,6 +95,6 @@ public class ContinuousPageWriterTest
 
     private Frame makeFrame(Message.Type type)
     {
-        return Frame.create(type, 1, ProtocolVersion.DSE_V2, EnumSet.noneOf(Frame.Header.Flag.class), CBUtil.allocator.buffer());
+        return Frame.create(type, 1, ProtocolVersion.DSE_V2, Frame.Header.HeaderFlag.NONE, CBUtil.allocator.buffer());
     }
 }
