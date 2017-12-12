@@ -11,10 +11,12 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.RateLimiter;
@@ -108,8 +110,8 @@ class Validator
     private final RateLimiter limiter;
     private final PageSize pageSize;
 
-    private final Observer observer;
-    private final int replicationFactor;
+    protected final Observer observer;
+    protected final int replicationFactor;
     private final Set<InetAddress> segmentReplicas;
 
     private final Future completionFuture = new Future();
@@ -126,7 +128,7 @@ class Validator
     @Nullable
     private volatile Set<InetAddress> missingNodes;
 
-    private Validator(ValidationLifecycle lifecycle)
+    protected Validator(ValidationLifecycle lifecycle)
     {
         this.lifecycle = lifecycle;
 
@@ -207,7 +209,7 @@ class Validator
         ReadCommand command = new NodeSyncReadCommand(segment(),
                                                       NodeSyncHelpers.time().currentTimeSeconds(),
                                                       executor.asScheduler());
-        QueryPager pager = command.getPager(null, ProtocolVersion.CURRENT);
+        QueryPager pager = createPager(command);
         // We don't want to use CL.ALL, because that would throw Unavailable unless all nodes are up. Instead, we want
         // read to proceed as soon as at least 2 nodes are up (hence CL.TWO), but we still want to block in the resolver
         // until all queried (live) replicas have replied (and ack eventual repairs), hence the
@@ -244,6 +246,12 @@ class Validator
         return completionFuture;
     }
 
+    @VisibleForTesting
+    protected QueryPager createPager(ReadCommand command)
+    {
+        return command.getPager(null, ProtocolVersion.CURRENT);
+    }
+
     private Flow<FlowablePartition> fetchAll(ValidationExecutor executor, QueryPager pager, ReadContext context)
     {
         return fetchPage(executor, pager, context).concatWith(() -> isDone(pager)
@@ -257,8 +265,8 @@ class Validator
         // Maybe schedule a refresh of the lock.
         lifecycle.onNewPage(pageSize);
         observer.onNewPage();
-        return pager.fetchPage(pageSize, context)
-                    .doOnComplete(() -> onPageComplete(executor));
+        return Flow.concat(pager.fetchPage(pageSize, context),
+                           Flow.defer(() -> { onPageComplete(executor); return Flow.empty(); }));
     }
 
     private boolean isDone(QueryPager pager)
@@ -356,7 +364,8 @@ class Validator
         if (flowFuture != null)
             flowFuture.cancel(true);
 
-        return completionFuture.cancel(true);
+        completionFuture.actuallyCancel();
+        return true;
     }
 
     private void markFinished()
@@ -377,13 +386,13 @@ class Validator
         validationOutcome = validationOutcome.composeWith(outcome);
 
         listener.onPageProcessing(observer.dataValidatedBytesForPage,
-                                  observer.limiterWaitTimeNanosForPage,
+                                  observer.limiterWaitTimeMicrosForPage,
                                   observer.timeIdleBeforeProcessingPage);
     }
 
     static interface PageProcessingStatsListener
     {
-        void onPageProcessing(long processedBytes, long waitedOnLimiterNanos, long waitedForProcessingNanos);
+        void onPageProcessing(long processedBytes, long waitedOnLimiterMicros, long waitedForProcessingNanos);
     }
 
     /**
@@ -431,9 +440,14 @@ class Validator
         @Override
         public boolean cancel(boolean mayInterruptIfRunning)
         {
-            // Note and cancelling the validator actually cancels the future, so we have nothing to do for the future
-            // itself here.
+            // We want cancellation through the future to actually cancel the validator if necessary, hence the override
+            // here. Validator#cancel will cancel this future itself properly through 'actuallyCancel' below.
             return Validator.this.cancel("cancelled through validation future");
+        }
+
+        private void actuallyCancel()
+        {
+            super.cancel(true);
         }
     }
 
@@ -442,12 +456,13 @@ class Validator
      * <p>
      * This is also where we rate limit.
      */
-    private class Observer implements ReadReconciliationObserver
+    @VisibleForTesting
+    protected class Observer implements ReadReconciliationObserver
     {
         private volatile boolean isComplete;
         private volatile boolean hasMismatch;
 
-        private volatile long limiterWaitTimeNanosForPage;
+        private volatile long limiterWaitTimeMicrosForPage;
         private volatile long dataValidatedBytesForPage;
         private volatile long responseReceivedTimeNanos;
         private volatile long timeIdleBeforeProcessingPage;
@@ -455,10 +470,11 @@ class Validator
         // Only collected when tracing is enabled.
         private volatile ValidationMetrics pageMetrics;
 
-        private void onNewPage()
+        @VisibleForTesting
+        protected void onNewPage()
         {
             hasMismatch = false;
-            limiterWaitTimeNanosForPage = 0;
+            limiterWaitTimeMicrosForPage = 0;
             dataValidatedBytesForPage = 0;
             timeIdleBeforeProcessingPage = 0;
 
@@ -546,7 +562,8 @@ class Validator
             onData(dataSize(marker), isConsistent);
         }
 
-        private void onData(int size, boolean isConsistent)
+        @VisibleForTesting
+        protected void onData(int size, boolean isConsistent)
         {
             // We're running on a specific executor (ValidationExecutor) explicitly because of the limiter, because
             // it is blocking. So make double sure we haven't introduced a bug by mistake by running on a TPC thread.
@@ -565,13 +582,8 @@ class Validator
                 pageMetrics.addDataValidated(size, isConsistent);
             dataValidatedBytesForPage += size;
 
-            // Save some calls to System.nanoTime if we're not blocking at all
-            if (!limiter.tryAcquire(size))
-            {
-                long start = System.nanoTime();
-                limiter.acquire(size);
-                limiterWaitTimeNanosForPage += System.nanoTime() - start;
-            }
+            double waitedSeconds = limiter.acquire(size);
+            limiterWaitTimeMicrosForPage +=  waitedSeconds * TimeUnit.SECONDS.toMicros(1L);
         }
 
         private int dataSize(RangeTombstoneMarker marker)

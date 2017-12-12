@@ -7,6 +7,7 @@ package com.datastax.bdp.db.nodesync;
 
 import java.util.Iterator;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -18,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import com.google.common.math.DoubleMath;
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +30,7 @@ import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.NodeSyncConfig;
 import org.apache.cassandra.utils.collection.History;
 import org.apache.cassandra.utils.units.RateUnit;
+import org.apache.cassandra.utils.units.SizeUnit;
 import org.apache.cassandra.utils.units.Units;
 
 /**
@@ -60,20 +62,8 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
 {
     private static final Logger logger = LoggerFactory.getLogger(ValidationExecutor.class);
 
-    private static final long CONTROLLER_INTERVAL_SEC = Long.getLong("dse.nodesync.controller_update_interval_sec",
-                                                                     TimeUnit.MINUTES.toSeconds(5));
-
-    private static final long CONTROLLER_INTERVAL_MS = TimeUnit.SECONDS.toMillis(CONTROLLER_INTERVAL_SEC);
-
-    // For an update interval, if thread spend more than this time waiting on request, we consider it significant.
-    // TODO(Sylvain): this definitely needs testing to check if this is a decent value. May want to make configurable at least for test.
-    private static final long THREAD_WAIT_TIME_THRESHOLD_MS = 10 * CONTROLLER_INTERVAL_MS / 100;
-    // For an update interval, if we spend more than this waiting on rate limiting, we consider it significant.
-    // TODO(Sylvain): this definitely needs testing to check if this is a decent value. May want to make configurable at least for test.
-    private static final long LIMITER_WAIT_TIME_THRESHOLD_MS = 5 * CONTROLLER_INTERVAL_MS / 100;
-    // For an update interval, if we spend more than this blocking on getting new task, we consider it significant.
-    // TODO(Sylvain): this definitely needs testing to check if this is a decent value. May want to make configurable at least for test.
-    private static final long BLOCKED_ON_NEW_TASK_THRESHOLD_MS = 10 * CONTROLLER_INTERVAL_MS / 100;
+    private static final long DEFAULT_CONTROLLER_INTERVAL_SEC = Long.getLong("dse.nodesync.controller_update_interval_sec",
+                                                                             TimeUnit.MINUTES.toSeconds(5));
 
     private enum State
     {
@@ -99,6 +89,8 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     /** Executor used to schedule the {@link Controller} at regular intervals. */
     private final ScheduledExecutorService updaterExecutor = Executors.newSingleThreadScheduledExecutor(new NamedThreadFactory("NodeSyncController"));
 
+    private volatile Controller controller;
+
     /** The number of currently processed validations. */
     private final AtomicInteger inFlightValidations = new AtomicInteger();
     /** The maximum number of in-flight validations allowed (this can be updated by the controller to increase/decrease the
@@ -113,18 +105,27 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     private final CompletableFuture<Void> shutdownFuture = new CompletableFuture<>();
 
     private final AtomicLong processingWaitTimeNanos = new AtomicLong();
-    private final AtomicLong limiterWaitTimeNanos = new AtomicLong();
+    private final AtomicLong limiterWaitTimeMicros = new AtomicLong();
     private final AtomicLong dataValidatedBytes = new AtomicLong();
     private final AtomicLong blockedOnNewTaskTimeNanos = new AtomicLong();
     private final ConcurrentMap<Thread, Long> waitingOnTaskThreads = new ConcurrentHashMap<>();
 
+    private final long controllerIntervalMs;
+
     ValidationExecutor(ValidationScheduler scheduler, NodeSyncConfig config)
+    {
+        this(scheduler, config, TimeUnit.SECONDS.toMillis(DEFAULT_CONTROLLER_INTERVAL_SEC));
+    }
+
+    @VisibleForTesting
+    ValidationExecutor(ValidationScheduler scheduler, NodeSyncConfig config, long controllerIntervalMs)
     {
         this.scheduler = scheduler;
         this.validationExecutor = DebuggableThreadPoolExecutor.createWithFixedPoolSize(new ValidationThread.Factory(), config.getMinThreads());
         this.wrappingScheduler = new NodeSyncStagedExecutor();
         this.config = config;
         this.maxInFlightValidations = config.getMinInflightValidations();
+        this.controllerIntervalMs = controllerIntervalMs;
     }
 
     StagedScheduler asScheduler()
@@ -135,6 +136,24 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     TracingAwareExecutorService asExecutor()
     {
         return validationExecutor;
+    }
+
+    @VisibleForTesting
+    History<Action> controllerHistory()
+    {
+        if (controller == null)
+            throw new IllegalStateException("The executor is not started");
+
+        return controller.history;
+    }
+
+    @VisibleForTesting
+    long lastMaxedOutWarn()
+    {
+        if (controller == null)
+            throw new IllegalStateException("The executor is not started");
+
+        return controller.lastMaxedOutWarn;
     }
 
     /**
@@ -152,7 +171,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                 return; // start() called twice, that's fine
         }
 
-        updaterExecutor.scheduleAtFixedRate(new Controller(), CONTROLLER_INTERVAL_SEC, CONTROLLER_INTERVAL_SEC, TimeUnit.SECONDS);
+        this.controller = new Controller(controllerIntervalMs);
+        controller.updateValues();
+        updaterExecutor.scheduleAtFixedRate(controller, controllerIntervalMs, controllerIntervalMs, TimeUnit.MILLISECONDS);
 
         for (int i = 0; i < maxInFlightValidations; i++)
             submitNewValidation();
@@ -187,7 +208,8 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
 
         // We should shutdown the scheduler because some threads could be blocked on a call to
         // scheduler.getNextValidation() and that's required to unblock them.
-        scheduler.shutdown();
+        if (scheduler != null) // Only exists because unit tests sometimes keep it null.
+            scheduler.shutdown();
 
         // Then, if it's a hard shutdown that was requested, actively cancel any running validations
         if (interruptValidations)
@@ -198,6 +220,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         // (note that our check is racy but signalling the future twice, which is our risk here, is harmless).
         if (inFlightValidations.get() == 0)
             shutdownFuture.complete(null);
+
+        updaterExecutor.shutdown();
+        this.controller = null;
 
         return shutdownFuture;
     }
@@ -257,7 +282,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                     waitingOnTaskThreads.put(currentThread, System.nanoTime());
                     try
                     {
-                        validator = scheduler.getNextValidation(inFlightValidations.get() <= 1);
+                        validator = getNextValidation(inFlightValidations.get() <= 1);
                     }
                     finally
                     {
@@ -308,6 +333,12 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         }
     }
 
+    @VisibleForTesting
+    protected Validator getNextValidation(boolean blockUntilAvailable)
+    {
+        return scheduler.getNextValidation(blockUntilAvailable);
+    }
+
     private void submit(Validator validator)
     {
         if (isShutdown())
@@ -324,18 +355,20 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                      inFlightValidators.remove(validator);
                      onValidationDone();
 
-                     // Validator handles all it's exception on its side, so this shouldn't happen. Shit happens though.
-                     if (e != null)
+                     // Validator handles all it's exception (outside of cancellation) on its side, so this shouldn't
+                     // happen. Shit happens though so log it.
+                     if (e != null && !(e instanceof CancellationException))
                          logger.error("Unexpected error reported by NodeSync validator of table {}. "
                                       + "This shouldn't happen and should be reported, but shouldn't have impact outside "
-                                      + "of the failure of that particular segment validation");
+                                      + "of the failure of that particular segment validation",
+                                      validator.segment().table , e);
                  });
     }
 
-    public void onPageProcessing(long processedBytes, long waitedOnLimiterNanos, long waitedForProcessingNanos)
+    public void onPageProcessing(long processedBytes, long waitedOnLimiterMicros, long waitedForProcessingNanos)
     {
         dataValidatedBytes.addAndGet(processedBytes);
-        limiterWaitTimeNanos.addAndGet(waitedOnLimiterNanos);
+        limiterWaitTimeMicros.addAndGet(waitedOnLimiterMicros);
         processingWaitTimeNanos.addAndGet(waitedForProcessingNanos);
     }
 
@@ -349,7 +382,8 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
      * Describe an action taken by the controller {@link Controller}: it can increase or decrease the number of threads
      * or number of inflight validations, or simply do nothing. Knowing that we only change one thing at a time.
      */
-    private enum Action
+    @VisibleForTesting
+    enum Action
     {
         INCREASE_THREADS,
         INCREASE_INFLIGHT_VALIDATIONS,
@@ -381,6 +415,16 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
      */
     private class Controller implements Runnable
     {
+        // For an update interval, if thread spend more than this time waiting on request, we consider it significant.
+        private final long threadWaitTimeThresholdMs;
+        // For an update interval, if we spend more than this waiting on rate limiting, we consider it significant.
+        private final long limiterWaitTimeThresholdMs;
+        // For an update interval, if we spend more than this blocking on getting new task, we consider it significant.
+        private final long blockedOnNewTaskThresholdMs;
+
+        private long lastTickNanos = System.nanoTime();
+        private long lastIntervalMs;
+
         private final DiffValue processingWaitTimeMsDiff = new DiffValue();
         private final DiffValue limiterWaitTimeMsDiff = new DiffValue();
         private final DiffValue dataValidatedBytesDiff = new DiffValue();
@@ -392,6 +436,13 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         /** Timestamp of the last time we warned about the executor being maxed out (without achieving the requested rate
          * that is). Negative if we haven't warned (or should warn unconditionally next time the situation arise). */
         private long lastMaxedOutWarn = -1;
+
+        private Controller(long controllerIntervalMs)
+        {
+            this.threadWaitTimeThresholdMs = 10 * controllerIntervalMs / 100;
+            this.limiterWaitTimeThresholdMs = 5 * controllerIntervalMs / 100;
+            this.blockedOnNewTaskThresholdMs = 10 * controllerIntervalMs / 100;
+        }
 
         /**
          * Whether we recently attempted a decrease immediately followed by an increase.
@@ -414,12 +465,12 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
 
         private boolean hasSignificantProcessingWaitTimeSinceLastCheck()
         {
-            return processingWaitTimeMsDiff.currentDiff() > THREAD_WAIT_TIME_THRESHOLD_MS;
+            return processingWaitTimeMsDiff.currentDiff() > threadWaitTimeThresholdMs;
         }
 
         private boolean hasSignificantLimiterWaitTimeSinceLastCheck()
         {
-            return limiterWaitTimeMsDiff.currentDiff() > LIMITER_WAIT_TIME_THRESHOLD_MS;
+            return limiterWaitTimeMsDiff.currentDiff() > limiterWaitTimeThresholdMs;
         }
 
         private long perThreadAvgBlockTime()
@@ -432,15 +483,15 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         // What percentage of the interval each thread doing something (not being blocked waiting on task) on average.
         private int threadAvgOccupationPercentage()
         {
-            long timeOccupied = CONTROLLER_INTERVAL_MS - perThreadAvgBlockTime();
-            float occupationPercentage = 100f * ((float)timeOccupied / (float)CONTROLLER_INTERVAL_MS);
+            long timeOccupied = lastIntervalMs - perThreadAvgBlockTime();
+            float occupationPercentage = 100f * ((float)timeOccupied / (float) lastIntervalMs);
             int value = Math.round(occupationPercentage);
             return value < 0 ? 0 : (value > 100 ? 100 : value);
         }
 
         private boolean hasSignificantBlockOnNewTaskSinceLastCheck()
         {
-            return perThreadAvgBlockTime() > BLOCKED_ON_NEW_TASK_THRESHOLD_MS;
+            return perThreadAvgBlockTime() > blockedOnNewTaskThresholdMs;
         }
 
         private boolean canIncreaseThreads()
@@ -496,9 +547,13 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
 
         private void updateValues()
         {
-            processingWaitTimeMsDiff.update(TimeUnit.NANOSECONDS.toMillis(processingWaitTimeNanos.get()));
-            limiterWaitTimeMsDiff.update(TimeUnit.NANOSECONDS.toMillis(limiterWaitTimeNanos.get()));
+            long nowNanos = System.nanoTime();
             dataValidatedBytesDiff.update(dataValidatedBytes.get());
+            processingWaitTimeMsDiff.update(TimeUnit.NANOSECONDS.toMillis(processingWaitTimeNanos.get()));
+            limiterWaitTimeMsDiff.update(TimeUnit.MICROSECONDS.toMillis(limiterWaitTimeMicros.get()));
+
+            lastIntervalMs = TimeUnit.NANOSECONDS.toMillis(nowNanos - lastTickNanos);
+            lastTickNanos = nowNanos;
 
             // We want to know how long thread have spend blocking for new task during the interval. This is composed
             // of 2 parts: what has been reported in blockedOnNewTaskTimeNanos, and those thread that are currently
@@ -508,7 +563,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             for (long start : waitingOnTaskThreads.values())
             {
                 long totalBlockedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-                blockedOnNewTaskMsDiff.addToCurrentDiff(Math.min(totalBlockedMs, CONTROLLER_INTERVAL_MS));
+                blockedOnNewTaskMsDiff.addToCurrentDiff(Math.min(totalBlockedMs, lastIntervalMs));
             }
         }
 
@@ -517,23 +572,11 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             updateValues();
 
             double targetRate = (double) config.getRate().in(RateUnit.B_S);
-            double recentRate = ((double) dataValidatedBytesDiff.currentDiff()) / CONTROLLER_INTERVAL_SEC;
+            double recentRate = ((double) 1000 * dataValidatedBytesDiff.currentDiff()) / lastIntervalMs;
 
             Action action = Action.DO_NOTHING;
-            if (DoubleMath.fuzzyEquals(targetRate, recentRate, targetRate * 0.05))
-            {
-                // The recent rate is withing 5% of our target, we're basically good. That said, we might be
-                // over-committed. To know if we are, we check how much we've been waiting on the limiter acquire()
-                // method. If that's a non-negligible amount of time, it means our current number of in-flight
-                // validations and threads generate more work than the limiter allows. In that case, we consider lowering
-                // one of those.
-                // Note however that we want to avoid changing our mind on every "tick", so check our little history to
-                // see if we already already tried decreasing our values without success (i.e. we ended up bumping them
-                // again afterwards).
-                if (!hasRecentUnsuccessfulDecrease() && hasSignificantLimiterWaitTimeSinceLastCheck())
-                    action = pickDecreaseAction();
-            }
-            else
+            // Check if we are below the target rate (with a 5% error margin).
+            if (recentRate < targetRate * 0.95)
             {
                 // We're not achieving our target rate. This can actually have 2 causes:
                 // 1) we're not using enough threads and/or in-flight validations to meet our rate goal. Then, assuming
@@ -560,6 +603,32 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                     if (action == Action.MAXED_OUT)
                         maybeWarnOnMaxedOut(recentRate);
                 }
+            }
+            else if (recentRate > targetRate * 1.05)
+            {
+                // We're over our rate. This should be happening in general due to the rate limiter, but at least in
+                // unit tests where we use a very short controller interval time, it seems to initially happen a bit
+                // and no real risk in handling this properly. We do log at debug so that if a bug make that happen
+                // a lot, we'll eventually notice the problem.
+                logger.debug("Recent effective rate {} is higher than the configured rate {}; this may temporarily happen " +
+                             "while the server warm up but shouldn't happen in general. If you see this with some " +
+                             "regularity, please report",
+                             Units.toString((long)recentRate, RateUnit.B_S),
+                             Units.toString((long)targetRate, RateUnit.B_S));
+                action = pickDecreaseAction();
+            }
+            else
+            {
+                // The recent rate is within 5% of our target, we're basically good. That said, we might be
+                // over-committed. To know if we are, we check how much we've been waiting on the limiter acquire()
+                // method. If that's a non-negligible amount of time, it means our current number of in-flight
+                // validations and threads generate more work than the limiter allows. In that case, we consider lowering
+                // one of those.
+                // Note however that we want to avoid changing our mind on every "tick", so check our little history to
+                // see if we already already tried decreasing our values without success (i.e. we ended up bumping them
+                // again afterwards).
+                if (!hasRecentUnsuccessfulDecrease() && hasSignificantLimiterWaitTimeSinceLastCheck())
+                    action = pickDecreaseAction();
             }
 
             if (logger.isDebugEnabled())
@@ -628,7 +697,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                         + "more of the node resources. "
                         + "If doing so doesn't help, this suggests the configured rate cannot be sustained by NodeSync "
                         + "on the current hardware.",
-                        Units.toString(CONTROLLER_INTERVAL_MS, TimeUnit.MILLISECONDS),
+                        Units.toString(lastIntervalMs, TimeUnit.MILLISECONDS),
                         Units.toString((long)recentRate, RateUnit.B_S),
                         config.getRate(),
                         validationExecutor.getCorePoolSize(),
@@ -645,6 +714,17 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             // ASAP if conditions changes.
             if (lastMaxedOutWarn >= 0 && history.isAtCapacity() && history.stream().noneMatch(a -> a == Action.MAXED_OUT))
                 lastMaxedOutWarn = -1;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("Interval: %s, processing wait time: %s, limiter wait time: %s, data validated; %s, blocked on new task: %s",
+                                 Units.toString(lastIntervalMs, TimeUnit.MILLISECONDS),
+                                 Units.toString(processingWaitTimeMsDiff.currentDiff, TimeUnit.MILLISECONDS),
+                                 Units.toString(limiterWaitTimeMsDiff.currentDiff, TimeUnit.MILLISECONDS),
+                                 Units.toString(dataValidatedBytesDiff.currentDiff, SizeUnit.BYTES),
+                                 Units.toString(blockedOnNewTaskMsDiff.currentDiff, TimeUnit.MILLISECONDS));
         }
     }
 

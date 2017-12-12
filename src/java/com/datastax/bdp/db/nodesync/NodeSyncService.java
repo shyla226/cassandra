@@ -81,7 +81,7 @@ public class NodeSyncService implements NodeSyncServiceMBean
 
     // A proxy to the system status table; exists for testing.
     final NodeSyncStatusTableProxy statusTableProxy;
-    private final NodeSyncConfig config = DatabaseDescriptor.getNodeSyncConfig();
+    private final NodeSyncConfig config;
 
     // Will be null if NodeSync isn't running. Is set to non-null only inside synchronized methods so as to ensure we
     // never run 2 instances at once.
@@ -171,6 +171,13 @@ public class NodeSyncService implements NodeSyncServiceMBean
     @VisibleForTesting
     NodeSyncService(NodeSyncStatusTableProxy statusTableProxy)
     {
+        this(DatabaseDescriptor.getNodeSyncConfig(), statusTableProxy);
+    }
+
+    @VisibleForTesting
+    NodeSyncService(NodeSyncConfig config, NodeSyncStatusTableProxy statusTableProxy)
+    {
+        this.config = config;
         this.statusTableProxy = statusTableProxy;
         registerJMX();
     }

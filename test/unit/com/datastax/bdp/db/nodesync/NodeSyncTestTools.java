@@ -8,6 +8,7 @@ package com.datastax.bdp.db.nodesync;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
@@ -15,19 +16,36 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.cql3.PageSize;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadContext;
+import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.pager.PagingState;
+import org.apache.cassandra.service.pager.QueryPager;
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscription;
+import org.apache.cassandra.utils.flow.FlowSubscriptionRecipient;
 
 import static org.junit.Assert.*;
 
@@ -272,6 +290,48 @@ public class NodeSyncTestTools
     }
 
     /**
+     * Creates a "fake" validation executor that executes only the provided validation and stay idle afterwards.
+     *
+     * @param controllerIntervalMs interval for the executor controller.
+     * @param validations the validations to execute.
+     * @return the created executor.
+     */
+    static ValidationExecutor executor(NodeSyncService service, long controllerIntervalMs, Validator... validations)
+    {
+        final AtomicInteger idx = new AtomicInteger();
+        return executor(service, controllerIntervalMs, () -> {
+            int i = idx.getAndIncrement();
+            return i < validations.length ? validations[i] : null;
+        });
+    }
+
+    /**
+     * Creates a "fake" validation executor that executes the validations provided by the generator.
+     *
+     * @param controllerIntervalMs interval for the executor controller.
+     * @param generator a function generating a new validations on each call. It can return null to signal the end of
+     *                  generation at which point the executor will simply block.
+     * @return the created executor.
+     */
+    static ValidationExecutor executor(NodeSyncService service, long controllerIntervalMs, Supplier<Validator> generator)
+    {
+        return new ValidationExecutor(null, service.config(), controllerIntervalMs)
+        {
+            @Override
+            protected Validator getNextValidation(boolean blockUntilAvailable)
+            {
+                Validator v = generator.get();
+                if (v != null)
+                    return v;
+
+                if (blockUntilAvailable)
+                    Uninterruptibles.sleepUninterruptibly(Long.MAX_VALUE, TimeUnit.DAYS);
+                return null;
+            }
+        };
+    }
+
+    /**
      * Very simple builder of multiple segments. Mostly saves typing the table for every segment when building a
      * big list of them.
      */
@@ -396,6 +456,116 @@ public class NodeSyncTestTools
             if (log)
                 logger.info("Recording validation for {}: {}", segment, info);
             ++recordValidationCalls;
+        }
+    }
+
+    /**
+     * A fake validator suitable for testing (where we can't really span multiple nodes.
+     */
+    static class TestValidator extends Validator
+    {
+        private final QueryPager pager;
+
+        TestValidator(ValidationLifecycle lifecycle,
+                      int pageCount,
+                      int pageQueryDelayMs)
+        {
+            this(lifecycle, pageCount, pageQueryDelayMs, 4, 128);
+        }
+
+        TestValidator(ValidationLifecycle lifecycle,
+                      int pageCount,
+                      int pageQueryDelayMs,
+                      int rowsPerPage,
+                      int rowSize)
+        {
+            super(lifecycle);
+            this.pager = new FakePager(pageCount, pageQueryDelayMs, rowsPerPage, rowSize);
+        }
+
+        @Override
+        protected QueryPager createPager(ReadCommand command)
+        {
+            return pager;
+        }
+
+        private class FakePager implements QueryPager
+        {
+            private final int pageCount;
+            private final int pageQueryDelayMs;
+            private final int rowsPerPage;
+            private final int rowSize;
+
+            // atomic is probably a tad overkill in practice, but it's just testing.
+            private final AtomicInteger pageReturned = new AtomicInteger();
+
+            /**
+             * A fake query pager that always return empty pages (which, as far as some of NodeSync tests go, is good enough).
+             *
+             * @param pageCount how many page in total should be returned.
+             * @param pageQueryDelayMs how much to sleep before return each page.
+             */
+            private FakePager(int pageCount, int pageQueryDelayMs, int rowsPerPage, int rowSize)
+            {
+                this.pageCount = pageCount;
+                this.pageQueryDelayMs = pageQueryDelayMs;
+                this.rowsPerPage = rowsPerPage;
+                this.rowSize = rowSize;
+            }
+
+            public Flow<FlowablePartition> fetchPage(PageSize pageSize, ReadContext ctx) throws RequestValidationException, RequestExecutionException
+            {
+                return fetchPageInternal(pageSize);
+            }
+
+            public Flow<FlowablePartition> fetchPageInternal(PageSize pageSize) throws RequestValidationException, RequestExecutionException
+            {
+                observer.onNewPage();
+
+                // We simulate the asynchronous nature of querying by delaying an otherwise empty flow.
+                // Note: if there is a better way in Flow to do this, you will have to tell me because I have no clue
+                // (tried using Flow.delayOnNext() with a non empty flow to no avail).
+                return new Flow<FlowablePartition>()
+                {
+                    public void requestFirst(FlowSubscriber subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+                    {
+                        ScheduledExecutors.scheduledTasks.schedule(() -> {
+
+                            // Pass a list of null for the endpoint responding. Because we fake a complete response, we know
+                            // having nulls is fine.
+                            observer.responsesReceived(Arrays.asList(new InetAddress[replicationFactor]));
+
+                            for (int i = 0; i < rowsPerPage; i++)
+                                observer.onData(rowSize, true);
+
+                            pageReturned.incrementAndGet();
+
+                            subscriptionRecipient.onSubscribe(FlowSubscription.DONE);
+                            subscriber.onComplete();
+                        }, pageQueryDelayMs, TimeUnit.MILLISECONDS);
+                    }
+                };
+            }
+
+            public boolean isExhausted()
+            {
+                return pageReturned.get() >= pageCount;
+            }
+
+            public int maxRemaining()
+            {
+                return Integer.MAX_VALUE;
+            }
+
+            public PagingState state(boolean inclusive)
+            {
+                return null;
+            }
+
+            public QueryPager withUpdatedLimit(DataLimits newLimits)
+            {
+                return this;
+            }
         }
     }
 }
