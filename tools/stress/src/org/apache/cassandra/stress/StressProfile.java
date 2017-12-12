@@ -559,6 +559,11 @@ public class StressProfile implements Serializable
                                 {
                                 case SET:
                                 case LIST:
+                                    if (c.getType().isFrozen())
+                                    {
+                                        sb.append("?");
+                                        break;
+                                    }
                                 case COUNTER:
                                     sb.append(quoteIdentifier(c.getName())).append(" + ?");
                                     break;

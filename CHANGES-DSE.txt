@@ -118,6 +118,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no internal DB ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no internal DB ticket)
 Merged from dse5.0:
+ * Support frozen collection list and set in stress (DB-1464)
  * Improved streams logging (DB-1409)
  * Make migration-delay configurable (DB-1404)
  * Improved schema migration logging (DB-1410)
