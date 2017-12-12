@@ -14,10 +14,18 @@ public interface IAuditWriter
     boolean isLoggingEnabled();
 
     /**
+     * Checks if this writer is ready
+     * @return {@code true} if this writer is ready, {@code false} otherwise.
+     */
+    default boolean isSetUpComplete()
+    {
+        return true;
+    };
+
+    /**
      * Prepares this writer.
      */
     default void setUp()
     {
-        
     }
 }

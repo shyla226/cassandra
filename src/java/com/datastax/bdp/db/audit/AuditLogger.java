@@ -12,7 +12,6 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.service.StorageService;
 
 public class AuditLogger
 {
@@ -106,7 +105,7 @@ public class AuditLogger
      */
     public Completable recordEvent(AuditableEvent event)
     {
-        if (!StorageService.instance.isAuditLoggingSetupComplete())
+        if (writer != null && !writer.isSetUpComplete())
         {
             logger.warn("Audit Logger not setup while trying to record an event.");
             return Completable.complete();
@@ -124,8 +123,7 @@ public class AuditLogger
 
     public boolean isEnabled()
     {
-        return (writer != null &&
-                StorageService.instance.isAuditLoggingSetupComplete());
+        return writer != null && writer.isSetUpComplete();
     }
 
     public void setup()

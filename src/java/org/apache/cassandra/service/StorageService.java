@@ -56,9 +56,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.bdp.db.audit.AuditLoggingOptions;
-import com.datastax.bdp.db.audit.CassandraAuditKeyspace;
-import com.datastax.bdp.db.audit.CassandraAuditWriter;
 import com.datastax.bdp.db.nodesync.NodeSyncService;
 import com.datastax.bdp.db.utils.concurrent.CompletableFutures;
 
@@ -130,8 +127,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public static final int RING_DELAY = getRingDelay(); // delay after which we assume ring has stablized
 
     private final JMXProgressSupport progressSupport = new JMXProgressSupport(this);
-    private final AtomicBoolean doneAuditLoggingSetup = new AtomicBoolean(false);
-    private volatile boolean auditLoggingSetupComplete = false;
 
     private static int getRingDelay()
     {
@@ -1107,18 +1102,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private Completable doAuditLoggingSetup()
     {
-        if (doneAuditLoggingSetup.getAndSet(true))
-            return Completable.complete();
-
         // The setUp is blocking so once it is done everything is ready.
         DatabaseDescriptor.getAuditLogger().setup();
-        auditLoggingSetupComplete = true;
-
         return Completable.complete();
-    }
-
-    public boolean isAuditLoggingSetupComplete() {
-        return auditLoggingSetupComplete;
     }
 
     private Completable maybeAddKeyspace(KeyspaceMetadata ksm)

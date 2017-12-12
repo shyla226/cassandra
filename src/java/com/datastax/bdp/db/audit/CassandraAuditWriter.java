@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.lang3.concurrent.BasicThreadFactory;
@@ -68,8 +69,13 @@ public class CassandraAuditWriter implements IAuditWriter
     private static final Logger droppedEventLogger = LoggerFactory.getLogger(DROPPED_EVENT_LOGGER);
 
     // number of fields in the audit table
-    private static int NUM_FIELDS = 13;
+    private static int NUM_FIELDS = 14;
     private static final ByteBuffer nodeIp = ByteBufferUtil.bytes(FBUtilities.getBroadcastAddress());
+
+    /**
+     * The writer possible states.
+     */
+    private enum State { NOT_STARTED, STARTING, READY };
 
     final int retentionPeriod;
     ModificationStatement insertStatement;
@@ -82,11 +88,26 @@ public class CassandraAuditWriter implements IAuditWriter
 
     private final BatchingOptions batchingOptions;
 
+    /**
+     * The writer's state.
+     */
+    private final AtomicReference<State> state = new AtomicReference<>(State.NOT_STARTED);
+
+    @Override
+    public boolean isSetUpComplete()
+    {
+        return state.get() == State.READY;
+    }
+
     @Override
     public void setUp()
     {
-        CassandraAuditKeyspace.maybeConfigure();
-        insertStatement = prepareInsertBlocking(retentionPeriod > 0);
+        if (state.compareAndSet(State.NOT_STARTED, State.STARTING))
+        {
+            CassandraAuditKeyspace.maybeConfigure();
+            insertStatement = prepareInsertBlocking(retentionPeriod > 0);
+            state.set(State.READY);
+        }
     }
 
     @VisibleForTesting
