@@ -108,7 +108,7 @@ public class ViewManager
         return viewsByName.values();
     }
 
-    public void reload()
+    public void reload(boolean buildAllViews)
     {
         Views views = keyspace.getMetadata().views;
         Map<String, ViewMetadata> newViewsByName = Maps.newHashMapWithExpectedSize(views.size());
@@ -128,6 +128,9 @@ public class ViewManager
             if (!viewsByName.containsKey(entry.getKey()))
                 addView(entry.getValue());
         }
+
+        if (!buildAllViews)
+            return;
 
         // Building views involves updating view build status in the system_distributed
         // keyspace and therefore it requires ring information. This check prevents builds
@@ -177,6 +180,16 @@ public class ViewManager
         forTable(view.getDefinition().baseTableId).removeByName(name);
         TPCUtils.blockingAwait(SystemKeyspace.setViewRemoved(keyspace.getName(), view.name));
         TPCUtils.blockingAwait(SystemDistributedKeyspace.setViewRemoved(keyspace.getName(), view.name));
+    }
+
+    /**
+     * Stops the building of the specified view, no-op if it isn't building.
+     *
+     * @param name the name of the view
+     */
+    public void stopBuild(String name)
+    {
+        viewsByName.get(name).stopBuild();
     }
 
     public View getByName(String name)

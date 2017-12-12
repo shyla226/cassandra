@@ -554,6 +554,9 @@ public interface StorageServiceMBean extends NotificationEmitter
     public int getConcurrentValidators();
     public void setConcurrentValidators(int value);
 
+    public int getConcurrentViewBuilders();
+    public void setConcurrentViewBuilders(int value);
+
     public boolean isIncrementalBackupsEnabled();
     public void setIncrementalBackupsEnabled(boolean value);
 

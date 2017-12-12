@@ -67,7 +67,7 @@ public final class SystemKeyspacesFilteringRestrictions
             Resources.addReadableSystemResource(DataResource.table(SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BUILT_INDEXES));
             Resources.addReadableSystemResource(DataResource.table(SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BUILT_VIEWS));
             Resources.addReadableSystemResource(DataResource.table(SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.SSTABLE_ACTIVITY));
-            Resources.addReadableSystemResource(DataResource.table(SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.VIEWS_BUILDS_IN_PROGRESS));
+            Resources.addReadableSystemResource(DataResource.table(SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.VIEW_BUILDS_IN_PROGRESS));
         }
     }
 
@@ -141,7 +141,7 @@ public final class SystemKeyspacesFilteringRestrictions
                     case SystemKeyspace.BUILT_INDEXES: // note: column 'table_name' is the keyspace_name - duh!
                     case SystemKeyspace.BUILT_VIEWS:
                     case SystemKeyspace.AVAILABLE_RANGES:
-                    case SystemKeyspace.VIEWS_BUILDS_IN_PROGRESS:
+                    case SystemKeyspace.VIEW_BUILDS_IN_PROGRESS:
                         return new SystemKeyspacesRestriction(tableMetadata, false);
                     default:
                         return new DenyAllRestriction(tableMetadata.partitionKeyColumns());
@@ -261,7 +261,7 @@ public final class SystemKeyspacesFilteringRestrictions
                                 case SystemKeyspace.BUILT_INDEXES: // note: column 'table_name' is the keyspace_name - duh!
                                 case SystemKeyspace.BUILT_VIEWS:
                                 case SystemKeyspace.AVAILABLE_RANGES:
-                                case SystemKeyspace.VIEWS_BUILDS_IN_PROGRESS:
+                                case SystemKeyspace.VIEW_BUILDS_IN_PROGRESS:
                                     // meaning: always allow reads of schema information of the above tables in the 'system' keyspace
                                     return true;
                                 default:

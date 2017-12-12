@@ -100,7 +100,11 @@ New features
    - Support for arithmetic operations on number has been added. See CASSANDRA-11935
    - Preview expected streaming required for a repair (nodetool repair --preview), and validate the
      consistency of repaired data between nodes (nodetool repair --validate). See CASSANDRA-13257
-   - Support for selecting Map values and Set elements has been added for SELECT queries. See CASSANDRA-7396 
+   - Support for selecting Map values and Set elements has been added for SELECT queries. See CASSANDRA-7396
+   - The initial build of materialized views can be parallelized. The number of concurrent builder
+     threads is specified by the property `cassandra.yaml:concurrent_materialized_view_builders`.
+     This property can be modified at runtime through both JMX and the new `setconcurrentviewbuilders`
+     and `getconcurrentviewbuilders` nodetool commands. See CASSANDRA-12245 for more details.
 
 Upgrading
 ---------
@@ -139,14 +143,18 @@ Upgrading
     - Config option index_interval has been removed (it was deprecated since 2.0)
     - Deprecated repair JMX APIs are removed.
     - The version of snappy-java has been upgraded to 1.1.2.6
-	- the miniumum value for internode message timeouts is 10ms. Previously, any
-	  positive value was allowed. See cassandra.yaml entries like
-	  read_request_timeout_in_ms for more details.
-	- Config option commitlog_sync_batch_window_in_ms has been deprecated as it's
-	  documentation has been incorrect and the setting itself near useless.
-	  Batch mode remains a valid commit log mode, however.
-	- There is a new commit log mode, group, which is similar to batch mode
-	  but blocks for up to a configurable number of milliseconds between disk flushes.
+    - the miniumum value for internode message timeouts is 10ms. Previously, any
+      positive value was allowed. See cassandra.yaml entries like
+      read_request_timeout_in_ms for more details.
+    - Config option commitlog_sync_batch_window_in_ms has been deprecated as it's
+      documentation has been incorrect and the setting itself near useless.
+      Batch mode remains a valid commit log mode, however.
+    - There is a new commit log mode, group, which is similar to batch mode
+      but blocks for up to a configurable number of milliseconds between disk flushes.
+    - Due to the parallelization of the initial build of materialized views,
+      the per token range view building status is stored in the new table
+      `system.view_builds_in_progress`. The old table `system.views_builds_in_progress`
+      is no longer used and can be removed. See CASSANDRA-12245 for more details.
 
 3.11.2
 ======
@@ -2220,7 +2228,7 @@ Configuraton
       SimpleStrategy and OldNetworkTopologyStrategy, respectively.
     - RowWarningThresholdInMB replaced with in_memory_compaction_limit_in_mb
     - GCGraceSeconds is now per-ColumnFamily instead of global
-	- Keyspace and column family names that do not confirm to a '^\w+' regex
+    - Keyspace and column family names that do not confirm to a '^\w+' regex
       are considered illegal.
     - Keyspace and column family definitions will need to be loaded via
       "bin/schematool <host> <jmxport> import".  _You only need to do this to

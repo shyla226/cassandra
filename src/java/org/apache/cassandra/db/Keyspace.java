@@ -366,7 +366,7 @@ public class Keyspace
             logger.trace("Initializing {}.{}", getName(), cfm.name);
             initCf(Schema.instance.getTableMetadataRef(cfm.id), loadSSTables);
         }
-        this.viewManager.reload();
+        this.viewManager.reload(false);
     }
 
     // Only used for mocking Keyspace

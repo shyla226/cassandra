@@ -272,7 +272,7 @@ public class SystemKeyspacesFilteringTest extends CQLTester
                              row(SystemKeyspace.PEERS),
                              row(SystemKeyspace.SIZE_ESTIMATES),
                              row(SystemKeyspace.SSTABLE_ACTIVITY),
-                             row(SystemKeyspace.VIEWS_BUILDS_IN_PROGRESS));
+                             row(SystemKeyspace.VIEW_BUILDS_IN_PROGRESS));
 
         // Verify schema information of "hidden" system-ks tables
         for (String table : Arrays.asList(SystemKeyspace.BATCHES,
