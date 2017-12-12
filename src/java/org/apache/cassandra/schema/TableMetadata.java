@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.Objects;
 
-import com.datastax.bdp.db.nodesync.NodeSyncService;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.*;
 
@@ -29,9 +28,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.DataResource;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.compaction.MemoryOnlyStrategy;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -127,6 +128,9 @@ public final class TableMetadata
     public final boolean hasMulticellOrCounterColumn;
     public final DataResource resource;
 
+    public final Config.AccessMode diskAccessMode;
+    public final Config.AccessMode indexAccessMode;
+
     private TableMetadata(Builder builder)
     {
         if (!Flag.isCQLCompatible(builder.flags))
@@ -177,6 +181,13 @@ public final class TableMetadata
         hasMulticellOrCounterColumn = any(regularAndStaticColumns, c -> c.type.isMultiCell() || c.type.isCounter());
 
         resource = DataResource.table(keyspace, name);
+
+        diskAccessMode = params.compaction.klass().equals(MemoryOnlyStrategy.class)
+                         ? Config.AccessMode.mmap
+                         : DatabaseDescriptor.getDiskAccessMode();
+        indexAccessMode = params.compaction.klass().equals(MemoryOnlyStrategy.class)
+                          ? Config.AccessMode.mmap
+                          : DatabaseDescriptor.getIndexAccessMode();
     }
 
     public static Builder builder(String keyspace, String table)

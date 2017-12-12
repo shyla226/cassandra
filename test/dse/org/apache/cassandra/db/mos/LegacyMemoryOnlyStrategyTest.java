@@ -27,7 +27,6 @@ import org.apache.cassandra.service.StorageServiceMBean;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotEquals;
 
 /**
  * Legacy test for MemoryOnlyStrategy. This test is obsoleted by {@link MemoryOnlyStrategyTest} and only
@@ -118,7 +117,7 @@ public class LegacyMemoryOnlyStrategyTest extends DseTestRunner
             LegacyMemoryOnlyStrategyTestUtil.waitForCompaction(connection, KEYSPACE, cf);
             LegacyMemoryOnlyStrategyTestUtil.insertData(getNativeClientForNode(1).newSession(), numInserts, KEYSPACE, cf);
 
-            assertNotEquals(0, mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getUsed());
+            assertFalse(0 == mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getUsed());
             LegacyMemoryOnlyStrategyTestUtil.verifyTotals(mosStatus);
 
             assertEquals(numInserts, sendCql3Native(1, KEYSPACE, select).all().size());
@@ -177,7 +176,7 @@ public class LegacyMemoryOnlyStrategyTest extends DseTestRunner
 
             LegacyMemoryOnlyStrategyTestUtil.verifyTotals(mosStatus);
 
-            assertNotEquals(0, mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getUsed());
+            assertFalse(0 == mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getUsed());
             LegacyMemoryOnlyStrategyTestUtil.verifyTotals(mosStatus);
 
             assertEquals(numInserts, sendCql3Native(1, KEYSPACE, select).all().size());

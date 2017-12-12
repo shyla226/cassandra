@@ -108,7 +108,7 @@ public class BigTableReader extends SSTableReader
         }
 
         try(FileHandle.Builder ibuilder = new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX))
-                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.AccessMode.mmap)
+                .mmapped(metadata().indexAccessMode == Config.AccessMode.mmap)
                 .withChunkCache(ChunkCache.instance))
         {
             loadSummary();

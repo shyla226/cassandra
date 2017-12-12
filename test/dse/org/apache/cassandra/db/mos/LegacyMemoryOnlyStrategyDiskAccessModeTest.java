@@ -45,10 +45,9 @@ public class LegacyMemoryOnlyStrategyDiskAccessModeTest extends DseTestRunner
     @Test
     public void testDiskAccessModeStandard() throws Exception
     {
-        // DiskAccessMode.standard = mmapping is turned off
         startNode(1, CassandraYamlBuilder.newInstance().withDiskAccessMode(Config.DiskAccessMode.standard.name()), false);
         LegacyMemoryOnlyStrategyTestUtil.maybeCreateKeyspace(KEYSPACE);
-        insertSomeDataAndVerifyLockedStatus(false);
+        insertSomeDataAndVerifyLockedStatus();
     }
 
     @Test
@@ -56,8 +55,7 @@ public class LegacyMemoryOnlyStrategyDiskAccessModeTest extends DseTestRunner
     {
         startNode(1, CassandraYamlBuilder.newInstance().withDiskAccessMode(Config.DiskAccessMode.mmap_index_only.name()), false);
         LegacyMemoryOnlyStrategyTestUtil.maybeCreateKeyspace(KEYSPACE);
-        // we can't really distinguish here between data & index files, so mmapping will work
-        insertSomeDataAndVerifyLockedStatus(true);
+        insertSomeDataAndVerifyLockedStatus();
     }
 
     @Test
@@ -65,8 +63,7 @@ public class LegacyMemoryOnlyStrategyDiskAccessModeTest extends DseTestRunner
     {
         startNode(1, CassandraYamlBuilder.newInstance().withDiskAccessMode(Config.DiskAccessMode.mmap_reads.name()), false);
         LegacyMemoryOnlyStrategyTestUtil.maybeCreateKeyspace(KEYSPACE);
-        // we can't really distinguish here between data & index files, so mmapping will work
-        insertSomeDataAndVerifyLockedStatus(true);
+        insertSomeDataAndVerifyLockedStatus();
     }
 
     @Test
@@ -74,7 +71,7 @@ public class LegacyMemoryOnlyStrategyDiskAccessModeTest extends DseTestRunner
     {
         startNode(1, CassandraYamlBuilder.newInstance().withDiskAccessMode(Config.DiskAccessMode.mmap.name()), false);
         LegacyMemoryOnlyStrategyTestUtil.maybeCreateKeyspace(KEYSPACE);
-        insertSomeDataAndVerifyLockedStatus(true);
+        insertSomeDataAndVerifyLockedStatus();
     }
 
     @Test
@@ -82,10 +79,10 @@ public class LegacyMemoryOnlyStrategyDiskAccessModeTest extends DseTestRunner
     {
         startNode(1, CassandraYamlBuilder.newInstance().withDiskAccessMode(Config.DiskAccessMode.auto.name()), false);
         LegacyMemoryOnlyStrategyTestUtil.maybeCreateKeyspace(KEYSPACE);
-        insertSomeDataAndVerifyLockedStatus(false);
+        insertSomeDataAndVerifyLockedStatus();
     }
 
-    private void insertSomeDataAndVerifyLockedStatus(boolean mmappingShouldWork) throws Exception
+    private void insertSomeDataAndVerifyLockedStatus() throws Exception
     {
         for (String sstableCompressor : Arrays.asList("", "LZ4Compressor"))
         {
@@ -114,15 +111,8 @@ public class LegacyMemoryOnlyStrategyDiskAccessModeTest extends DseTestRunner
             ssProxy.forceKeyspaceFlush(KEYSPACE, cf);
             LegacyMemoryOnlyStrategyTestUtil.waitForCompaction(connection, KEYSPACE, cf);
 
-            if (mmappingShouldWork)
-            {
-                assertFalse(0 == mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getUsed());
-            }
-            else
-            {
-                assertEquals(0, mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getUsed());
-                assertFalse(0 == mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getNotAbleToLock());
-            }
+            // MOS should always work regardless of disk access mode
+            assertFalse(0 == mosStatus.getMemoryOnlyTableInformation(KEYSPACE, cf).getUsed());
             LegacyMemoryOnlyStrategyTestUtil.verifyTotals(mosStatus);
         }
     }

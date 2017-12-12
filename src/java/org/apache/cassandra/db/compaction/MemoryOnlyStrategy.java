@@ -31,7 +31,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static com.google.common.collect.Iterables.filter;
 
@@ -273,6 +272,15 @@ public class MemoryOnlyStrategy extends AbstractCompactionStrategy
 
         removed.unlock(MemoryOnlyStatus.instance);
         sstables.remove(removed);
+    }
+
+    @Override
+    public void shutdown()
+    {
+        sstables.forEach(sstable -> sstable.unlock(MemoryOnlyStatus.instance));
+        sstables.clear();
+
+        super.shutdown();
     }
 
     /**

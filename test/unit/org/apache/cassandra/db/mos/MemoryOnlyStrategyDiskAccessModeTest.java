@@ -35,10 +35,9 @@ public class MemoryOnlyStrategyDiskAccessModeTest extends CQLTester
     @Test
     public void testDiskAccessModeStandard() throws Throwable
     {
-        // DiskAccessMode.standard = mmapping is turned off
         DatabaseDescriptor.setDiskAccessMode(Config.AccessMode.standard);
         DatabaseDescriptor.setIndexAccessMode(Config.AccessMode.standard);
-        insertSomeDataAndVerifyLockedStatus(false);
+        insertSomeDataAndVerifyLockedStatus();
     }
 
     @Test
@@ -46,8 +45,7 @@ public class MemoryOnlyStrategyDiskAccessModeTest extends CQLTester
     {
         DatabaseDescriptor.setDiskAccessMode(Config.AccessMode.standard);
         DatabaseDescriptor.setIndexAccessMode(Config.AccessMode.mmap);
-        // we can't really distinguish here between data & index files, so mmapping will work
-        insertSomeDataAndVerifyLockedStatus(true);
+        insertSomeDataAndVerifyLockedStatus();
     }
 
     @Test
@@ -55,15 +53,14 @@ public class MemoryOnlyStrategyDiskAccessModeTest extends CQLTester
     {
         DatabaseDescriptor.setDiskAccessMode(Config.AccessMode.mmap);
         DatabaseDescriptor.setIndexAccessMode(Config.AccessMode.mmap);
-        insertSomeDataAndVerifyLockedStatus(true);
+        insertSomeDataAndVerifyLockedStatus();
     }
 
-    private void insertSomeDataAndVerifyLockedStatus(boolean mmappingShouldWork) throws Throwable
+    private void insertSomeDataAndVerifyLockedStatus() throws Throwable
     {
         for (String sstableCompressor : Arrays.asList("", "LZ4Compressor"))
         {
             logger.info("insertSomeDataAndVerifyLockedStatus(): " + (sstableCompressor.isEmpty() ? "sstable_compression turned off" : String.format("Using sstable_compression: %s", sstableCompressor)));
-
 
             utils.createTable(sstableCompressor);
 
@@ -92,15 +89,8 @@ public class MemoryOnlyStrategyDiskAccessModeTest extends CQLTester
 
             assertEquals(numInserts, getRows(utils.execute("SELECT * FROM %s")).length); // read from compacted sstable
 
-            if (mmappingShouldWork)
-            {
-                assertFalse(0 == mosStatus.getMemoryOnlyTableInformation(KEYSPACE_PER_TEST, currentTable()).getUsed());
-            }
-            else
-            {
-                assertEquals(0, mosStatus.getMemoryOnlyTableInformation(KEYSPACE_PER_TEST, currentTable()).getUsed());
-                assertFalse(0 == mosStatus.getMemoryOnlyTableInformation(KEYSPACE_PER_TEST, currentTable()).getNotAbleToLock());
-            }
+            // MOS should always work regardless of disk access mode
+            assertFalse(0 == mosStatus.getMemoryOnlyTableInformation(KEYSPACE_PER_TEST, currentTable()).getUsed());
 
             utils.verifyTotals(mosStatus);
         }
