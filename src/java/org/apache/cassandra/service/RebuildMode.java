@@ -5,9 +5,12 @@ package org.apache.cassandra.service;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 
 import org.apache.cassandra.concurrent.TPCUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -42,40 +45,37 @@ enum RebuildMode
         public void beforeStreaming(List<String> keyspaces)
         {
             // reset the locally available ranges for the keyspaces
-            List<CompletableFuture> futures = keyspaces.stream()
-                                                       .map(SystemKeyspace::resetAvailableRanges)
-                                                       .collect(Collectors.toList());
-            TPCUtils.blockingAwait(CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])));
+            TPCUtils.blockingAwait(CompletableFuture.allOf(keyspaces.stream()
+                                                                    .peek(ks -> logger.info("Resetting available ranges for keyspace {}",
+                                                                                            ks))
+                                                                    .map(SystemKeyspace::resetAvailableRanges)
+                                                                    .toArray(CompletableFuture[]::new)));
         }
 
         @Override
         public void beforeStreaming(Map<String, Collection<Range<Token>>> rangesPerKeyspaces)
         {
             // reset the locally available ranges for the keyspaces
-            List<CompletableFuture> futures = rangesPerKeyspaces.entrySet()
-                                                                .stream()
-                                                                .map(entry -> SystemKeyspace.resetAvailableRanges(entry.getKey(), entry.getValue()))
-                                                                .collect(Collectors.toList());
-            TPCUtils.blockingAwait(CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])));
+            TPCUtils.blockingAwait(CompletableFuture.allOf(rangesPerKeyspaces.entrySet()
+                                                                             .stream()
+                                                                             .peek(entry -> logger.info("Resetting available ranges for keyspace {}: {}",
+                                                                                                        entry.getKey(),
+                                                                                                        entry.getValue()))
+                                                                             .map(entry -> SystemKeyspace.resetAvailableRanges(entry.getKey(), entry.getValue()))
+                                                                             .toArray(CompletableFuture[]::new)));
         }
     },
 
     /**
-     * Resets the locally available ranges, removes all locally present data (like a {@code TRUNCATE}), streams all ranges
+     * Resets the locally available ranges, removes all locally present data (like a {@code TRUNCATE}),
+     * streams all ranges
      */
     RESET
     {
         @Override
         public void beforeStreaming(List<String> keyspaces)
         {
-            for (String keyspaceName : keyspaces)
-            {
-                // reset the locally available ranges for the keyspaces
-                TPCUtils.blockingAwait(SystemKeyspace.resetAvailableRanges(keyspaceName));
-
-                // truncate the tables for the keyspaces (local, not cluster wide)
-                Keyspace.open(keyspaceName).getColumnFamilyStores().forEach(ColumnFamilyStore::truncateBlocking);
-            }
+            resetAndTruncate(keyspaces, DatabaseDescriptor.isAutoSnapshot());
         }
 
         @Override
@@ -94,14 +94,7 @@ enum RebuildMode
         @Override
         public void beforeStreaming(List<String> keyspaces)
         {
-            for (String keyspaceName : keyspaces)
-            {
-                // reset the locally available ranges for the keyspaces
-                SystemKeyspace.resetAvailableRanges(keyspaceName);
-
-                // truncate the tables for the keyspaces (local, not cluster wide)
-                Keyspace.open(keyspaceName).getColumnFamilyStores().forEach(cfs -> cfs.truncateBlocking(false));
-            }
+            resetAndTruncate(keyspaces, false);
         }
 
         @Override
@@ -111,20 +104,25 @@ enum RebuildMode
         }
     };
 
+    private static final Logger logger = LoggerFactory.getLogger(RebuildMode.class);
+
     /**
      * Called before streaming.
+     *
      * @param keyspaces the keyspaces that need to be streamed
      */
     public abstract void beforeStreaming(List<String> keyspaces);
 
     /**
      * Called before streaming.
+     *
      * @param rangesPerKeyspaces the keyspaces ranges that need to be streamed
      */
     public abstract void beforeStreaming(Map<String, Collection<Range<Token>>> rangesPerKeyspaces);
 
     /**
      * Returns the mode corresponding to the specified name or if the name is {@code null} the default mode.
+     *
      * @param name the name of the mode to retrieve
      * @return the mode corresponding to the specified name or if the name is {@code null} the default mode
      * @throws IllegalArgumentException if the specified name cannot be found.
@@ -141,5 +139,26 @@ enum RebuildMode
                 return mode;
         }
         throw new IllegalArgumentException("Unknown mode used for rebuild: " + name);
+    }
+
+    private static void resetAndTruncate(List<String> keyspaces, boolean snapshot)
+    {
+        for (String keyspaceName : keyspaces)
+        {
+            logger.info("Resetting available ranges for keyspace {}",
+                        keyspaceName);
+
+            // reset the locally available ranges for the keyspaces
+            TPCUtils.blockingAwait(SystemKeyspace.resetAvailableRanges(keyspaceName));
+
+            // truncate the tables for the keyspaces (local, not cluster wide)
+            Keyspace.open(keyspaceName).getColumnFamilyStores().forEach(cfs -> {
+                logger.info("Truncating table {}.{}{}",
+                            keyspaceName,
+                            cfs.name,
+                            snapshot ? ", with snapshot" : ", no snapshot");
+                cfs.truncateBlocking(snapshot);
+            });
+        }
     }
 }
