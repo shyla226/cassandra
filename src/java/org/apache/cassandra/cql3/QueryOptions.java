@@ -35,6 +35,7 @@ import org.apache.cassandra.transport.CBCodec;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.Flags;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -399,7 +400,7 @@ public abstract class QueryOptions
              * or as quickly as possible.
              */
             CONTINUOUS
-        };
+        }
 
         private final PageSize pageSize;
         private final Mechanism mechanism;
@@ -488,64 +489,36 @@ public abstract class QueryOptions
 
     private static class Codec implements CBCodec<QueryOptions>
     {
-        private enum Flag
+        private interface CodecFlag
         {
+            static final int NONE               = 0;
             // public flags
-            VALUES(0),
-            SKIP_METADATA(1),
-            PAGE_SIZE(2),
-            PAGING_STATE(3),
-            SERIAL_CONSISTENCY(4),
-            TIMESTAMP(5),
-            NAMES_FOR_VALUES(6),
-            KEYSPACE(7),
+            static final int VALUES             = 1 << 0;
+            static final int SKIP_METADATA      = 1 << 1;
+            static final int PAGE_SIZE          = 1 << 2;
+            static final int PAGING_STATE       = 1 << 3;
+            static final int SERIAL_CONSISTENCY = 1 << 4;
+            static final int TIMESTAMP          = 1 << 5;
+            static final int NAMES_FOR_VALUES   = 1 << 6;
+            static final int KEYSPACE           = 1 << 7;
 
             // private flags
-            PAGE_SIZE_BYTES(30),
-            CONTINUOUS_PAGING(31);
-
-            /** The position of the bit that must be set to one to indicate a flag is set */
-            private final int pos;
-
-            Flag(int pos)
-            {
-                this.pos = pos;
-            }
-
-            private static final Flag[] ALL_VALUES = values();
-
-            public static EnumSet<Flag> deserialize(int flags)
-            {
-                EnumSet<Flag> set = EnumSet.noneOf(Flag.class);
-                for (Flag flag : ALL_VALUES)
-                {
-                    if ((flags & (1 << flag.pos)) != 0)
-                        set.add(flag);
-                }
-                return set;
-            }
-
-            public static int serialize(EnumSet<Flag> flags)
-            {
-                int i = 0;
-                for (Flag flag : flags)
-                    i |= 1 << flag.pos;
-                return i;
-            }
+            static final int PAGE_SIZE_BYTES    = 1 << 30;
+            static final int CONTINUOUS_PAGING  = 1 << 31;
         }
 
         public QueryOptions decode(ByteBuf body, ProtocolVersion version)
         {
             ConsistencyLevel consistency = CBUtil.readConsistencyLevel(body);
-            EnumSet<Flag> flags = Flag.deserialize(version.isGreaterOrEqualTo(ProtocolVersion.V5)
+            int flags = version.isGreaterOrEqualTo(ProtocolVersion.V5)
                                                    ? (int)body.readUnsignedInt()
-                                                   : (int)body.readUnsignedByte());
+                                                   : (int)body.readUnsignedByte();
 
             List<ByteBuffer> values = Collections.<ByteBuffer>emptyList();
             List<String> names = null;
-            if (flags.contains(Flag.VALUES))
+            if (Flags.contains(flags, CodecFlag.VALUES))
             {
-                if (flags.contains(Flag.NAMES_FOR_VALUES))
+                if (Flags.contains(flags, CodecFlag.NAMES_FOR_VALUES))
                 {
                     Pair<List<String>, List<ByteBuffer>> namesAndValues = CBUtil.readNameAndValueList(body, version);
                     names = namesAndValues.left;
@@ -557,20 +530,19 @@ public abstract class QueryOptions
                 }
             }
 
-            boolean skipMetadata = flags.contains(Flag.SKIP_METADATA);
-            flags.remove(Flag.VALUES);
-            flags.remove(Flag.SKIP_METADATA);
+            boolean skipMetadata = Flags.contains(flags, CodecFlag.SKIP_METADATA);
+            flags = Flags.remove(flags, CodecFlag.VALUES | CodecFlag.SKIP_METADATA);
 
             SpecificOptions options = SpecificOptions.DEFAULT;
-            if (!flags.isEmpty())
+            if (flags != CodecFlag.NONE)
             {
                 PageSize pageSize = null;
-                if (flags.contains(Flag.PAGE_SIZE))
+                if (Flags.contains(flags, CodecFlag.PAGE_SIZE))
                 {
                     try
                     {
-                        pageSize = new PageSize(body.readInt(),
-                                                flags.contains(Flag.PAGE_SIZE_BYTES) ? PageSize.PageUnit.BYTES : PageSize.PageUnit.ROWS);
+                        PageSize.PageUnit pageUnit = Flags.contains(flags, CodecFlag.PAGE_SIZE_BYTES) ? PageSize.PageUnit.BYTES : PageSize.PageUnit.ROWS;
+                        pageSize = new PageSize(body.readInt(), pageUnit);
                     }
                     catch (IllegalArgumentException e)
                     {
@@ -578,11 +550,11 @@ public abstract class QueryOptions
                     }
                 }
 
-                PagingState pagingState = flags.contains(Flag.PAGING_STATE) ? PagingState.deserialize(CBUtil.readValueNoCopy(body), version) : null;
-                ConsistencyLevel serialConsistency = flags.contains(Flag.SERIAL_CONSISTENCY) ? CBUtil.readConsistencyLevel(body) : ConsistencyLevel.SERIAL;
+                PagingState pagingState = Flags.contains(flags, CodecFlag.PAGING_STATE) ? PagingState.deserialize(CBUtil.readValueNoCopy(body), version) : null;
+                ConsistencyLevel serialConsistency = Flags.contains(flags, CodecFlag.SERIAL_CONSISTENCY) ? CBUtil.readConsistencyLevel(body) : ConsistencyLevel.SERIAL;
 
                 long timestamp = Long.MIN_VALUE;
-                if (flags.contains(Flag.TIMESTAMP))
+                if (Flags.contains(flags, CodecFlag.TIMESTAMP))
                 {
                     long ts = body.readLong();
                     if (ts == Long.MIN_VALUE)
@@ -591,8 +563,8 @@ public abstract class QueryOptions
                 }
 
                 PagingOptions pagingOptions = null;
-                boolean hasContinuousPaging = flags.contains(Flag.CONTINUOUS_PAGING);
-                String keyspace = flags.contains(Flag.KEYSPACE) ? CBUtil.readString(body) : null;
+                boolean hasContinuousPaging = Flags.contains(flags, CodecFlag.CONTINUOUS_PAGING);
+                String keyspace = Flags.contains(flags, CodecFlag.KEYSPACE) ? CBUtil.readString(body) : null;
 
                 if (pageSize == null)
                 {
@@ -634,25 +606,25 @@ public abstract class QueryOptions
 
             CBUtil.writeConsistencyLevel(options.getConsistency(), dest);
 
-            EnumSet<Flag> flags = gatherFlags(options);
+            int flags = gatherFlags(options);
             if (version.isGreaterOrEqualTo(ProtocolVersion.V5))
-                dest.writeInt(Flag.serialize(flags));
+                dest.writeInt(flags);
             else
-                dest.writeByte((byte)Flag.serialize(flags));
+                dest.writeByte((byte)flags);
 
-            if (flags.contains(Flag.VALUES))
+            if (Flags.contains(flags, CodecFlag.VALUES))
                 CBUtil.writeValueList(options.getValues(), dest);
-            if (flags.contains(Flag.PAGE_SIZE))
+            if (Flags.contains(flags, CodecFlag.PAGE_SIZE))
                 dest.writeInt(pagingOptions.pageSize().rawSize());
-            if (flags.contains(Flag.PAGING_STATE))
+            if (Flags.contains(flags, CodecFlag.PAGING_STATE))
                 CBUtil.writeValue(pagingOptions.state().serialize(version), dest);
-            if (flags.contains(Flag.SERIAL_CONSISTENCY))
+            if (Flags.contains(flags, CodecFlag.SERIAL_CONSISTENCY))
                 CBUtil.writeConsistencyLevel(options.getSerialConsistency(), dest);
-            if (flags.contains(Flag.TIMESTAMP))
+            if (Flags.contains(flags, CodecFlag.TIMESTAMP))
                 dest.writeLong(options.getSpecificOptions().timestamp);
-            if (flags.contains(Flag.KEYSPACE))
+            if (Flags.contains(flags, CodecFlag.KEYSPACE))
                 CBUtil.writeString(options.getSpecificOptions().keyspace, dest);
-            if (flags.contains(Flag.CONTINUOUS_PAGING))
+            if (Flags.contains(flags, CodecFlag.CONTINUOUS_PAGING))
             {
                 dest.writeInt(pagingOptions.maxPages);
                 dest.writeInt(pagingOptions.maxPagesPerSecond);
@@ -672,51 +644,51 @@ public abstract class QueryOptions
 
             size += CBUtil.sizeOfConsistencyLevel(options.getConsistency());
 
-            EnumSet<Flag> flags = gatherFlags(options);
+            int flags = gatherFlags(options);
             size += (version.isGreaterOrEqualTo(ProtocolVersion.V5) ? 4 : 1);
 
-            if (flags.contains(Flag.VALUES))
+            if (Flags.contains(flags, CodecFlag.VALUES))
                 size += CBUtil.sizeOfValueList(options.getValues());
-            if (flags.contains(Flag.PAGE_SIZE))
+            if (Flags.contains(flags, CodecFlag.PAGE_SIZE))
                 size += 4;
-            if (flags.contains(Flag.PAGING_STATE))
+            if (Flags.contains(flags, CodecFlag.PAGING_STATE))
                 size += CBUtil.sizeOfValue(pagingOptions.state().serializedSize(version));
-            if (flags.contains(Flag.SERIAL_CONSISTENCY))
+            if (Flags.contains(flags, CodecFlag.SERIAL_CONSISTENCY))
                 size += CBUtil.sizeOfConsistencyLevel(options.getSerialConsistency());
-            if (flags.contains(Flag.TIMESTAMP))
+            if (Flags.contains(flags, CodecFlag.TIMESTAMP))
                 size += 8;
-            if (flags.contains(Flag.KEYSPACE))
+            if (Flags.contains(flags, CodecFlag.KEYSPACE))
                 size += CBUtil.sizeOfString(options.getSpecificOptions().keyspace);
-            if (flags.contains(Flag.CONTINUOUS_PAGING))
+            if (Flags.contains(flags, CodecFlag.CONTINUOUS_PAGING))
                 size += (version.isGreaterOrEqualTo(ProtocolVersion.DSE_V2) ? 12 : 8);
 
             return size;
         }
 
-        private EnumSet<Flag> gatherFlags(QueryOptions options)
+        private int gatherFlags(QueryOptions options)
         {
-            EnumSet<Flag> flags = EnumSet.noneOf(Flag.class);
+            int flags = CodecFlag.NONE;
             if (options.getValues().size() > 0)
-                flags.add(Flag.VALUES);
+                flags = Flags.add(flags, CodecFlag.VALUES);
             if (options.skipMetadata())
-                flags.add(Flag.SKIP_METADATA);
+                flags = Flags.add(flags, CodecFlag.SKIP_METADATA);
             PagingOptions pagingOptions = options.getPagingOptions();
             if (pagingOptions != null)
             {
-                flags.add(Flag.PAGE_SIZE);
+                flags = Flags.add(flags, CodecFlag.PAGE_SIZE);
                 if (pagingOptions.pageSize.isInBytes())
-                    flags.add(Flag.PAGE_SIZE_BYTES);
+                    flags = Flags.add(flags, CodecFlag.PAGE_SIZE_BYTES);
                 if (pagingOptions.state() != null)
-                    flags.add(Flag.PAGING_STATE);
+                    flags = Flags.add(flags, CodecFlag.PAGING_STATE);
                 if (pagingOptions.isContinuous())
-                    flags.add(Flag.CONTINUOUS_PAGING);
+                    flags = Flags.add(flags, CodecFlag.CONTINUOUS_PAGING);
             }
             if (options.getSerialConsistency() != ConsistencyLevel.SERIAL)
-                flags.add(Flag.SERIAL_CONSISTENCY);
+                flags = Flags.add(flags, CodecFlag.SERIAL_CONSISTENCY);
             if (options.getSpecificOptions().timestamp != Long.MIN_VALUE)
-                flags.add(Flag.TIMESTAMP);
+                flags = Flags.add(flags, CodecFlag.TIMESTAMP);
             if (options.getSpecificOptions().keyspace != null)
-                flags.add(Flag.KEYSPACE);
+                flags = Flags.add(flags, CodecFlag.KEYSPACE);
             return flags;
         }
     }

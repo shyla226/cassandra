@@ -19,7 +19,6 @@
 package org.apache.cassandra.transport;
 
 import java.io.IOException;
-import java.util.EnumSet;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -32,7 +31,9 @@ import io.netty.handler.codec.MessageToMessageEncoder;
 import io.netty.util.Attribute;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.transport.Frame.Header.HeaderFlag;
 import org.apache.cassandra.transport.messages.ErrorMessage;
+import org.apache.cassandra.utils.Flags;
 
 public class Frame
 {
@@ -69,7 +70,7 @@ public class Frame
         return body.release();
     }
 
-    public static Frame create(Message.Type type, int streamId, ProtocolVersion version, EnumSet<Header.Flag> flags, ByteBuf body)
+    public static Frame create(Message.Type type, int streamId, ProtocolVersion version, int flags, ByteBuf body)
     {
         Header header = new Header(version, flags, streamId, type);
         return new Frame(header, body);
@@ -83,11 +84,11 @@ public class Frame
         public static final int BODY_LENGTH_SIZE = 4;
 
         public final ProtocolVersion version;
-        public final EnumSet<Flag> flags;
+        public int flags;
         public final int streamId;
         public final Message.Type type;
 
-        private Header(ProtocolVersion version, EnumSet<Flag> flags, int streamId, Message.Type type)
+        private Header(ProtocolVersion version, int flags, int streamId, Message.Type type)
         {
             this.version = version;
             this.flags = flags;
@@ -95,48 +96,15 @@ public class Frame
             this.type = type;
         }
 
-        public enum Flag
+        public interface HeaderFlag
         {
-            // The order of that enum matters!!
-            COMPRESSED,
-            TRACING,
-            CUSTOM_PAYLOAD,
-            WARNING,
-            USE_BETA;
+            static final int NONE           = 0;
 
-            private static final Flag[] ALL_VALUES = values();
-            private static final EnumSet<Flag>[] DESERIALIZATION_TABLE = new EnumSet[1 << ALL_VALUES.length];
-            static
-            {
-                for (int i = 0; i < DESERIALIZATION_TABLE.length; i++)
-                {
-                    DESERIALIZATION_TABLE[i] = deserialize0(i);
-                }
-            }
-
-            public static EnumSet<Flag> deserialize(int flags)
-            {
-                return DESERIALIZATION_TABLE[flags & (DESERIALIZATION_TABLE.length - 1)];
-            }
-
-            private static EnumSet<Flag> deserialize0(int flags)
-            {
-                EnumSet<Flag> set = EnumSet.noneOf(Flag.class);
-                for (int n = 0; n < ALL_VALUES.length; n++)
-                {
-                    if ((flags & (1 << n)) != 0)
-                        set.add(ALL_VALUES[n]);
-                }
-                return set;
-            }
-
-            public static int serialize(EnumSet<Flag> flags)
-            {
-                int i = 0;
-                for (Flag flag : flags)
-                    i |= 1 << flag.ordinal();
-                return i;
-            }
+            static final int COMPRESSED     = 1 << 0;
+            static final int TRACING        = 1 << 1;
+            static final int CUSTOM_PAYLOAD = 1 << 2;
+            static final int WARNING        = 1 << 3;
+            static final int USE_BETA       = 1 << 4;
         }
     }
 
@@ -192,9 +160,8 @@ public class Frame
                 return null;
 
             int flags = buffer.getByte(idx++);
-            EnumSet<Header.Flag> decodedFlags = Header.Flag.deserialize(flags);
 
-            if (version.isBeta() && !decodedFlags.contains(Header.Flag.USE_BETA))
+            if (version.isBeta() && !Flags.contains(flags, HeaderFlag.USE_BETA))
                 throw new ProtocolException(String.format("Beta version of the protocol used (%s), but USE_BETA flag is unset", version),
                                             version);
 
@@ -237,7 +204,7 @@ public class Frame
             idx += bodyLength;
             buffer.readerIndex(idx);
 
-            return new Frame(new Header(version, decodedFlags, streamId, type), body.retain());
+            return new Frame(new Header(version, flags, streamId, type), body.retain());
         }
 
         @Override
@@ -304,7 +271,7 @@ public class Frame
 
             Message.Type type = frame.header.type;
             header.writeByte(type.direction.addToVersion(frame.header.version.asInt()));
-            header.writeByte(Header.Flag.serialize(frame.header.flags));
+            header.writeByte(frame.header.flags);
 
             // Continue to support writing pre-v3 headers so that we can give proper error messages to drivers that
             // connect with the v1/v2 protocol. See CASSANDRA-11464.
@@ -329,7 +296,7 @@ public class Frame
         {
             Connection connection = ctx.channel().attr(Connection.attributeKey).get();
 
-            if (!frame.header.flags.contains(Header.Flag.COMPRESSED) || connection == null)
+            if (!Flags.contains(frame.header.flags, HeaderFlag.COMPRESSED) || connection == null)
             {
                 results.add(frame);
                 return;
@@ -368,7 +335,7 @@ public class Frame
                 return;
             }
 
-            frame.header.flags.add(Header.Flag.COMPRESSED);
+            frame.header.flags = Flags.add(frame.header.flags, HeaderFlag.COMPRESSED);
             results.add(compressor.compress(frame));
         }
     }
