@@ -62,7 +62,7 @@ import org.apache.cassandra.tools.nodetool.RepairAdmin;
  * <h1>Consistent prepare</h1>
  *
  *  The consistent prepare step promotes the parent repair session to a consistent session, and isolates the sstables
- *  being repaired other sstables. First, the coordinator sends a {@link PrepareConsistentRequest} message to each repair
+ *  being repaired from other sstables. First, the coordinator sends a {@link PrepareConsistentRequest} message to each repair
  *  participant (including itself). When received, the node creates a {@link LocalSession} instance, sets it's state to
  *  {@code PREPARING}, persists it, and tries to resolve any previously pending (non finalized nor completed) sessions:
  *  this means each node tries to complete the session based on local and remote state, and if successful, it runs

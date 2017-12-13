@@ -94,8 +94,8 @@ import org.apache.cassandra.utils.UUIDGen;
  * one for each token range to repair. On repair session might repair multiple
  * column families. For each of those column families, the repair session will
  * request merkle trees for each replica of the range being repaired, diff those
- * trees upon receiving them, schedule the streaming ofthe parts to repair (based on
- * the tree diffs) and wait for all those operation. See RepairSession for more
+ * trees upon receiving them, schedule the streaming of the parts to repair (based on
+ * the tree diffs) and wait for all those operations. See RepairSession for more
  * details.
  *
  * The creation of a repair session is done through the submitRepairSession that
@@ -458,7 +458,8 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         try
         {
             // Failed repair is expensive so we wait for longer time.
-            if (!prepareLatch.await(1, TimeUnit.HOURS)) {
+            // Prepare message verb is relatively trivial, RPC timeout should be enough, SEE CASSANDRA-9292
+            if (!prepareLatch.await(DatabaseDescriptor.getRpcTimeout(), TimeUnit.MILLISECONDS)) {
                 failRepair(parentRepairSession, "Did not get replies from all endpoints.");
             }
         }
@@ -481,7 +482,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         throw new RuntimeException(errorMsg);
     }
 
-    public void registerParentRepairSession(UUID parentRepairSession, InetAddress coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, PreviewKind previewKind)
+    public synchronized void registerParentRepairSession(UUID parentRepairSession, InetAddress coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, PreviewKind previewKind)
     {
         assert isIncremental || repairedAt == ActiveRepairService.UNREPAIRED_SSTABLE;
         if (!registeredForEndpointChanges)
@@ -490,8 +491,11 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             FailureDetector.instance.registerFailureDetectionEventListener(this);
             registeredForEndpointChanges = true;
         }
-
-        parentRepairSessions.put(parentRepairSession, new ParentRepairSession(coordinator, columnFamilyStores, ranges, isIncremental, repairedAt, previewKind));
+        if (!parentRepairSessions.containsKey(parentRepairSession)) {
+            parentRepairSessions.put(parentRepairSession, new ParentRepairSession(coordinator, columnFamilyStores, ranges, isIncremental, repairedAt, previewKind));
+        } else {
+            logger.info("Parent repair session with id = {} has already been registered.", parentRepairSession);
+        }
     }
 
     public ParentRepairSession getParentRepairSession(UUID parentSessionId)
