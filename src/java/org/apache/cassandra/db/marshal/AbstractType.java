@@ -96,11 +96,15 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     }
 
     protected final ComparisonType comparisonType;
-    private final int valueLength;
     protected final FixedSizeType fixedSizeType;
     protected final int fixedCompareReturns;
     private final boolean isReversed;
+    private final int valueLength;
 
+    protected AbstractType(ComparisonType comparisonType)
+    {
+        this(comparisonType, VARIABLE_LENGTH, false);
+    }
     protected AbstractType(ComparisonType comparisonType, int valueLength)
     {
         this(comparisonType, valueLength, false);

@@ -41,7 +41,7 @@ public class DecimalType extends NumberType<BigDecimal>
 
     private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
-    DecimalType() {super(ComparisonType.CUSTOM, VARIABLE_LENGTH);} // singleton
+    DecimalType() {super(ComparisonType.CUSTOM);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {

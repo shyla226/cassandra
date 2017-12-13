@@ -62,7 +62,7 @@ public class TupleType extends AbstractType<ByteBuffer>
 
     protected TupleType(List<AbstractType<?>> types, boolean freezeInner)
     {
-        super(ComparisonType.CUSTOM, VARIABLE_LENGTH);
+        super(ComparisonType.CUSTOM);
         if (freezeInner)
             this.types = types.stream().map(AbstractType::freeze).collect(Collectors.toList());
         else

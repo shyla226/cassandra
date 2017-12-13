@@ -63,7 +63,7 @@ public final class IntegerType extends NumberType<BigInteger>
         return i;
     }
 
-    IntegerType() {super(ComparisonType.CUSTOM, VARIABLE_LENGTH);}/* singleton */
+    IntegerType() {super(ComparisonType.CUSTOM);}/* singleton */
 
     public boolean isEmptyValueMeaningless()
     {

@@ -40,7 +40,7 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
 {
     protected AbstractCompositeType()
     {
-        super(ComparisonType.CUSTOM, VARIABLE_LENGTH);
+        super(ComparisonType.CUSTOM);
     }
 
     @Override
