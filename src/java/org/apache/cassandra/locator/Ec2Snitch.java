@@ -50,6 +50,7 @@ public class Ec2Snitch extends AbstractNetworkTopologySnitch
     private Map<InetAddress, Map<String, String>> savedEndpoints;
     protected String ec2zone;
     protected String ec2region;
+    protected String datacenterSuffix;
 
     public Ec2Snitch() throws IOException, ConfigurationException
     {
@@ -63,7 +64,7 @@ public class Ec2Snitch extends AbstractNetworkTopologySnitch
         if (ec2region.endsWith("1"))
             ec2region = az.substring(0, az.length() - 3);
 
-        String datacenterSuffix = (new SnitchProperties()).get("dc_suffix", "");
+        datacenterSuffix = (new SnitchProperties()).get("dc_suffix", "");
         ec2region = ec2region.concat(datacenterSuffix);
         logger.info("EC2Snitch using region: {}, zone: {}.", ec2region, ec2zone);
     }
@@ -135,5 +136,13 @@ public class Ec2Snitch extends AbstractNetworkTopologySnitch
     public String getLocalRack()
     {
         return ec2zone;
+    }
+
+    public String toString()
+    {
+        return "Ec2Snitch{" +
+               ", datacenterSuffix=" + datacenterSuffix +
+               ", region(DC)='" + ec2region + '\'' +
+               ", zone(rack)='" + ec2zone + "'}";
     }
 }

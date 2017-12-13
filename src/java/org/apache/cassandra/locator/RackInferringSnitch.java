@@ -19,6 +19,8 @@ package org.apache.cassandra.locator;
 
 import java.net.InetAddress;
 
+import org.apache.cassandra.utils.FBUtilities;
+
 /**
  * A simple endpoint snitch implementation that assumes datacenter and rack information is encoded
  * in the 2nd and 3rd octets of the ip address, respectively.
@@ -33,5 +35,12 @@ public class RackInferringSnitch extends AbstractNetworkTopologySnitch
     public String getDatacenter(InetAddress endpoint)
     {
         return Integer.toString(endpoint.getAddress()[1] & 0xFF, 10);
+    }
+
+    public String toString()
+    {
+        return "RackInferringSnitch{" +
+               ", DC='" + getLocalDatacenter() + '\'' +
+               ", rack='" + getLocalRack() + "'}";
     }
 }

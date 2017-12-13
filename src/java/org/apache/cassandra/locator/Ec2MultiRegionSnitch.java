@@ -65,4 +65,12 @@ public class Ec2MultiRegionSnitch extends Ec2Snitch
         Gossiper.instance.addLocalApplicationState(ApplicationState.INTERNAL_IP, StorageService.instance.valueFactory.internalIP(localPrivateAddress));
         Gossiper.instance.register(new ReconnectableSnitchHelper(this, ec2region, true));
     }
+
+    public String toString()
+    {
+        return "Ec2MultiRegionSnitch{" +
+               ", localPrivateAddress=" + localPrivateAddress +
+               ", region(DC)='" + ec2region + '\'' +
+               ", zone(rack)='" + ec2zone + "'}";
+    }
 }

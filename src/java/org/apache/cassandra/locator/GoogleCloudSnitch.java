@@ -50,6 +50,7 @@ public class GoogleCloudSnitch extends AbstractNetworkTopologySnitch
     private Map<InetAddress, Map<String, String>> savedEndpoints;
     protected String gceZone;
     protected String gceRegion;
+    protected String datacenterSuffix;
 
     public GoogleCloudSnitch() throws IOException, ConfigurationException
     {
@@ -64,7 +65,7 @@ public class GoogleCloudSnitch extends AbstractNetworkTopologySnitch
         int lastRegionIndex = az.lastIndexOf("-");
         gceRegion = az.substring(0, lastRegionIndex);
 
-        String datacenterSuffix = (new SnitchProperties()).get("dc_suffix", "");
+        datacenterSuffix = (new SnitchProperties()).get("dc_suffix", "");
         gceRegion = gceRegion.concat(datacenterSuffix);
         logger.info("GCESnitch using region: {}, zone: {}.", gceRegion, gceZone);
     }
@@ -137,5 +138,13 @@ public class GoogleCloudSnitch extends AbstractNetworkTopologySnitch
     public String getLocalRack()
     {
         return gceZone;
+    }
+
+    public String toString()
+    {
+        return "Ec2Snitch{" +
+               ", datacenterSuffix=" + datacenterSuffix +
+               ", region(DC)='" + gceRegion + '\'' +
+               ", zone(rack)='" + gceZone + "'}";
     }
 }

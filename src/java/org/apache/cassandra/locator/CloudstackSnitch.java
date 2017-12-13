@@ -217,4 +217,11 @@ public class CloudstackSnitch extends AbstractNetworkTopologySnitch
 
         return "http://" + endpoint;
     }
+
+    public String toString()
+    {
+        return "CloudstackSnitch{" +
+               "myDC='" + csZoneDc + '\'' +
+               ", myRack='" + csZoneRack + "'}";
+    }
 }
