@@ -362,7 +362,8 @@ public class DynamicCompositeType extends AbstractCompositeType
 
         public FixedValueComparator(int cmp)
         {
-            super(ComparisonType.FIXED_COMPARE, 0, FixedSizeType.NONE, cmp);
+            // VAR_LENGTH due to compatibility reasons, should be 0
+            super(ComparisonType.FIXED_COMPARE, VARIABLE_LENGTH, FixedSizeType.NONE, cmp);
         }
 
         @Override

@@ -33,7 +33,8 @@ public class ShortType extends NumberType<Short>
 
     ShortType()
     {
-        super(ComparisonType.FIXED_SIZE_VALUE, 2, FixedSizeType.SHORT);
+        // VAR_LENGTH due to compatibility reasons, should be 2
+        super(ComparisonType.FIXED_SIZE_VALUE, VARIABLE_LENGTH, FixedSizeType.SHORT);
     } // singleton
 
     public static int compareType(ByteBuffer o1, ByteBuffer o2)

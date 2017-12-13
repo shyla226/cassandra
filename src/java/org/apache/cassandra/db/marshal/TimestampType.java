@@ -49,7 +49,7 @@ public class TimestampType extends TemporalType<Date>
 
     public static final TimestampType instance = new TimestampType();
 
-    private TimestampType() {super(ComparisonType.CUSTOM);} // singleton
+    private TimestampType() {super(ComparisonType.CUSTOM, 8);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {

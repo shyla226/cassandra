@@ -38,7 +38,8 @@ public class ByteType extends NumberType<Byte>
 
     ByteType()
     {
-        super(ComparisonType.FIXED_SIZE_VALUE, 1, FixedSizeType.BYTE);
+        // VAR_LENGTH due to compatibility reasons, should be 1
+        super(ComparisonType.FIXED_SIZE_VALUE, VARIABLE_LENGTH, FixedSizeType.BYTE);
     } // singleton
 
     public static int compareType(ByteBuffer o1, ByteBuffer o2)

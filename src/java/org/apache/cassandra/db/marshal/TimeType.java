@@ -40,7 +40,7 @@ public class TimeType extends TemporalType<Long>
 
     private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
-    private TimeType() {super(ComparisonType.BYTE_ORDER);} // singleton
+    private TimeType() {super(ComparisonType.BYTE_ORDER, VARIABLE_LENGTH);} // singleton
 
     public ByteSource asByteComparableSource(ByteBuffer buf)
     {
