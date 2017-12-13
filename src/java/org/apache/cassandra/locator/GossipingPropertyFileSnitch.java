@@ -152,4 +152,14 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
         if (pendingHelper != null)
             Gossiper.instance.unregister(pendingHelper);
     }
+
+    public String toString()
+    {
+        return "GossipingPropertyFileSnitch{" + "psnitch=" + psnitch +
+               ", myDC='" + myDC + '\'' +
+               ", myRack='" + myRack + '\'' +
+               ", preferLocal=" + preferLocal +
+               ", snitchHelperReference=" + snitchHelperReference +
+               '}';
+    }
 }

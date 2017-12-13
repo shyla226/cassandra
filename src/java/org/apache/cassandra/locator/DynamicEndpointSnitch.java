@@ -445,4 +445,11 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         }
         return maxScore;
     }
+
+    public String toString()
+    {
+        return "DynamicEndpointSnitch{registered=" + registered +
+               ", subsnitch=" + subsnitch +
+               '}';
+    }
 }
