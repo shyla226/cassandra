@@ -91,6 +91,8 @@ public class SLF4JAuditWriter implements IAuditWriter
     @Override
     public Completable recordEvent(AuditableEvent event)
     {
+        // Apparently DSE test rely on the logging coming from line 96
+        // We should change those tests at some point. Such a thing is making me cry
         AUDIT_LOG.info("{}", event);
         return Completable.complete();
     }
