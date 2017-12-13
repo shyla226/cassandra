@@ -264,4 +264,9 @@ public class PropertyFileSnitch extends AbstractNetworkTopologySnitch
     {
         gossipStarted = true;
     }
+
+    public String toString()
+    {
+        return "PropertyFileSnitch{" + "gossipStarted=" + gossipStarted + '}';
+    }
 }

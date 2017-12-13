@@ -20,6 +20,8 @@ package org.apache.cassandra.locator;
 import java.net.InetAddress;
 import java.util.List;
 
+import org.apache.cassandra.utils.FBUtilities;
+
 /**
  * A simple endpoint snitch implementation that treats Strategy order as proximity,
  * allowing non-read-repaired reads to prefer a single endpoint, which improves
@@ -50,5 +52,12 @@ public class SimpleSnitch extends AbstractEndpointSnitch
         // Making all endpoints equal ensures we won't change the original ordering (since
         // Collections.sort is guaranteed to be stable)
         return 0;
+    }
+
+    public String toString()
+    {
+        return "SimpleSnitch{" +
+               ", DC='" + getDatacenter(FBUtilities.getBroadcastAddress()) + '\'' +
+               ", rack='" + getRack(FBUtilities.getBroadcastAddress()) + "'}";
     }
 }
