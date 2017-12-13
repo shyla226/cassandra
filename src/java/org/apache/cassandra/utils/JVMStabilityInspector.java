@@ -58,7 +58,7 @@ public final class JVMStabilityInspector
         boolean isUnstable = false;
         if (t instanceof OutOfMemoryError)
         {
-            if (Boolean.getBoolean("cassandra.printHeapHistogramOnOutOfMemoryError"))
+            if (printHeapHistogramOnOutOfMemoryError())
             {
                 // We want to avoid printing multiple time the heap histogram if multiple OOM errors happen in a short
                 // time span.
@@ -93,6 +93,23 @@ public final class JVMStabilityInspector
 
         if (t.getCause() != null)
             inspectThrowable(t.getCause());
+    }
+
+    /**
+     * Checks if an heap histogram must be printed on OutOfMemoryError.
+     * <p>By default we always print an heap histogram as for large heap it can save us a huge amount of time.
+     * If the user want to turn it down he should use the {@code cassandra.printHeapHistogramOnOutOfMemoryError}
+     * property.</p>
+     * @return {@code true} if an heap histogram must be printed on OutOfMemoryError, {@code false} otherwise.
+     */
+    private static boolean printHeapHistogramOnOutOfMemoryError()
+    {
+        String property = System.getProperty("cassandra.printHeapHistogramOnOutOfMemoryError");
+
+        if (property == null)
+            return true;
+
+        return Boolean.parseBoolean(property);
     }
 
     public static void inspectCommitLogThrowable(Throwable t)

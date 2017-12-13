@@ -28,6 +28,8 @@ Operations
      IO and compactions. Alternatively, operators can run repair before bootstrapping the replacement with the
      default replace_consistency=ONE.
      Available options: "ONE"(default), "LOCAL_DC_QUORUM", "GLOBAL_QUORUM".
+   - DSE is logging by default a heap histogram on OutOfMemoryError. To disable that behavior
+     set the 'cassandra.printHeapHistogramOnOutOfMemoryError' System property to 'false'.
 
 DSE 5.0.10
 ==========
@@ -53,9 +55,6 @@ Upgrading
      rely on the OnOutOfMemoryError option as the ExitOnOutOfMemoryError and CrashOnOutOfMemoryError options
      are not supported by the older 1.7 and 1.8 JVMs. A warning will be logged at startup if none of those JVM
      options are used. See CASSANDRA-13006 for more details.
-   - Cassandra is not logging anymore by default an Heap histogram on OutOfMemoryError. To enable that behavior
-     set the 'cassandra.printHeapHistogramOnOutOfMemoryError' System property to 'true'. See CASSANDRA-13006
-     for more details.
 
 3.0.15
 =====

@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Print heap histogram on OOM errors by default (DB-1489)
  * Support frozen collection list and set in stress (DB-1464)
  * Improved streams logging (DB-1409)
  * Make migration-delay configurable (DB-1404)
