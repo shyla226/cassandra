@@ -96,7 +96,6 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.flow.Flow;
 
-import static org.apache.cassandra.db.marshal.AbstractType.VARIABLE_LENGTH;
 import static org.junit.Assert.*;
 
 public class SASIIndexTest
@@ -1591,7 +1590,7 @@ public class SASIIndexTest
     {
 
         // special type which is UTF-8 but is only on the inside
-        AbstractType<?> stringType = new AbstractType<String>(AbstractType.ComparisonType.CUSTOM, VARIABLE_LENGTH)
+        AbstractType<?> stringType = new AbstractType<String>(AbstractType.ComparisonType.CUSTOM)
         {
             public ByteBuffer fromString(String source) throws MarshalException
             {

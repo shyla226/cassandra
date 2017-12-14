@@ -56,7 +56,6 @@ public class TimestampType extends TemporalType<Date>
         return true;
     }
 
-    @Override
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
         return LongType.compareLongs(o1, o2);
@@ -143,6 +142,12 @@ public class TimestampType extends TemporalType<Date>
     public TypeSerializer<Date> getSerializer()
     {
         return TimestampSerializer.instance;
+    }
+
+    @Override
+    public int valueLengthIfFixed()
+    {
+        return 8;
     }
 
     @Override

@@ -77,7 +77,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
 
     protected CollectionType(ComparisonType comparisonType, Kind kind)
     {
-        super(comparisonType, VARIABLE_LENGTH);
+        super(comparisonType);
         this.kind = kind;
     }
 

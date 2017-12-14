@@ -33,12 +33,7 @@ public abstract class TemporalType<T> extends AbstractType<T>
 {
     protected TemporalType(ComparisonType comparisonType)
     {
-        super(comparisonType, 8);
-    }
-
-    public TemporalType(ComparisonType comparisonType, int fixedValueLength)
-    {
-        super(comparisonType, fixedValueLength);
+        super(comparisonType);
     }
 
     /**
