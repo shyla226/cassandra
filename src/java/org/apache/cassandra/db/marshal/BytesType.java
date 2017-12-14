@@ -34,7 +34,7 @@ public class BytesType extends AbstractType<ByteBuffer>
 {
     public static final BytesType instance = new BytesType();
 
-    BytesType() {super(ComparisonType.BYTE_ORDER, VARIABLE_LENGTH);} // singleton
+    BytesType() {super(ComparisonType.BYTE_ORDER);} // singleton
 
     public ByteBuffer fromString(String source)
     {

@@ -38,10 +38,10 @@ public class ByteType extends NumberType<Byte>
 
     ByteType()
     {
-        super(ComparisonType.FIXED_SIZE_VALUE, 1, FixedSizeType.BYTE);
+        super(ComparisonType.CUSTOM);
     } // singleton
 
-    public static int compareType(ByteBuffer o1, ByteBuffer o2)
+    public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
         return o1.get(o1.position()) - o2.get(o2.position());
     }

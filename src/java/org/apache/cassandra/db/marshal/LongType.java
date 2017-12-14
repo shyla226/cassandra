@@ -21,31 +21,43 @@ import java.nio.ByteBuffer;
 
 import org.apache.commons.lang3.mutable.MutableLong;
 
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
-import org.apache.cassandra.serializers.*;
+import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.serializers.LongSerializer;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 public class LongType extends NumberType<Long>
 {
     public static final LongType instance = new LongType();
 
-    LongType() {super(ComparisonType.FIXED_SIZE_VALUE, 8, FixedSizeType.LONG);} // singleton
+    LongType() {super(ComparisonType.CUSTOM);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
         return true;
     }
 
-    public static int compareType(ByteBuffer o1, ByteBuffer o2)
+    public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
         return compareLongs(o1, o2);
     }
 
     public static int compareLongs(ByteBuffer o1, ByteBuffer o2)
     {
-        return Long.compare(UnsafeByteBufferAccess.getLong(o1), UnsafeByteBufferAccess.getLong(o2));
+        if (!o1.hasRemaining() || !o2.hasRemaining())
+            return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
+
+        int diff = o1.get(o1.position()) - o2.get(o2.position());
+        if (diff != 0)
+            return diff;
+
+        return ByteBufferUtil.compareUnsigned(o1, o2);
     }
 
     public ByteSource asByteComparableSource(ByteBuffer buf)
@@ -114,6 +126,12 @@ public class LongType extends NumberType<Long>
     public TypeSerializer<Long> getSerializer()
     {
         return LongSerializer.instance;
+    }
+
+    @Override
+    public int valueLengthIfFixed()
+    {
+        return 8;
     }
 
     @Override

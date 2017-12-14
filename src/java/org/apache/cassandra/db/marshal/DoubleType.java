@@ -21,17 +21,22 @@ import java.nio.ByteBuffer;
 
 import org.apache.commons.lang3.mutable.MutableDouble;
 
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
-import org.apache.cassandra.serializers.*;
+import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.serializers.DoubleSerializer;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 public class DoubleType extends NumberType<Double>
 {
     public static final DoubleType instance = new DoubleType();
 
-    DoubleType() {super(ComparisonType.FIXED_SIZE_VALUE, 8, FixedSizeType.DOUBLE);} // singleton
+    DoubleType() {super(ComparisonType.CUSTOM);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
@@ -44,9 +49,12 @@ public class DoubleType extends NumberType<Double>
         return true;
     }
 
-    public static int compareType(ByteBuffer o1, ByteBuffer o2)
+    public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
-        return Double.compare(UnsafeByteBufferAccess.getDouble(o1), UnsafeByteBufferAccess.getDouble(o2));
+        if (!o1.hasRemaining() || !o2.hasRemaining())
+            return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
+
+        return compose(o1).compareTo(compose(o2));
     }
 
     public ByteSource asByteComparableSource(ByteBuffer buf)
@@ -101,6 +109,12 @@ public class DoubleType extends NumberType<Double>
     public TypeSerializer<Double> getSerializer()
     {
         return DoubleSerializer.instance;
+    }
+
+    @Override
+    public int valueLengthIfFixed()
+    {
+        return 8;
     }
 
     @Override

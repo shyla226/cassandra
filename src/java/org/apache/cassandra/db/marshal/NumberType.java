@@ -29,14 +29,9 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 public abstract class NumberType<T extends Number> extends AbstractType<T>
 {
-    protected NumberType(ComparisonType comparisonType, int valueLength)
+    protected NumberType(ComparisonType comparisonType)
     {
-        super(comparisonType, valueLength);
-    }
-
-    public NumberType(ComparisonType comparisonType, int valueLength, FixedSizeType fixedSizeType)
-    {
-        super(comparisonType, valueLength, fixedSizeType, 0);
+        super(comparisonType);
     }
 
     /**

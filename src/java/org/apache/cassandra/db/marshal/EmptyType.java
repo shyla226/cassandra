@@ -38,7 +38,12 @@ public class EmptyType extends AbstractType<Void>
 {
     public static final EmptyType instance = new EmptyType();
 
-    private EmptyType() {super(ComparisonType.FIXED_COMPARE, 0, FixedSizeType.NONE, 0);} // singleton
+    private EmptyType() {super(ComparisonType.CUSTOM);} // singleton
+
+    public int compareCustom(ByteBuffer o1, ByteBuffer o2)
+    {
+        return 0;
+    }
 
     public ByteSource asByteComparableSource(ByteBuffer b)
     {
@@ -84,6 +89,12 @@ public class EmptyType extends AbstractType<Void>
     public TypeSerializer<Void> getSerializer()
     {
         return EmptySerializer.instance;
+    }
+
+    @Override
+    public int valueLengthIfFixed()
+    {
+        return 0;
     }
 
     @Override
