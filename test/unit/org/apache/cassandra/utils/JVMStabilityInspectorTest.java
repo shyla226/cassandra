@@ -80,6 +80,7 @@ public class JVMStabilityInspectorTest
     @Test
     public void testOutOfMemoryHandling()
     {
+        System.setProperty("cassandra.printHeapHistogramOnOutOfMemoryError", "false");
         for (Throwable oom : asList(new OutOfMemoryError(), new Exception(new OutOfMemoryError())))
         {
             try
