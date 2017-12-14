@@ -74,10 +74,9 @@ public abstract class AbstractEndpointSnitch implements IEndpointSnitch
 
     private boolean hasRemoteNode(List<InetAddress> l)
     {
-        String localDc = DatabaseDescriptor.getLocalDataCenter();
         for (InetAddress ep : l)
         {
-            if (!localDc.equals(getDatacenter(ep)))
+            if (!isInLocalDatacenter(ep))
                 return true;
         }
         return false;

@@ -100,8 +100,6 @@ public class DatabaseDescriptor
     private static long counterCacheSizeInMB;
     private static long indexSummaryCapacityInMB;
 
-    private static String localDC;
-    private static String localRack;
     private static Comparator<InetAddress> localComparator;
     private static EncryptionContext encryptionContext;
     private static boolean hasLoggedConfig;
@@ -1128,8 +1126,7 @@ public class DatabaseDescriptor
         }
         EndpointSnitchInfo.create();
 
-        localDC = snitch.getLocalDatacenter();
-        localRack = snitch.getLocalRack();
+        String localDC = snitch.getLocalDatacenter();
         localComparator = new Comparator<InetAddress>()
         {
             public int compare(InetAddress endpoint1, InetAddress endpoint2)
@@ -2411,12 +2408,12 @@ public class DatabaseDescriptor
 
     public static String getLocalDataCenter()
     {
-        return localDC;
+        return snitch.getLocalDatacenter();
     }
 
     public static String getLocalRack()
     {
-        return localRack;
+        return snitch.getLocalRack();
     }
 
     public static Comparator<InetAddress> getLocalComparator()

@@ -55,9 +55,9 @@ public class RangeFetchMapCalculatorTest
             public String getDatacenter(InetAddress endpoint)
             {
                 if (getIPLastPart(endpoint) <= 50 || getIPLastPart(endpoint) % 2 == 0)
-                    return DatabaseDescriptor.getLocalDataCenter();
+                    return "datacenter1";
                 else
-                    return DatabaseDescriptor.getLocalDataCenter() + "Remote";
+                    return "datacenter1Remote";
             }
 
             private int getIPLastPart(InetAddress endpoint)

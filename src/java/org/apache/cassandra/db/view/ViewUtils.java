@@ -62,14 +62,13 @@ public final class ViewUtils
     {
         AbstractReplicationStrategy replicationStrategy = Keyspace.open(keyspaceName).getReplicationStrategy();
 
-        String localDataCenter = DatabaseDescriptor.getLocalDataCenter();
         List<InetAddress> baseEndpoints = new ArrayList<>();
         List<InetAddress> viewEndpoints = new ArrayList<>();
         for (InetAddress baseEndpoint : replicationStrategy.getNaturalEndpoints(baseToken))
         {
             // An endpoint is local if we're not using Net
             if (!(replicationStrategy instanceof NetworkTopologyStrategy) ||
-                DatabaseDescriptor.getEndpointSnitch().getDatacenter(baseEndpoint).equals(localDataCenter))
+                    DatabaseDescriptor.getEndpointSnitch().isInLocalDatacenter(baseEndpoint))
                 baseEndpoints.add(baseEndpoint);
         }
 
@@ -84,7 +83,7 @@ public final class ViewUtils
             if (baseEndpoints.contains(viewEndpoint))
                 baseEndpoints.remove(viewEndpoint);
             else if (!(replicationStrategy instanceof NetworkTopologyStrategy) ||
-                     DatabaseDescriptor.getEndpointSnitch().getDatacenter(viewEndpoint).equals(localDataCenter))
+                    DatabaseDescriptor.getEndpointSnitch().isInLocalDatacenter(viewEndpoint))
                 viewEndpoints.add(viewEndpoint);
         }
 
