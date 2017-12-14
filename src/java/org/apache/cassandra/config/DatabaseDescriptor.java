@@ -2700,7 +2700,8 @@ public class DatabaseDescriptor
         final int confCores = conf == null || conf.tpc_cores == null ? FBUtilities.getAvailableProcessors() - 1 : conf.tpc_cores;
 
         // allow system property override
-        return Integer.getInteger(Config.PROPERTY_PREFIX+"tpc_cores", confCores);
+        int cores = Integer.getInteger(Config.PROPERTY_PREFIX + "tpc_cores", confCores);
+        return Math.max(cores, 1);
     }
 
     public static NodeSyncConfig getNodeSyncConfig()
