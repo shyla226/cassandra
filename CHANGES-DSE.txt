@@ -8,6 +8,7 @@ DSE 5.1.6
  * Do not leak body buffer in case of protocol exceptions and upgrade Netty to 4.0.52 (DB-1257)
  * Ensure that the list and set selectors elements are all of the same type (DB-905)
 Merged from dse5.0:
+ * Print heap histogram on OOM errors by default (DB-1489)
  * Support frozen collection list and set in stress (DB-1464)
  * Improved streams logging (DB-1409)
  * Make migration-delay configurable (DB-1404)

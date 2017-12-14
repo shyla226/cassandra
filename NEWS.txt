@@ -16,16 +16,6 @@ using the provided 'sstableupgrade' tool.
 DSE 5.1.6
 =========
 
-Upgrading
----------
-    - Cassandra is now relying on the JVM options to properly shutdown on OutOfMemoryError. By default it will
-      rely on the OnOutOfMemoryError option as the ExitOnOutOfMemoryError and CrashOnOutOfMemoryError options
-      are not supported by the older 1.7 and 1.8 JVMs. A warning will be logged at startup if none of those JVM
-      options are used. See CASSANDRA-13006 for more details
-    - Cassandra is not logging anymore by default an Heap histogram on OutOfMemoryError. To enable that behavior
-      set the 'cassandra.printHeapHistogramOnOutOfMemoryError' System property to 'true'. See CASSANDRA-13006
-      for more details.
-
 Operations
 ----------
     - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
@@ -43,6 +33,12 @@ Upgrading
       cluster. Once all nodes have been upgraded, the "real" schema version will be
       announced. Note: this fix is only necessary in DSE 5.1 and therefore only applies
       to DSE 5.1. (DB-1477)
+    - DSE is now relying on the JVM options to properly shutdown on OutOfMemoryError. By default it will
+      rely on the OnOutOfMemoryError option as the ExitOnOutOfMemoryError and CrashOnOutOfMemoryError options
+      are not supported by the older 1.7 and 1.8 JVMs. A warning will be logged at startup if none of those JVM
+      options are used. See CASSANDRA-13006 for more details
+    - DSE is logging by default a heap histogram on OutOfMemoryError. To disable that behavior
+      set the 'cassandra.printHeapHistogramOnOutOfMemoryError' System property to 'false'.
 
 DSE 5.1.3
 =========
