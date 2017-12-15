@@ -65,6 +65,7 @@ class MemoryOnlyStrategyTestUtil
 
         logger.info(String.format("%-30s %-30s %12s %17s %7s\n", "Keyspace", "ColumnFamily", "Size", "Couldn't Lock",
                                   "Usage"));
+
         for (MemoryOnlyStatusMXBean.TableInfo mi : mosStatus.getMemoryOnlyTableInformation())
         {
             logger.info(String.format("%-30s %-30s %10dB %15dB %6.0f%%\n", mi.getKs(), mi.getCf(), mi.getUsed(),
