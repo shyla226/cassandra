@@ -35,11 +35,11 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.BlacklistedDirectories;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.DiskBoundaries;
-import org.apache.cassandra.db.DiskBoundaryManager;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.RowUpdateBuilder;
@@ -68,14 +68,15 @@ public class CompactionStrategyManagerTest
     @BeforeClass
     public static void beforeClass()
     {
-        SchemaLoader.prepareServer();
-        backups = DatabaseDescriptor.isIncrementalBackupsEnabled();
-        DatabaseDescriptor.setIncrementalBackupsEnabled(false);
+        DatabaseDescriptor.daemonInitialization();
         /**
          * We use byte ordered partitioner in this test to be able to easily infer an SSTable
          * disk assignment based on its generation - See {@link this#getSSTableIndex(Integer[], SSTableReader)}
          */
         originalPartitioner = StorageService.instance.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+        backups = DatabaseDescriptor.isIncrementalBackupsEnabled();
+        DatabaseDescriptor.setIncrementalBackupsEnabled(false);
+        SchemaLoader.prepareServer();
     }
 
     @AfterClass
@@ -281,7 +282,7 @@ public class CompactionStrategyManagerTest
         private DiskBoundaries createDiskBoundaries(ColumnFamilyStore cfs, Integer[] boundaries)
         {
             List<PartitionPosition> positions = Arrays.stream(boundaries).map(b -> Util.token(String.format(String.format("%04d", b))).minKeyBound()).collect(Collectors.toList());
-            return new DiskBoundaries(cfs.getDirectories().getWriteableLocations(), positions, 0, 0);
+            return new DiskBoundaries(cfs.getDirectories().getWriteableLocations(), positions, StorageService.instance.getTokenMetadata().getRingVersion(), BlacklistedDirectories.getDirectoriesVersion());
         }
     }
 
