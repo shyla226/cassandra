@@ -320,13 +320,6 @@ public class IOSchedulerTest
         }
 
         @Override
-        public Disposable scheduleDirect(Runnable runnable, long delay, TimeUnit unit)
-        {
-            tasks.add(runnable);
-            return EmptyDisposable.INSTANCE;
-        }
-
-        @Override
         public ScheduledRunnable scheduleActual(final Runnable runnable, long delayTime, TimeUnit unit, DisposableContainer parent)
         {
             ScheduledRunnable ret = new ScheduledRunnable(runnable, parent);

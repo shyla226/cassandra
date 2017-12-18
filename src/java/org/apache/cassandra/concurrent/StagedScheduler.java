@@ -19,10 +19,13 @@
 package org.apache.cassandra.concurrent;
 
 import java.util.EnumMap;
+import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
+import io.reactivex.plugins.RxJavaPlugins;
 
 /**
  * A scheduler with some additional methods for supporting stages: {@link TPCTaskType}.
@@ -102,6 +105,34 @@ public abstract class StagedScheduler extends Scheduler
         return scheduleDirect(wrap(run, taskType), delay, unit);
     }
 
+    @Override
+    public Disposable scheduleDirect(Runnable run, long delay, TimeUnit unit)
+    {
+        final Worker w = createWorker();
+
+        final Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
+
+        TPCAwareDisposeTask task = new TPCAwareDisposeTask(decoratedRun, w);
+
+        w.schedule(task, delay, unit);
+
+        return task;
+    }
+
+    @Override
+    public Disposable schedulePeriodicallyDirect(Runnable run, long initialDelay, long period, TimeUnit unit)
+    {
+        // The default RxJava implementation of this API does not play well with some of our TPC-specific
+        // implementation details. For example, disposing the Disposable returned by the default implementation won't
+        // cancel the TPCRunnable that we may have passed for periodic scheduling. As another example, the default
+        // implementation includes multiple calls to RxJavaPlugins.onSchedule() coupled with multiple wrappings of the
+        // thus decorated Runnable in internal Disposable types. This can result in multiple redundant TPCRunnables
+        // created as a result of the decorations. Until we decide it pays off to reimplement this code path as we've
+        // done for the scheduleDirect code path, it's best to throw here.
+        // Also see https://github.com/riptano/apollo/pull/586
+        throw new UnsupportedOperationException();
+    }
+
     public TPCRunnable wrap(Runnable runnable, TPCTaskType taskType)
     {
         return TPCRunnable.wrap(runnable, ExecutorLocals.create(), taskType, metricsCoreId());
@@ -126,5 +157,65 @@ public abstract class StagedScheduler extends Scheduler
     {
         // Because this executor explicitly specifies locals that need to be set, we always wrap the runnable.
         return (runnable, locals) -> execute(TPCRunnable.wrap(runnable, locals, type, metricsCoreId()));
+    }
+
+    /**
+     * Used to execute a given runnable, and to dispose of resources related to the execution. If the runnable is a
+     * <code>TPCRunnable</code>, special care is taken in case of disposal before the runnable execution has completed.
+     * Inspired by the internal dispose tasks used by {@link Scheduler}.
+     */
+    static final class TPCAwareDisposeTask implements Runnable, Callable<Object>, Disposable
+    {
+        private final Runnable runnable;
+        /**
+         * The worker that would be running this dispose task, and respectively its runnable.
+         */
+        private final Worker w;
+        /**
+         * Shows whether the runnable has progressed - either by having started running, or by getting cancelled.
+         */
+        private final AtomicBoolean hasProgressed;
+        
+        TPCAwareDisposeTask(Runnable runnable, Worker w)
+        {
+            this.runnable = runnable;
+            this.w = w;
+            this.hasProgressed = new AtomicBoolean();
+        }
+
+        @Override
+        public void run()
+        {
+            try
+            {
+                if (hasProgressed.compareAndSet(false, true))
+                    runnable.run();
+            }
+            finally
+            {
+                dispose();
+            }
+        }
+
+        @Override
+        public Object call()
+        {
+            run();
+            return null;
+        }
+
+        @Override
+        public void dispose()
+        {
+            w.dispose();
+            if (runnable instanceof TPCRunnable && hasProgressed.compareAndSet(false, true))
+                ((TPCRunnable) runnable).cancelled();
+        }
+
+        @Override
+        public boolean isDisposed()
+        {
+            return w.isDisposed();
+        }
     }
 }

@@ -125,45 +125,15 @@ class ExecutorBasedWorker extends Scheduler.Worker
         return scheduleActual(action, delayTime, unit, tasks);
     }
 
-    public Disposable scheduleDirect(final Runnable run, long delayTime, TimeUnit unit)
+    ScheduledRunnable scheduleActual(final Runnable decoratedRun, long delayTime, TimeUnit unit, DisposableContainer parent)
     {
-        Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
-        try
-        {
-            Future<?> f;
-            if (delayTime <= 0)
-            {
-                f = executor.submit(decoratedRun);
-            }
-            else
-            {
-                f = executor.schedule(decoratedRun, delayTime, unit);
-            }
-            return new Disposable()
-            {
-                public void dispose()
-                {
-                    f.cancel(false);
-                    if (f.isCancelled() && run instanceof TPCRunnable)
-                        ((TPCRunnable) run).cancelled();
-                }
-
-                public boolean isDisposed()
-                {
-                    return f.isCancelled();
-                }
-            };
-        }
-        catch (RejectedExecutionException ex)
-        {
-            RxJavaPlugins.onError(ex);
-            return EmptyDisposable.INSTANCE;
-        }
-    }
-
-    public ScheduledRunnable scheduleActual(final Runnable run, long delayTime, TimeUnit unit, DisposableContainer parent)
-    {
-        Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
+        // We should be able to avoid the decoration if we can establish an invariant that RxJava's decoration
+        // mechanism should have already been used before delegating to the underlying scheduler worker.
+        // This would save some allocations and TPC metrics pollution in some cases (e.g. if the decoration wraps
+        // as TPCRunnable, and the given runnable is not one already - a typical example being a wrapper over
+        // TPCRunnable...). If we want or have to decorate here too, we should either accept the redundancy, or
+        // add some checks during the decoration.
+        // Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
 
         ScheduledRunnable sr = new ScheduledRunnable(decoratedRun, parent);
 

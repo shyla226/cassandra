@@ -34,18 +34,6 @@ public class SimpleCondition implements Condition
 
     private volatile WaitQueue waiting;
     private volatile boolean signaled = false;
-    private volatile Runnable signalAction;
-    private volatile Scheduler scheduler;
-
-    public void setSignalAction(Scheduler scheduler, Runnable signalAction)
-    {
-        assert this.signalAction == null;
-        this.scheduler = scheduler;
-        this.signalAction = signalAction;
-
-        if (signaled)
-            scheduler.createWorker().schedule(signalAction::run);
-    }
 
     public void await() throws InterruptedException
     {
@@ -93,10 +81,6 @@ public class SimpleCondition implements Condition
         signaled = true;
         if (waiting != null)
             waiting.signalAll();
-
-        if (signalAction != null)
-            scheduler.createWorker().schedule(signalAction::run);
-
     }
 
     public void awaitUninterruptibly()
