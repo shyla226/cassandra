@@ -160,22 +160,22 @@ public class ColumnFilter
 
     /**
      * Return this column filter if {@link #fetchedIncludesAllColumns} is correct with regard to the
-     * partition columns received as a parameter, that is {@link #fetchedIncludesAllColumns} is true
-     * if all partition columns are contained in {@link #fetched} or false otherwise.
+     * columns received as a parameter, that is {@link #fetchedIncludesAllColumns} is true
+     * if all columns are contained in {@link #fetched} or false otherwise.
      * Return a copy with {@link #fetchedIncludesAllColumns} set accordingly if it doesn't already
-     * reflect the correct status for these partition columns.
+     * reflect the correct status for these columns.
      *
-     * This is required because occasionally a filter columns may not contain partition columns, for example
+     * This is required because occasionally a filter columns may not contain columns, for example
      * if a coordinator has sent a request bound to an older schema version, or if a prepared statement
      * hasn't been updated. In this case, fetching such columns will cause a serialization exception since
      * it is assumed that the selection filter is a superset of all columns to serialize, see DB-1444.
      *
-     * @param partitionColumns - the columns of the partition that will use this filter
+     * @param columns - the columns that this filter will be asked to select
      * @return this filter or a copy with {@link #fetchedIncludesAllColumns} amended accordingly.
      */
-    public ColumnFilter withPartitionColumnsVerified(RegularAndStaticColumns partitionColumns)
+    public ColumnFilter withColumnsVerified(RegularAndStaticColumns columns)
     {
-        boolean fetchedIncludesAllColumns = fetched.includes(partitionColumns);
+        boolean fetchedIncludesAllColumns = fetched.includes(columns);
         if (fetchedIncludesAllColumns == this.fetchedIncludesAllColumns)
             return this;
 

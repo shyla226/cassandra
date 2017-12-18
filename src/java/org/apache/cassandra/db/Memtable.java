@@ -530,7 +530,7 @@ public class Memtable implements Comparable<Memtable>
                 assert position instanceof DecoratedKey;
                 DecoratedKey key = (DecoratedKey) position;
                 ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
-                FlowableUnfilteredPartition fup = filter.getFlowableUnfilteredPartition(columnFilter.withPartitionColumnsVerified(partition.columns()), partition);
+                FlowableUnfilteredPartition fup = filter.getFlowableUnfilteredPartition(columnFilter.withColumnsVerified(partition.columns()), partition);
 
                 if (currentPartitions.hasNext())
                     subscriber.onNext(fup);

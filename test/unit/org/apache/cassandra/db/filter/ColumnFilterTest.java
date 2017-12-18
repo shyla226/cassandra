@@ -117,7 +117,8 @@ public class ColumnFilterTest
         testRoundTrip(columnFilter, metadata, SERIALIZER_40);
         testRoundTrip(columnFilter, metadata, SERIALIZER_DSE60);
 
-        columnFilter = ColumnFilter.selection(metadata, metadata.regularAndStaticColumns().without(v1).without(s1));
+        columnFilter = ColumnFilter.selection(metadata, metadata.regularAndStaticColumns().without(v1).without(s1))
+                                   .withColumnsVerified(metadata.regularAndStaticColumns());
         testRoundTrip(columnFilter, SERIALIZER_30.maybeUpdateForBackwardCompatility(columnFilter), metadata, SERIALIZER_30);
         testRoundTrip(columnFilter, SERIALIZER_3014.maybeUpdateForBackwardCompatility(columnFilter), metadata, SERIALIZER_3014);
         testRoundTrip(columnFilter, metadata, SERIALIZER_40);

@@ -58,7 +58,7 @@ public class SerializationHelper
     {
         this.flag = flag;
         this.version = version;
-        this.columnsToFetch = columnsToFetch == null ? null : columnsToFetch.withPartitionColumnsVerified(metadata.regularAndStaticColumns());
+        this.columnsToFetch = columnsToFetch == null ? null : columnsToFetch.withColumnsVerified(metadata.regularAndStaticColumns());
         this.droppedColumns = metadata.droppedColumns;
     }
 
