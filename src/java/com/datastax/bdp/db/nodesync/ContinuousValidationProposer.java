@@ -196,7 +196,9 @@ class ContinuousValidationProposer extends ValidationProposer
                 return Validator.create(lifecycle);
             }
 
-            service().tracing().skipContinuous(segment(), status.toString());
+            if (service().tracing().isEnabled())
+                service().tracing().skipContinuous(segment(), status.toString());
+
             // Note: if the segment was already (remotely) locked at proposal, this would mean that despite the
             // lock penalty to the priority, that segment was still the highest priority, but it is still
             // locked remotely. In that case, it's probably worth waiting a small delay before retrying

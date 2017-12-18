@@ -8,6 +8,8 @@ package com.datastax.bdp.db.nodesync;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import org.junit.After;
@@ -239,5 +241,47 @@ public class TableStateTest
             assertTrue(segmentStates.get(i).lastValidationTimeMs() > 0);
         for (int i = 2; i < 4; i++)
             assertTrue(segmentStates.get(i).lastValidationTimeMs() < 0);
+    }
+
+    @Test
+    public void testInvalidationAndStatusToStringRace() throws Exception
+    {
+        TableMetadata table = metadataBuilder("ks", "table")
+                              .addPartitionKeyColumn("k", Int32Type.instance)
+                              .build();
+
+        NodeSyncService service = new NodeSyncService(new NodeSyncTestTools.DevNullTableProxy(debugLog));
+
+        List<Range<Token>> localRanges = asList(range(-2, -1), range(-1, 0));
+        TableState state = TableState.load(service, table, localRanges, 1);
+
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        AtomicBoolean stopped = new AtomicBoolean();
+        AtomicReference<String> str = new AtomicReference<>();
+        Thread t = new Thread(() -> {
+            try
+            {
+                while (!stopped.get())
+                {
+                    TableState.Ref ref = state.nextSegmentToValidate();
+                    ref.lock();
+                    String s = ref.checkStatus().toString();
+                    str.set(s);
+                }
+            }
+            catch (Exception e)
+            {
+                failure.set(e);
+            }
+        });
+        t.start();
+        for (int i = 0; i < 10000; i++)
+            state.update(asList(range(i, i + 1), range(i + 1, i + 2)));
+
+        stopped.set(true);
+        t.join();
+
+        if (failure.get() != null)
+            throw failure.get();
     }
 }

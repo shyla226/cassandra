@@ -864,13 +864,13 @@ public class TableState
                     return "segment locked by " + lockedBy;
 
                 String reason;
-                if (ref.isInvalidated())
+                SegmentState currentState = ref.currentState();
+                if (currentState == null)
                 {
                     reason = "the topology or depth has changed";
                 }
                 else
                 {
-                    SegmentState currentState = ref.currentState();
                     if (ref.segmentAtCreation.lastValidationTimeMs() != currentState.lastValidationTimeMs())
                     {
                         reason = String.format("was recently validated by another node (%s, previously know: %s)",
