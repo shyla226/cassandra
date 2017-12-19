@@ -28,6 +28,8 @@ import com.google.common.collect.PeekingIterator;
 
 import io.reactivex.Completable;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -155,7 +157,7 @@ public class TableViews extends AbstractCollection<View>
                 return StorageProxy.mutateMV(update.partitionKey().getKey(), mutations, writeCommitLog, baseComplete, queryStartNanoTime);
             else
                 return Completable.complete();
-        }).subscribeOn(Schedulers.io());
+        }).subscribeOn(StageManager.getScheduler(Stage.BACKGROUND_IO));
     }
 
 

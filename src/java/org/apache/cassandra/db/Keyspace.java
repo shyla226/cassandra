@@ -416,13 +416,13 @@ public class Keyspace
     {
         if (SchemaConstants.isLocalSystemKeyspace(metadata.name))
             return TPCBoundaries.NONE;
-        
+
         List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(this);
         return computeTPCBoundaries(localRanges);
     }
 
     private TPCBoundaries computeTPCBoundaries(List<Range<Token>> ranges)
-    {        
+    {
         TPCBoundaries boundaries = ranges == null ? TPCBoundaries.NONE : TPCBoundaries.compute(ranges, TPC.getNumCores());
         logger.debug("Computed TPC core assignments for {}: {}", getName(), boundaries);
 
@@ -642,11 +642,15 @@ public class Keyspace
                                                  : UpdateTransaction.NO_OP;
 
             CommitLogPosition pos = commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition;
-            Completable memtableCompletable = cfs.apply(upd, indexTransaction, opGroup, pos);
+            Completable memtableCompletable;
             if (requiresViewUpdate)
             {
-                memtableCompletable = memtableCompletable.doOnComplete(() -> baseComplete.set(System.currentTimeMillis()));
-                memtablePutCompletables.add(viewUpdateCompletable);
+                memtableCompletable = viewUpdateCompletable.andThen(Completable.defer(() -> cfs.apply(upd, indexTransaction, opGroup, pos)))
+                                                           .doOnComplete(() -> baseComplete.set(System.currentTimeMillis()));
+            }
+            else
+            {
+                memtableCompletable = cfs.apply(upd, indexTransaction, opGroup, pos);
             }
             memtablePutCompletables.add(memtableCompletable);
         }

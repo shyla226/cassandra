@@ -644,7 +644,8 @@ public class StorageProxy implements StorageProxyMBean
         if (StorageService.instance.isStarting() || StorageService.instance.isJoining() || StorageService.instance.isMoving())
         {
             return BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(),
-                                                           mutations), writeCommitLog);
+                                                           mutations), writeCommitLog)
+                        .doFinally(() -> viewWriteMetrics.addNano(System.nanoTime() - startTime));
         }
 
         List<MutationAndEndpoints> mutationsAndEndpoints = new ArrayList<>(mutations.size());
@@ -654,6 +655,7 @@ public class StorageProxy implements StorageProxyMBean
         //Since the base -> view replication is 1:1 we only need to store the BL locally
         final List<InetAddress> batchlogEndpoints = Collections.singletonList(FBUtilities.getBroadcastAddress());
         AsyncLatch cleanupLatch = new AsyncLatch(mutations.size(), () -> asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID));
+
 
         ArrayList<Completable> completables = new ArrayList<>(mutations.size() + 1);
 
@@ -690,12 +692,20 @@ public class StorageProxy implements StorageProxyMBean
             }
         }
 
+        // no remote view mutation
+        if (mutationsAndEndpoints.isEmpty())
+            return Completable.concat(completables)
+                              .doFinally(() -> viewWriteMetrics.addNano(System.nanoTime() - startTime));
+
+        Completable batchlogCompletable = null;
+
         // Apply to local batchlog memtable in this thread
         if (!nonLocalMutations.isEmpty())
-            completables.add(BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), nonLocalMutations), writeCommitLog));
+        {
+            batchlogCompletable = BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), nonLocalMutations), writeCommitLog);
+        }
 
-        if (mutationsAndEndpoints.isEmpty())
-            return Completable.concat(completables);
+        assert batchlogCompletable != null;
 
         // Creates write handlers: each mutation must be acknowledged to clean the batchlog.
         // We also need to update view metrics.
@@ -720,10 +730,10 @@ public class StorageProxy implements StorageProxyMBean
             return handler;
         }));
 
-        completables.addAll(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
-
-        // now actually perform the writes
-        writeBatchedMutations(mutationsAndEndpoints, handlers, Verbs.WRITES.VIEW_WRITE);
+        // now actually perform the writes (we don't need to wait for view replica writes)
+        completables.add(batchlogCompletable.doOnComplete(() -> {
+            writeBatchedMutations(mutationsAndEndpoints, handlers, Verbs.WRITES.VIEW_WRITE);
+        }));
 
         return Completable.concat(completables)
                           .doFinally(() -> viewWriteMetrics.addNano(System.nanoTime() - startTime));
