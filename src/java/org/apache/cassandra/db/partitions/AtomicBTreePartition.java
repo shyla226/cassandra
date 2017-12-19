@@ -22,6 +22,9 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.reactivex.Single;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -31,12 +34,11 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.HeapAllocator;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 
@@ -53,6 +55,8 @@ public class AtomicBTreePartition extends AbstractBTreePartition
     public static final long EMPTY_SIZE = ObjectSizes.measure(new AtomicBTreePartition(null,
             DatabaseDescriptor.getPartitioner().decorateKey(ByteBuffer.allocate(1)),
             null));
+
+    private final static Logger logger = LoggerFactory.getLogger(AtomicBTreePartition.class);
 
     private final MemtableAllocator allocator;
 
@@ -132,6 +136,11 @@ public class AtomicBTreePartition extends AbstractBTreePartition
             this.ref = new Holder(newColumns, tree, newDeletionInfo, newStatic, newStats);
 
             updater.finish();
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Error updating Partition {}", update.partitionKey, t);
         }
         finally
         {

@@ -38,7 +38,6 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
@@ -451,7 +450,7 @@ public class TWCSMultiWriter implements SSTableMultiWriter
         Row.Builder builder = rowBuilders[idx];
         if (builder == null)
         {
-            builder = BTreeRow.sortedBuilder();
+            builder = Row.Builder.sorted();
             rowBuilders[idx] = builder;
             builder.newRow(c);
         }

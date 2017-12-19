@@ -37,7 +37,8 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.SearchIterator;
-import org.apache.cassandra.utils.btree.BTreeSearchIterator;
+
+import static org.apache.cassandra.db.Columns.ColumnSearchIterator;
 
 public class SerializationHeader
 {
@@ -49,8 +50,8 @@ public class SerializationHeader
     private final List<AbstractType<?>> clusteringTypes;
 
     private final RegularAndStaticColumns columns;
-    private final BTreeSearchIterator<ColumnMetadata, ColumnMetadata> staticColumnIterator;
-    private final BTreeSearchIterator<ColumnMetadata, ColumnMetadata> regularColumnIterator;
+    private final ColumnSearchIterator staticColumnIterator;
+    private final ColumnSearchIterator regularColumnIterator;
     private final EncodingStats stats;
 
     private final Map<ByteBuffer, AbstractType<?>> typeMap;
@@ -66,8 +67,8 @@ public class SerializationHeader
         this.keyType = keyType;
         this.clusteringTypes = clusteringTypes;
         this.columns = columns;
-        this.staticColumnIterator = columns.statics.isEmpty() ? null : columns.statics.iterator();
-        this.regularColumnIterator = columns.regulars.iterator();
+        this.staticColumnIterator = columns.statics.isEmpty() ? null : columns.statics.searchIterator();
+        this.regularColumnIterator = columns.regulars.searchIterator();
         this.stats = stats;
         this.typeMap = typeMap;
     }
@@ -132,7 +133,7 @@ public class SerializationHeader
 
     public SearchIterator<ColumnMetadata, ColumnMetadata> columnsIterator(boolean isStatic)
     {
-        BTreeSearchIterator<ColumnMetadata, ColumnMetadata> iterator = isStatic ? staticColumnIterator : regularColumnIterator;
+        ColumnSearchIterator iterator = isStatic ? staticColumnIterator : regularColumnIterator;
 
         assert iterator != null;
         iterator.rewind();

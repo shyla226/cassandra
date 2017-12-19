@@ -391,7 +391,7 @@ public class UnfilteredRowIteratorsMergeTest
     {
         final Clustering clustering = clusteringFor(pos);
         final LivenessInfo live = LivenessInfo.create(timeGenerator.applyAsInt(pos), nowInSec);
-        return BTreeRow.noCellLiveRow(clustering, live);
+        return ArrayBackedRow.noCellLiveRow(clustering, live);
     }
 
     private void dumpList(List<Unfiltered> list)

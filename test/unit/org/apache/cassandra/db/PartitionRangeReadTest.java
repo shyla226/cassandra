@@ -33,7 +33,6 @@ import static org.junit.Assert.assertTrue;
 
 import org.apache.cassandra.*;
 import org.apache.cassandra.db.marshal.AsciiType;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;

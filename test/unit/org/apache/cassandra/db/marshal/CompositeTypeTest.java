@@ -29,6 +29,7 @@ import static org.junit.Assert.assertEquals;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.Cell;
@@ -197,7 +198,7 @@ public class CompositeTypeTest
 
         ColumnMetadata cdef = cfs.metadata().getColumn(ByteBufferUtil.bytes("val"));
 
-        ImmutableBTreePartition readPartition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
+        Partition readPartition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
         Iterator<Row> iter = readPartition.iterator();
 
         compareValues(iter.next().getCell(cdef), "cname1");

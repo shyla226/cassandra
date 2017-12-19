@@ -36,7 +36,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogSegment;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.ArrayBackedRow;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.gms.Gossiper;
@@ -102,7 +102,7 @@ public class OutOfSpaceTest extends CQLTester
             DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.ignore);  // we should always die on assertion errors
             Mutation m = new Mutation(PartitionUpdate.singleRowUpdate(currentTableMetadata(),
                                                                       Util.dk("broken"),
-                                                                      BTreeRow.emptyRow(Util.clustering(currentTableMetadata().comparator, "col"))));
+                                                                      ArrayBackedRow.emptyRow(Util.clustering(currentTableMetadata().comparator, "col"))));
             m.applyUnsafe();
             flushAndExpectError(AssertionError.class);
             Assert.assertTrue(killerForTests.wasKilled());

@@ -45,7 +45,7 @@ public enum TPCTaskType
     READ(Features.PENDABLE),
     /** Single-partition read request that will be first scheduled on an eventloop */
     READ_DEFERRED(Features.PENDABLE),
-    /** Single-partition read response, not always counted */
+    /** Single-partition read scheduled on local node */
     READ_RESPONSE("READ_SWITCH_FOR_RESPONSE"),
     /** Partition range read request */
     READ_RANGE(Features.PENDABLE),

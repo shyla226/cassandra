@@ -32,15 +32,24 @@ import org.apache.cassandra.utils.SearchIterator;
  * and so Partition objects should be use as sparingly as possible. There is a couple
  * of cases where we do need to represent partition in-memory (memtables and row cache).
  */
-public interface Partition
+public interface Partition extends Iterable<Row>
 {
+    public static final int INITIAL_ROW_CAPACITY = 16;
+
     public TableMetadata metadata();
     public DecoratedKey partitionKey();
     public DeletionTime partitionLevelDeletion();
+    public DeletionInfo deletionInfo();
 
     public RegularAndStaticColumns columns();
 
     public EncodingStats stats();
+
+    public int rowCount();
+
+    public Row lastRow();
+
+    public boolean hasRows();
 
     /**
      * Whether the partition object has no informations at all, including any deletion informations.

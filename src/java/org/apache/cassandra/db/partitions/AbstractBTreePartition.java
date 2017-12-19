@@ -45,7 +45,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         this.partitionKey = partitionKey;
     }
 
-    protected static final class Holder
+    public static final class Holder
     {
         final RegularAndStaticColumns columns;
         final DeletionInfo deletionInfo;
@@ -151,7 +151,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
                     activeDeletion = rt.deletionTime();
 
                 if (row == null)
-                    return activeDeletion.isLive() ? null : BTreeRow.emptyDeletedRow(clustering, Row.Deletion.regular(activeDeletion));
+                    return activeDeletion.isLive() ? null : ArrayBackedRow.emptyDeletedRow(clustering, Row.Deletion.regular(activeDeletion));
 
                 return row.filter(columns, activeDeletion, true, metadata());
             }

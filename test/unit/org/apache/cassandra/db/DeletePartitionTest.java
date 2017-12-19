@@ -86,7 +86,7 @@ public class DeletePartitionTest
             store.forceBlockingFlush();
 
         // validate removal
-        ImmutableBTreePartition partitionUnfiltered = Util.getOnlyPartitionUnfiltered(Util.cmd(store, key).build());
+        Partition partitionUnfiltered = Util.getOnlyPartitionUnfiltered(Util.cmd(store, key).build());
         assertFalse(partitionUnfiltered.partitionLevelDeletion().isLive());
         assertFalse(partitionUnfiltered.iterator().hasNext());
     }

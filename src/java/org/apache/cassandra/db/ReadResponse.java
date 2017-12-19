@@ -124,7 +124,7 @@ public abstract class ReadResponse
                 try (UnfilteredRowIterator partition = iter.next())
                 {
                     if (partition.partitionKey().equals(key))
-                        return ImmutableBTreePartition.create(partition).toString();
+                        return ArrayBackedPartition.create(partition).toString();
                 }
             }
         }
@@ -179,9 +179,9 @@ public abstract class ReadResponse
      */
     private static class LocalResponse extends ReadResponse
     {
-        private final List<ImmutableBTreePartition> partitions;
+        private final List<Partition> partitions;
 
-        private LocalResponse(List<ImmutableBTreePartition> partitions)
+        private LocalResponse(List<Partition> partitions)
         {
             super();
             this.partitions = partitions;
@@ -189,9 +189,9 @@ public abstract class ReadResponse
 
         public static Single<ReadResponse> build(Flow<FlowableUnfilteredPartition> partitions)
         {
-            return ImmutableBTreePartition.create(partitions)
-                                          .toList()
-                                          .mapToRxSingle(LocalResponse::new);
+            return ArrayBackedPartition.create(partitions)
+                                       .toList()
+                                       .mapToRxSingle(LocalResponse::new);
         }
 
         public Flow<FlowableUnfilteredPartition> data(ReadCommand command)

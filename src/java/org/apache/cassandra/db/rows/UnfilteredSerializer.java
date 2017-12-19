@@ -360,7 +360,7 @@ public class UnfilteredSerializer extends VersionDependent<EncodingVersion>
         if (!hasAllColumns)
             size += Columns.serializer.serializedSubsetSize(Collections2.transform(row, ColumnData::column), header.columns(isStatic));
 
-        SearchIterator<ColumnMetadata, ColumnMetadata> si = headerColumns.iterator();
+        SearchIterator<ColumnMetadata, ColumnMetadata> si = headerColumns.searchIterator();
         for (ColumnData data : row)
         {
             ColumnMetadata column = si.next(data.column());
@@ -529,7 +529,7 @@ public class UnfilteredSerializer extends VersionDependent<EncodingVersion>
 
                     Deletion deletion = new Row.Deletion(header.readDeletionTime(in), deletionIsShadowable);
                     in.seek(nextPosition);
-                    return BTreeRow.emptyDeletedRow(clustering, deletion);
+                    return ArrayBackedRow.emptyDeletedRow(clustering, deletion);
                 }
                 else
                 {
@@ -547,7 +547,7 @@ public class UnfilteredSerializer extends VersionDependent<EncodingVersion>
         int flags = in.readUnsignedByte();
         assert !isEndOfPartition(flags) && kind(flags) == Unfiltered.Kind.ROW && isExtended(flags) : flags;
         int extendedFlags = in.readUnsignedByte();
-        Row.Builder builder = BTreeRow.sortedBuilder();
+        Row.Builder builder = Row.Builder.sorted();
         builder.newRow(Clustering.STATIC_CLUSTERING);
         return deserializeRowBody(in, header, helper, flags, extendedFlags, builder);
     }
@@ -610,7 +610,8 @@ public class UnfilteredSerializer extends VersionDependent<EncodingVersion>
 
             try
             {
-                columns.apply(column -> {
+                for (ColumnMetadata column : columns)
+                {
                     try
                     {
                         if (column.isSimple())
@@ -622,7 +623,7 @@ public class UnfilteredSerializer extends VersionDependent<EncodingVersion>
                     {
                         throw new WrappedException(e);
                     }
-                }, false);
+                }
             }
             catch (WrappedException e)
             {

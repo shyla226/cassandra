@@ -161,7 +161,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
 
             private IndexEntry findEntry(Clustering clustering)
             {
-                assert entriesIdx < entries.size();
+                assert entriesIdx < entries.size() : "" + entriesIdx + ">=" + entries.size();
                 while (entriesIdx < entries.size())
                 {
                     IndexEntry entry = entries.get(entriesIdx++);

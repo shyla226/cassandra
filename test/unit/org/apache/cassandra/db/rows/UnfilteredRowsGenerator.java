@@ -223,7 +223,7 @@ public class UnfilteredRowsGenerator
     {
         final Clustering clustering = clusteringFor(pos);
         final LivenessInfo live = LivenessInfo.create(timeGenerator.applyAsInt(pos), UnfilteredRowIteratorsMergeTest.nowInSec);
-        return BTreeRow.noCellLiveRow(clustering, live);
+        return ArrayBackedRow.noCellLiveRow(clustering, live);
     }
 
     static Row emptyRowAt(int pos, int time, int deletionTime)
@@ -231,7 +231,7 @@ public class UnfilteredRowsGenerator
         final Clustering clustering = clusteringFor(pos);
         final LivenessInfo live = LivenessInfo.create(time, UnfilteredRowIteratorsMergeTest.nowInSec);
         final DeletionTime delTime = deletionTime == -1 ? DeletionTime.LIVE : new DeletionTime(deletionTime, deletionTime);
-        return BTreeRow.create(clustering, live, Row.Deletion.regular(delTime), BTree.empty());
+        return ArrayBackedRow.create(clustering, live, Row.Deletion.regular(delTime), ArrayBackedRow.EMPTY_ARRAY, 0);
     }
 
     static Clustering clusteringFor(int i)

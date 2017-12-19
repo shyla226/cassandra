@@ -85,7 +85,6 @@ public class RowAndDeletionMergeIterator extends AbstractUnfilteredRowIterator
             }
 
             // We have a next row
-
             if (openRange == null)
             {
                 // We have no currently open tombstone range. So check if we have a next range and if it sorts before this row.

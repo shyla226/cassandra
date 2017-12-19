@@ -132,7 +132,7 @@ public class RowTest
         ColumnMetadata defA = metadata.getColumn(new ColumnIdentifier("a", true));
         ColumnMetadata defB = metadata.getColumn(new ColumnIdentifier("b", true));
 
-        Row.Builder builder = BTreeRow.unsortedBuilder(nowInSeconds);
+        Row.Builder builder = Row.Builder.unsorted(nowInSeconds);
         builder.newRow(metadata.comparator.make("c1"));
         writeSimpleCellValue(builder, defA, "a1", 0);
         writeSimpleCellValue(builder, defA, "a2", 1);
@@ -157,7 +157,7 @@ public class RowTest
 
         Cell cell = BufferCell.expiring(def, 0, ttl, nowInSeconds, ((AbstractType) def.cellValueType()).decompose("a1"));
 
-        PartitionUpdate update = PartitionUpdate.singleRowUpdate(metadata, dk, BTreeRow.singleCellRow(metadata.comparator.make("c1"), cell));
+        PartitionUpdate update = PartitionUpdate.singleRowUpdate(metadata, dk, ArrayBackedRow.singleCellRow(metadata.comparator.make("c1"), cell));
         new Mutation(update).applyUnsafe();
 
         // when we read with a nowInSeconds before the cell has expired,
@@ -176,7 +176,7 @@ public class RowTest
         ColumnMetadata defA = metadata.getColumn(new ColumnIdentifier("a", true));
         ColumnMetadata defB = metadata.getColumn(new ColumnIdentifier("b", true));
 
-        Row.Builder builder = BTreeRow.unsortedBuilder(nowInSeconds);
+        Row.Builder builder = Row.Builder.unsorted(nowInSeconds);
         builder.newRow(metadata.comparator.make("c1"));
         writeSimpleCellValue(builder, defA, "a1", 0);
         writeSimpleCellValue(builder, defA, "a2", 1);

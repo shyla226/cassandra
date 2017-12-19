@@ -174,7 +174,7 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
         public Builder onTimeout(Consumer<InetAddress> task)
         {
             if (onTimeoutTasks == null)
-                onTimeoutTasks = new ArrayList<>();
+                onTimeoutTasks = new ArrayList<>(1);
             onTimeoutTasks.add(task);
             return this;
         }

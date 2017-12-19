@@ -140,12 +140,12 @@ public class ColumnsTest
         List<ColumnMetadata> defs = new ArrayList<>();
         addClustering(names, defs);
 
-        Columns columns = Columns.from(new HashSet<>(defs));
+        Columns columns = Columns.from(new TreeSet<>(defs));
 
         defs = new ArrayList<>();
         addClustering(names.subList(0, 8), defs);
 
-        Columns subset = Columns.from(new HashSet<>(defs));
+        Columns subset = Columns.from(new TreeSet<>(defs));
 
         Assert.assertTrue(columns.containsAll(subset));
     }

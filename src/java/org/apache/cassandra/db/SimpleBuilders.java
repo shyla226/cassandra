@@ -27,7 +27,6 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
@@ -308,7 +307,7 @@ public abstract class SimpleBuilders
         public RowBuilder(TableMetadata metadata, Object... clusteringColumns)
         {
             this.metadata = metadata;
-            this.builder = BTreeRow.unsortedBuilder(FBUtilities.nowInSeconds());
+            this.builder = Row.Builder.unsorted(FBUtilities.nowInSeconds());
 
             this.builder.newRow(makeClustering(metadata, clusteringColumns));
         }

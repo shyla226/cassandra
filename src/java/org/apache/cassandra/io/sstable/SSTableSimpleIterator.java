@@ -69,7 +69,7 @@ public abstract class SSTableSimpleIterator extends AbstractIterator<Unfiltered>
         {
             super(metadata, in, helper);
             this.header = header;
-            this.builder = BTreeRow.sortedBuilder();
+            this.builder = Row.Builder.sorted();
         }
 
         public Row readStaticRow() throws IOException
@@ -107,7 +107,7 @@ public abstract class SSTableSimpleIterator extends AbstractIterator<Unfiltered>
             {
                 Row staticRow = UnfilteredSerializer.serializers.get(helper.version).deserializeStaticRow(in, header, helper);
                 if (!staticRow.deletion().isLive())
-                    return BTreeRow.emptyDeletedRow(staticRow.clustering(), staticRow.deletion());
+                    return ArrayBackedRow.emptyDeletedRow(staticRow.clustering(), staticRow.deletion());
             }
             return Rows.EMPTY_STATIC_ROW;
         }

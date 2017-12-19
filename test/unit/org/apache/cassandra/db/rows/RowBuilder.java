@@ -88,4 +88,9 @@ public class RowBuilder implements Row.Builder
     {
         throw new UnsupportedOperationException();
     }
+
+    public void reset()
+    {
+        throw new UnsupportedOperationException();
+    }
 }

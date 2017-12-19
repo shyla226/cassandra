@@ -221,14 +221,14 @@ public class StreamingTransferTest
         assertEquals(1, cfs.getLiveSSTables().size());
 
         // and that the index and filter were properly recovered
-        List<ImmutableBTreePartition> partitions = Util.getAllUnfiltered(Util.cmd(cfs).build());
+        List<Partition> partitions = Util.getAllUnfiltered(Util.cmd(cfs).build());
         assertEquals(offs.length, partitions.size());
         for (int i = 0; i < offs.length; i++)
         {
             int expectedKey = offs[i];
             int expectedCol = offs[i];
 
-            ImmutableBTreePartition partition = partitions.get(i);
+            Partition partition = partitions.get(i);
             assertEquals(expectedKey, (int) Int32Type.instance.getSerializer().deserialize(partition.partitionKey().getKey()));
             assertEquals(expectedCol, (int) Int32Type.instance.getSerializer().deserialize(partition.iterator().next().clustering().get(0)));
 

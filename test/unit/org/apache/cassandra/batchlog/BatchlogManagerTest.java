@@ -30,6 +30,8 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.Util.PartitionerSwitcher;
 import org.apache.cassandra.concurrent.TPCUtils;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -114,8 +116,8 @@ public class BatchlogManagerTest extends CQLTester
                 .applyUnsafe();
 
         DecoratedKey dk = cfs.decorateKey(ByteBufferUtil.bytes("1234"));
-        ImmutableBTreePartition results = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, dk).build());
-        Iterator<Row> iter = results.iterator();
+        Partition results = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, dk).build());
+        UnfilteredRowIterator iter = results.unfilteredIterator();
         assert iter.hasNext();
 
         Mutation mutation = new Mutation(PartitionUpdate.fullPartitionDelete(cfm,

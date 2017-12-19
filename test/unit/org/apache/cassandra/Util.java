@@ -59,6 +59,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.partitions.ArrayBackedPartition;
 import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
@@ -301,7 +302,7 @@ public class Util
 
     public static void assertEmptyUnfiltered(ReadCommand command)
     {
-        List<ImmutableBTreePartition> res = getAllUnfiltered(command);
+        List<Partition> res = getAllUnfiltered(command);
         if (!res.isEmpty())
             throw new AssertionError("Expected no results for query " + command.toCQLString() + " but got key " + command.metadata().partitionKeyType.getString(res.get(0).partitionKey().getKey()));
     }
@@ -320,9 +321,9 @@ public class Util
         }
     }
 
-    public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
+    public static List<Partition> getAllUnfiltered(ReadCommand command)
     {
-        return ImmutableBTreePartition.create(command.executeLocally()).toList().blockingSingle();
+        return ArrayBackedPartition.create(command.executeLocally()).toList().blockingSingle();
     }
 
     public static List<FilteredPartition> getAll(ReadCommand command)
@@ -376,15 +377,15 @@ public class Util
         }
     }
 
-    public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd)
+    public static Partition getOnlyPartitionUnfiltered(ReadCommand cmd)
     {
         try (UnfilteredPartitionIterator iterator = cmd.executeForTests())
         {
-            ImmutableBTreePartition ret;
+            Partition ret;
             assert iterator.hasNext() : "Expecting a single partition but got nothing";
             try (UnfilteredRowIterator partition = iterator.next())
             {
-                ret = ImmutableBTreePartition.create(partition);
+                ret = ArrayBackedPartition.create(partition);
             }
 
             assert !iterator.hasNext() : "Expecting a single partition but got more";
@@ -710,7 +711,7 @@ public class Util
 
         ColumnMetadata def = metadata.getColumn(new ColumnIdentifier("myCol", false));
         Clustering c = Clustering.make(ByteBufferUtil.bytes("c1"), ByteBufferUtil.bytes(42));
-        Row row = BTreeRow.singleCellRow(c, BufferCell.live(def, 0, ByteBufferUtil.EMPTY_BYTE_BUFFER));
+        Row row = ArrayBackedRow.singleCellRow(c, BufferCell.live(def, 0, ByteBufferUtil.EMPTY_BYTE_BUFFER));
         PagingState.RowMark mark = PagingState.RowMark.create(metadata, row, protocolVersion);
         boolean inclusive = protocolVersion.isGreaterOrEqualTo(ProtocolVersion.DSE_V1);
         return new PagingState(pk, mark, 10, 0, inclusive);

@@ -35,6 +35,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.partitions.ArrayBackedPartition;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -101,7 +102,7 @@ public class PartitionImplementationTest
     Row makeRow(Clustering clustering, String colValue)
     {
         ColumnMetadata defCol = metadata.getColumn(new ColumnIdentifier("col", true));
-        Row.Builder row = BTreeRow.unsortedBuilder(TIMESTAMP);
+        Row.Builder row = Row.Builder.unsorted(TIMESTAMP);
         row.newRow(clustering);
         row.addCell(BufferCell.live(defCol, TIMESTAMP, ByteBufferUtil.bytes(colValue)));
         return row.build();
@@ -110,7 +111,7 @@ public class PartitionImplementationTest
     Row makeStaticRow()
     {
         ColumnMetadata defCol = metadata.getColumn(new ColumnIdentifier("static_col", true));
-        Row.Builder row = BTreeRow.unsortedBuilder(TIMESTAMP);
+        Row.Builder row = Row.Builder.unsorted(TIMESTAMP);
         row.newRow(Clustering.STATIC_CLUSTERING);
         row.addCell(BufferCell.live(defCol, TIMESTAMP, ByteBufferUtil.bytes("static value")));
         return row.build();
@@ -235,10 +236,10 @@ public class PartitionImplementationTest
     {
         NavigableSet<Clusterable> sortedContent = new TreeSet<Clusterable>(metadata.comparator);
         sortedContent.addAll(contentSupplier.get());
-        AbstractBTreePartition partition;
+        Partition partition;
         try (UnfilteredRowIterator iter = new Util.UnfilteredSource(metadata, Util.dk("pk"), staticRow, sortedContent.stream().map(x -> (Unfiltered) x).iterator()))
         {
-            partition = ImmutableBTreePartition.create(iter);
+            partition = ArrayBackedPartition.create(iter);
         }
 
         ColumnMetadata defCol = metadata.getColumn(new ColumnIdentifier("col", true));
@@ -266,7 +267,7 @@ public class PartitionImplementationTest
                      partition.isEmpty());
         // hasRows
         assertEquals(sortedContent.stream().anyMatch(x -> x instanceof Row),
-                     partition.hasRows());
+                     partition.rowCount() > 0);
 
         // iterator
         assertIteratorsEqual(sortedContent.stream().filter(x -> x instanceof Row).iterator(),
@@ -360,7 +361,7 @@ public class PartitionImplementationTest
         return builder.build();
     }
 
-    void testSlicingOfIterators(NavigableSet<Clusterable> sortedContent, AbstractBTreePartition partition, ColumnFilter cf, boolean reversed)
+    void testSlicingOfIterators(NavigableSet<Clusterable> sortedContent, Partition partition, ColumnFilter cf, boolean reversed)
     {
         Function<? super Clusterable, ? extends Clusterable> colFilter = x -> x instanceof Row ? ((Row) x).filter(cf, metadata) : x;
         Slices slices = makeSlices();
@@ -459,7 +460,7 @@ public class PartitionImplementationTest
                 if (!rt.isClose(false))
                     return row;
                 DeletionTime delTime = rt.closeDeletionTime(false);
-                return row == null ? BTreeRow.emptyDeletedRow(cl, Deletion.regular(delTime)) : row.filter(ColumnFilter.all(metadata), delTime, true, metadata);
+                return row == null ? ArrayBackedRow.emptyDeletedRow(cl, Deletion.regular(delTime)) : row.filter(ColumnFilter.all(metadata), delTime, true, metadata);
             }
         return row;
     }

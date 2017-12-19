@@ -174,7 +174,7 @@ public class SSTableFlushObserverTest
                   DatabaseDescriptor.getPartitioner().decorateKey(key),
                   DeletionTime.LIVE,
                   cfm.regularAndStaticColumns(),
-                  BTreeRow.emptyRow(Clustering.STATIC_CLUSTERING),
+                  ArrayBackedRow.emptyRow(Clustering.STATIC_CLUSTERING),
                   false,
                   EncodingStats.NO_STATS);
 
@@ -220,7 +220,7 @@ public class SSTableFlushObserverTest
 
     private static Row buildRow(Collection<Cell> cells)
     {
-        Row.Builder rowBuilder = BTreeRow.sortedBuilder();
+        Row.Builder rowBuilder = Row.Builder.sorted();
         rowBuilder.newRow(Clustering.EMPTY);
         cells.forEach(rowBuilder::addCell);
         return rowBuilder.build();

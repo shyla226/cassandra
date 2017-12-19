@@ -120,7 +120,7 @@ public class RowUpdateBuilder
         assert clusteringValues.length == update.metadata().comparator.size() || (clusteringValues.length == 0 && !update.columns().statics.isEmpty());
 
         boolean isStatic = clusteringValues.length != update.metadata().comparator.size();
-        Row.Builder builder = BTreeRow.sortedBuilder();
+        Row.Builder builder = Row.Builder.sorted();
 
         if (isStatic)
             builder.newRow(Clustering.STATIC_CLUSTERING);

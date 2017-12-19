@@ -137,7 +137,9 @@ public class BTree
             {
                 int i = 0;
                 for (K k : source)
+                {
                     values[i++] = updateF.apply(k);
+                }
             }
             if (updateF != UpdateFunction.noOp())
                 updateF.allocated(ObjectSizes.sizeOfArray(values));
@@ -177,7 +179,6 @@ public class BTree
     {
         if (isEmpty(btree))
             return build(updateWith, updateWithLength, updateF);
-
 
         TreeBuilder builder = TreeBuilder.newInstance();
         btree = builder.update(btree, comparator, updateWith, updateF);
@@ -1222,14 +1223,10 @@ public class BTree
      * Public method
      *
      */
-    public static <V> void apply(Object[] btree, Consumer<V> function, Predicate<V> stopCondition, boolean reversed)
+    public static <V> boolean apply(Object[] btree, Consumer<V> function, Predicate<V> stopCondition, boolean reversed)
     {
-        if (reversed)
-            applyReverse(btree, function, stopCondition);
-        else
-            applyForwards(btree, function, stopCondition);
+        return reversed ? applyReverse(btree, function, stopCondition) : applyForwards(btree, function, stopCondition);
     }
-
 
     /**
      * Simple method to walk the btree forwards and apply a function till a stop condition is reached

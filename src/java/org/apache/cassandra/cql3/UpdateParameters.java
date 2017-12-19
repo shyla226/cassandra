@@ -95,13 +95,13 @@ public class UpdateParameters
         if (clustering == Clustering.STATIC_CLUSTERING)
         {
             if (staticBuilder == null)
-                staticBuilder = BTreeRow.unsortedBuilder(nowInSec);
+                staticBuilder = Row.Builder.unsorted(nowInSec);
             builder = staticBuilder;
         }
         else
         {
             if (regularBuilder == null)
-                regularBuilder = BTreeRow.unsortedBuilder(nowInSec);
+                regularBuilder = Row.Builder.unsorted(nowInSec);
             builder = regularBuilder;
         }
 

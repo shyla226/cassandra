@@ -341,20 +341,20 @@ public class Memtable implements Comparable<Memtable>
         {
             AtomicBTreePartition previous = partitionMap.get(key);
             assert TPC.getCoreId() == coreId;
-            if (logger.isTraceEnabled())
-                logger.trace("Adding key {} to memtable", key);
+            //if (logger.isTraceEnabled())
+            //    logger.trace("Adding key {} to memtable", key);
 
             assert writeBarrier == null || writeBarrier.isAfter(opGroup)
             : String.format("Put called after write barrier\n%s", FBUtilities.Debug.getStackTrace());
 
-                if (previous == null)
-                {
-                    MemtableAllocator allocator = partitionMap.allocator;
-                    final DecoratedKey cloneKey = allocator.clone(key);
-                    AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
-                    int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
-                    allocator.onHeap().allocated(overhead);
-                    partitionMap.updateLiveDataSize(8);
+            if (previous == null)
+            {
+                MemtableAllocator allocator = partitionMap.allocator;
+                final DecoratedKey cloneKey = allocator.clone(key);
+                AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
+                int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
+                allocator.onHeap().allocated(overhead);
+                partitionMap.updateLiveDataSize(8);
 
                 // We'll add the columns later.
                 partitionMap.put(cloneKey, empty);
@@ -821,7 +821,7 @@ public class Memtable implements Comparable<Memtable>
                 if (!metadata.partitioner.equals(DatabaseDescriptor.getPartitioner()) && partitions.size() > 1)
                 {
                     partitions = Collections.singletonList(MergeIterator.get(partitions,
-                                                                             Comparator.comparing(AtomicBTreePartition::partitionKey),
+                                                                             Comparator.comparing(Partition::partitionKey),
                                                                              new MergeReducer<>()));
                 }
 
@@ -1053,14 +1053,14 @@ public class Memtable implements Comparable<Memtable>
 
         ColumnsCollector(RegularAndStaticColumns columns)
         {
-            columns.statics.apply(def -> this.columns.add(def), false);
-            columns.regulars.apply(def -> this.columns.add(def), false);
+            columns.statics.apply(def -> this.columns.add(def));
+            columns.regulars.apply(def -> this.columns.add(def));
         }
 
         public void update(RegularAndStaticColumns columns)
         {
-            columns.statics.apply(def -> this.columns.add(def), false);
-            columns.regulars.apply(def -> this.columns.add(def), false);
+            columns.statics.apply(def -> this.columns.add(def));
+            columns.regulars.apply(def -> this.columns.add(def));
         }
 
         public RegularAndStaticColumns get()

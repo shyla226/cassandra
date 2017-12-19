@@ -76,8 +76,8 @@ public abstract class MultiCBuilder
     public static MultiCBuilder create(ClusteringComparator comparator, boolean forMultipleValues)
     {
         return forMultipleValues
-             ? new MultiClusteringBuilder(comparator)
-             : new OneClusteringBuilder(comparator);
+               ? new MultiClusteringBuilder(comparator)
+               : new OneClusteringBuilder(comparator);
     }
 
     /**
@@ -185,9 +185,9 @@ public abstract class MultiCBuilder
      * @return the <code>ClusteringBound</code>s
      */
     public abstract NavigableSet<ClusteringBound> buildBoundForSlice(boolean isStart,
-                                                                 boolean isInclusive,
-                                                                 boolean isOtherBoundInclusive,
-                                                                 List<ColumnMetadata> columnDefs);
+                                                                     boolean isInclusive,
+                                                                     boolean isOtherBoundInclusive,
+                                                                     List<ColumnMetadata> columnDefs);
 
     /**
      * Builds the <code>ClusteringBound</code>s
@@ -309,8 +309,8 @@ public abstract class MultiCBuilder
                 return BTreeSet.of(comparator, isStart ? ClusteringBound.BOTTOM : ClusteringBound.TOP);
 
             ByteBuffer[] newValues = size == elements.length
-                                   ? elements
-                                   : Arrays.copyOf(elements, size);
+                                     ? elements
+                                     : Arrays.copyOf(elements, size);
 
             return BTreeSet.of(comparator, ClusteringBound.create(ClusteringBound.boundKind(isStart, isInclusive), newValues));
         }
@@ -475,9 +475,9 @@ public abstract class MultiCBuilder
         }
 
         public NavigableSet<ClusteringBound> buildBoundForSlice(boolean isStart,
-                                                            boolean isInclusive,
-                                                            boolean isOtherBoundInclusive,
-                                                            List<ColumnMetadata> columnDefs)
+                                                                boolean isInclusive,
+                                                                boolean isOtherBoundInclusive,
+                                                                List<ColumnMetadata> columnDefs)
         {
             built = true;
 

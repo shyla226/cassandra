@@ -60,7 +60,7 @@ public abstract class EnsureOnHeap extends Transformation
             // If current "row" is Rows.EMPTY_STATIC_ROW, don't copy it again, as "copied_empty_static_row" != EMPTY_STATIC_ROW
             if (row == null || row == Rows.EMPTY_STATIC_ROW)
                 return row;
-            return Rows.copy(row, HeapAllocator.instance.cloningBTreeRowBuilder()).build();
+            return Rows.copy(row, HeapAllocator.instance.cloningRowBuilder(row.size())).build();
         }
 
         public Row applyToStatic(Row row)
@@ -87,6 +87,16 @@ public abstract class EnsureOnHeap extends Transformation
                 public Row next(Clustering key)
                 {
                     return applyToRow(partition.next(key));
+                }
+
+                public void rewind()
+                {
+                    throw new UnsupportedOperationException();
+                }
+
+                public int indexOfCurrent()
+                {
+                    throw new UnsupportedOperationException();
                 }
             };
         }
