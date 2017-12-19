@@ -1363,7 +1363,11 @@
         <jvmarg value="-Djava.security.egd=file:/dev/urandom" />
         <jvmarg value="-Dcassandra.testtag=@{testtag}"/>
         <jvmarg value="-Dcassandra.keepBriefBrief=${cassandra.keepBriefBrief}" />
-	<optjvmargs/>
+        <optjvmargs/>
+        <!-- Uncomment to debug unittest, attach debugger to port 1416 -->
+        <!--
+        <jvmarg line="-agentlib:jdwp=transport=dt_socket,address=localhost:1416,server=y,suspend=y" />
+        -->
         <classpath>
           <pathelement path="${java.class.path}"/>
           <pathelement location="${stress.build.classes}"/>
@@ -1520,6 +1524,17 @@
       <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
+    </testmacro>
+  </target>
+
+  <!-- Use this with an FQDN for test class, and a csv list of methods like this:
+    ant long-testsome -Dtest.name=org.apache.cassandra.cql3.ViewLongTest -Dtest.methods=testConflictResolution
+  -->
+  <target name="long-testsome" depends="build-test" description="Execute specific long unit tests" >
+    <testmacro inputdir="${test.long.src}" timeout="${test.long.timeout}">
+      <test name="${test.name}" methods="${test.methods}"/>
+      <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
+      <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
     </testmacro>
   </target>
 
