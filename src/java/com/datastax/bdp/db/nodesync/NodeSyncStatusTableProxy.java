@@ -6,7 +6,6 @@
 package com.datastax.bdp.db.nodesync;
 
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.dht.Range;
@@ -23,7 +22,7 @@ public interface NodeSyncStatusTableProxy
 {
     public static NodeSyncStatusTableProxy DEFAULT = new NodeSyncStatusTableProxy()
     {
-        public CompletableFuture<List<NodeSyncRecord>> nodeSyncRecords(TableMetadata table, Range<Token> range)
+        public List<NodeSyncRecord> nodeSyncRecords(TableMetadata table, Range<Token> range)
         {
             return SystemDistributedKeyspace.nodeSyncRecords(table, range);
         }
@@ -51,7 +50,7 @@ public interface NodeSyncStatusTableProxy
      * @param range the range for which to retrieve the records. This <b>must</b> be a non wrapping range.
      * @return all the NodeSync records that cover {@code range}.
      */
-    public CompletableFuture<List<NodeSyncRecord>> nodeSyncRecords(TableMetadata table, Range<Token> range);
+    public List<NodeSyncRecord> nodeSyncRecords(TableMetadata table, Range<Token> range);
 
     /**
      * Retrieves the recorded NodeSync validations that cover a specific {@code segment}.
@@ -62,9 +61,9 @@ public interface NodeSyncStatusTableProxy
      * easier to work with using {@link NodeSyncRecord#consolidate}.
      *
      * @param segment the segment for which to retrieve the records.
-     * @return a future on the NodeSync records that cover {@code segment} fully.
+     * @return the NodeSync records that cover {@code segment} fully.
      */
-    default public CompletableFuture<List<NodeSyncRecord>> nodeSyncRecords(Segment segment)
+    default public List<NodeSyncRecord> nodeSyncRecords(Segment segment)
     {
         return nodeSyncRecords(segment.table, segment.range);
     }

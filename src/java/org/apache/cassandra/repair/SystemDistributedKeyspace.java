@@ -72,7 +72,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Throwables;
-
 import static java.lang.String.format;
 
 import static java.util.stream.Collectors.toSet;
@@ -448,7 +447,7 @@ public final class SystemDistributedKeyspace
             logger.error(String.format("Unexpected error while %s: %s", operationDescription, NODESYNC_ERROR_IMPACT_MSG), error);
     }
 
-    public static CompletableFuture<List<NodeSyncRecord>> nodeSyncRecords(Segment segment)
+    public static List<NodeSyncRecord> nodeSyncRecords(Segment segment)
     {
         return nodeSyncRecords(segment.table, segment.range);
     }
@@ -473,7 +472,7 @@ public final class SystemDistributedKeyspace
     // The idea being that as we segments won't be of completely random size, we can make it so that we don't fetch
     // anything unnecessary in the "normal" case while make it much more likely to get what we should in the "bad" cases,
     // thus lowering the performance impact of this issue (to something hopefully completely negligible).
-    public static CompletableFuture<List<NodeSyncRecord>> nodeSyncRecords(TableMetadata table, Range<Token> range)
+    public static List<NodeSyncRecord> nodeSyncRecords(TableMetadata table, Range<Token> range)
     {
         assert !range.isTrulyWrapAround();
 
@@ -481,9 +480,8 @@ public final class SystemDistributedKeyspace
 
         Token.TokenFactory tkf = table.partitioner.getTokenFactory();
 
-        // Note that unavailable exceptions will show synchronously while timeouts will show asynchronously (and of
-        // course unexpected exception can happen anywhere), hence the 2 calls to withNodeSyncExceptionHandling.
-        Callable<CompletableFuture<List<NodeSyncRecord>>> callable = () -> queryNodeSyncRecords(table, range, tkf) .thenApply(rows -> {
+        Callable<List<NodeSyncRecord>> callable = () -> {
+            UntypedResultSet rows = queryNodeSyncRecords(table, range, tkf);
             List<NodeSyncRecord> records = new ArrayList<>();
             for (UntypedResultSet.Row row : rows)
             {
@@ -513,13 +511,8 @@ public final class SystemDistributedKeyspace
                 }
             }
             return records;
-        }).exceptionally(err -> {
-            logForNodeSyncOnError(err, "reading NodeSync records");
-            return Collections.emptyList();
-        });
-        return withNodeSyncExceptionHandling(callable,
-                                             CompletableFuture.completedFuture(Collections.emptyList()),
-                                             "reading NodeSync records");
+        };
+        return withNodeSyncExceptionHandling(callable, Collections.emptyList(), "reading NodeSync records");
     }
 
     // See the table definition for why we have this
@@ -550,7 +543,7 @@ public final class SystemDistributedKeyspace
         return l;
     }
 
-    private static CompletableFuture<UntypedResultSet> queryNodeSyncRecords(TableMetadata table, Range<Token> range, Token.TokenFactory tkf)
+    private static UntypedResultSet queryNodeSyncRecords(TableMetadata table, Range<Token> range, Token.TokenFactory tkf)
     {
         Token start = range.left;
         Token end = range.right;
@@ -574,9 +567,10 @@ public final class SystemDistributedKeyspace
         ByteBuffer startBytes = tkf.toByteArray(start);
         ByteBuffer endBytes = end.isMinimum() ? null : tkf.toByteArray(end);
 
+        // Not using {@link QueryProcessor#executeAsync} because executeAsync() runs subsequent operations on TPC thread.
         return end.isMinimum()
-               ? QueryProcessor.executeAsync(q, ConsistencyLevel.ONE, table.keyspace, table.name, groups, startBytes)
-               : QueryProcessor.executeAsync(q, ConsistencyLevel.ONE, table.keyspace, table.name, groups, startBytes, endBytes);
+               ? QueryProcessor.execute(q, ConsistencyLevel.ONE, table.keyspace, table.name, groups, startBytes)
+               : QueryProcessor.execute(q, ConsistencyLevel.ONE, table.keyspace, table.name, groups, startBytes, endBytes);
     }
 
     /**

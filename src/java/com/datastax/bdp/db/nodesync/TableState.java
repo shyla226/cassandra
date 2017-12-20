@@ -13,7 +13,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -23,8 +22,6 @@ import com.google.common.annotations.VisibleForTesting;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.util.concurrent.Uninterruptibles;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,7 +32,6 @@ import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.units.Units;
 
 /**
@@ -587,24 +583,12 @@ public class TableState
 
         private void populateRangeFromStatusTable(Range<Token> toLoad)
         {
-            try
-            {
-                // TODO: related to the TODO from the parent load method, we could improve this: recalling consolidate on all
-                // records for every segments is inefficient and we can do that much cleanly. This is probably not urgent as
-                // the impact in practice is likely low (this is not performance critical).
-                List<NodeSyncRecord> records = Uninterruptibles.getUninterruptibly(statusTable().nodeSyncRecords(table, toLoad));
-                for (int i = 0; i < size; i++)
-                    update(i, NodeSyncRecord.consolidate(segments.get(i), records));
-            }
-            catch (ExecutionException e)
-            {
-                // Shouldn't really happen because we already catch reading errors in SystemDistributedKeyspace. But if
-                // something escape, complain but don't break everything either (better to have a table validated from
-                // empty information than not at all).
-                logger.error("Unexpected error loading/reloading NodeSync stat for {}, this is a bug; This won't prevent" +
-                             "NodeSync from running, but this node may not prioritize NodeSync work properly",
-                             table, Throwables.unwrapped(e));
-            }
+            // TODO: related to the TODO from the parent load method, we could improve this: recalling consolidate on all
+            // records for every segments is inefficient and we can do that much cleanly. This is probably not urgent as
+            // the impact in practice is likely low (this is not performance critical).
+            List<NodeSyncRecord> records = statusTable().nodeSyncRecords(table, toLoad);
+            for (int i = 0; i < size; i++)
+                update(i, NodeSyncRecord.consolidate(segments.get(i), records));
         }
 
         private void updateDeadline(long newDeadlineTargetMs)
@@ -1011,41 +995,29 @@ public class TableState
             if (!versionAtCreation.equals(tableState.version))
                 return Status.updated(this);
 
+            List<NodeSyncRecord> records = tableState.statusTable().nodeSyncRecords(segment());
+            NodeSyncRecord consolidated = NodeSyncRecord.consolidate(segment(), records);
+            tableState.lock.writeLock().lock();
             try
             {
-                return tableState.statusTable()
-                                 .nodeSyncRecords(segment())
-                                 .thenApply(records -> NodeSyncRecord.consolidate(segment(), records))
-                                 .thenApply(record -> {
-                                     tableState.lock.writeLock().lock();
-                                     try
-                                     {
-                                         if (!isInvalidated())
-                                             tableState.stateHolder.update(indexAtCreation, record);
+                if (!isInvalidated())
+                    tableState.stateHolder.update(indexAtCreation, consolidated);
 
-                                         // Note that it's possible that a remotely locked segment is still the one
-                                         // with the highest priority and so that the version hasn't changed. And we
-                                         // could decide to double-validate the segment in that case, it wouldn't exactly
-                                         // be wrong or break things, but it's waste of resources and likely unexpected,
-                                         // so we don't.
-                                         if (isRemotelyLocked(record))
-                                             return Status.locked(this, record.lockedBy);
+                // Note that it's possible that a remotely locked segment is still the one
+                // with the highest priority and so that the version hasn't changed. And we
+                // could decide to double-validate the segment in that case, it wouldn't exactly
+                // be wrong or break things, but it's waste of resources and likely unexpected,
+                // so we don't.
+                if (isRemotelyLocked(consolidated))
+                    return Status.locked(this, consolidated.lockedBy);
 
-                                         return versionAtCreation.equals(tableState.version)
-                                                ? Status.upToDate(this)
-                                                : Status.updated(this);
-                                     }
-                                     finally
-                                     {
-                                         tableState.lock.writeLock().unlock();
-                                     }
-                                 }).get();
+                return versionAtCreation.equals(tableState.version)
+                       ? Status.upToDate(this)
+                       : Status.updated(this);
             }
-            catch (InterruptedException | ExecutionException e)
+            finally
             {
-                logger.error("Unexpected error while checking status of segment to validate; this is a bug, but will NodeSync "
-                             + "will proceed validating the segment to ensure progress. This may result in non optimal behavior", e);
-                return Status.upToDate(this);
+                tableState.lock.writeLock().unlock();
             }
         }
 

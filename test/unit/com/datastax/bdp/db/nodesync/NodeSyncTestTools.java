@@ -369,12 +369,12 @@ public class NodeSyncTestTools
             this.log = log;
         }
 
-        public CompletableFuture<List<NodeSyncRecord>> nodeSyncRecords(TableMetadata table, Range<Token> range)
+        public List<NodeSyncRecord> nodeSyncRecords(TableMetadata table, Range<Token> range)
         {
             if (log)
                 logger.info("Querying node records for {} on range {}", table, range);
             ++readRecordsCalls;
-            return CompletableFuture.completedFuture(Collections.emptyList());
+            return Collections.emptyList();
         }
 
         public void lockNodeSyncSegment(Segment segment, long timeout, TimeUnit timeoutUnit)

@@ -41,17 +41,17 @@ public class SystemDistributedKeyspaceTest extends CQLTester
 
         Segment seg = seg(table, 0, 100);
 
-        assertEquals(Collections.emptyList(), SystemDistributedKeyspace.nodeSyncRecords(seg).get());
+        assertEquals(Collections.emptyList(), SystemDistributedKeyspace.nodeSyncRecords(seg));
 
         // Add one and check it gets picked up
         ValidationInfo i1 = fullInSync(10);
         SystemDistributedKeyspace.recordNodeSyncValidation(seg(table, 0, 50), i1, true);
-        assertEquals(records(table).add(0, 50, i1).asList(), SystemDistributedKeyspace.nodeSyncRecords(seg).get());
+        assertEquals(records(table).add(0, 50, i1).asList(), SystemDistributedKeyspace.nodeSyncRecords(seg));
 
         // Add one that isn't part of the requested segment and check it isn't picked up
         ValidationInfo i2 = fullInSync(15);
         SystemDistributedKeyspace.recordNodeSyncValidation(seg(table, 100, 150), i2, true);
-        assertEquals(records(table).add(0, 50, i1).asList(), SystemDistributedKeyspace.nodeSyncRecords(seg).get());
+        assertEquals(records(table).add(0, 50, i1).asList(), SystemDistributedKeyspace.nodeSyncRecords(seg));
 
         // Add one more within the requested segment and check it's picked up. Also record both a full and an more recent validation
         ValidationInfo i3 = fullInSync(7);
@@ -61,7 +61,7 @@ public class SystemDistributedKeyspaceTest extends CQLTester
         assertEquals(records(table).add(0, 50, i1)
                                    .add(50, 100, i4, i3)
                                    .asList(),
-                     SystemDistributedKeyspace.nodeSyncRecords(seg).get());
+                     SystemDistributedKeyspace.nodeSyncRecords(seg));
 
         // Lastly, test querying with a segment that goes up to min token since that's a separate code path. Make sure
         // it fetches all our insert segments.
@@ -69,6 +69,6 @@ public class SystemDistributedKeyspaceTest extends CQLTester
                                    .add(50, 100, i4, i3)
                                    .add(100, 150, i2)
                                    .asList(),
-                     SystemDistributedKeyspace.nodeSyncRecords(seg(table, 0, min())).get());
+                     SystemDistributedKeyspace.nodeSyncRecords(seg(table, 0, min())));
     }
 }
