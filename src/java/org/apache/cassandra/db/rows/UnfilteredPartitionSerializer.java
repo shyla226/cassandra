@@ -103,8 +103,7 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
 
         serializeBeginningOfPartition(partition, header, selection, out, rowEstimate, false);
 
-        return partition.content().process(unfiltered ->
-                                           serialize(unfiltered, header, out))
+        return partition.content().process(unfiltered -> serialize(unfiltered, header, out))
                                   .map(VOID ->
                                        {
                                            serializeEndOfPartition(out);
@@ -271,7 +270,7 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
         final SerializationHeader sHeader = header.sHeader;
         return new AbstractUnfilteredRowIterator(metadata, header.key, header.partitionDeletion, sHeader.columns(), header.staticRow, header.isReversed, sHeader.stats())
         {
-            private final Row.Builder builder = Row.Builder.sorted();
+            private final Row.Builder builder = BTreeRow.sortedBuilder();
 
             protected Unfiltered computeNext()
             {
@@ -300,7 +299,7 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
                                          DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header)
         {
             super(ph, staticRow);
-            this.builder = Row.Builder.sorted();
+            this.builder = BTreeRow.sortedBuilder();
             this.in = in;
             this.helper = new SerializationHelper(metadata, version, flag);
             this.sHeader = header.sHeader;

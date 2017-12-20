@@ -650,7 +650,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         // queryMemtableAndSSTablesInTimestampOrder
         boolean onlyUnrepaired = true;
-        Partition timeOrderedResults = null;
+        ImmutableBTreePartition timeOrderedResults = null;
         ClusteringIndexNamesFilter namesFilter = null;
     }
 
@@ -920,7 +920,7 @@ public class SinglePartitionReadCommand extends ReadCommand
     }
 
     private FlowableUnfilteredPartition outputTimeOrderedResult(ColumnFamilyStore cfs,
-                                                                Partition timeOrderedResult,
+                                                                ImmutableBTreePartition timeOrderedResult,
                                                                 SSTableReadMetricsCollector metricsCollector,
                                                                 boolean onlyUnrepaired)
     {
@@ -960,7 +960,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         return timeOrderedResult.unfilteredPartition(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed());
     }
 
-    private Flow<Partition> mergeToMemory(Partition prev, FlowableUnfilteredPartition partition, ClusteringIndexNamesFilter filter)
+    private Flow<ImmutableBTreePartition> mergeToMemory(ImmutableBTreePartition prev, FlowableUnfilteredPartition partition, ClusteringIndexNamesFilter filter)
     {
         int maxRows = Math.max(filter.requestedRows().size(), 1);
 
@@ -973,7 +973,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                               nowInSec(),
                                               null);
 
-        return ArrayBackedPartition.create(merged, maxRows);
+        return ImmutableBTreePartition.create(merged, maxRows, true);
     }
 
     private ClusteringIndexNamesFilter reduceFilter(ClusteringIndexNamesFilter filter, Partition result, long sstableTimestamp)
@@ -1024,7 +1024,6 @@ public class SinglePartitionReadCommand extends ReadCommand
             newClusterings.addAll(Sets.difference(clusterings, toRemove));
             clusterings = newClusterings.build();
         }
-
         return new ClusteringIndexNamesFilter(clusterings, filter.isReversed());
     }
 

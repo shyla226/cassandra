@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.Consumer;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -37,6 +38,10 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.WrappedInt;
+import org.apache.cassandra.utils.WrappedLong;
+import org.apache.cassandra.utils.btree.BTree;
+import org.apache.cassandra.utils.btree.UpdateFunction;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -54,10 +59,9 @@ import org.apache.cassandra.utils.versioning.Versioned;
  * is also a few static helper constructor methods for special cases ({@code emptyUpdate()},
  * {@code fullPartitionDelete} and {@code singleRowUpdate}).
  */
-public class PartitionUpdate extends ArrayBackedPartition
+public class PartitionUpdate extends AbstractBTreePartition
 {
     protected static final Logger logger = LoggerFactory.getLogger(PartitionUpdate.class);
-    private static final Row[] EMPTY_ROWS = new Row[]{};
 
     public static final Versioned<EncodingVersion, PartitionUpdateSerializer> serializers = EncodingVersion.versioned(PartitionUpdateSerializer::new);
 
@@ -70,10 +74,13 @@ public class PartitionUpdate extends ArrayBackedPartition
     private volatile boolean isBuilt;
     private boolean canReOpen = true;
 
-    private List<Row> rowBuilder;
-    private boolean needsSort;
+    private Holder holder;
+    private BTree.Builder<Row> rowBuilder;
+    private MutableDeletionInfo deletionInfo;
 
     private final boolean canHaveShadowedData;
+
+    private final TableMetadata metadata;
 
     private PartitionUpdate(TableMetadata metadata,
                             DecoratedKey key,
@@ -82,11 +89,12 @@ public class PartitionUpdate extends ArrayBackedPartition
                             int initialRowCapacity,
                             boolean canHaveShadowedData)
     {
-        super(key, new Holder(columns, EMPTY_ROWS, 0, DeletionInfo.LIVE, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS), metadata);
+        super(key);
+        this.metadata = metadata;
+        this.deletionInfo = deletionInfo;
+        this.holder = new Holder(columns, BTree.empty(), deletionInfo, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
         this.canHaveShadowedData = canHaveShadowedData;
-        holder.deletionInfo = deletionInfo;
-        rowBuilder = new ArrayList<>(initialRowCapacity);
-        needsSort = false;
+        rowBuilder = builder(initialRowCapacity);
     }
 
     private PartitionUpdate(TableMetadata metadata,
@@ -95,9 +103,11 @@ public class PartitionUpdate extends ArrayBackedPartition
                             MutableDeletionInfo deletionInfo,
                             boolean canHaveShadowedData)
     {
-        super(key, holder, metadata);
+        super(key);
+        this.metadata = metadata;
+        this.holder = holder;
+        this.deletionInfo = deletionInfo;
         this.isBuilt = true;
-        this.holder.deletionInfo = deletionInfo;
         this.canHaveShadowedData = canHaveShadowedData;
     }
 
@@ -106,7 +116,7 @@ public class PartitionUpdate extends ArrayBackedPartition
                            RegularAndStaticColumns columns,
                            int initialRowCapacity)
     {
-        this(metadata, key, columns, MutableDeletionInfo.live(),  initialRowCapacity, true);
+        this(metadata, key, columns, MutableDeletionInfo.live(), initialRowCapacity, true);
     }
 
     public PartitionUpdate(TableMetadata metadata,
@@ -131,7 +141,7 @@ public class PartitionUpdate extends ArrayBackedPartition
     public static PartitionUpdate emptyUpdate(TableMetadata metadata, DecoratedKey key)
     {
         MutableDeletionInfo deletionInfo = MutableDeletionInfo.live();
-        Holder holder = new Holder(RegularAndStaticColumns.NONE, 0,  Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
+        Holder holder = new Holder(RegularAndStaticColumns.NONE, BTree.empty(), deletionInfo, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
         return new PartitionUpdate(metadata, key, holder, deletionInfo, false);
     }
 
@@ -148,7 +158,7 @@ public class PartitionUpdate extends ArrayBackedPartition
     public static PartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, int nowInSec)
     {
         MutableDeletionInfo deletionInfo = new MutableDeletionInfo(timestamp, nowInSec);
-        Holder holder = new Holder(RegularAndStaticColumns.NONE, 0, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
+        Holder holder = new Holder(RegularAndStaticColumns.NONE, BTree.empty(), deletionInfo, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
         return new PartitionUpdate(metadata, key, holder, deletionInfo, false);
     }
 
@@ -166,13 +176,12 @@ public class PartitionUpdate extends ArrayBackedPartition
         MutableDeletionInfo deletionInfo = MutableDeletionInfo.live();
         if (row.isStatic())
         {
-            Holder holder = new Holder(new RegularAndStaticColumns(Columns.from(row.columns()), Columns.NONE), 0, row, EncodingStats.NO_STATS);
+            Holder holder = new Holder(new RegularAndStaticColumns(Columns.from(row.columns()), Columns.NONE), BTree.empty(), deletionInfo, row, EncodingStats.NO_STATS);
             return new PartitionUpdate(metadata, key, holder, deletionInfo, false);
         }
         else
         {
-            Holder holder = new Holder( new RegularAndStaticColumns(Columns.NONE, Columns.from(row.columns())), 1, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
-            holder.rows[holder.length++] = row;
+            Holder holder = new Holder(new RegularAndStaticColumns(Columns.NONE, Columns.from(row.columns())), BTree.singleton(row), deletionInfo, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
             return new PartitionUpdate(metadata, key, holder, deletionInfo, false);
         }
     }
@@ -205,11 +214,29 @@ public class PartitionUpdate extends ArrayBackedPartition
     public static PartitionUpdate fromIterator(UnfilteredRowIterator iterator, ColumnFilter filter)
     {
         iterator = UnfilteredRowIterators.withOnlyQueriedData(iterator, filter);
-        ArrayBackedPartition p = create(iterator, 16);
-        MutableDeletionInfo deletionInfo = (MutableDeletionInfo) p.deletionInfo();
-        return new PartitionUpdate(iterator.metadata(), iterator.partitionKey(), p.holder, deletionInfo, false);
+        Holder holder = build(iterator, 16);
+        MutableDeletionInfo deletionInfo = (MutableDeletionInfo) holder.deletionInfo;
+        return new PartitionUpdate(iterator.metadata(), iterator.partitionKey(), holder, deletionInfo, false);
     }
 
+    /**
+     * Turns the given iterator into an update.
+     *
+     * @param iterator the iterator to turn into updates.
+     * @param filter the column filter used when querying {@code iterator}. This is used to make
+     * sure we don't include data for which the value has been skipped while reading (as we would
+     * then be writing something incorrect).
+     *
+     * Warning: this method does not close the provided iterator, it is up to
+     * the caller to close it.
+     */
+    public static PartitionUpdate fromIterator(RowIterator iterator, ColumnFilter filter)
+    {
+        iterator = RowIterators.withOnlyQueriedData(iterator, filter);
+        MutableDeletionInfo deletionInfo = MutableDeletionInfo.live();
+        Holder holder = build(iterator, deletionInfo, true, 16);
+        return new PartitionUpdate(iterator.metadata(), iterator.partitionKey(), holder, deletionInfo, false);
+    }
 
     protected boolean canHaveShadowedData()
     {
@@ -292,7 +319,7 @@ public class PartitionUpdate extends ArrayBackedPartition
             return Iterables.getOnlyElement(updates);
 
         int nowInSecs = FBUtilities.nowInSeconds();
-        List<UnfilteredRowIterator> asIterators = Lists.transform(updates, ArrayBackedPartition::unfilteredIterator);
+        List<UnfilteredRowIterator> asIterators = Lists.transform(updates, AbstractBTreePartition::unfilteredIterator);
         return fromIterator(UnfilteredRowIterators.merge(asIterators, nowInSecs), ColumnFilter.all(updates.get(0).metadata()));
     }
 
@@ -302,7 +329,7 @@ public class PartitionUpdate extends ArrayBackedPartition
     @Override
     public DeletionInfo deletionInfo()
     {
-        return holder.deletionInfo;
+        return deletionInfo;
     }
 
     /**
@@ -322,14 +349,11 @@ public class PartitionUpdate extends ArrayBackedPartition
     public void updateAllTimestamp(long newTimestamp)
     {
         Holder holder = holder();
-        ((MutableDeletionInfo)holder.deletionInfo).updateAllTimestamp(newTimestamp - 1);
-
-        for (int i = 0; i < holder.length; i++)
-            holder.rows[i].updateAllTimestamp(newTimestamp);
-
+        deletionInfo.updateAllTimestamp(newTimestamp - 1);
+        Object[] tree = BTree.<Row>transformAndFilter(holder.tree, (x) -> x.updateAllTimestamp(newTimestamp));
         Row staticRow = holder.staticRow.updateAllTimestamp(newTimestamp);
-        EncodingStats newStats = EncodingStats.Collector.collect(staticRow, iterator(), holder.deletionInfo);
-        holder.stats = newStats;
+        EncodingStats newStats = EncodingStats.Collector.collect(staticRow, BTree.<Row>iterator(tree), deletionInfo);
+        this.holder = new Holder(holder.columns, tree, deletionInfo, staticRow, newStats);
     }
 
     /**
@@ -344,8 +368,8 @@ public class PartitionUpdate extends ArrayBackedPartition
     {
         return rowCount()
              + (staticRow().isEmpty() ? 0 : 1)
-             + holder.deletionInfo.rangeCount()
-             + (holder.deletionInfo.getPartitionDeletion().isLive() ? 0 : 1);
+             + deletionInfo.rangeCount()
+             + (deletionInfo.getPartitionDeletion().isLive() ? 0 : 1);
     }
 
     /**
@@ -355,17 +379,13 @@ public class PartitionUpdate extends ArrayBackedPartition
      */
     public int dataSize()
     {
-        Integer size = 0;
-        Holder holder = holder();
+        WrappedInt size = new WrappedInt(0);
+        BTree.<Row>apply(holder().tree, (row) -> {
+            size.add(row.clustering().dataSize());
+            row.apply(cd -> size.add(cd.dataSize()), false);
+        }, false);
 
-        for (int i = 0; i < holder.length; i++)
-        {
-            Row row = holder.rows[i];
-            size += row.clustering().dataSize();
-            size += row.reduce(0, (v,cd) -> v + cd.dataSize());
-        }
-
-        return size;
+        return size.get();
     }
 
     public TableMetadata metadata()
@@ -411,8 +431,15 @@ public class PartitionUpdate extends ArrayBackedPartition
         // called concurrently with sort() (which should be avoided in the first place, but
         // better safe than sorry).
         isBuilt = false;
-        rowBuilder.clear();
-        needsSort = false;
+        if (rowBuilder == null)
+            rowBuilder = builder(16);
+    }
+
+    private BTree.Builder<Row> builder(int initialCapacity)
+    {
+        return BTree.<Row>builder(metadata().comparator, initialCapacity)
+                    .setQuickResolver((a, b) ->
+                                      Rows.merge(a, b, createdAtInSec));
     }
 
     /**
@@ -437,14 +464,10 @@ public class PartitionUpdate extends ArrayBackedPartition
      */
     public void validate()
     {
-        Holder holder = holder();
-
-        for (int i = 0; i < holder.length; i++)
-        {
-            Row row = holder.rows[i];
+        BTree.<Row>apply(holder().tree, row -> {
             metadata().comparator.validate(row.clustering());
             row.apply(cd -> cd.validate(), false);
-        }
+        }, false);
     }
 
     /**
@@ -454,32 +477,34 @@ public class PartitionUpdate extends ArrayBackedPartition
      */
     public long maxTimestamp()
     {
+        maybeBuild();
 
-        Holder holder = holder();
-        Long maxTimestamp = holder.deletionInfo.maxTimestamp();
+        WrappedLong maxTimestamp = new WrappedLong(deletionInfo.maxTimestamp());
 
-        for (int i = 0; i < holder.length; i++)
-        {
-            Row row = holder.rows[i];
+        applyForwards(row -> {
+            maxTimestamp.max(row.primaryKeyLivenessInfo().timestamp());
 
-            maxTimestamp = row.reduce(maxTimestamp, (ts, cd) -> {
+            row.apply(cd -> {
                 if (cd.column().isSimple())
                 {
-                    return Math.max(ts, ((Cell)cd).timestamp());
+                    maxTimestamp.max(((Cell)cd).timestamp());
                 }
                 else
                 {
                     ComplexColumnData complexData = (ComplexColumnData)cd;
-                    ts = Math.max(ts, complexData.complexDeletion().markedForDeleteAt());
-                    ts = complexData.reduce(ts, (ts2,cell) -> Math.max(ts2, cell.timestamp()));
-                    return ts;
+                    maxTimestamp.max(complexData.complexDeletion().markedForDeleteAt());
+                    complexData.applyForwards(cell -> maxTimestamp.max(cell.timestamp()));
                 }
-            });
-        }
+            }, false);
+        });
 
-        return maxTimestamp;
+        return maxTimestamp.get();
     }
 
+    private void applyForwards(Consumer<Row> function)
+    {
+        BTree.apply(holder().tree, function, false);
+    }
 
     /**
      * For an update on a counter table, returns a list containing a {@code CounterMark} for
@@ -520,13 +545,13 @@ public class PartitionUpdate extends ArrayBackedPartition
     public void addPartitionDeletion(DeletionTime deletionTime)
     {
         assertNotBuilt();
-        ((MutableDeletionInfo)holder.deletionInfo).add(deletionTime);
+        deletionInfo.add(deletionTime);
     }
 
     public void add(RangeTombstone range)
     {
         assertNotBuilt();
-        ((MutableDeletionInfo)holder.deletionInfo).add(range, metadata().comparator);
+        deletionInfo.add(range, metadata().comparator);
     }
 
     /**
@@ -555,21 +580,13 @@ public class PartitionUpdate extends ArrayBackedPartition
             Row staticRow = holder.staticRow.isEmpty()
                       ? row
                       : Rows.merge(holder.staticRow, row, createdAtInSec);
-            holder.staticRow = staticRow;
+            holder = new Holder(holder.columns, holder.tree, holder.deletionInfo, staticRow, holder.stats);
         }
         else
         {
             // this assert is expensive, and possibly of limited value; we should consider removing it
             // or introducing a new class of assertions for test purposes
             assert columns().regulars.containsAll(row.columns()) : columns().regulars + " is not superset of " + row.columns();
-
-            // Track if sorting is needed before build
-            if (!needsSort)
-            {
-                int size = rowBuilder.size();
-                needsSort = size > 0 && metadata.comparator.compare(rowBuilder.get(size - 1).clustering(), row) > 0;
-            }
-
             rowBuilder.add(row);
         }
     }
@@ -587,27 +604,17 @@ public class PartitionUpdate extends ArrayBackedPartition
         if (isBuilt)
             return;
 
-        if (needsSort)
-            rowBuilder.sort((a,b) -> metadata.comparator.compare(a.clustering(), b.clustering()));
+        Holder holder = this.holder;
+        Object[] cur = holder.tree;
+        Object[] add = rowBuilder.build();
+        Object[] merged = BTree.<Row>merge(cur, add, metadata().comparator,
+                                           UpdateFunction.Simple.of((a, b) -> Rows.merge(a, b, createdAtInSec)));
 
-        holder.rows = new Row[rowBuilder.size()];
+        assert deletionInfo == holder.deletionInfo;
+        EncodingStats newStats = EncodingStats.Collector.collect(holder.staticRow, BTree.<Row>iterator(merged), deletionInfo);
 
-        //Simply add / replace
-        for (Row row : rowBuilder)
-        {
-            int lastIdx = holder.length - 1;
-            boolean append = lastIdx < 0 || metadata.comparator.compare(holder.rows[lastIdx], row) != 0;
-            if (append)
-                append(row);
-            else
-                holder.rows[lastIdx] = Rows.merge(holder.rows[lastIdx], row, createdAtInSec);
-        }
-
-        EncodingStats newStats = EncodingStats.Collector.collect(holder.staticRow, super.iterator(), holder.deletionInfo);
-
-        holder.stats = newStats;
-        rowBuilder.clear();
-        needsSort = false;
+        this.holder = new Holder(holder.columns, merged, holder.deletionInfo, holder.staticRow, newStats);
+        rowBuilder = null;
         isBuilt = true;
     }
 
@@ -627,7 +634,7 @@ public class PartitionUpdate extends ArrayBackedPartition
                                 metadata.partitionKeyType.getString(partitionKey().getKey()),
                                 columns()));
 
-        sb.append("\n    deletionInfo=").append(holder.deletionInfo);
+        sb.append("\n    deletionInfo=").append(deletionInfo);
         sb.append(" (not built)");
         return sb.toString();
     }
@@ -799,7 +806,7 @@ public class PartitionUpdate extends ArrayBackedPartition
             {
                 assert !iter.isReverseOrder();
 
-                update.metadata().id.serialize(out);
+                update.metadata.id.serialize(out);
                 UnfilteredPartitionSerializer.serializers.get(version).serialize(iter, null, out, update.rowCount());
             }
         }
@@ -815,13 +822,8 @@ public class PartitionUpdate extends ArrayBackedPartition
             assert header.rowEstimate >= 0;
 
             MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(header.partitionDeletion, metadata.comparator, false);
-            Holder holder = new Holder(header.sHeader.columns(), header.rowEstimate, header.staticRow, header.sHeader.stats());
-
-            PartitionUpdate p = new PartitionUpdate(metadata,
-                                                    header.key,
-                                                    holder,
-                                                    null,
-                                                    false);
+            BTree.Builder<Row> rows = BTree.builder(metadata.comparator, header.rowEstimate);
+            rows.auto(false);
 
             try (UnfilteredRowIterator partition = UnfilteredPartitionSerializer.serializers.get(version).deserializeToIt(in, metadata, flag, header))
             {
@@ -829,14 +831,18 @@ public class PartitionUpdate extends ArrayBackedPartition
                 {
                     Unfiltered unfiltered = partition.next();
                     if (unfiltered.kind() == Unfiltered.Kind.ROW)
-                        p.append((Row)unfiltered);
+                        rows.add((Row)unfiltered);
                     else
                         deletionBuilder.add((RangeTombstoneMarker)unfiltered);
                 }
             }
 
-            holder.deletionInfo = deletionBuilder.build();
-            return p;
+            MutableDeletionInfo deletionInfo = deletionBuilder.build();
+            return new PartitionUpdate(metadata,
+                                       header.key,
+                                       new Holder(header.sHeader.columns(), rows.build(), deletionInfo, header.staticRow, header.sHeader.stats()),
+                                       deletionInfo,
+                                       false);
         }
 
         public long serializedSize(PartitionUpdate update)
@@ -893,8 +899,8 @@ public class PartitionUpdate extends ArrayBackedPartition
         {
             // This is a bit of a giant hack as this is the only place where we mutate a Row object. This makes it more efficient
             // for counters however and this won't be needed post-#6506 so that's probably fine.
-            assert row instanceof AbstractRow;
-            ((AbstractRow)row).setValue(column, path, value);
+            assert row instanceof BTreeRow;
+            ((BTreeRow)row).setValue(column, path, value);
         }
     }
 }

@@ -53,12 +53,12 @@ public class ColumnConditionTest
     private static Row newRow(ColumnMetadata definition, ByteBuffer value)
     {
         BufferCell cell = new BufferCell(definition, 0L, Cell.NO_TTL, Cell.NO_DELETION_TIME, value, null);
-        return ArrayBackedRow.singleCellRow(Clustering.EMPTY, cell);
+        return BTreeRow.singleCellRow(Clustering.EMPTY, cell);
     }
 
     private static Row newRow(ColumnMetadata definition, List<ByteBuffer> values)
     {
-        Row.Builder builder = Row.Builder.sorted();
+        Row.Builder builder = BTreeRow.sortedBuilder();
         builder.newRow(Clustering.EMPTY);
         long now = System.currentTimeMillis();
         if (values != null)
@@ -82,7 +82,7 @@ public class ColumnConditionTest
 
     private static Row newRow(ColumnMetadata definition, SortedSet<ByteBuffer> values)
     {
-        Row.Builder builder = Row.Builder.sorted();
+        Row.Builder builder = BTreeRow.sortedBuilder();
         builder.newRow(Clustering.EMPTY);
         if (values != null)
         {
@@ -102,7 +102,7 @@ public class ColumnConditionTest
 
     private static Row newRow(ColumnMetadata definition, Map<ByteBuffer, ByteBuffer> values)
     {
-        Row.Builder builder = Row.Builder.sorted();
+        Row.Builder builder = BTreeRow.sortedBuilder();
         builder.newRow(Clustering.EMPTY);
         if (values != null)
         {

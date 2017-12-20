@@ -34,6 +34,7 @@ import static org.apache.cassandra.utils.btree.BTree.POSITIVE_INFINITY;
  */
 final class TreeBuilder
 {
+
     private final static Recycler<TreeBuilder> builderRecycler = new Recycler<TreeBuilder>()
     {
         protected TreeBuilder newObject(Handle handle)

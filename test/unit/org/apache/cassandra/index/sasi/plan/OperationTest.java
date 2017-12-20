@@ -671,7 +671,7 @@ public class OperationTest extends SchemaLoader
 
     private static Row buildRow(Clustering clustering, Row.Deletion deletion, Cell... cells)
     {
-        Row.Builder rowBuilder = Row.Builder.sorted();
+        Row.Builder rowBuilder = BTreeRow.sortedBuilder();
         rowBuilder.newRow(clustering);
         for (Cell c : cells)
             rowBuilder.addCell(c);

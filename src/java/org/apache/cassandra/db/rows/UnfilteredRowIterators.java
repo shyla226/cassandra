@@ -637,7 +637,7 @@ public abstract class UnfilteredRowIterators
             {
                 Row merged = rowMerger.merge(markerMerger == null ? partitionLevelDeletion : markerMerger.activeDeletion());
                 if (listener != null)
-                    listener.onMergedRows(merged == null ? ArrayBackedRow.emptyRow(rowMerger.mergedClustering()) : merged, rowMerger.mergedRows());
+                    listener.onMergedRows(merged == null ? BTreeRow.emptyRow(rowMerger.mergedClustering()) : merged, rowMerger.mergedRows());
                 return merged;
             }
             else

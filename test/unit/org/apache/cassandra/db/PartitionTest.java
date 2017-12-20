@@ -135,8 +135,8 @@ public class PartitionTest
 
             ReadCommand cmd1 = Util.cmd(cfs, "key1").build();
             ReadCommand cmd2 = Util.cmd(cfs, "key2").build();
-            Partition p1 = Util.getOnlyPartitionUnfiltered(cmd1);
-            Partition p2 = Util.getOnlyPartitionUnfiltered(cmd2);
+            ImmutableBTreePartition p1 = Util.getOnlyPartitionUnfiltered(cmd1);
+            ImmutableBTreePartition p2 = Util.getOnlyPartitionUnfiltered(cmd2);
 
             Hasher hasher1 = HashingUtils.CURRENT_HASH_FUNCTION.newHasher();
             Hasher hasher2 = HashingUtils.CURRENT_HASH_FUNCTION.newHasher();
@@ -180,7 +180,7 @@ public class PartitionTest
         builder.build().applyUnsafe();
 
         RowUpdateBuilder.deleteRowAt(cfs.metadata(), 10L, localDeletionTime, "key1", "c").applyUnsafe();
-        Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, "key1").build());
+        ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, "key1").build());
         EncodingStats stats = partition.stats();
         assertEquals(localDeletionTime, stats.minLocalDeletionTime);
     }

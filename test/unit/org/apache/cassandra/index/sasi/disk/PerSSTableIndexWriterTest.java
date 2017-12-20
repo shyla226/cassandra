@@ -30,7 +30,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.marshal.LongType;
-import org.apache.cassandra.db.rows.ArrayBackedRow;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sasi.SASIIndex;
@@ -92,8 +92,8 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
         {
             ByteBuffer key = ByteBufferUtil.bytes(String.format(keyFormat, i));
             expectedKeys.put(cfs.metadata().partitioner.decorateKey(key),
-                             ArrayBackedRow.singleCellRow(Clustering.EMPTY,
-                                                          BufferCell.live(column, timestamp, Int32Type.instance.decompose(i))));
+                             BTreeRow.singleCellRow(Clustering.EMPTY,
+                                                    BufferCell.live(column, timestamp, Int32Type.instance.decompose(i))));
         }
 
         indexWriter.begin();

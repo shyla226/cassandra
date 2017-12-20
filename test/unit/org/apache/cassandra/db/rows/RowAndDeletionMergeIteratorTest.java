@@ -397,7 +397,7 @@ public class RowAndDeletionMergeIteratorTest
 
     private void addRow(PartitionUpdate update, int col1, int a)
     {
-        update.add(ArrayBackedRow.singleCellRow(update.metadata().comparator.make(col1), makeCell(defA, a, 0)));
+        update.add(BTreeRow.singleCellRow(update.metadata().comparator.make(col1), makeCell(defA, a, 0)));
     }
 
     private Cell makeCell(ColumnMetadata columnMetadata, int value, long timestamp)

@@ -25,22 +25,23 @@ import java.nio.ByteBuffer;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
-import com.google.common.collect.Lists;
 import com.google.common.hash.Hasher;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.utils.AbstractIndexedListIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.HashingUtils;
-import org.apache.cassandra.utils.MergeIterator;
-import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.SearchIterator;
+import org.apache.cassandra.utils.btree.BTree;
+import org.apache.cassandra.utils.btree.BTreeSearchIterator;
+import org.apache.cassandra.utils.btree.BTreeRemoval;
+import org.apache.cassandra.utils.btree.UpdateFunction;
 
 /**
  * An immutable and sorted list of (non-PK) columns for a given table.
@@ -48,23 +49,29 @@ import org.apache.cassandra.utils.SearchIterator;
  * Note that in practice, it will either store only static columns, or only regular ones. When
  * we need both type of columns, we use a {@link RegularAndStaticColumns} object.
  */
-public class Columns extends AbstractCollection<ColumnMetadata>
+public class Columns extends AbstractCollection<ColumnMetadata> implements Collection<ColumnMetadata>
 {
     public static final Serializer serializer = new Serializer();
-    public static final ColumnMetadata[] EMPTY = new ColumnMetadata[]{};
-    public static final Columns NONE = new Columns(EMPTY, 0);
+    public static final Columns NONE = new Columns(BTree.empty(), 0);
+    private static final ColumnMetadata FIRST_COMPLEX =
+        new ColumnMetadata("",
+                           "",
+                           ColumnIdentifier.getInterned(ByteBufferUtil.EMPTY_BYTE_BUFFER, UTF8Type.instance),
+                           SetType.getInstance(UTF8Type.instance, true),
+                           ColumnMetadata.NO_POSITION,
+                           ColumnMetadata.Kind.REGULAR);
 
-    private final ColumnMetadata[] columns;
+    private final Object[] columns;
     private final int complexIdx; // Index of the first complex column
 
-    private Columns(ColumnMetadata[] columns, int complexIdx)
+    private Columns(Object[] columns, int complexIdx)
     {
-        assert complexIdx <= columns.length;
+        assert complexIdx <= BTree.size(columns);
         this.columns = columns;
         this.complexIdx = complexIdx;
     }
 
-    private Columns(ColumnMetadata[] columns)
+    private Columns(Object[] columns)
     {
         this(columns, findFirstComplexIdx(columns));
     }
@@ -78,49 +85,28 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public static Columns of(ColumnMetadata c)
     {
-        return new Columns(new ColumnMetadata[]{c}, c.isComplex() ? 0 : 1);
+        return new Columns(BTree.singleton(c), c.isComplex() ? 0 : 1);
     }
 
     /**
      * Returns a new {@code Columns} object holing the same columns than the provided set.
      *
-     * @param s the list from which to create the new {@code Columns}.
+     * @param s the set from which to create the new {@code Columns}.
      * @return the newly created {@code Columns} containing the columns from {@code s}.
      */
     public static Columns from(Collection<ColumnMetadata> s)
     {
-        ColumnMetadata[] columns = new ColumnMetadata[s.size()];
-        int i = 0;
-        int firstComplexId = columns.length;
-
-        ColumnMetadata last = null;
-        for (ColumnMetadata c : s)
-        {
-            assert c != null && (last == null || c.compareTo(last) >= 0) : "Must be passed a sorted collection with no nulls";
-
-            if (c.isComplex())
-                firstComplexId = Math.min(firstComplexId, i);
-
-            columns[i++] = c;
-            last = c;
-        }
-
-        return new Columns(columns, firstComplexId);
+        Object[] tree = BTree.<ColumnMetadata>builder(Comparator.naturalOrder()).addAll(s).build();
+        return new Columns(tree, findFirstComplexIdx(tree));
     }
 
-    private static int findFirstComplexIdx(ColumnMetadata[] columns)
+    private static int findFirstComplexIdx(Object[] tree)
     {
         // have fast path for common no-complex case
-        if (columns.length == 0)
-            return 0;
-
-        for (int i = columns.length - 1; i >= 0; i--)
-        {
-            if (columns[i].isSimple())
-                return i + 1;
-        }
-
-        return 0;
+        int size = BTree.size(tree);
+        if (!BTree.isEmpty(tree) && BTree.<ColumnMetadata>findByIndex(tree, size - 1).isSimple())
+            return size;
+        return BTree.ceilIndex(tree, Comparator.naturalOrder(), FIRST_COMPLEX);
     }
 
     /**
@@ -130,7 +116,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public boolean isEmpty()
     {
-        return columns.length == 0;
+        return BTree.isEmpty(columns);
     }
 
     /**
@@ -150,7 +136,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public int complexColumnCount()
     {
-        return columns.length - complexIdx;
+        return BTree.size(columns) - complexIdx;
     }
 
     /**
@@ -160,7 +146,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public int size()
     {
-        return columns.length;
+        return BTree.size(columns);
     }
 
     /**
@@ -180,7 +166,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public boolean hasComplex()
     {
-        return complexIdx < columns.length;
+        return complexIdx < BTree.size(columns);
     }
 
     /**
@@ -193,7 +179,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public ColumnMetadata getSimple(int i)
     {
-        return columns[i];
+        return BTree.findByIndex(columns, i);
     }
 
     /**
@@ -206,7 +192,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public ColumnMetadata getComplex(int i)
     {
-        return columns[complexIdx + i];
+        return BTree.findByIndex(columns, complexIdx + i);
     }
 
     /**
@@ -220,7 +206,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public int simpleIdx(ColumnMetadata c)
     {
-        return Arrays.binarySearch(columns, c);
+        return BTree.findIndex(columns, Comparator.naturalOrder(), c);
     }
 
     /**
@@ -234,7 +220,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public int complexIdx(ColumnMetadata c)
     {
-        return Arrays.binarySearch(columns, c) - complexIdx;
+        return BTree.findIndex(columns, Comparator.naturalOrder(), c) - complexIdx;
     }
 
     /**
@@ -246,7 +232,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public boolean contains(ColumnMetadata c)
     {
-        return Arrays.binarySearch(columns, c) >= 0;
+        return BTree.findIndex(columns, Comparator.naturalOrder(), c) >= 0;
     }
 
     /**
@@ -266,34 +252,14 @@ public class Columns extends AbstractCollection<ColumnMetadata>
         if (this == NONE)
             return other;
 
-        if (Arrays.equals(this.columns, other.columns))
+        Object[] tree = BTree.<ColumnMetadata>merge(this.columns, other.columns, Comparator.naturalOrder(),
+                                                    UpdateFunction.noOp());
+        if (tree == this.columns)
             return this;
+        if (tree == other.columns)
+            return other;
 
-        try(CloseableIterator<ColumnMetadata> merge = MergeIterator.get(Lists.newArrayList(Iterators.forArray(this.columns), Iterators.forArray(other.columns)),
-                                                                         Comparator.naturalOrder(),
-                                                                         new Reducer<ColumnMetadata, ColumnMetadata>()
-                                                                         {
-                                                                             ColumnMetadata reduced = null;
-
-                                                                             @Override
-                                                                             public boolean trivialReduceIsTrivial()
-                                                                             {
-                                                                                 return true;
-                                                                             }
-
-                                                                             public void reduce(int idx, ColumnMetadata current)
-                                                                             {
-                                                                                 reduced = current;
-                                                                             }
-
-                                                                             public ColumnMetadata getReduced()
-                                                                             {
-                                                                                 return reduced;
-                                                                             }
-                                                                         }))
-        {
-            return Columns.from(Lists.newArrayList(merge));
-        }
+        return new Columns(tree, findFirstComplexIdx(tree));
     }
 
     /**
@@ -310,8 +276,9 @@ public class Columns extends AbstractCollection<ColumnMetadata>
         if (other.size() > this.size())
             return false;
 
+        BTreeSearchIterator<ColumnMetadata, ColumnMetadata> iter = BTree.slice(columns, Comparator.naturalOrder(), BTree.Dir.ASC);
         for (Object def : other)
-            if (Arrays.binarySearch(columns, (ColumnMetadata) def, Comparator.naturalOrder()) < 0)
+            if (iter.next((ColumnMetadata) def) == null)
                 return false;
         return true;
     }
@@ -323,16 +290,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public Iterator<ColumnMetadata> simpleColumns()
     {
-        if (isEmpty())
-            return Iterators.emptyIterator();
-
-        return new AbstractIndexedListIterator<ColumnMetadata>(complexIdx, 0)
-        {
-            protected ColumnMetadata get(int index)
-            {
-                return columns[index];
-            }
-        };
+        return BTree.iterator(columns, 0, complexIdx - 1, BTree.Dir.ASC);
     }
 
     /**
@@ -342,13 +300,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public Iterator<ColumnMetadata> complexColumns()
     {
-        return new AbstractIndexedListIterator<ColumnMetadata>(columns.length, complexIdx)
-        {
-            protected ColumnMetadata get(int index)
-            {
-                return columns[index];
-            }
-        };
+        return BTree.iterator(columns, complexIdx, BTree.size(columns) - 1, BTree.Dir.ASC);
     }
 
     /**
@@ -356,62 +308,10 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      *
      * @return an iterator over all the columns of this object.
      */
-    public Iterator<ColumnMetadata> iterator()
+    public BTreeSearchIterator<ColumnMetadata, ColumnMetadata> iterator()
     {
-        return new AbstractIndexedListIterator<ColumnMetadata>(columns.length, 0)
-        {
-            protected ColumnMetadata get(int index)
-            {
-                return columns[index];
-            }
-        };
+        return BTree.<ColumnMetadata, ColumnMetadata>slice(columns, Comparator.naturalOrder(), BTree.Dir.ASC);
     }
-
-    static class ColumnSearchIterator implements SearchIterator<ColumnMetadata, ColumnMetadata>
-    {
-        final ColumnMetadata[] columns;
-        int next = 0;
-
-        ColumnSearchIterator(ColumnMetadata[] columns)
-        {
-            this.columns = columns;
-        }
-
-        public ColumnMetadata next(ColumnMetadata key)
-        {
-            if (next >= columns.length)
-                return null;
-
-            int n = Arrays.binarySearch(columns, next, columns.length, key);
-            if (n >= 0)
-            {
-                next = n;
-                return key;
-            }
-            else
-            {
-                next = -n - 1;
-            }
-
-            return null;
-        }
-
-        public int indexOfCurrent()
-        {
-            return next;
-        }
-
-        public void rewind()
-        {
-            next = 0;
-        }
-    }
-
-    public ColumnSearchIterator searchIterator()
-    {
-        return new ColumnSearchIterator(columns);
-    }
-
 
     /**
      * An iterator that returns the columns of this object in "select" order (that
@@ -446,38 +346,37 @@ public class Columns extends AbstractCollection<ColumnMetadata>
         if (!contains(column))
             return this;
 
-        ColumnMetadata[] newColumns = Arrays.stream(columns).filter(c -> c.compareTo(column) != 0).toArray(ColumnMetadata[]::new);
+        Object[] newColumns = BTreeRemoval.<ColumnMetadata>remove(columns, Comparator.naturalOrder(), column);
         return new Columns(newColumns);
     }
 
     /**
-     * Apply a function to each column definition.
-     * @param function
-     */
-    public void apply(Consumer<ColumnMetadata> function)
-    {
-        for (ColumnMetadata cm : columns)
-            function.accept(cm);
-    }
-
-    /**
      * Returns a predicate to test whether columns are included in this {@code Columns} object,
-     * assuming that the tested columns are passed to the predicate in sorted order.
+     * assuming that tes tested columns are passed to the predicate in sorted order.
      *
      * @return a predicate to test the inclusion of sorted columns in this object.
      */
     public Predicate<ColumnMetadata> inOrderInclusionTester()
     {
-        SearchIterator<ColumnMetadata, ColumnMetadata> iter = searchIterator();
+        SearchIterator<ColumnMetadata, ColumnMetadata> iter = BTree.slice(columns, Comparator.naturalOrder(), BTree.Dir.ASC);
         return column -> iter.next(column) != null;
     }
 
     public void digest(Hasher hasher)
     {
-        for (ColumnMetadata c : columns)
+        for (ColumnMetadata c : this)
             HashingUtils.updateBytes(hasher, c.name.bytes.duplicate());
     }
 
+    /**
+     * Apply a function to each column definition in forwards or reversed order.
+     * @param function
+     * @param reversed
+     */
+    public void apply(Consumer<ColumnMetadata> function, boolean reversed)
+    {
+        BTree.apply(columns, function, reversed);
+    }
 
     @Override
     public boolean equals(Object other)
@@ -488,13 +387,13 @@ public class Columns extends AbstractCollection<ColumnMetadata>
             return false;
 
         Columns that = (Columns)other;
-        return this.complexIdx == that.complexIdx && Arrays.equals(this.columns, that.columns);
+        return this.complexIdx == that.complexIdx && BTree.equals(this.columns, that.columns);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(complexIdx, Arrays.hashCode(columns));
+        return Objects.hash(complexIdx, BTree.hashCode(columns));
     }
 
     @Override
@@ -502,7 +401,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
     {
         StringBuilder sb = new StringBuilder("[");
         boolean first = true;
-        for (ColumnMetadata def : columns)
+        for (ColumnMetadata def : this)
         {
             if (first) first = false; else sb.append(" ");
             sb.append(def.name);
@@ -515,14 +414,14 @@ public class Columns extends AbstractCollection<ColumnMetadata>
         public void serialize(Columns columns, DataOutputPlus out) throws IOException
         {
             out.writeUnsignedVInt(columns.size());
-            for (ColumnMetadata column : columns.columns)
+            for (ColumnMetadata column : columns)
                 ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
         }
 
         public long serializedSize(Columns columns)
         {
             long size = TypeSizes.sizeofUnsignedVInt(columns.size());
-            for (ColumnMetadata column : columns.columns)
+            for (ColumnMetadata column : columns)
                 size += ByteBufferUtil.serializedSizeWithVIntLength(column.name.bytes);
             return size;
         }
@@ -530,7 +429,8 @@ public class Columns extends AbstractCollection<ColumnMetadata>
         public Columns deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
         {
             int length = (int)in.readUnsignedVInt();
-            ColumnMetadata[] columns = new ColumnMetadata[length];
+            BTree.Builder<ColumnMetadata> builder = BTree.builder(Comparator.naturalOrder());
+            builder.auto(false);
             for (int i = 0; i < length; i++)
             {
                 ByteBuffer name = ByteBufferUtil.readWithVIntLength(in);
@@ -544,9 +444,9 @@ public class Columns extends AbstractCollection<ColumnMetadata>
                     if (column == null)
                         throw new RuntimeException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
                 }
-                columns[i] = column;
+                builder.add(column);
             }
-            return new Columns(columns);
+            return new Columns(builder.build());
         }
 
         /**
@@ -614,24 +514,19 @@ public class Columns extends AbstractCollection<ColumnMetadata>
             }
             else
             {
-                ColumnMetadata[] columns = new ColumnMetadata[superset.size()];
-                int index = 0;
+                BTree.Builder<ColumnMetadata> builder = BTree.builder(Comparator.naturalOrder());
                 int firstComplexIdx = 0;
-                for (ColumnMetadata column : superset.columns)
+                for (ColumnMetadata column : superset)
                 {
                     if ((encoded & 1) == 0)
                     {
-                        columns[index++] = column;
+                        builder.add(column);
                         if (column.isSimple())
                             ++firstComplexIdx;
                     }
                     encoded >>>= 1;
-
-                    if (index == columns.length)
-                        break;
                 }
-
-                return new Columns(columns.length == index ? columns : Arrays.copyOf(columns, index), firstComplexIdx);
+                return new Columns(builder.build(), firstComplexIdx);
             }
         }
 
@@ -640,8 +535,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
         private static long encodeBitmap(Collection<ColumnMetadata> columns, Columns superset, int supersetCount)
         {
             long bitmap = 0L;
-            ColumnSearchIterator iter = superset.searchIterator();
-
+            BTreeSearchIterator<ColumnMetadata, ColumnMetadata> iter = superset.iterator();
             // the index we would encounter next if all columns are present
             int expectIndex = 0;
             for (ColumnMetadata column : columns)
@@ -667,7 +561,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
         {
             // write flag indicating we're in lengthy mode
             out.writeUnsignedVInt(supersetCount - columnCount);
-            ColumnSearchIterator iter = superset.searchIterator();
+            BTreeSearchIterator<ColumnMetadata, ColumnMetadata> iter = superset.iterator();
             if (columnCount < supersetCount / 2)
             {
                 // write present columns
@@ -701,14 +595,13 @@ public class Columns extends AbstractCollection<ColumnMetadata>
             int supersetCount = superset.size();
             int columnCount = supersetCount - delta;
 
-            ColumnMetadata[] columns = new ColumnMetadata[columnCount];
-
+            BTree.Builder<ColumnMetadata> builder = BTree.builder(Comparator.naturalOrder());
             if (columnCount < supersetCount / 2)
             {
                 for (int i = 0 ; i < columnCount ; i++)
                 {
                     int idx = (int) in.readUnsignedVInt();
-                    columns[i] = superset.columns[idx];
+                    builder.add(BTree.findByIndex(superset.columns, idx));
                 }
             }
             else
@@ -722,7 +615,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
                     while (idx < nextMissingIndex)
                     {
                         ColumnMetadata def = iter.next();
-                        columns[idx - skipped] = def;
+                        builder.add(def);
                         idx++;
                     }
                     if (idx == supersetCount)
@@ -732,7 +625,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
                     skipped++;
                 }
             }
-            return new Columns(columns);
+            return new Columns(builder.build());
         }
 
         @DontInline
@@ -740,7 +633,7 @@ public class Columns extends AbstractCollection<ColumnMetadata>
         {
             // write flag indicating we're in lengthy mode
             int size = TypeSizes.sizeofUnsignedVInt(supersetCount - columnCount);
-            ColumnSearchIterator iter = superset.searchIterator();
+            BTreeSearchIterator<ColumnMetadata, ColumnMetadata> iter = superset.iterator();
             if (columnCount < supersetCount / 2)
             {
                 // write present columns
@@ -768,5 +661,6 @@ public class Columns extends AbstractCollection<ColumnMetadata>
             }
             return size;
         }
+
     }
 }

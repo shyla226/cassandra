@@ -26,7 +26,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.reactivex.Completable;
-import io.reactivex.CompletableSource;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -34,7 +33,6 @@ import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.FailureResponse;
-import org.apache.cassandra.rx.CompletableTimeout;
 
 abstract class AbstractWriteHandler extends WriteHandler
 {
@@ -124,7 +122,7 @@ abstract class AbstractWriteHandler extends WriteHandler
                 subscriber.onError(error);
             else
                 subscriber.onComplete();
-            })).compose(s -> new CompletableTimeout(s, currentTimeout(), TimeUnit.NANOSECONDS))
+            })).timeout(currentTimeout(), TimeUnit.NANOSECONDS)
                .onErrorResumeNext(exc -> {
                if (exc instanceof TimeoutException)
                {

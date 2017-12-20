@@ -37,7 +37,7 @@ public abstract class Rows
 {
     private Rows() {}
 
-    public static final Row EMPTY_STATIC_ROW = ArrayBackedRow.emptyRow(Clustering.STATIC_CLUSTERING);
+    public static final Row EMPTY_STATIC_ROW = BTreeRow.emptyRow(Clustering.STATIC_CLUSTERING);
 
     public static Row.Builder copy(Row row, Row.Builder builder)
     {
@@ -231,7 +231,7 @@ public abstract class Rows
 
     public static Row merge(Row row1, Row row2, int nowInSec)
     {
-        Row.Builder builder = Row.Builder.sorted();
+        Row.Builder builder = BTreeRow.sortedBuilder();
         merge(row1, row2, builder, nowInSec);
         return builder.build();
     }
@@ -333,7 +333,7 @@ public abstract class Rows
      */
     public static Row removeShadowedCells(Row existing, Row update, DeletionTime rangeDeletion, int nowInSec)
     {
-        Row.Builder builder = Row.Builder.sorted();
+        Row.Builder builder = BTreeRow.sortedBuilder();
         Clustering clustering = existing.clustering();
         builder.newRow(clustering);
 

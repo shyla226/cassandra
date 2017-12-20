@@ -68,6 +68,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
@@ -2576,7 +2577,7 @@ public class SASIIndexTest
 
     private static Row buildRow(Cell... cells)
     {
-        Row.Builder rowBuilder = Row.Builder.sorted();
+        Row.Builder rowBuilder = BTreeRow.sortedBuilder();
         rowBuilder.newRow(Clustering.EMPTY);
         for (Cell c : cells)
             rowBuilder.addCell(c);

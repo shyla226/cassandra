@@ -497,7 +497,7 @@ public class TableViews extends AbstractCollection<View>
         // Returning null for an empty row is slightly ugly, but the case where there is no pre-existing row is fairly common
         // (especially when building the view), so we want to avoid a dummy allocation of an empty row every time.
         // And MultiViewUpdateBuilder knows how to deal with that.
-        return deletion.isLive() ? null : ArrayBackedRow.emptyDeletedRow(clustering, Row.Deletion.regular(deletion));
+        return deletion.isLive() ? null : BTreeRow.emptyDeletedRow(clustering, Row.Deletion.regular(deletion));
     }
 
     /**

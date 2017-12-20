@@ -293,7 +293,7 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
             {
                 if (currentRows[i] == null)
                 {
-                    currentRows[i] = Row.Builder.sorted();
+                    currentRows[i] = BTreeRow.sortedBuilder();
                     currentRows[i].newRow(clustering);
                 }
                 return currentRows[i];

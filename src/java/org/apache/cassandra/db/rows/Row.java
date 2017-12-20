@@ -21,7 +21,6 @@ import java.util.*;
 import java.util.function.Consumer;
 
 import com.google.common.base.Predicate;
-import com.google.common.collect.Lists;
 import com.google.common.hash.Hasher;
 
 import org.apache.cassandra.db.*;
@@ -32,6 +31,7 @@ import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.utils.HashingUtils;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Reducer;
+import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
 
@@ -181,6 +181,13 @@ public interface Row extends Unfiltered, Collection<ColumnData>
      * @param nowInSec the current time in seconds to decid if a cell is expired.
      */
     public boolean hasDeletion(int nowInSec);
+
+    /**
+     * An iterator to efficiently search data for a given column.
+     *
+     * @return a search iterator for the cells of this row.
+     */
+    public SearchIterator<ColumnMetadata, ColumnData> searchIterator();
 
     /**
      * Returns a copy of this row that:
@@ -442,16 +449,6 @@ public interface Row extends Unfiltered, Collection<ColumnData>
      */
     public interface Builder
     {
-        static Builder sorted()
-        {
-            return ArrayBackedRow.sortedBuilder();
-        }
-
-        static Builder unsorted(int nowInSec)
-        {
-            return ArrayBackedRow.unsortedBuilder(nowInSec);
-        }
-
         /**
          * Creates a copy of this {@code Builder}.
          * @return a copy of this {@code Builder}
@@ -521,8 +518,6 @@ public interface Row extends Unfiltered, Collection<ColumnData>
          * @return the last row built by this builder.
          */
         public Row build();
-
-        public void reset();
     }
 
     /**
@@ -636,7 +631,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
         private int rowsToMerge;
         private int lastRowSet = -1;
 
-        private final ColumnData[] dataBuffer;
+        private final List<ColumnData> dataBuffer;
         private final ColumnDataReducer columnDataReducer;
 
         public Merger(int numRows, int nowInSec, int numColumns, boolean hasComplex)
@@ -644,11 +639,12 @@ public interface Row extends Unfiltered, Collection<ColumnData>
             this.rows = new Row[numRows];
             this.columnDataIterators = new ArrayList<>(numRows);
             this.columnDataReducer = new ColumnDataReducer(numRows, nowInSec, hasComplex);
-            this.dataBuffer = new ColumnData[numColumns];
+            this.dataBuffer = new ArrayList<>(numColumns);
         }
 
         public void clear()
         {
+            dataBuffer.clear();
             Arrays.fill(rows, null);
             columnDataIterators.clear();
             rowsToMerge = 0;
@@ -704,19 +700,17 @@ public interface Row extends Unfiltered, Collection<ColumnData>
 
             columnDataReducer.setActiveDeletion(activeDeletion);
             Iterator<ColumnData> merged = MergeIterator.get(columnDataIterators, ColumnData.comparator, columnDataReducer);
-
-            int numMerged = 0;
             while (merged.hasNext())
             {
                 ColumnData data = merged.next();
                 if (data != null)
-                    dataBuffer[numMerged++] = data;
+                    dataBuffer.add(data);
             }
 
             // Because some data might have been shadowed by the 'activeDeletion', we could have an empty row
-            return rowInfo.isEmpty() && rowDeletion.isLive() && numMerged == 0
+            return rowInfo.isEmpty() && rowDeletion.isLive() && dataBuffer.isEmpty()
                  ? null
-                 : ArrayBackedRow.create(clustering, rowInfo, rowDeletion, Arrays.copyOf(dataBuffer, numMerged), numMerged);
+                 : BTreeRow.create(clustering, rowInfo, rowDeletion, BTree.build(dataBuffer, UpdateFunction.<ColumnData>noOp()));
         }
 
         public Clustering mergedClustering()

@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public abstract class MemtableBufferAllocator extends MemtableAllocator
 {
@@ -31,7 +32,7 @@ public abstract class MemtableBufferAllocator extends MemtableAllocator
 
     public Row.Builder rowBuilder()
     {
-        return allocator.cloningRowBuilder();
+        return allocator.cloningBTreeRowBuilder();
     }
 
     public DecoratedKey clone(DecoratedKey key)
