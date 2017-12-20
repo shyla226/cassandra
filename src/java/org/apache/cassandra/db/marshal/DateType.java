@@ -48,7 +48,7 @@ public class DateType extends AbstractType<Date>
 
     private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
-    DateType() {super(ComparisonType.BYTE_ORDER);} // singleton
+    DateType() {super(ComparisonType.BYTE_ORDER, 8);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
@@ -127,12 +127,6 @@ public class DateType extends AbstractType<Date>
     public TypeSerializer<Date> getSerializer()
     {
         return TimestampSerializer.instance;
-    }
-
-    @Override
-    public int valueLengthIfFixed()
-    {
-        return 8;
     }
 
     @Override

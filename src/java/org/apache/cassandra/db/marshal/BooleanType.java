@@ -40,18 +40,15 @@ public class BooleanType extends AbstractType<Boolean>
 
     private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
-    BooleanType() {super(ComparisonType.CUSTOM);} // singleton
+    BooleanType() {super(ComparisonType.PRIMITIVE_COMPARE, 1, PrimitiveType.BOOLEAN, 0);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
         return true;
     }
 
-    public int compareCustom(ByteBuffer o1, ByteBuffer o2)
+    public static int compareType(ByteBuffer o1, ByteBuffer o2)
     {
-        if (!o1.hasRemaining() || !o2.hasRemaining())
-            return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
-
         // False is 0, True is anything else, makes False sort before True.
         byte b1 = o1.get(o1.position());
         byte b2 = o2.get(o2.position());
@@ -108,12 +105,6 @@ public class BooleanType extends AbstractType<Boolean>
     public TypeSerializer<Boolean> getSerializer()
     {
         return BooleanSerializer.instance;
-    }
-
-    @Override
-    public int valueLengthIfFixed()
-    {
-        return 1;
     }
 
     @Override
