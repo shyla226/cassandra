@@ -45,8 +45,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
@@ -155,7 +153,7 @@ public final class MessagingService implements MessagingServiceMBean
                 cp.incrementTimeout();
 
             updateBackPressureOnReceive(target, expiredCallbackInfo.verb, true).join();
-            StageManager.getStage(Stage.INTERNAL_RESPONSE).submit(() -> callback.onTimeout(target));
+            expiredCallbackInfo.responseExecutor.execute(() -> callback.onTimeout(target), null);
         };
         callbacks = new ExpiringMap<>(DatabaseDescriptor.getMinRpcTimeout(), timeoutReporter);
 
@@ -247,11 +245,12 @@ public final class MessagingService implements MessagingServiceMBean
                                            : r -> messageInterceptors.intercept(r, handleResponse, null);
 
         Runnable onAborted = () ->
-        {
-            Tracing.trace("Discarding partial local response (timed out)");
-            MessagingService.instance().incrementDroppedMessages(request);
-            callback.onTimeout(FBUtilities.getBroadcastAddress());
-        };
+                             request.responseExecutor().execute(() -> {
+                                 Tracing.trace("Discarding partial local response (timed out)");
+                                 MessagingService.instance().incrementDroppedMessages(request);
+                                 callback.onTimeout(FBUtilities.getBroadcastAddress());
+                             }, ExecutorLocals.create());
+
         Consumer<Request<P, Q>> consumer = rq ->
         {
             if (rq.isTimedOut(ApproximateTime.currentTimeMillis()))
@@ -704,8 +703,6 @@ public final class MessagingService implements MessagingServiceMBean
     public void shutdown()
     {
         logger.info("Waiting for messaging service to quiesce");
-        // We may need to schedule hints, so it's erroneous to shut down the HINTS first
-        assert !StageManager.getStage(Stage.HINTS).isShutdown();
 
         // the important part
         if (!callbacks.shutdownBlocking())

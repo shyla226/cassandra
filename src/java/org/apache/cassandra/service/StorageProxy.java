@@ -2203,8 +2203,20 @@ public class StorageProxy implements StorageProxyMBean
         return (int) StorageMetrics.totalHintsInProgress.getCount();
     }
 
-    public void verifyNoHintsInProgress()
+    public void waitForHintsInProgress(int timeout, TimeUnit timeUnit)
     {
+        long now = System.nanoTime();
+        long end = now + TimeUnit.NANOSECONDS.convert(timeout, timeUnit);
+
+        while (now < end)
+        {
+            if (getHintsInProgress() <= 0)
+                return;
+
+            FBUtilities.sleepQuietly(10);
+            now = System.nanoTime();
+        }
+
         if (getHintsInProgress() > 0)
             logger.warn("Some hints were not written before shutdown.  This is not supposed to happen.  You should (a) run repair, and (b) file a bug report");
     }
@@ -2266,7 +2278,7 @@ public class StorageProxy implements StorageProxyMBean
                                                               for (InetAddress target : targets)
                                                                   getHintsInProgressFor(target).decrementAndGet();
                                                           });
-        hintsCompletable = hintsCompletable.subscribeOn(StageManager.getScheduler(Stage.HINTS));
+        hintsCompletable = hintsCompletable.subscribeOn(StageManager.getScheduler(Stage.BACKGROUND_IO));
         // Note: above uses Rx subscribeOn as this task is scheduled on a stage and there's no point track it in TPC metrics as well.
         return TPCUtils.toFuture(hintsCompletable);
     }

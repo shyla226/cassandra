@@ -2755,11 +2755,6 @@ public class DatabaseDescriptor
         return Integer.getInteger("cassandra.io.background.max_pool_size", 256);
     }
 
-    public static int getMaxHintsReceiveThreads()
-    {
-        return Integer.getInteger("cassandra.hints.max_receive_threads", DatabaseDescriptor.getMaxHintsDeliveryThreads());
-    }
-
     /* For tests ONLY, don't use otherwise or all hell will break loose. Tests should restore value at the end. */
     public static AuditLogger setAuditLoggerUnsafe(AuditLogger logger)
     {

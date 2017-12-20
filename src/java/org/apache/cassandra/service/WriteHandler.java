@@ -198,27 +198,12 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
             if (consistencyLevel == ConsistencyLevel.ANY)
                 return this;
 
-            InetAddress local = FBUtilities.getBroadcastAddress();
             return onTimeout(host ->
             {
                 if (!StorageProxy.shouldHint(host))
                     return;
 
-                if (host.equals(local))
-                {
-                    StorageProxy.submitHint(Collections.singleton(local), Completable.defer(() ->
-                    {
-                        // Locally, there is no point to write a hint (it's not really less costly than writing the
-                        // mutation itself) so we just write the mutation, but still use HintRunnable which provides
-                        // proper back-pressure for hints.
-                        mutation.apply();
-                        return Completable.complete();
-                    }));
-                }
-                else
-                {
-                    StorageProxy.submitHint(mutation, host, null);
-                }
+                StorageProxy.submitHint(mutation, host, null);
             });
         }
 
