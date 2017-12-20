@@ -365,7 +365,7 @@ public class SelectStatement implements CQLStatement
         // We know the size can only be in rows currently if continuous paging
         // is not used, so don't bother computing the average row size.
         return pagingOptions.isContinuous()
-             ? size.inEstimatedRows(ResultSet.estimatedRowSize(cfm, selection.getColumnMapping()))
+             ? size.inEstimatedRows(ResultSet.estimatedRowSizeForAllColumns(cfm))
              : size.inRows();
     }
 
@@ -803,7 +803,7 @@ public class SelectStatement implements CQLStatement
         return new AggregationQueryPager(pager,
                                          query.limits(),
                                          DatabaseDescriptor.getAggregatedQueryTimeout(),
-                                         ResultSet.estimatedRowSize(cfm, selection.getColumnMapping()));
+                                         ResultSet.estimatedRowSizeForAllColumns(cfm));
     }
 
     public ResultSet process(PartitionIterator partitions, int nowInSec) throws InvalidRequestException

@@ -787,7 +787,17 @@ public class ResultSet
      * primary columns, as well as complex columns and ignores disk format overheads.
      * @return - an estimated size of a CQL row.
      */
-    public static int estimatedRowSize(CFMetaData cfm, SelectionColumns columns)
+    public static int estimatedRowSizeForColumns(CFMetaData cfm, SelectionColumns columns)
+    {
+        return estimatedRowSize(columns.getColumnSpecifications(), cfm);
+    }
+
+    public static int estimatedRowSizeForAllColumns(CFMetaData cfm)
+    {
+        return estimatedRowSize(cfm.allColumns(), cfm);
+    }
+
+    private static int estimatedRowSize(Iterable<? extends ColumnSpecification> columns, CFMetaData cfm)
     {
         ColumnFamilyStore cfs = Keyspace.open(cfm.ksName).getColumnFamilyStore(cfm.cfName);
 
@@ -796,7 +806,7 @@ public class ResultSet
                                   : cfs.getMeanPartitionSize());
 
         int ret = 0;
-        for (ColumnSpecification def : columns.getColumnSpecifications())
+        for (ColumnSpecification def : columns)
         {
             int fixedLength = def.type.valueLengthIfFixed();
             ret += CBUtil.sizeOfValue(fixedLength > 0 ? fixedLength : avgColumnSize);
