@@ -41,7 +41,7 @@ public class DecimalType extends NumberType<BigDecimal>
 
     private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
-    DecimalType() {super(ComparisonType.CUSTOM);} // singleton
+    DecimalType() {super(ComparisonType.CUSTOM, VARIABLE_LENGTH);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
@@ -54,11 +54,9 @@ public class DecimalType extends NumberType<BigDecimal>
         return true;
     }
 
+    @Override
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
-        if (!o1.hasRemaining() || !o2.hasRemaining())
-            return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
-
         return compose(o1).compareTo(compose(o2));
     }
 

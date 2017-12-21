@@ -36,7 +36,7 @@ public class SimpleDateType extends TemporalType<Integer>
 {
     public static final SimpleDateType instance = new SimpleDateType();
 
-    SimpleDateType() {super(ComparisonType.BYTE_ORDER);} // singleton
+    SimpleDateType() {super(ComparisonType.BYTE_ORDER, VARIABLE_LENGTH);} // singleton
 
     public ByteSource asByteComparableSource(ByteBuffer buf)
     {

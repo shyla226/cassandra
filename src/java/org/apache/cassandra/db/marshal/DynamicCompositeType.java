@@ -360,17 +360,10 @@ public class DynamicCompositeType extends AbstractCompositeType
         public static final FixedValueComparator alwaysLesserThan = new FixedValueComparator(-1);
         public static final FixedValueComparator alwaysGreaterThan = new FixedValueComparator(1);
 
-        private final int cmp;
-
         public FixedValueComparator(int cmp)
         {
-            super(ComparisonType.CUSTOM);
-            this.cmp = cmp;
-        }
-
-        public int compareCustom(ByteBuffer v1, ByteBuffer v2)
-        {
-            return cmp;
+            // VAR_LENGTH due to compatibility reasons, should be 0
+            super(ComparisonType.FIXED_COMPARE, VARIABLE_LENGTH, PrimitiveType.NONE, cmp);
         }
 
         @Override

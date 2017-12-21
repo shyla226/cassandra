@@ -49,13 +49,14 @@ public class TimestampType extends TemporalType<Date>
 
     public static final TimestampType instance = new TimestampType();
 
-    private TimestampType() {super(ComparisonType.CUSTOM);} // singleton
+    private TimestampType() {super(ComparisonType.CUSTOM, 8);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
         return true;
     }
 
+    @Override
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
         return LongType.compareLongs(o1, o2);
@@ -142,12 +143,6 @@ public class TimestampType extends TemporalType<Date>
     public TypeSerializer<Date> getSerializer()
     {
         return TimestampSerializer.instance;
-    }
-
-    @Override
-    public int valueLengthIfFixed()
-    {
-        return 8;
     }
 
     @Override

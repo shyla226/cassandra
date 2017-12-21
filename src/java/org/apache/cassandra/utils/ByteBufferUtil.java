@@ -465,7 +465,7 @@ public class ByteBufferUtil
     }
 
     /**
-     * Convert a byte buffer to a short.
+     * Convert a byte buffer to a byte.
      * Does not change the byte buffer position.
      *
      * @param bytes byte buffer to convert to byte
