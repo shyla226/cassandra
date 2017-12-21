@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.CompletableSource;
+import io.reactivex.Single;
 import io.reactivex.SingleObserver;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.Action;
@@ -932,6 +933,56 @@ public abstract class Flow<T>
             if (iter instanceof AutoCloseable)
                 ((AutoCloseable) iter).close();
         }
+    }
+
+    public static <O> Flow<O> fromFuture(CompletableFuture<O> future)
+    {
+        return new Flow<O>()
+        {
+            public void requestFirst(FlowSubscriber<O> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+            {
+                subscriptionRecipient.onSubscribe(FlowSubscription.DONE);
+                future.whenComplete((v, e) -> {
+                    if (e != null)
+                        subscriber.onError(e);
+                    else
+                        subscriber.onFinal(v);
+                });
+            }
+        };
+    }
+
+    public static <O> Flow<O> fromSingle(Single<O> single)
+    {
+        return new Flow<O>()
+        {
+            public void requestFirst(FlowSubscriber<O> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+            {
+                subscriptionRecipient.onSubscribe(FlowSubscription.DONE);
+                single.doOnError(subscriber::onError)
+                      .subscribe(subscriber::onFinal);
+            }
+        };
+    }
+
+    public static <O> Flow<O> fromCallable(Callable<O> callable)
+    {
+        return new Flow<O>()
+        {
+            public void requestFirst(FlowSubscriber<O> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
+            {
+                subscriptionRecipient.onSubscribe(FlowSubscription.DONE);
+                try
+                {
+                    O v = callable.call();
+                    subscriber.onFinal(v);
+                }
+                catch (Throwable t)
+                {
+                    subscriber.onError(t);
+                }
+            }
+        };
     }
 
     enum RequestLoopState

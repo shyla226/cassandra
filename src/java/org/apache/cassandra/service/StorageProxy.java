@@ -49,6 +49,7 @@ import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
@@ -80,6 +81,7 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.concurrent.AsyncLatch;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.Threads;
 
 public class StorageProxy implements StorageProxyMBean
 {
@@ -316,6 +318,30 @@ public class StorageProxy implements StorageProxyMBean
                                            endpoints.liveCount());
 
         return Pair.create(endpoints, requiredParticipants);
+    }
+
+    /** Non-blocking version of beginAndRepairPaxos, scheduled on the IO pool */
+    private static Flow<Pair<UUID, Integer>> beginAndRepairPaxosAsync(long queryStartNanoTime,
+                                                                        DecoratedKey key,
+                                                                        TableMetadata metadata,
+                                                                        List<InetAddress> liveEndpoints,
+                                                                        int requiredParticipants,
+                                                                        ConsistencyLevel consistencyForPaxos,
+                                                                        ConsistencyLevel consistencyForCommit,
+                                                                        final boolean isWrite,
+                                                                        ClientState state)
+    {
+        return
+            Flow.fromCallable(() -> beginAndRepairPaxos(queryStartNanoTime,
+                                                          key,
+                                                          metadata,
+                                                          liveEndpoints,
+                                                          requiredParticipants,
+                                                          consistencyForPaxos,
+                                                          consistencyForCommit,
+                                                          isWrite,
+                                                          state))
+                .lift(Threads.requestOnIo(TPCTaskType.EXECUTE_STATEMENT));
     }
 
     /**
@@ -1293,50 +1319,60 @@ public class StorageProxy implements StorageProxyMBean
     private static Flow<FlowablePartition> readWithPaxos(SinglePartitionReadCommand.Group group, ReadContext ctx)
     throws InvalidRequestException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
-       assert ctx.clientState != null;
-       if (group.commands.size() > 1)
-           throw new InvalidRequestException("SERIAL/LOCAL_SERIAL consistency may only be requested for one partition at a time");
+        assert ctx.clientState != null;
+        if (group.commands.size() > 1)
+            throw new InvalidRequestException("SERIAL/LOCAL_SERIAL consistency may only be requested for one partition at a time");
 
-       long start = System.nanoTime();
-       SinglePartitionReadCommand command = group.commands.get(0);
-       TableMetadata metadata = command.metadata();
-       DecoratedKey key = command.partitionKey();
+        long start = System.nanoTime();
+        SinglePartitionReadCommand command = group.commands.get(0);
+        TableMetadata metadata = command.metadata();
+        DecoratedKey key = command.partitionKey();
         ConsistencyLevel consistencyLevel = ctx.consistencyLevel;
 
-       // make sure any in-progress paxos writes are done (i.e., committed to a majority of replicas), before performing a quorum read
-       Pair<WriteEndpoints, Integer> p = getPaxosParticipants(metadata, key, consistencyLevel);
-       List<InetAddress> liveEndpoints = p.left.live();
-       int requiredParticipants = p.right;
+        // make sure any in-progress paxos writes are done (i.e., committed to a majority of replicas), before performing a quorum read
+        Pair<WriteEndpoints, Integer> p = getPaxosParticipants(metadata, key, consistencyLevel);
+        List<InetAddress> liveEndpoints = p.left.live();
+        int requiredParticipants = p.right;
 
-       // does the work of applying in-progress writes; throws UAE or timeout if it can't
-       final ConsistencyLevel consistencyForCommitOrFetch = consistencyLevel == ConsistencyLevel.LOCAL_SERIAL
-                                                            ? ConsistencyLevel.LOCAL_QUORUM
-                                                            : ConsistencyLevel.QUORUM;
+        // does the work of applying in-progress writes; throws UAE or timeout if it can't
+        final ConsistencyLevel consistencyForCommitOrFetch = consistencyLevel == ConsistencyLevel.LOCAL_SERIAL
+                                                             ? ConsistencyLevel.LOCAL_QUORUM
+                                                             : ConsistencyLevel.QUORUM;
 
-       try
-       {
-           final Pair<UUID, Integer> pair = beginAndRepairPaxos(start,
-                                                                key,
-                                                                metadata,
-                                                                liveEndpoints,
-                                                                requiredParticipants,
-                                                                consistencyLevel,
-                                                                consistencyForCommitOrFetch,
-                                                                false,
-                                                                ctx.clientState);
-           if (pair.right > 0)
-               casReadMetrics.contention.update(pair.right);
-       }
-       catch (WriteTimeoutException e)
-       {
-           return Flow.error(new ReadTimeoutException(consistencyLevel, 0, consistencyLevel.blockFor(Keyspace.open(metadata.keyspace)), false));
-       }
-       catch (WriteFailureException e)
-       {
-           return Flow.error(new ReadFailureException(consistencyLevel, e.received, e.blockFor, false, e.failureReasonByEndpoint));
-       }
+        Flow<Pair<UUID, Integer>> repairPaxosFlow =
+            beginAndRepairPaxosAsync(start,
+                                     key,
+                                     metadata,
+                                     liveEndpoints,
+                                     requiredParticipants,
+                                     consistencyLevel,
+                                     consistencyForCommitOrFetch,
+                                     false,
+                                     ctx.clientState)
+                .map((pair) -> {
+                    recordCasContention(pair.right);
+                    return pair;
+                })
+                .onErrorResumeNext(e -> {
+                    if (e instanceof WriteTimeoutException)
+                    {
+                        return Flow.error(new ReadTimeoutException(
+                        consistencyLevel, 0, consistencyLevel.blockFor(Keyspace.open(metadata.keyspace)), false));
+                    }
+                    else if (e instanceof WriteFailureException)
+                    {
+                        WriteFailureException wfe = (WriteFailureException) e;
+                        return Flow.error(new ReadFailureException(
+                        consistencyLevel, wfe.received, wfe.blockFor, false, wfe.failureReasonByEndpoint));
+                    }
+                    else
+                    {
+                        return Flow.error(e);
+                    }
+                });
 
-        return fetchRows(group.commands, ctx.withConsistency(consistencyForCommitOrFetch))
+        return Threads.observeOn(repairPaxosFlow, TPC.bestTPCScheduler(), TPCTaskType.EXECUTE_STATEMENT)
+               .flatMap((unused) -> fetchRows(group.commands, ctx.withConsistency(consistencyForCommitOrFetch)))
                .doOnError(e -> {
                    if (e instanceof UnavailableException)
                    {

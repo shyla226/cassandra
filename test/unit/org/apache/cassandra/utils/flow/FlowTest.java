@@ -18,8 +18,13 @@
 
 package org.apache.cassandra.utils.flow;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.collect.Ordering;
@@ -28,6 +33,7 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.reactivex.Single;
 import io.reactivex.functions.Function;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
@@ -300,6 +306,64 @@ public class FlowTest
 
         Assert.assertFalse(currentThread.get().equals(transformedThread1.get()));
         Assert.assertFalse(transformedThread1.get().equals(transformedThread2.get()));
+    }
+
+    @Test
+    public void fromFutureTest()
+    {
+        CompletableFuture<String> completableFuture = new CompletableFuture<>();
+        completableFuture.complete("item");
+        Flow<String> flow = Flow.fromFuture(completableFuture);
+        Assert.assertEquals("item", flow.blockingSingle());
+    }
+
+    @Test
+    public void fromFutureErrorHandlingTest()
+    {
+        CompletableFuture<String> completableFuture = new CompletableFuture<>();
+        completableFuture.completeExceptionally(new IOException("whatever"));
+        Flow<String> flow = Flow.fromFuture(completableFuture)
+                                .onErrorResumeNext(e -> {
+                                    Assert.assertTrue(e instanceof IOException);
+                                    return Flow.just("item");
+                                });
+        Assert.assertEquals("item", flow.blockingSingle());
+    }
+
+    @Test
+    public void fromSingleTest()
+    {
+        Flow<String> flow = Flow.fromSingle(Single.just("item"));
+        Assert.assertEquals("item", flow.blockingSingle());
+    }
+
+    @Test
+    public void fromSingleErrorHandlingTest()
+    {
+        Flow<String> flow = Flow.<String>fromSingle(Single.error(new IOException("whatever")))
+                                .onErrorResumeNext(e -> {
+                                    Assert.assertTrue(e instanceof IOException);
+                                    return Flow.just("item");
+                                });
+        Assert.assertEquals("item", flow.blockingSingle());
+    }
+
+    @Test
+    public void fromCallableTest()
+    {
+        Flow<String> flow = Flow.fromCallable(() -> "item");
+        Assert.assertEquals("item", flow.blockingSingle());
+    }
+
+    @Test
+    public void fromCallableErrorHandlingTest()
+    {
+        Flow<String> flow = Flow.<String>fromCallable(() -> { throw new IOException("whatever"); })
+                                .onErrorResumeNext(e -> {
+                                    Assert.assertTrue(e instanceof IOException);
+                                    return Flow.just("item");
+                                });
+        Assert.assertEquals("item", flow.blockingSingle());
     }
 
     static void assertStacktraceMessage(String msg, Object[] tags)
