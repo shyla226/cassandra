@@ -194,7 +194,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         {
             return pageSize.isInRows()
                    ? pageSize.rawSize()
-                   : pageSize.inEstimatedRows(ResultSet.estimatedRowSize(select.table, select.getSelection().getColumnMapping()));
+                   : pageSize.inEstimatedRows(ResultSet.estimatedRowSizeForColumns(select.table, select.getSelection().getColumnMapping()));
         }
 
         /**

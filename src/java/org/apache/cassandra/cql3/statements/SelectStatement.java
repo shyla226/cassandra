@@ -626,7 +626,7 @@ public class SelectStatement implements CQLStatement
         ContinuousPagingState continuousPagingState = new ContinuousPagingState(DatabaseDescriptor.getContinuousPaging(),
                                                                                 new ContinuousPagingExecutor(this, queryOptions, queryState, query, queryStartNanoTime, pageSize),
                                                                                 () -> queryState.getConnection().channel(),
-                                                                                ResultSet.estimatedRowSize(table, getSelection().getColumnMapping()));
+                                                                                ResultSet.estimatedRowSizeForColumns(table, getSelection().getColumnMapping()));
         ResultBuilder builder = ContinuousPagingService.createSession(getSelection().newSelectors(queryOptions),
                                                                       aggregationSpec == null ? null : aggregationSpec.newGroupMaker(),
                                                                       getResultMetadata(),
@@ -838,7 +838,7 @@ public class SelectStatement implements CQLStatement
         return new AggregationQueryPager(pager,
                                          query.limits(),
                                          DatabaseDescriptor.getAggregatedQueryTimeout(),
-                                         ResultSet.estimatedRowSize(table, selection.getColumnMapping()));
+                                         ResultSet.estimatedRowSizeForAllColumns(table));
     }
 
     /**
@@ -1106,7 +1106,7 @@ public class SelectStatement implements CQLStatement
 
             return DataLimits.groupByLimits(cqlRowLimit,
                                             cqlPerPartitionLimit,
-                                            pageSize.inEstimatedRows(ResultSet.estimatedRowSize(table, selection.getColumnMapping())),
+                                            pageSize.inEstimatedRows(ResultSet.estimatedRowSizeForAllColumns(table)),
                                             aggregationSpec);
         }
 
