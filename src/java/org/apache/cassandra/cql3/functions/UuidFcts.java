@@ -38,7 +38,7 @@ public abstract class UuidFcts
         }
 
         @Override
-        public boolean isPure()
+        public boolean isDeterministic()
         {
             return false;
         }

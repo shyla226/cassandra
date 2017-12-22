@@ -1319,6 +1319,7 @@ public class AggregationTest extends CQLTester
                                                       f.argTypes(),
                                                       f.returnType(),
                                                       null,
+                                                      false,
                                                       new InvalidRequestException("foo bar is broken"));
 
         Schema.instance.load(ksm.withSwapped(ksm.functions.without(f.name(), f.argTypes()).with(broken)));
@@ -2148,5 +2149,32 @@ public class AggregationTest extends CQLTester
         {
             DatabaseDescriptor.setAggregatedQueryTimeout(oldTimeout);
         }
+    }
+
+    @Test
+    public void testParseDeterministic() throws Throwable
+    {
+        testParseDeterministic("", false);
+        testParseDeterministic("DETERMINISTIC", true);
+    }
+
+    private void testParseDeterministic(String deterministicModifier, boolean shouldBeDeterministic) throws Throwable
+    {
+        createTable("CREATE TABLE %s (key int PRIMARY KEY, d double)");
+
+        String sfunc = shortFunctionName(createFunction(KEYSPACE,
+                                                        "int, int",
+                                                        "CREATE FUNCTION %s(a int, b int) " +
+                                                        "CALLED ON NULL INPUT " +
+                                                        "RETURNS int " +
+                                                        "LANGUAGE javascript " +
+                                                        "AS 'a + b;'"));
+
+        String query = "CREATE AGGREGATE %s(int) SFUNC " + sfunc + " STYPE int " + deterministicModifier;
+        String name = createAggregate(KEYSPACE, "int", query);
+
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(keyspace());
+        UDAggregate f = (UDAggregate) ksm.functions.get(parseFunctionName(name)).iterator().next();
+        assertEquals(shouldBeDeterministic, f.isDeterministic());
     }
 }

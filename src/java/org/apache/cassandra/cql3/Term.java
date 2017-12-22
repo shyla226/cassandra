@@ -135,7 +135,7 @@ public interface Term
      * A terminal term, one that can be reduced to a byte buffer directly.
      *
      * This includes most terms that don't have a bind marker (an exception
-     * being delayed call for non pure function that are NonTerminal even
+     * being delayed call for non-deterministic function that are NonTerminal even
      * if they don't have bind markers).
      *
      * This can be only one of:
@@ -192,7 +192,7 @@ public interface Term
      *   - marker for a constant value
      *   - marker for a collection value (list, set, map)
      *   - a function having bind marker
-     *   - a non pure function (even if it doesn't have bind marker - see #5616)
+     *   - a non-deterministic function (even if it doesn't have bind marker - see #5616)
      */
     public abstract class NonTerminal implements Term
     {

@@ -50,11 +50,12 @@ public interface Function extends AssignmentTestable
     public boolean isNative();
 
     /**
-     * Checks whether the function is a pure function (as in doesn't depend on, nor produce side effects) or not.
+     * Checks whether the function is a deterministic function (as in given a particular input, will always produce the
+     * same output) or not.
      *
-     * @return <code>true</code> if the function is a pure function, <code>false</code> otherwise.
+     * @return <code>true</code> if the function is a deterministic function, <code>false</code> otherwise.
      */
-    public boolean isPure();
+    public boolean isDeterministic();
 
     /**
      * Checks whether the function is an aggregate function or not.

@@ -243,6 +243,9 @@ public final class SchemaKeyspace
               + "language text,"
               + "return_type text,"
               + "called_on_null_input boolean,"
+              + "deterministic boolean,"
+              + "monotonic boolean,"
+              + "monotonic_on frozen<list<text>>,"
               + "PRIMARY KEY ((keyspace_name), function_name, argument_types))");
 
     private static final TableMetadata Aggregates =
@@ -257,6 +260,7 @@ public final class SchemaKeyspace
               + "return_type text,"
               + "state_func text,"
               + "state_type text,"
+              + "deterministic boolean,"
               + "PRIMARY KEY ((keyspace_name), aggregate_name, argument_types))");
 
     private static final List<TableMetadata> ALL_TABLE_METADATA =
@@ -848,7 +852,10 @@ public final class SchemaKeyspace
                .add("language", function.language())
                .add("return_type", function.returnType().asCQL3Type().toString())
                .add("called_on_null_input", function.isCalledOnNullInput())
-               .add("argument_names", function.argNames().stream().map((c) -> bbToString(c.bytes)).collect(toList()));
+               .add("argument_names", function.argNames().stream().map((c) -> bbToString(c.bytes)).collect(toList()))
+               .add("deterministic", function.isDeterministic())
+               .add("monotonic", function.isMonotonic())
+               .add("monotonic_on", function.monotonicOn().stream().map((c) -> bbToString(c.bytes)).collect(toList()));
     }
 
     private static String bbToString(ByteBuffer bb)
@@ -887,6 +894,7 @@ public final class SchemaKeyspace
                .add("state_func", aggregate.stateFunction().name().name)
                .add("state_type", aggregate.stateType().asCQL3Type().toString())
                .add("final_func", aggregate.finalFunction() != null ? aggregate.finalFunction().name().name : null)
+               .add("deterministic", aggregate.isDeterministic())
                .add("initcond", aggregate.initialCondition() != null
                                 // must use the frozen state type here, as 'null' for unfrozen collections may mean 'empty'
                                 ? aggregate.stateType().freeze().asCQL3Type().toCQLLiteral(aggregate.initialCondition(), ProtocolVersion.CURRENT)
@@ -1252,6 +1260,15 @@ public final class SchemaKeyspace
         String language = row.getString("language");
         String body = row.getString("body");
         boolean calledOnNullInput = row.getBoolean("called_on_null_input");
+        boolean deterministic = row.has("deterministic") && row.getBoolean("deterministic");
+        boolean monotonic = row.has("monotonic") && row.getBoolean("monotonic");
+
+        List<ColumnIdentifier> monotonicOn = row.has("monotonic_on")
+                                           ? row.getFrozenList("monotonic_on", UTF8Type.instance)
+                                                .stream()
+                                                .map(arg -> new ColumnIdentifier(arg, true))
+                                                .collect(toList())
+                                           : Collections.emptyList();
 
         /*
          * TODO: find a way to get rid of Schema.instance dependency; evaluate if the opimisation below makes a difference
@@ -1280,12 +1297,12 @@ public final class SchemaKeyspace
 
         try
         {
-            return UDFunction.create(name, argNames, argTypes, returnType, calledOnNullInput, language, body);
+            return UDFunction.create(name, argNames, argTypes, returnType, calledOnNullInput, language, body, deterministic, monotonic, monotonicOn);
         }
         catch (InvalidRequestException e)
         {
             logger.error(String.format("Cannot load function '%s' from schema: this function won't be available (on this node)", name), e);
-            return UDFunction.createBrokenFunction(name, argNames, argTypes, returnType, calledOnNullInput, language, body, e);
+            return UDFunction.createBrokenFunction(name, argNames, argTypes, returnType, calledOnNullInput, language, body, deterministic, monotonic, monotonicOn, e);
         }
     }
 
@@ -1318,14 +1335,15 @@ public final class SchemaKeyspace
         FunctionName finalFunc = row.has("final_func") ? new FunctionName(ksName, row.getString("final_func")) : null;
         AbstractType<?> stateType = row.has("state_type") ? CQLTypeParser.parse(ksName, row.getString("state_type"), types) : null;
         ByteBuffer initcond = row.has("initcond") ? Terms.asBytes(ksName, row.getString("initcond"), stateType) : null;
+        boolean deterministic = row.has("deterministic") && row.getBoolean("deterministic");
 
         try
         {
-            return UDAggregate.create(functions, name, argTypes, returnType, stateFunc, finalFunc, stateType, initcond);
+            return UDAggregate.create(functions, name, argTypes, returnType, stateFunc, finalFunc, stateType, initcond, deterministic);
         }
         catch (InvalidRequestException reason)
         {
-            return UDAggregate.createBroken(name, argTypes, returnType, initcond, reason);
+            return UDAggregate.createBroken(name, argTypes, returnType, initcond, deterministic, reason);
         }
     }
 

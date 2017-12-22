@@ -47,6 +47,7 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
 {
     private final boolean orReplace;
     private final boolean ifNotExists;
+    private final boolean deterministic;
     private FunctionName functionName;
     private FunctionName stateFunc;
     private FunctionName finalFunc;
@@ -68,7 +69,8 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
                                     String finalFunc,
                                     Term.Raw ival,
                                     boolean orReplace,
-                                    boolean ifNotExists)
+                                    boolean ifNotExists,
+                                    boolean deterministic)
     {
         this.functionName = functionName;
         this.argRawTypes = argRawTypes;
@@ -78,6 +80,7 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         this.ival = ival;
         this.orReplace = orReplace;
         this.ifNotExists = ifNotExists;
+        this.deterministic = deterministic;
     }
 
     @Override
@@ -256,7 +259,7 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         if (!stateFunction.isCalledOnNullInput() && initcond == null)
             return error(String.format("Cannot create aggregate %s without INITCOND because state function %s does not accept 'null' arguments", functionName, stateFunc));
 
-        UDAggregate udAggregate = new UDAggregate(functionName, argTypes, returnType, stateFunction, finalFunction, initcond);
+        UDAggregate udAggregate = new UDAggregate(functionName, argTypes, returnType, stateFunction, finalFunction, initcond, deterministic);
 
         return MigrationManager.announceNewAggregate(udAggregate, isLocalOnly)
                 .andThen(Maybe.just( new Event.SchemaChange(

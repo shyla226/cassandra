@@ -76,7 +76,7 @@ public abstract class TimeFcts
             }
 
             @Override
-            public boolean isPure()
+            public boolean isDeterministic()
             {
                 return false;
             }
@@ -256,7 +256,7 @@ public abstract class TimeFcts
         }
 
         @Override
-        protected boolean isPartialApplicationMonotonic(List<ByteBuffer> partialArguments)
+        public boolean isPartialApplicationMonotonic(List<ByteBuffer> partialArguments)
         {
             return partialArguments.get(0) == UNRESOLVED
                     && partialArguments.get(1) != UNRESOLVED
@@ -425,7 +425,7 @@ public abstract class TimeFcts
     public static final NativeScalarFunction floorTime = new NativeScalarFunction("floor", TimeType.instance, TimeType.instance, DurationType.instance)
     {
         @Override
-        protected boolean isPartialApplicationMonotonic(List<ByteBuffer> partialParameters)
+        public boolean isPartialApplicationMonotonic(List<ByteBuffer> partialParameters)
         {
             return partialParameters.get(0) == UNRESOLVED && partialParameters.get(1) != UNRESOLVED;
         }

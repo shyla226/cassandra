@@ -60,6 +60,10 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
     protected final String language;
     protected final String body;
 
+    protected final boolean deterministic;
+    protected final boolean monotonic;
+    protected final List<ColumnIdentifier> monotonicOn;
+
     protected final List<UDFDataType> argumentTypes;
     protected final UDFDataType resultType;
     protected final boolean calledOnNullInput;
@@ -177,13 +181,19 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
                          AbstractType<?> returnType,
                          boolean calledOnNullInput,
                          String language,
-                         String body)
+                         String body,
+                         boolean deterministic,
+                         boolean monotonic,
+                         List<ColumnIdentifier> monotonicOn)
     {
         super(name, argTypes, returnType);
         assert new HashSet<>(argNames).size() == argNames.size() : "duplicate argument names";
         this.argNames = argNames;
         this.language = language;
         this.body = body;
+        this.deterministic = deterministic;
+        this.monotonic = monotonic;
+        this.monotonicOn = monotonicOn;
         this.argumentTypes = UDFDataType.wrap(argTypes, !calledOnNullInput);
         this.resultType = UDFDataType.wrap(returnType, !calledOnNullInput);
         this.calledOnNullInput = calledOnNullInput;
@@ -203,21 +213,24 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
                                     AbstractType<?> returnType,
                                     boolean calledOnNullInput,
                                     String language,
-                                    String body)
+                                    String body,
+                                    boolean deterministic,
+                                    boolean monotonic,
+                                    List<ColumnIdentifier> monotonicOn)
     {
         UDFunction.assertUdfsEnabled(language);
 
         switch (language)
         {
             case "java":
-                return new JavaBasedUDFunction(name, argNames, argTypes, returnType, calledOnNullInput, body);
+                return new JavaBasedUDFunction(name, argNames, argTypes, returnType, calledOnNullInput, body, deterministic, monotonic, monotonicOn);
             default:
-                return new ScriptBasedUDFunction(name, argNames, argTypes, returnType, calledOnNullInput, language, body);
+                return new ScriptBasedUDFunction(name, argNames, argTypes, returnType, calledOnNullInput, language, body, deterministic, monotonic, monotonicOn);
         }
     }
 
     /**
-     * It can happen that a function has been declared (is listed in the scheam) but cannot
+     * It can happen that a function has been declared (is listed in the schema) but cannot
      * be loaded (maybe only on some nodes). This is the case for instance if the class defining
      * the class is not on the classpath for some of the node, or after a restart. In that case,
      * we create a "fake" function so that:
@@ -232,9 +245,12 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
                                                   boolean calledOnNullInput,
                                                   String language,
                                                   String body,
+                                                  boolean deterministic,
+                                                  boolean monotonic,
+                                                  List<ColumnIdentifier> monotonicOn,
                                                   InvalidRequestException reason)
     {
-        return new UDFunction(name, argNames, argTypes, returnType, calledOnNullInput, language, body)
+        return new UDFunction(name, argNames, argTypes, returnType, calledOnNullInput, language, body, deterministic, monotonic, monotonicOn)
         {
             protected ExecutorService executor()
             {
@@ -261,10 +277,35 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
         };
     }
 
-    public boolean isPure()
+    public boolean isDeterministic()
     {
-        // Right now, we have no way to check if an UDF is pure. Due to that we consider them as non pure to avoid any risk.
-        return false;
+        return deterministic;
+    }
+
+    @Override
+    public boolean isMonotonic()
+    {
+        return monotonic;
+    }
+
+    @Override
+    public boolean isPartialApplicationMonotonic(List<ByteBuffer> partialParameters)
+    {
+        assert partialParameters.size() == argNames.size();
+        if (!monotonic)
+        {
+            for (int i = 0; i < partialParameters.size(); i ++)
+            {
+                ByteBuffer partialParameter = partialParameters.get(i);
+                if (partialParameter == Function.UNRESOLVED)
+                {
+                    ColumnIdentifier unresolvedArgumentName = argNames.get(i);
+                    if (!monotonicOn.contains(unresolvedArgumentName))
+                        return false;
+                }
+            }
+        }
+        return true;
     }
 
     public final ByteBuffer execute(Arguments arguments)
@@ -503,6 +544,11 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
     public String language()
     {
         return language;
+    }
+
+    public List<ColumnIdentifier> monotonicOn()
+    {
+        return monotonicOn;
     }
 
     /**

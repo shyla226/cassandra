@@ -254,7 +254,7 @@ public abstract class Lists
     }
 
     /**
-     * Basically similar to a Value, but with some non-pure function (that need
+     * Basically similar to a Value, but with some non-deterministic function (that need
      * to be evaluated at execution time) in it.
      *
      * Note: this would also work for a list with bind markers, but we don't support

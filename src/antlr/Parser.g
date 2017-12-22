@@ -661,6 +661,7 @@ batchStatementObjective returns [ModificationStatement.Parsed statement]
 createAggregateStatement returns [CreateAggregateStatement expr]
     @init {
         boolean orReplace = false;
+        boolean deterministic = false;
         boolean ifNotExists = false;
 
         List<CQL3Type.Raw> argsTypes = new ArrayList<>();
@@ -683,7 +684,9 @@ createAggregateStatement returns [CreateAggregateStatement expr]
       (
         K_INITCOND ival = term
       )?
-      { $expr = new CreateAggregateStatement(fn, argsTypes, sfunc, stype, ffunc, ival, orReplace, ifNotExists); }
+      ( K_DETERMINISTIC { deterministic = true; } )?
+      { $expr = new CreateAggregateStatement(fn, argsTypes, sfunc, stype, ffunc, ival,
+                                             orReplace, ifNotExists, deterministic); }
     ;
 
 dropAggregateStatement returns [DropAggregateStatement expr]
@@ -715,6 +718,10 @@ createFunctionStatement returns [CreateFunctionStatement expr]
         List<ColumnIdentifier> argsNames = new ArrayList<>();
         List<CQL3Type.Raw> argsTypes = new ArrayList<>();
         boolean calledOnNullInput = false;
+
+        boolean deterministic = false;
+        boolean monotonic = false;
+        List<ColumnIdentifier> monotonicOn = new ArrayList<>();
     }
     : K_CREATE (K_OR K_REPLACE { orReplace = true; })?
       K_FUNCTION
@@ -728,10 +735,15 @@ createFunctionStatement returns [CreateFunctionStatement expr]
       ')'
       ( (K_RETURNS K_NULL) | (K_CALLED { calledOnNullInput=true; })) K_ON K_NULL K_INPUT
       K_RETURNS rt = comparatorType
+      ( K_DETERMINISTIC { deterministic = true; } )?
+      (
+        K_MONOTONIC { monotonic=true; monotonicOn.addAll(argsNames); }
+        | K_MONOTONIC K_ON k=noncol_ident { monotonicOn.add(k); monotonic=monotonicOn.containsAll(argsNames); }
+      )?
       K_LANGUAGE language = IDENT
       K_AS body = STRING_LITERAL
-      { $expr = new CreateFunctionStatement(fn, $language.text.toLowerCase(), $body.text,
-                                            argsNames, argsTypes, rt, calledOnNullInput, orReplace, ifNotExists); }
+      { $expr = new CreateFunctionStatement(fn, $language.text.toLowerCase(), $body.text, argsNames, argsTypes, rt,
+                                            calledOnNullInput, orReplace, ifNotExists, deterministic, monotonic, monotonicOn); }
     ;
 
 dropFunctionStatement returns [DropFunctionStatement expr]
@@ -1929,5 +1941,7 @@ basic_unreserved_keyword returns [String str]
         | K_PARTITION
         | K_GROUP
         | K_RESOURCE
+        | K_DETERMINISTIC
+        | K_MONOTONIC
         ) { $str = $k.text; }
     ;

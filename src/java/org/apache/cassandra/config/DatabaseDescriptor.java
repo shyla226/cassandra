@@ -2558,6 +2558,11 @@ public class DatabaseDescriptor
         return conf.enable_user_defined_functions_threads;
     }
 
+    public static void enableUserDefinedFunctionsThreads(boolean enableUserDefinedFunctionsThreads)
+    {
+        conf.enable_user_defined_functions_threads = enableUserDefinedFunctionsThreads;
+    }
+
     public static long getUserDefinedFunctionWarnTimeout()
     {
         return conf.user_defined_function_warn_timeout;

@@ -1,4 +1,5 @@
 dse 6.0.0:
+ * Allow UDFs within GROUP BY clause (DB-672)
  * Add rate argument to `nodesync validation submit` (DB-1271)
  * Added batchlog_endpoint_strategy config to improve batchlog endpoint selection (DB-1367)
  * Batchlog replays do not leverage remote coordinators (DB-1337)

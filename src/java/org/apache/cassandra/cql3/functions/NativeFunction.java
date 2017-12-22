@@ -32,9 +32,9 @@ public abstract class NativeFunction extends AbstractFunction
         super(FunctionName.nativeFunction(name), Arrays.asList(argTypes), returnType);
     }
 
-    public boolean isPure()
+    public boolean isDeterministic()
     {
-        // Most of our functions are pure, the other ones should override this
+        // Most of our functions are deterministic, the other ones should override this
         return true;
     }
 

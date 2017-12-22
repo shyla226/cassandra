@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.validation.entities;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 
@@ -26,6 +27,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.InvalidQueryException;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -820,6 +822,9 @@ public class UFTest extends CQLTester
                                                             true,
                                                             "java",
                                                             f.body(),
+                                                            false,
+                                                            false,
+                                                            Collections.emptyList(),
                                                             new InvalidRequestException("foo bar is broken"));
         Schema.instance.load(ksm.withSwapped(ksm.functions.without(f.name(), f.argTypes()).with(broken)));
 
@@ -966,5 +971,160 @@ public class UFTest extends CQLTester
         assertRows(execute("SELECT " + fNameIRN + "(empty_int) FROM %s"), row(new Object[]{ null }));
         assertRows(execute("SELECT " + fNameICC + "(empty_int) FROM %s"), row(0));
         assertRows(execute("SELECT " + fNameICN + "(empty_int) FROM %s"), row(new Object[]{ null }));
+    }
+
+    private void testParseDeterministic(String deterministicModifier, boolean expectedDeterministic) throws Throwable
+    {
+        String fName = createFunction(KEYSPACE, "double", "CREATE FUNCTION %s (input double) " +
+                                                          "CALLED ON NULL INPUT " +
+                                                          "RETURNS double " +
+                                                          deterministicModifier +
+                                                          " LANGUAGE java " +
+                                                          "AS 'return Math.sin(input);'");
+
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(KEYSPACE);
+        UDFunction f = (UDFunction) ksm.functions.get(parseFunctionName(fName)).iterator().next();
+        Assert.assertEquals(expectedDeterministic, f.isDeterministic());
+    }
+
+    @Test
+    public void testParseDeterministic() throws Throwable
+    {
+        testParseDeterministic("", false);
+        testParseDeterministic("DETERMINISTIC", true);
+    }
+
+    private void testParseMonotonic(String arguments,
+                                    String monotonicModifier,
+                                    boolean expectedMonotonic,
+                                    String... expectedMonotonicOn) throws Throwable
+    {
+        String fName = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (" +
+                                                       arguments +
+                                                       ") CALLED ON NULL INPUT " +
+                                                       "RETURNS int " +
+                                                       monotonicModifier +
+                                                       " LANGUAGE java " +
+                                                       "AS 'return 1;'");
+
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(KEYSPACE);
+        UDFunction f = (UDFunction) ksm.functions.get(parseFunctionName(fName)).iterator().next();
+        Assert.assertEquals(expectedMonotonic, f.isMonotonic());
+        Assert.assertArrayEquals(expectedMonotonicOn, f.monotonicOn().stream().map(Object::toString).toArray());
+    }
+
+    private void testParseMonotonic(String parameters, String monotonicModifier, String expectedMessage) {
+        try
+        {
+            createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (" +
+                                            parameters +
+                                            ") CALLED ON NULL INPUT " +
+                                            "RETURNS int " +
+                                            monotonicModifier +
+                                            " LANGUAGE java " +
+                                            "AS 'return 1;'");
+        }
+        catch (Throwable e)
+        {
+            Throwable cause = e.getCause();
+            Assert.assertTrue(cause instanceof InvalidRequestException);
+            Assert.assertEquals(expectedMessage,cause.getMessage());
+        }
+    }
+
+    @Test
+    public void testParseMonotonic() throws Throwable
+    {
+        testParseMonotonic("a int", "", false);
+        testParseMonotonic("a int", "MONOTONIC", true, "a");
+        testParseMonotonic("a int", "MONOTONIC ON a", true, "a");
+        testParseMonotonic("a int",
+                           "MONOTONIC ON b",
+                           "Monotony should be declared on one of the arguments, 'b' is not an argument");
+
+        testParseMonotonic("a int, b int", "", false);
+        testParseMonotonic("a int, b int", "MONOTONIC", true, "a", "b");
+        testParseMonotonic("a int, b int", "MONOTONIC ON a", false, "a");
+        testParseMonotonic("a int, b int", "MONOTONIC ON b", false, "b");
+        testParseMonotonic("a int, b int",
+                           "MONOTONIC ON c",
+                           "Monotony should be declared on one of the arguments, 'c' is not an argument");
+    }
+
+    @Test
+    public void testUDFOnGroupByClause() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, PRIMARY KEY (pk, ck))");
+        execute("INSERT into %s (pk, ck) values (0, 0)");
+        execute("INSERT into %s (pk, ck) values (0, 1)");
+        execute("INSERT into %s (pk, ck) values (0, 2)");
+        execute("INSERT into %s (pk, ck) values (0, 3)");
+        execute("INSERT into %s (pk, ck) values (0, 4)");
+        execute("INSERT into %s (pk, ck) values (0, 5)");
+
+        // Verify that asynchronous UDF execution is enabled by default
+        Assert.assertTrue(DatabaseDescriptor.enableUserDefinedFunctionsThreads());
+
+        // Test that UDFs in GROUP BY clause are rejected due to the asynchronous UDF execution
+        String f = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (x int) " +
+                                                   "CALLED ON NULL INPUT " +
+                                                   "RETURNS int " +
+                                                   "MONOTONIC " +
+                                                   "LANGUAGE java " +
+                                                   "AS 'return x / 2;'");
+        assertInvalidMessage("User defined functions are not supported in the GROUP BY clause when asynchronous",
+                             String.format("SELECT pk, ck, %s(ck) FROM %%s GROUP BY pk, %<s(ck)", f));
+
+        // Test that native functions in GROUP BY clause are not rejected
+        assertRows(execute(String.format("SELECT pk, ck FROM %%s GROUP BY pk, %s(ck)", "toDate")),
+                   row(0, 0), row(0, 1), row(0, 2), row(0, 3), row(0, 4), row(0, 5));
+
+        // Test with asynchronous UDF execution disabled
+        try
+        {
+            DatabaseDescriptor.enableUserDefinedFunctionsThreads(false);
+
+            // Test non-monotonic function
+            String f1 = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (x int) " +
+                                                        "CALLED ON NULL INPUT " +
+                                                        "RETURNS int " +
+                                                        "LANGUAGE java " +
+                                                        "AS 'return -1 * x;'");
+            assertInvalidMessage("Only monotonic functions are supported in the GROUP BY clause.",
+                                 String.format("SELECT pk, ck, %s(ck) FROM %%s GROUP BY pk, %<s(ck)", f1));
+
+            // Test fully monotonic function
+            String f2 = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (x int) " +
+                                                        "CALLED ON NULL INPUT " +
+                                                        "RETURNS int " +
+                                                        "MONOTONIC " +
+                                                        "LANGUAGE java " +
+                                                        "AS 'return x / 2;'");
+            assertRows(execute(String.format("SELECT pk, ck, %s(ck) FROM %%s GROUP BY pk, %<s(ck)", f2)),
+                       row(0, 0, 0),
+                       row(0, 2, 1),
+                       row(0, 4, 2));
+
+            // Test partially monotonic function
+            String f3 = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (dividend int, divisor int) " +
+                                                        "CALLED ON NULL INPUT " +
+                                                        "RETURNS int " +
+                                                        "MONOTONIC ON dividend " +
+                                                        "LANGUAGE java " +
+                                                        "AS 'return dividend / divisor;'");
+            assertRows(execute(String.format("SELECT pk, ck, %s(ck, 2) FROM %%s GROUP BY pk, %<s(ck, 2)", f3)),
+                       row(0, 0, 0),
+                       row(0, 2, 1),
+                       row(0, 4, 2));
+            assertRows(execute(String.format("SELECT pk, ck, %s(ck, 3) FROM %%s GROUP BY pk, %<s(ck, 3)", f3)),
+                       row(0, 0, 0),
+                       row(0, 3, 1));
+            assertInvalidMessage("Only monotonic functions are supported in the GROUP BY clause.",
+                                 String.format("SELECT pk, ck, %s(2, ck) FROM %%s GROUP BY pk, %<s(2, ck)", f3));
+        }
+        finally
+        {
+            DatabaseDescriptor.enableUserDefinedFunctionsThreads(true);
+        }
     }
 }

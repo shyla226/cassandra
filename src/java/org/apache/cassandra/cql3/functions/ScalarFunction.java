@@ -86,7 +86,7 @@ public interface ScalarFunction extends Function
         if (unresolvedCount == argTypes().size())
             return this;
 
-        if (isPure() && unresolvedCount == 0)
+        if (isDeterministic() && unresolvedCount == 0)
         {
             Arguments arguments = newArguments(protocolVersion);
             for (int i = 0, m = partialArguments.size(); i < m; i++)
@@ -101,5 +101,17 @@ public interface ScalarFunction extends Function
         }
 
         return new PartiallyAppliedScalarFunction(this, partialArguments, unresolvedCount);
+    }
+
+    /**
+     * Checks if a partial application of the function is monotonic.
+     *
+     *<p>A function is monotonic if it is either entirely nonincreasing or nondecreasing.</p>
+     * @param partialParameters the input parameters used to create the partial application of the function
+     * @return {@code true} if the partial application of the function is monotonic {@code false} otherwise.
+     */
+    default boolean isPartialApplicationMonotonic(List<ByteBuffer> partialParameters)
+    {
+        return isMonotonic();
     }
 }

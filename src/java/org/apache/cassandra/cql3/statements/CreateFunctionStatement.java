@@ -60,6 +60,10 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
     private List<AbstractType<?>> argTypes;
     private AbstractType<?> returnType;
 
+    private final boolean deterministic;
+    private final boolean monotonic;
+    private final List<ColumnIdentifier> monotonicOn;
+
     public CreateFunctionStatement(FunctionName functionName,
                                    String language,
                                    String body,
@@ -68,7 +72,10 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
                                    CQL3Type.Raw rawReturnType,
                                    boolean calledOnNullInput,
                                    boolean orReplace,
-                                   boolean ifNotExists)
+                                   boolean ifNotExists,
+                                   boolean deterministic,
+                                   boolean monotonic,
+                                   List<ColumnIdentifier> monotonicOn)
     {
         this.functionName = functionName;
         this.language = language;
@@ -79,6 +86,9 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
         this.calledOnNullInput = calledOnNullInput;
         this.orReplace = orReplace;
         this.ifNotExists = ifNotExists;
+        this.deterministic = deterministic;
+        this.monotonic = monotonic;
+        this.monotonicOn = monotonicOn;
     }
 
     @Override
@@ -160,6 +170,9 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
 
         if (Schema.instance.getKeyspaceMetadata(functionName.keyspace) == null)
             throw new InvalidRequestException(String.format("Cannot add function '%s' to non existing keyspace '%s'.", functionName.name, functionName.keyspace));
+
+        if (!argNames.containsAll(monotonicOn))
+            throw new InvalidRequestException(String.format("Monotony should be declared on one of the arguments, '%s' is not an argument", monotonicOn.get(0)));
     }
 
     public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
@@ -183,7 +196,7 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
                                     functionName, returnType.asCQL3Type(), old.returnType().asCQL3Type()));
         }
 
-        UDFunction udFunction = UDFunction.create(functionName, argNames, argTypes, returnType, calledOnNullInput, language, body);
+        UDFunction udFunction = UDFunction.create(functionName, argNames, argTypes, returnType, calledOnNullInput, language, body, deterministic, monotonic, monotonicOn);
 
         return MigrationManager.announceNewFunction(udFunction, isLocalOnly)
                 .andThen(Maybe.just(new Event.SchemaChange(

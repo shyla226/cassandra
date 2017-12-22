@@ -43,13 +43,15 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
     protected final ByteBuffer initcond;
     private final ScalarFunction stateFunction;
     private final ScalarFunction finalFunction;
+    private final boolean deterministic;
 
     public UDAggregate(FunctionName name,
                        List<AbstractType<?>> argTypes,
                        AbstractType<?> returnType,
                        ScalarFunction stateFunc,
                        ScalarFunction finalFunc,
-                       ByteBuffer initcond)
+                       ByteBuffer initcond,
+                       boolean deterministic)
     {
         super(name, argTypes, returnType);
         this.stateFunction = stateFunc;
@@ -58,6 +60,7 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
         this.resultType = UDFDataType.wrap(returnType, false);
         this.stateType = stateFunc != null ? UDFDataType.wrap(stateFunc.returnType(), false) : null;
         this.initcond = initcond;
+        this.deterministic = deterministic;
     }
 
     public static UDAggregate create(Functions functions,
@@ -67,7 +70,8 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
                                      FunctionName stateFunc,
                                      FunctionName finalFunc,
                                      AbstractType<?> stateType,
-                                     ByteBuffer initcond)
+                                     ByteBuffer initcond,
+                                     boolean deterministic)
     throws InvalidRequestException
     {
         List<AbstractType<?>> stateTypes = new ArrayList<>(argTypes.size() + 1);
@@ -79,16 +83,18 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
                                returnType,
                                resolveScalar(functions, name, stateFunc, stateTypes),
                                finalFunc != null ? resolveScalar(functions, name, finalFunc, finalTypes) : null,
-                               initcond);
+                               initcond,
+                               deterministic);
     }
 
     public static UDAggregate createBroken(FunctionName name,
                                            List<AbstractType<?>> argTypes,
                                            AbstractType<?> returnType,
                                            ByteBuffer initcond,
+                                           boolean deterministic,
                                            InvalidRequestException reason)
     {
-        return new UDAggregate(name, argTypes, returnType, null, null, initcond)
+        return new UDAggregate(name, argTypes, returnType, null, null, initcond, deterministic)
         {
             public Aggregate newAggregate() throws InvalidRequestException
             {
@@ -100,10 +106,9 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
         };
     }
 
-    public boolean isPure()
+    public boolean isDeterministic()
     {
-        // Right now, we have no way to check if an UDA is pure. Due to that we consider them as non pure to avoid any risk.
-        return false;
+        return deterministic;
     }
 
     @Override

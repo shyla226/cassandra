@@ -37,7 +37,6 @@ import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 final class ScriptBasedUDFunction extends UDFunction
 {
@@ -134,9 +133,12 @@ final class ScriptBasedUDFunction extends UDFunction
                           AbstractType<?> returnType,
                           boolean calledOnNullInput,
                           String language,
-                          String body)
+                          String body,
+                          boolean deterministic,
+                          boolean monotonic,
+                          List<ColumnIdentifier> monotonicOn)
     {
-        super(name, argNames, argTypes, returnType, calledOnNullInput, language, body);
+        super(name, argNames, argTypes, returnType, calledOnNullInput, language, body, deterministic, monotonic, monotonicOn);
 
         if (!"JavaScript".equalsIgnoreCase(language) || scriptEngine == null)
             throw new InvalidRequestException(String.format("Invalid language '%s' for function '%s'", language, name));
@@ -178,7 +180,7 @@ final class ScriptBasedUDFunction extends UDFunction
     }
 
     /**
-     * Like {@link UDFunction#executeUserDefined(ProtocolVersion, List)} but the first parameter is already in non-serialized form.
+     * Like {@link UDFunction#executeUserDefined(Arguments)} but the first parameter is already in non-serialized form.
      * Remaining parameters (2nd paramters and all others) are in {@code parameters}.
      * This is used to prevent superfluous (de)serialization of the state of aggregates.
      * Means: scalar functions of aggregates are called using this variant.
