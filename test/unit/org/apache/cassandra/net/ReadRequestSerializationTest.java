@@ -17,7 +17,8 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.ReadVerbs;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.ArrayBackedPartition;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.TrackedDataInputPlus;
@@ -102,7 +103,7 @@ public class ReadRequestSerializationTest extends CQLTester
         assertEquals(4, serDeser(cmd).size());
     }
 
-    private List<ImmutableBTreePartition> serDeser(ReadCommand cmd) throws Throwable
+    private List<Partition> serDeser(ReadCommand cmd) throws Throwable
     {
         ReadResponse response = ReadResponse.createDataResponse(cmd.executeLocally(), cmd, false).blockingGet();
         ReadVerbs.ReadVersion version = Version.last(ReadVerbs.ReadVersion.class);
@@ -112,6 +113,6 @@ public class ReadRequestSerializationTest extends CQLTester
         DataInputBuffer in = new DataInputBuffer(out.buffer(), true);
         ReadResponse dst = ReadResponse.serializers.get(version).deserialize(in);
 
-        return ImmutableBTreePartition.create(dst.data(cmd)).toList().blockingSingle();
+        return ArrayBackedPartition.create(dst.data(cmd)).toList().blockingSingle();
     }
 }
