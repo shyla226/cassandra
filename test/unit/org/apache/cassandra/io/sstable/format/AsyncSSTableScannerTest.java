@@ -29,7 +29,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.ChunkCacheMocks;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
@@ -43,6 +47,7 @@ import org.apache.cassandra.db.rows.FlowablePartitionBase;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.Threads;
 
@@ -51,6 +56,8 @@ import static org.apache.cassandra.io.sstable.format.SSTableScannerUtils.*;
 
 public class AsyncSSTableScannerTest
 {
+    private static final Logger logger = LoggerFactory.getLogger(AsyncSSTableScannerTest.class);
+
     public static final String KEYSPACE = "AsyncSSTableScannerTest";
     public static final String TABLE = "Standard1";
 
@@ -355,19 +362,29 @@ public class AsyncSSTableScannerTest
     @Test
     public void testParallelAccess() throws Exception
     {
-        testParallelAccess(false);
+        testParallelAccess(false, null);
     }
 
     @Test
     public void testParallelAccessWithCacheIntercept() throws Exception
     {
-        testParallelAccess(true);
+        testParallelAccess(true, null);
     }
 
-    private void testParallelAccess(boolean interceptCache) throws Exception
+    @Test
+    public void testParallelAccessBigFormat() throws Exception
     {
-        // intercepting the cache with the cache mocks should result in a
-        // NotInCacheException on average once every 4 reads
+        testParallelAccess(false, SSTableFormat.Type.BIG);
+    }
+
+    @Test
+    public void testParallelAccessWithCacheInterceptBigFormat() throws Exception
+    {
+        testParallelAccess(true, SSTableFormat.Type.BIG);
+    }
+
+    private void testParallelAccess(boolean interceptCache, SSTableFormat.Type sstableFormat) throws Exception
+    {
         if (interceptCache)
             ChunkCacheMocks.interceptCache(random);
 
@@ -380,11 +397,19 @@ public class AsyncSSTableScannerTest
             // disable compaction while flushing
             store.disableAutoCompaction();
 
+            final List<Pair<Integer, Integer>> ranges = new ArrayList<>(4);
             for (int i = 0; i < 4; i++)
+            {
                 for (int j = 2; j < 20; j++)
                     insertRowWithKey(store.metadata(), i * 100 + j);
 
+                ranges.add(Pair.create(i * 100 + 2, i * 100 + 19)); // range start and end, included
+            }
+
             store.forceBlockingFlush();
+
+            if (sstableFormat != null)
+                Util.rewriteToFormat(store, sstableFormat);
 
             assertEquals(1, store.getLiveSSTables().size());
             SSTableReader sstable = store.getLiveSSTables().iterator().next();
@@ -401,8 +426,17 @@ public class AsyncSSTableScannerTest
                                                  {
                                                      try
                                                      {
-                                                         Flow<FlowableUnfilteredPartition> scanner = sstable.getAsyncScanner()
+                                                         // first test a specific range
+                                                         Pair<Integer, Integer> range = ranges.get(coreNum % ranges.size());
+                                                         logger.debug("Testing {}", range);
+
+                                                         Flow<FlowableUnfilteredPartition> scanner = sstable.getAsyncScanner(makeRanges(range.left - 1, range.right))
                                                                                                             .lift(Threads.requestOnCore(coreNum, TPCTaskType.UNKNOWN));
+                                                         assertScanContainsRanges(scanner, range.left, range.right);
+
+                                                         // then test all the data
+                                                         scanner = sstable.getAsyncScanner()
+                                                                          .lift(Threads.requestOnCore(coreNum, TPCTaskType.UNKNOWN));
                                                          assertScanContainsRanges(scanner,
                                                                                   2, 19,
                                                                                   102, 119,
@@ -411,6 +445,7 @@ public class AsyncSSTableScannerTest
                                                      }
                                                      catch (Throwable err)
                                                      {
+                                                         logger.error("Core {} failed with {}", coreNum, err.getMessage(), err);
                                                          error.compareAndSet(null, err);
                                                      }
                                                      finally

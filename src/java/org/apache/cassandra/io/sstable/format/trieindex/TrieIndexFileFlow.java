@@ -112,7 +112,8 @@ public class TrieIndexFileFlow extends FlowSource<IndexFileEntry>
         }
         catch (Rebufferer.NotInCacheException e)
         {
-            logger.trace("{} - NotInCacheException at retry number {}: {}", hashCode(), retryNum, e.getMessage());
+            if (logger.isTraceEnabled())
+                logger.trace("{} - NotInCacheException at retry number {}: {}", hashCode(), retryNum, e.getMessage());
 
             // Retry the request once data is in the cache
             e.accept(() -> readWithRetry(retryNum + 1),
