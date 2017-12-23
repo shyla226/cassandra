@@ -49,7 +49,7 @@ public class ParkedThreadsMonitor
     public static final Supplier<ParkedThreadsMonitor> instance = Suppliers.memoize(ParkedThreadsMonitor::new);
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ParkedThreadsMonitor.class);
-    private static final long SLEEP_INTERVAL = Long.getLong("dse.thread_monitor_sleep_nanos", 50000);
+    private static final long SLEEP_INTERVAL = Long.getLong("dse.thread_monitor_sleep_nanos", 10000);
 
     private final MpscUnboundedArrayQueue<Runnable> commands = new MpscUnboundedArrayQueue<>(128);
     private final ArrayList<MonitorableThread> monitoredThreads = new ArrayList<>(Runtime.getRuntime().availableProcessors() * 2);
@@ -101,7 +101,8 @@ public class ParkedThreadsMonitor
                 JVMStabilityInspector.inspectThrowable(t);
                 LOGGER.error("ParkedThreadsMonitor exception: ", t);
             }
-            LockSupport.parkNanos(SLEEP_INTERVAL);
+            if (SLEEP_INTERVAL > 0)
+                LockSupport.parkNanos(SLEEP_INTERVAL);
         }
 
         for (MonitorableThread thread : monitoredThreads)
