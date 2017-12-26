@@ -60,7 +60,7 @@ import org.apache.cassandra.utils.concurrent.Ref;
 /**
  * Holds metadata about compressed file
  */
-public class CompressionMetadata
+public class CompressionMetadata implements AutoCloseable
 {
     // dataLength can represent either the true length of the file
     // or some shorter value, in the case we want to impose a shorter limit on readers
@@ -301,6 +301,7 @@ public class CompressionMetadata
         return offsets.toArray(new Chunk[offsets.size()]);
     }
 
+    @Override
     public void close()
     {
         chunkOffsets.close();
