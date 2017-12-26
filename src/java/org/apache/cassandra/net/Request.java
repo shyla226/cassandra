@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
+import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.monitoring.AbortedOperationException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.utils.FBUtilities;
@@ -238,7 +239,11 @@ public class Request<P, Q> extends Message<P>
                                          if (e instanceof AbortedOperationException)
                                              onAborted.run();
                                          else if (e instanceof DroppingResponseException)
-                                             logger.debug("Dropping response to {} as requested by the handler (it threw DroppingResponseException)", to());
+                                         {
+                                             DroppingResponseException err = (DroppingResponseException)e;
+                                             logger.debug("Dropping response to {} as requested by the handler (it threw DroppingResponseException).{}",
+                                                          to(), err.getMessage() == null ? "" : String.format(" Reason: %s", err.getMessage()));
+                                         }
                                          else
                                              // Handlers are not supposed to throw anything else than the 2 previous exceptions by contract, but
                                              // let's not completely silence a programmer bug.

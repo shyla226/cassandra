@@ -133,6 +133,8 @@ public class TableMetrics
     public final Histogram colUpdateTimeDeltaHistogram;
     /** time taken acquiring the partition lock for materialized view updates for this table */
     public final Timer viewLockAcquireTime;
+    /** View Lock Acquisition timeout */
+    public final Counter viewLockAcquisitionTimeouts;
     /** time taken during the local read of a materialized view update */
     public final Timer viewReadTime;
     /** Disk space used by snapshot files which */
@@ -819,6 +821,7 @@ public class TableMetrics
         tombstoneWarnings = createTableCounter("TombstoneWarnings");
 
         droppedMutations = createTableCounter("DroppedMutations");
+        viewLockAcquisitionTimeouts = createTableCounter("ViewLockAcquisitionTimeouts");
 
         casPrepare = new LatencyMetrics(factory, aliasFactory, "CasPrepare", cfs.keyspace.metric.casPrepare);
         casPropose = new LatencyMetrics(factory, aliasFactory, "CasPropose", cfs.keyspace.metric.casPropose);

@@ -27,4 +27,14 @@ package org.apache.cassandra.net;
  */
 public class DroppingResponseException extends RuntimeException
 {
+
+    public DroppingResponseException()
+    {
+        super();
+    }
+
+    public DroppingResponseException(String message)
+    {
+        super(message);
+    }
 }

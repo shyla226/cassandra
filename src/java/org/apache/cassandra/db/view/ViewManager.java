@@ -19,14 +19,18 @@ package org.apache.cassandra.db.view;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Joiner;
+import com.google.common.base.Throwables;
 import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.Striped;
 
@@ -36,6 +40,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.net.DroppingResponseException;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.db.*;
@@ -230,13 +235,13 @@ public class ViewManager
     {
         if (mutation.viewLockAcquireStart == 0)
             mutation.viewLockAcquireStart = System.currentTimeMillis();
-        
+
         // Get the locks for the mutation:
         SortedMap<Long, ExecutableLock> locks = getLocksFor(mutation);
 
         // The coordinated action to execute:
         CoordinatedAction coordinator = new CoordinatedAction(
-            () -> 
+            () ->
             {
                 // Collect metrics before actually applying the update.
                 // Bulk non-droppable operations (e.g. commitlog replay, hint delivery) are not measured.
@@ -277,6 +282,36 @@ public class ViewManager
         }
         // Kickoff the chain:
         first.complete(null);
+
+        // Handle timeout on failure to acquire lock
+        result = result.exceptionally(t -> {
+
+            if (t instanceof CompletionException && t.getCause() != null)
+                t = t.getCause();
+
+            if (t instanceof TimeoutException)
+            {
+                List<String> tables = new ArrayList<>(mutation.getTableIds().size());
+                Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
+                for (TableId tableId : mutation.getTableIds())
+                {
+                    ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(tableId);
+                    cfs.metric.viewLockAcquisitionTimeouts.inc();
+                    tables.add(cfs.name);
+                }
+                String message = String.format("Could not acquire view lock in %d milliseconds for table%s %s of keyspace %s.",
+                                               System.currentTimeMillis() - mutation.createdAt,
+                                               tables.size() > 1 ? "s" : "", Joiner.on(",").join(tables), keyspace.getName());
+                // Getting a timeout here should mean the coordinator that forwarded that base table
+                // write has already timed out on its own, so there isn't much benefit in answering
+                throw new DroppingResponseException(message);
+            }
+            else
+            {
+                // Otherwise, it's unexpected so let the normal exception handling from VerbHandlers do its job
+                throw Throwables.propagate(t);
+            }
+        });
 
         // Return the result of chaining all locks:
         return result;
