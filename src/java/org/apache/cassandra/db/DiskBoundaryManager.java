@@ -33,6 +33,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -83,6 +84,7 @@ public class DiskBoundaryManager
             if (StorageService.instance.isBootstrapMode()
                 && !StorageService.isReplacingSameAddress()) // When replacing same address, the node marks itself as UN locally
             {
+                PendingRangeCalculatorService.instance.blockUntilFinished();
                 localRanges = tmd.getPendingRanges(cfs.keyspace.getName(), FBUtilities.getBroadcastAddress());
             }
             else

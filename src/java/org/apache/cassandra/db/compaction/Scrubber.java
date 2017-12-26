@@ -102,8 +102,7 @@ public class Scrubber implements Closeable
 
         List<SSTableReader> toScrub = Collections.singletonList(sstable);
 
-        int locIndex = cfs.getCompactionStrategyManager().getCompactionStrategyIndex(sstable);
-        this.destination = cfs.getDirectories().getLocationForDisk(cfs.getDirectories().getWriteableLocations()[locIndex]);
+        this.destination = cfs.getDirectories().getLocationForDisk(cfs.getDiskBoundaries().getCorrectDiskForSSTable(sstable));
         this.isCommutative = cfs.metadata().isCounter();
 
         this.isIndex = cfs.isIndex();
