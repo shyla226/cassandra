@@ -61,11 +61,11 @@ public class DiskBoundaryManagerTest extends CQLTester
     private static final List<List<Directories.DataDirectory>> ALL_DIRS = Arrays.asList(DIRS1, DIRS2, DIRS3);
 
     private DiskBoundaryManager dbm;
-    private MockCFS mock;
     private Directories cfDirectories;
     private Directories custom1Directories;
     private Directories custom2Directories;
     private Directories[] allDirectories;
+    private ColumnFamilyStore cfs;
 
     @Before
     public void setup()
@@ -74,14 +74,13 @@ public class DiskBoundaryManagerTest extends CQLTester
         TokenMetadata metadata = StorageService.instance.getTokenMetadata();
         metadata.updateNormalTokens(BootStrapper.getRandomTokens(metadata, 10), FBUtilities.getBroadcastAddress());
         createTable("create table %s (id int primary key, x text)");
-        ColumnFamilyStore currentColumnFamilyStore = getCurrentColumnFamilyStore();
-        dbm = currentColumnFamilyStore.diskBoundaryManager;
 
         cfDirectories = new Directories(getCurrentColumnFamilyStore().metadata, DIRS1);
         custom1Directories = new Directories(getCurrentColumnFamilyStore().metadata, DIRS2);
         custom2Directories = new Directories(getCurrentColumnFamilyStore().metadata, DIRS3);
         allDirectories = new Directories[]{ cfDirectories, custom1Directories, custom2Directories };
-        mock = new MockCFS(getCurrentColumnFamilyStore(), cfDirectories);
+        cfs = getCurrentColumnFamilyStore();
+        dbm = getCurrentColumnFamilyStore().diskBoundaryManager;
     }
 
     @Test
@@ -90,11 +89,11 @@ public class DiskBoundaryManagerTest extends CQLTester
         for (int i = 0; i < allDirectories.length; i++)
         {
             Directories dir = allDirectories[i];
-            DiskBoundaries dbv = dbm.getDiskBoundaries(mock, dir);
+            DiskBoundaries dbv = dbm.getDiskBoundaries(cfs, dir);
             Assert.assertEquals(ALL_DIRS.get(i).size(), dbv.positions.size());
             Assert.assertEquals(Arrays.asList(dir.getWriteableLocations()), dbv.directories);
             // fetch again and check that reference is cached
-            assertSame(dbv, dbm.getDiskBoundaries(mock, dir));
+            assertSame(dbv, dbm.getDiskBoundaries(cfs, dir));
         }
     }
 
@@ -131,7 +130,7 @@ public class DiskBoundaryManagerTest extends CQLTester
         DiskBoundaries[] boundaries = new DiskBoundaries[allDirectories.length];
         for (int i = 0; i < allDirectories.length; i++)
         {
-            boundaries[i] = dbm.getDiskBoundaries(mock, allDirectories[i]);
+            boundaries[i] = dbm.getDiskBoundaries(cfs, allDirectories[i]);
         }
         return boundaries;
     }
@@ -161,16 +160,7 @@ public class DiskBoundaryManagerTest extends CQLTester
         for (int i = 0; i < allDirectories.length; i++)
         {
             assertNotSame(oldBoundaries[i], newBoundaries[i]);
-            assertSame(newBoundaries[i], dbm.getDiskBoundaries(mock, allDirectories[i]));
-        }
-    }
-
-    // just to be able to override the data directories
-    private static class MockCFS extends ColumnFamilyStore
-    {
-        MockCFS(ColumnFamilyStore cfs, Directories dirs)
-        {
-            super(cfs.keyspace, cfs.getTableName(), 0, cfs.metadata, dirs, false, false, true);
+            assertSame(newBoundaries[i], dbm.getDiskBoundaries(cfs, allDirectories[i]));
         }
     }
 }
