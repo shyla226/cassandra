@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Prevent received SSTables with tombstones during repair from being compacted (DB-1333)
  * Wait RING_DELAY for schema to settle before starting view builder (DB-1328)
  * Make `ReservedKeywords` mutable (DB-1637)
  * Non-disruptive seed node list reload (DB-1626)

@@ -81,6 +81,8 @@ import static java.util.Collections.singleton;
  */
 public class CompactionManager implements CompactionManagerMBean
 {
+    private static final int WAIT_FOR_CESSATION_TIME_IN_SECS = Integer.getInteger("cassandra.wait_for_cessation_time_in_seconds", 60);
+
     public static final String MBEAN_OBJECT_NAME = "org.apache.cassandra.db:type=CompactionManager";
     private static final Logger logger = LoggerFactory.getLogger(CompactionManager.class);
     public static final CompactionManager instance;
@@ -1291,7 +1293,7 @@ public class CompactionManager implements CompactionManagerMBean
         public void afterExecute(Runnable r, Throwable t)
         {
             DebuggableThreadPoolExecutor.maybeResetTraceSessionWrapper(r);
-    
+
             if (t == null)
                 t = DebuggableThreadPoolExecutor.extractThrowable(r);
 
@@ -1528,7 +1530,7 @@ public class CompactionManager implements CompactionManagerMBean
     public void waitForCessation(Iterable<ColumnFamilyStore> cfss)
     {
         long start = System.nanoTime();
-        long delay = TimeUnit.MINUTES.toNanos(1);
+        long delay = TimeUnit.SECONDS.toNanos(WAIT_FOR_CESSATION_TIME_IN_SECS);
         while (System.nanoTime() - start < delay)
         {
             if (CompactionManager.instance.isCompacting(cfss))

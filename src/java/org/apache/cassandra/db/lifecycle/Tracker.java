@@ -66,7 +66,7 @@ public class Tracker
 {
     private static final Logger logger = LoggerFactory.getLogger(Tracker.class);
 
-    private final Collection<INotificationConsumer> subscribers = new CopyOnWriteArrayList<>();
+    private final List<INotificationConsumer> subscribers = new CopyOnWriteArrayList<>();
 
     public final ColumnFamilyStore cfstore;
     final AtomicReference<View> view;
@@ -495,7 +495,8 @@ public class Tracker
 
     public void subscribe(INotificationConsumer consumer)
     {
-        subscribers.add(consumer);
+        // Add at list head, so more recent subscribers are notified first (DB-1333)
+        subscribers.add(0, consumer);
     }
 
     public void unsubscribe(INotificationConsumer consumer)
