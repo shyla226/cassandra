@@ -490,7 +490,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         }
     }
 
-    private void handleFlushNotification(Iterable<SSTableReader> added)
+    private void handleFlushNotification(Iterable<SSTableReader> added, boolean fromStream)
     {
         // If reloaded, SSTables will be placed in their correct locations
         // so there is no need to process notification
@@ -501,7 +501,12 @@ public class CompactionStrategyManager implements INotificationConsumer
         try
         {
             for (SSTableReader sstable : added)
-                compactionStrategyFor(sstable).addSSTable(sstable);
+            {
+                if (fromStream)
+                    compactionStrategyFor(sstable).addSSTableFromStreaming(sstable);
+                else
+                    compactionStrategyFor(sstable).addSSTable(sstable);
+            }
         }
         finally
         {
@@ -623,7 +628,7 @@ public class CompactionStrategyManager implements INotificationConsumer
     {
         if (notification instanceof SSTableAddedNotification)
         {
-            handleFlushNotification(((SSTableAddedNotification) notification).added);
+            handleFlushNotification(((SSTableAddedNotification) notification).added, ((SSTableAddedNotification) notification).fromStream);
         }
         else if (notification instanceof SSTableListChangedNotification)
         {
