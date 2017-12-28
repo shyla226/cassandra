@@ -184,4 +184,24 @@ public class PartitionTest
         EncodingStats stats = partition.stats();
         assertEquals(localDeletionTime, stats.minLocalDeletionTime);
     }
+
+
+    @Test
+    public void testUpdateTimestamp()
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_TENCOL);
+        RowUpdateBuilder builder = new RowUpdateBuilder(cfs.metadata(), 5, "key1").clustering("c").add("val", "val1");
+        for (int i = 0; i < 10; i++)
+            builder.add("val" + i, "val" + i);
+        Mutation m = builder.build();
+
+        long maxTs = m.getPartitionUpdate(cfs.metadata.get()).maxTimestamp();
+        Assert.assertEquals(5, maxTs);
+
+        m.getPartitionUpdate(cfs.metadata.get()).updateAllTimestamp(6);
+
+
+        long maxTs2 = m.getPartitionUpdate(cfs.metadata.get()).maxTimestamp();
+        Assert.assertEquals(6, maxTs2);
+    }
 }
