@@ -21,6 +21,9 @@ package org.apache.cassandra.io.sstable.format.big;
 import java.io.IOException;
 import java.util.concurrent.CompletionException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.db.DecoratedKey;
@@ -42,6 +45,8 @@ import org.apache.cassandra.utils.flow.FlowSource;
  */
 public class BigIndexFileFlow extends FlowSource<IndexFileEntry>
 {
+    private static final Logger logger = LoggerFactory.getLogger(BigIndexFileFlow.class);
+
     private final BigTableReader sstable;
     private final FileHandle ifile;
     private final RandomAccessReader reader;
@@ -54,6 +59,7 @@ public class BigIndexFileFlow extends FlowSource<IndexFileEntry>
     private final int exclusiveRight;
     private final TPCScheduler onReadyExecutor;
 
+    private boolean firstPublished;
     private long position;
 
     public BigIndexFileFlow(BigTableReader sstable,
@@ -73,6 +79,7 @@ public class BigIndexFileFlow extends FlowSource<IndexFileEntry>
         this.right = right;
         this.exclusiveRight = exclusiveRight;
         this.onReadyExecutor = TPC.bestTPCScheduler();
+        this.firstPublished = false;
         this.position = -1;
     }
 
@@ -85,7 +92,7 @@ public class BigIndexFileFlow extends FlowSource<IndexFileEntry>
     {
         try
         {
-            IndexFileEntry current = position == -1 ? readFirst(isRetry) : readNext(isRetry);
+            IndexFileEntry current = !firstPublished ? readFirst(isRetry) : readNext(isRetry);
             if (current != IndexFileEntry.EMPTY)
                 subscriber.onNext(current);
             else
@@ -93,10 +100,15 @@ public class BigIndexFileFlow extends FlowSource<IndexFileEntry>
         }
         catch (Rebufferer.NotInCacheException e)
         {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - isRetry? {}, firstPublished? {}  NotInCacheException: {}", hashCode(), isRetry, firstPublished, e.getMessage());
+
             // Retry the request once data is in the cache
             e.accept(() -> readWithRetry(true),
                      (t) ->
                      {
+                         logger.error("Failed to retry due to exception", t);
+
                          // Calling completeExceptionally() wraps the original exception into a CompletionException even
                          // though the documentation says otherwise
                          if (t instanceof CompletionException && t.getCause() != null)
@@ -136,6 +148,8 @@ public class BigIndexFileFlow extends FlowSource<IndexFileEntry>
                 if (indexDecoratedKey.compareTo(right) > exclusiveRight)
                     break;
 
+                firstPublished = true; // from now on it's safe to compare only with the right
+                //logger.debug("Publishing {} - {} / {}", indexDecoratedKey, left, right);
                 return new IndexFileEntry(indexDecoratedKey,
                                           rowIndexEntrySerializer.deserialize(reader, reader.getFilePointer()));
             }
@@ -162,6 +176,7 @@ public class BigIndexFileFlow extends FlowSource<IndexFileEntry>
             DecoratedKey indexDecoratedKey = partitioner.decorateKey(ByteBufferUtil.readWithShortLength(reader));
             if (right == null || indexDecoratedKey.compareTo(right) <= exclusiveRight)
             {
+                //logger.debug("Publishing {} - {} / {}, firstPublished? {}", indexDecoratedKey, left, right, firstPublished);
                 return new IndexFileEntry(indexDecoratedKey, rowIndexEntrySerializer.deserialize(reader, reader.getFilePointer()));
             }
         }
