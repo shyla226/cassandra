@@ -26,9 +26,27 @@ num_tokens: 256
 
 # Number of cores used by the internal Thread-Per-Core architecture (TPC). This corresponds to the
 # number of event loops that will be created internally.
-# If unset or commented (the default), this will default to the number of available processors on the machine. That
-# generally yield the best performance and most users should rely on it.
+# If unset or commented (the default), this will default to the number of available processors on the machine minus one.
+# That generally yields the best performance and most users should rely on it unless the machine has very few cores
+# such as 2 or 4 cores.
 #tpc_cores:
+
+# Number of cores used for reads. Not all TPC cores may necessarily be used for AIO reads. TPC cores can share
+# IO queues for reads if required, for example because the global IO queue depth is less than the number of cores
+# on the machine. This value may not be bigger than tpc_cores and should ideally be bigger than the
+# number of NUMA nodes on a machine. By default this is set to min(tpc_cores, io_global_queue_depth / 4), which means
+# that each IO queue must have at least a local depth of 4 and we choose a number of IO queues, or IO cores, such that the
+# combined depth does not exceed io_global_queue_depth, capped to the number of TPC cores.
+# tpc_io_cores:
+
+# The global IO queue depth, used for reads when AIO is enabled (the default for SSDs).
+# You can pick the value that is used by the Linux IO scheduler in /sys/class/block/sd[a|b...]/queue/nr_requests,
+# which is typically 128. You can also run tools/bin/disk_cal.py to determine the ideal queue
+# depth for a specific disk. However, bear in mind that capping to the ideal queue depth assumes that all
+# TPC IO cores will be working fully during read workloads. If that's not the case, you may want to double
+# the ideal queue depth for example. Exceeding the value used by the Linux IO scheduler (128), is never
+# advantageous and will result in higher latency.
+io_global_queue_depth: 128
 
 # Triggers automatic allocation of num_tokens tokens for this node. The allocation
 # algorithm attempts to choose tokens in a way that optimizes replicated load over

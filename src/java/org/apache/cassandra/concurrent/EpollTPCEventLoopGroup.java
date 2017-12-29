@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import io.netty.channel.DefaultSelectStrategyFactory;
 import io.netty.channel.EventLoop;
 import io.netty.channel.MultithreadEventLoopGroup;
+import io.netty.channel.epoll.AIOContext;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.channel.epoll.Native;
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
@@ -135,7 +136,14 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
     protected EventLoop newChild(Executor executor, Object... args) throws Exception
     {
         assert executor instanceof TPCThread.TPCThreadsCreator;
-        return new SingleCoreEventLoop(this, (TPCThread.TPCThreadsCreator)executor);
+        TPCThread.TPCThreadsCreator tpcThreadsCreator = (TPCThread.TPCThreadsCreator)executor;
+        // we could make this code a bit safer but it would require changing TPCThreadsCreator to fix the
+        // core of the next thread it will create, unfortunately we need the aio properties before the thread
+        // itself is created
+        int nextCore = tpcThreadsCreator.lastCreatedThread() == null
+                       ? 0
+                       : tpcThreadsCreator.lastCreatedThread().coreId() + 1;
+        return new SingleCoreEventLoop(this, tpcThreadsCreator, TPC.aioCoordinator.getIOConfig(nextCore));
     }
 
     public static class SingleCoreEventLoop extends EpollEventLoop implements TPCEventLoop, ParkedThreadsMonitor.MonitorableThread
@@ -172,14 +180,14 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         /** for schedule check throttling */
         private long lastScheduledCheckTime = lastEpollCheckTime;
 
-        private SingleCoreEventLoop(EpollTPCEventLoopGroup parent, TPCThread.TPCThreadsCreator executor)
+        private SingleCoreEventLoop(EpollTPCEventLoopGroup parent, TPCThread.TPCThreadsCreator executor, AIOContext.Config aio)
         {
             super(parent,
                   executor,
                   0,
                   DefaultSelectStrategyFactory.INSTANCE.newSelectStrategy(),
                   RejectedExecutionHandlers.reject(),
-                  TPC.USE_AIO);
+                  aio);
 
             this.parent = parent;
             this.queue = new MpscArrayQueue<>(1 << 16);

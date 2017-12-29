@@ -65,6 +65,8 @@ public class Config
     public SystemTableEncryptionOptions system_info_encryption = new SystemTableEncryptionOptions();
 
     public Integer tpc_cores;
+    public Integer tpc_io_cores;
+    public Integer io_global_queue_depth;
 
     /* Hashing strategy Random or OPHF */
     public String partitioner;

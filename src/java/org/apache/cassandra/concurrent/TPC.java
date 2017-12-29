@@ -36,6 +36,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.util.AioCoordinator;
 import org.apache.cassandra.metrics.TPCAggregatedStageMetrics;
 import org.apache.cassandra.rx.RxSubscriptionDebugger;
 import org.apache.cassandra.metrics.TPCTotalMetrics;
@@ -78,6 +79,10 @@ public class TPC
                                           && Aio.isAvailable() && USE_EPOLL &&
                                           (Boolean.parseBoolean(System.getProperty("dse.io.aio.force", "false")) || DatabaseDescriptor.assumeDataDirectoriesOnSSD());
     public static final int AIO_BLOCK_SIZE = 512;
+
+    public static final AioCoordinator aioCoordinator = new AioCoordinator(NUM_CORES,
+                                                                           DatabaseDescriptor.getTPCIOCores(),
+                                                                           DatabaseDescriptor.getIOGlobalQueueDepth());
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
     private final static AtomicLong roundRobinIndex = new AtomicLong(0);
@@ -222,6 +227,32 @@ public class TPC
     {
         int coreId = getCoreId();
         return isValidCoreId(coreId) ? getForCore(coreId) : getForCore(getNextCore());
+    }
+
+    /**
+     * @return the TPC scheduler associated to the next TPC core, see {@link #getNextCore()}.
+     */
+    public static TPCScheduler getNextTPCSchduler()
+    {
+        return getForCore(getNextCore());
+    }
+    /**
+     * Same as {@link #bestTPCScheduler()} but for core ids.
+     *
+     * @return the current core id or the next core id
+     */
+    public static int bestTPCCore()
+    {
+        int coreId = getCoreId();
+        return isValidCoreId(coreId) ? coreId : getNextCore();
+    }
+
+    /**
+     * @return the event loop associated to the best (current) TPC core.
+     */
+    public static TPCEventLoop bestIOEventLoop()
+    {
+        return getForCore(aioCoordinator.getIOCore(bestTPCCore())).eventLoop;
     }
 
     public static IOScheduler ioScheduler()

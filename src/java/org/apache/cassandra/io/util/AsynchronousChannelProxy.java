@@ -80,9 +80,8 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
 
             try
             {
-                EpollEventLoop loop = (EpollEventLoop) TPC.bestTPCScheduler().getExecutor();
                 int flags = FileDescriptor.O_RDONLY | FileDescriptor.O_DIRECT;
-                return new AIOEpollFileChannel(file, loop, flags);
+                return new AIOEpollFileChannel(file, (EpollEventLoop)TPC.bestIOEventLoop(), flags);
             }
             catch (IOException e)
             {
@@ -100,6 +99,9 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
             throw new RuntimeException(e);
         }
     }
+
+    // store a variable to avoid instanceof checks for every read, eventually we should separate the two implementations
+    private final AIOEpollFileChannel epollChannel;
 
     public AsynchronousChannelProxy(String path)
     {
@@ -119,11 +121,13 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
     public AsynchronousChannelProxy(String filePath, AsynchronousFileChannel channel)
     {
         super(filePath, channel);
+        this.epollChannel = channel instanceof AIOEpollFileChannel ? (AIOEpollFileChannel)channel : null;
     }
 
     public AsynchronousChannelProxy(AsynchronousChannelProxy copy)
     {
         super(copy);
+        this.epollChannel = channel instanceof AIOEpollFileChannel ? (AIOEpollFileChannel)channel : null;
     }
 
     boolean requiresAlignment()
@@ -131,7 +135,7 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
         return channel instanceof AIOEpollFileChannel;
     }
 
-    static final int MAX_RETRIES = 10;
+    private static final int MAX_RETRIES = 10;
 
     CompletionHandler<Integer, ByteBuffer> makeRetryingHandler(ByteBuffer dest,
                                                                long offset,
@@ -172,13 +176,17 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
             }
         };
     }
+
     public void read(ByteBuffer dest, long offset, CompletionHandler<Integer, ByteBuffer> onComplete)
     {
         CompletionHandler<Integer, ByteBuffer> retryingHandler = makeRetryingHandler(dest, offset, onComplete);
 
         try
         {
-            channel.read(dest, offset, dest, retryingHandler);
+            if (epollChannel != null)
+                epollChannel.read(dest, offset, dest, retryingHandler, (EpollEventLoop)TPC.bestIOEventLoop());
+            else
+                channel.read(dest, offset, dest, retryingHandler);
         }
         catch (Throwable t)
         {
@@ -221,9 +229,8 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
     {
         int fd;
 
-        if (channel instanceof AIOEpollFileChannel)
+        if (epollChannel != null)
         {
-            AIOEpollFileChannel epollChannel =  (AIOEpollFileChannel)channel;
             if (epollChannel.isDirect())
                 return; // direct AIO channels bypass the page cache
 
@@ -255,7 +262,7 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
      */
     public AsynchronousChannelProxy maybeBatched(boolean vectored)
     {
-        if (!(channel instanceof AIOEpollFileChannel))
+        if (epollChannel == null)
             return sharedCopy();
 
         return new AIOEpollBatchedChannelProxy(this, vectored);
