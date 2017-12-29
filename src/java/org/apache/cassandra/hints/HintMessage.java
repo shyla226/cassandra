@@ -27,6 +27,11 @@ import javax.annotation.Nullable;
 
 import com.google.common.primitives.Ints;
 
+import org.apache.cassandra.concurrent.SchedulableMessage;
+import org.apache.cassandra.concurrent.StagedScheduler;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
@@ -51,15 +56,21 @@ import org.apache.cassandra.utils.versioning.Versioned;
  * Scenario (2) means that we got a hint from a node that's going through decommissioning and is streaming its hints
  * elsewhere first.
  */
-public abstract class HintMessage
+public abstract class HintMessage implements SchedulableMessage
 {
     public static final Versioned<HintsVersion, Serializer<HintMessage>> serializers = HintsVersion.versioned(HintSerializer::new);
 
     final UUID hostId;
+    final transient StagedScheduler scheduler;
+    final transient TracingAwareExecutor requestExecutor;
+    final transient TracingAwareExecutor responseExecutor;
 
-    HintMessage(UUID hostId)
+    HintMessage(UUID hostId, StagedScheduler scheduler)
     {
         this.hostId = hostId;
+        this.scheduler = scheduler;
+        this.requestExecutor = scheduler.forTaskType(TPCTaskType.HINT_DISPATCH);
+        this.responseExecutor = scheduler.forTaskType(TPCTaskType.HINT_RESPONSE);
     }
 
     public static HintMessage create(UUID hostId, Hint hint)
@@ -70,6 +81,24 @@ public abstract class HintMessage
     static HintMessage createEncoded(UUID hostId, ByteBuffer hint, HintsVersion version)
     {
         return new Encoded(hostId, hint, version);
+    }
+
+    @Override
+    public StagedScheduler getScheduler()
+    {
+        return scheduler;
+    }
+
+    @Override
+    public TracingAwareExecutor getRequestExecutor()
+    {
+        return requestExecutor;
+    }
+
+    @Override
+    public TracingAwareExecutor getResponseExecutor()
+    {
+        return responseExecutor;
     }
 
     /**
@@ -98,14 +127,14 @@ public abstract class HintMessage
 
         private Simple(UUID hostId, Hint hint)
         {
-            super(hostId);
+            super(hostId, hint.mutation.getScheduler());
             this.hint = hint;
             this.unknownTableID = null;
         }
 
         private Simple(UUID hostId, TableId unknownTableID)
         {
-            super(hostId);
+            super(hostId, TPC.bestTPCScheduler());
             this.hint = null;
             this.unknownTableID = unknownTableID;
         }
@@ -179,7 +208,7 @@ public abstract class HintMessage
 
         private Encoded(UUID hostId, ByteBuffer hint, HintsVersion version)
         {
-            super(hostId);
+            super(hostId, TPC.bestTPCScheduler());
             this.hint = hint;
             this.version = version;
         }

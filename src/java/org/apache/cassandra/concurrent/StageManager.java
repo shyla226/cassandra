@@ -47,7 +47,6 @@ public class StageManager
         stages.put(Stage.INTERNAL_RESPONSE, multiThreadedStage(Stage.INTERNAL_RESPONSE, FBUtilities.getAvailableProcessors()));
         stages.put(Stage.READ_REPAIR, multiThreadedStage(Stage.READ_REPAIR, FBUtilities.getAvailableProcessors()));
         stages.put(Stage.BACKGROUND_IO, multiThreadedStage(Stage.BACKGROUND_IO, DatabaseDescriptor.getMaxBackgroundIOThreads()));
-        stages.put(Stage.HINTS, multiThreadedStage(Stage.HINTS, DatabaseDescriptor.getMaxHintsReceiveThreads()));
         // the rest are all single-threaded
         stages.put(Stage.GOSSIP, new JMXEnabledThreadPoolExecutor(Stage.GOSSIP)); // should stay single threaded as we rely on this
         stages.put(Stage.ANTI_ENTROPY, new JMXEnabledThreadPoolExecutor(Stage.ANTI_ENTROPY));

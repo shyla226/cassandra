@@ -20,6 +20,8 @@ package org.apache.cassandra.hints;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableList;
 
@@ -248,7 +250,10 @@ public class HintTest
         long totalHintCount = StorageProxy.instance.getTotalHints();
         // Process hint message.
         HintMessage message = HintMessage.create(localId, hint);
-        Verbs.HINTS.HINT.newRequest(local, message).execute(x -> {}, () -> {});
+        CountDownLatch awaitRequest = new CountDownLatch(1);
+        Verbs.HINTS.HINT.newRequest(local, message).execute(x -> awaitRequest.countDown(), () -> {});
+
+        awaitRequest.await(100, TimeUnit.MILLISECONDS);
 
         // hint should not be applied as we no longer are a replica
         assertNoPartitions(key, TABLE0);
@@ -291,7 +296,10 @@ public class HintTest
             long totalHintCount = StorageMetrics.totalHints.getCount();
             // Process hint message.
             HintMessage message = HintMessage.create(localId, hint);
-            Verbs.HINTS.HINT.newRequest(local, message).execute(x -> {}, () -> {});
+            CountDownLatch awaitRequest = new CountDownLatch(1);
+            Verbs.HINTS.HINT.newRequest(local, message).execute(x -> awaitRequest.countDown(), () -> {});
+
+            awaitRequest.await(100, TimeUnit.MILLISECONDS);
 
             // hint should not be applied as we no longer are a replica
             assertNoPartitions(key, TABLE0);

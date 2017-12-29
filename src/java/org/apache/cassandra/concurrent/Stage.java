@@ -27,7 +27,6 @@ public enum Stage
     INTERNAL_RESPONSE,
     READ_REPAIR,
     BACKGROUND_IO,
-    HINTS,
     AUTHZ;
 
     public String getJmxType()
@@ -43,7 +42,6 @@ public enum Stage
                 return "internal";
             case REQUEST_RESPONSE:
             case READ_REPAIR:
-            case HINTS:
             case AUTHZ:
                 return "request";
             default:

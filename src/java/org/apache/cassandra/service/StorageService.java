@@ -4698,16 +4698,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     protected synchronized void drain(boolean isFinalShutdown) throws IOException, InterruptedException, ExecutionException
     {
-        ExecutorService hintsStage = StageManager.getStage(Stage.HINTS);
-
-        if (hintsStage.isTerminated())
+        if (isShutdown)
         {
             if (!isFinalShutdown)
                 logger.warn("Cannot drain node (did it already happen?)");
             return;
         }
 
-        assert !isShutdown;
         isShutdown = true;
 
         Throwable preShutdownHookThrowable = Throwables.perform(null, preShutdownHooks.stream().map(h -> h::run));
@@ -4817,10 +4814,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "clearing background IO stage", false);
 
-            hintsStage.shutdown();
-            hintsStage.awaitTermination(3600, TimeUnit.SECONDS);
-
-            StorageProxy.instance.verifyNoHintsInProgress();
+            // if mutations have stopped hints should stop too
+            StorageProxy.instance.waitForHintsInProgress(3600, TimeUnit.SECONDS);
 
             // shutdown hints
             HintsService.instance.shutdownBlocking();

@@ -114,7 +114,11 @@ public enum TPCTaskType
     /** Number of Thread.yield() calls done by this TPC thread when it has no tasks to perform */
     EVENTLOOP_YIELD(Features.EXCLUDE_FROM_TOTALS),
     /** Number of LockSupport.park() calls done by this TPC thread when it has no tasks to perform */
-    EVENTLOOP_PARK(Features.EXCLUDE_FROM_TOTALS);
+    EVENTLOOP_PARK(Features.EXCLUDE_FROM_TOTALS),
+    /** Hint dispatch request */
+    HINT_DISPATCH(Features.PENDABLE),
+    /** Hint dispatch response */
+    HINT_RESPONSE;
 
     // Using the constants in the enum class causes "Illegal forward reference", using a nested static class works.
     private static class Features

@@ -19,12 +19,15 @@ package org.apache.cassandra.hints;
 
 import java.net.InetAddress;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.EncodingVersion;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -108,15 +111,19 @@ public class HintsVerbs extends VerbGroup<HintsVerbs.HintsVersion>
         {
             // the node is not the final destination of the hint (must have gotten it from a decommissioning node),
             // so just store it locally, to be delivered later.
-            HintsService.instance.write(hostId, hint);
-            return null;
+            return CompletableFuture.supplyAsync(() -> {
+                HintsService.instance.write(hostId, hint);
+                return null;
+            }, cmd ->  StageManager.getStage(Stage.BACKGROUND_IO).execute(cmd, ExecutorLocals.create()));
         }
         else if (!StorageProxy.instance.appliesLocally(hint.mutation))
         {
             // the topology has changed, and we are no longer a replica of the mutation - since we don't know which node(s)
             // it has been handed over to, re-address the hint to all replicas; see CASSANDRA-5902.
-            HintsService.instance.writeForAllReplicas(hint);
-            return null;
+            return CompletableFuture.supplyAsync(() -> {
+                HintsService.instance.writeForAllReplicas(hint);
+                return null;
+            }, cmd ->  StageManager.getStage(Stage.BACKGROUND_IO).execute(cmd, ExecutorLocals.create()));
         }
         else
         {
@@ -132,7 +139,6 @@ public class HintsVerbs extends VerbGroup<HintsVerbs.HintsVersion>
         RegistrationHelper helper = helper().droppedGroup(DroppedMessages.Group.HINT);
 
         HINT = helper.ackedRequest("HINT", HintMessage.class)
-                     .requestStage(Stage.HINTS)
                      .timeout(DatabaseDescriptor::getWriteRpcTimeout)
                      .withBackPressure()
                      .handler(HINT_HANDLER);
