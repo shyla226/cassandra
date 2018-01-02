@@ -29,11 +29,19 @@ import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.MessageToMessageEncoder;
 import io.netty.util.Attribute;
+import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.TPCEventLoop;
+import org.apache.cassandra.concurrent.TPCRunnable;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.transport.Frame.Header.HeaderFlag;
 import org.apache.cassandra.transport.messages.ErrorMessage;
 import org.apache.cassandra.utils.Flags;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.TimeSource;
+import org.jctools.queues.SpscArrayQueue;
 
 public class Frame
 {
@@ -70,9 +78,9 @@ public class Frame
         return body.release();
     }
 
-    public static Frame create(Message.Type type, int streamId, ProtocolVersion version, int flags, ByteBuf body)
+    public static Frame create(TimeSource timeSource, Message.Type type, int streamId, ProtocolVersion version, int flags, ByteBuf body)
     {
-        Header header = new Header(version, flags, streamId, type);
+        Header header = new Header(version, flags, streamId, type, timeSource.nanoTime());
         return new Frame(header, body);
     }
 
@@ -87,13 +95,15 @@ public class Frame
         public int flags;
         public final int streamId;
         public final Message.Type type;
+        public final long queryStartNanoTime;
 
-        private Header(ProtocolVersion version, int flags, int streamId, Message.Type type)
+        private Header(ProtocolVersion version, int flags, int streamId, Message.Type type, long queryStartNanoTime)
         {
             this.version = version;
             this.flags = flags;
             this.streamId = streamId;
             this.type = type;
+            this.queryStartNanoTime = queryStartNanoTime;
         }
 
         public interface HeaderFlag
@@ -122,11 +132,20 @@ public class Frame
         private long bytesToDiscard;
         private int tooLongStreamId;
 
+        private final TimeSource timeSource;
         private final Connection.Factory factory;
+        private final AsyncProcessor processor;
 
-        public Decoder(Connection.Factory factory)
+        public Decoder(TimeSource timeSource, Connection.Factory factory)
         {
+            this(timeSource, factory, null);
+        }
+
+        public Decoder(TimeSource timeSource, Connection.Factory factory, AsyncProcessor processor)
+        {
+            this.timeSource = timeSource;
             this.factory = factory;
+            this.processor = processor;
         }
 
         @VisibleForTesting
@@ -204,19 +223,20 @@ public class Frame
             idx += bodyLength;
             buffer.readerIndex(idx);
 
-            return new Frame(new Header(version, flags, streamId, type), body.retain());
+            return new Frame(new Header(version, flags, streamId, type, timeSource.nanoTime()), body.retain());
         }
 
         @Override
         protected void decode(ChannelHandlerContext ctx, ByteBuf buffer, List<Object> results)
         throws Exception
         {
-            Frame frame = decodeFrame(buffer);
-            if (frame == null)
-                return;
-
+            Frame frame = null;
             try
             {
+                frame = decodeFrame(buffer);
+                if (frame == null)
+                    return;
+
                 Attribute<Connection> attrConn = ctx.channel().attr(Connection.attributeKey);
                 Connection connection = attrConn.get();
                 if (connection == null)
@@ -233,11 +253,16 @@ public class Frame
                     frame.header.version, connection.getVersion())),
                     frame.header.streamId);
                 }
-                results.add(frame);
+
+                if (processor != null)
+                    processor.maybeDoAsync(ctx, frame, results);
+                else
+                    results.add(frame);
             }
             catch (Throwable t)
             {
-                frame.release();
+                if (frame != null)
+                    frame.release();
                 throw t;
             }
         }
@@ -337,6 +362,73 @@ public class Frame
 
             frame.header.flags = Flags.add(frame.header.flags, HeaderFlag.COMPRESSED);
             results.add(compressor.compress(frame));
+        }
+    }
+
+    /**
+     * The async frame processor schedules frames for async decoding if the event loop asks to backpressure, in order
+     * to give more CPU power to inflight requests and in particular reduce heap usage (and related GC activity).
+     * <p>
+     * Please note actual async processing only works with Epoll event loops ans tasks supporting
+     * {@link TPCTaskType#backpressured()}, otherwise decoding will be always processed synchronously.
+     */
+    public static class AsyncProcessor implements Runnable
+    {
+        private final TPCEventLoop eventLoop;
+        private final SpscArrayQueue<Pair<ChannelHandlerContext, Frame>> frames;
+
+        public AsyncProcessor(TPCEventLoop eventLoop)
+        {
+            this.eventLoop = eventLoop;
+            this.frames = new SpscArrayQueue<>(1 << 16);
+        }
+
+        public void maybeDoAsync(ChannelHandlerContext context, Frame frame, List<Object> out)
+        {
+            // If backpressure is not supported by the message type, or the queue is empty and we shouldn't backpressure
+            // (due to not hitting the limit), execute synchronously by directly adding the frame to the output list:
+            if (!frame.header.type.supportsBackpressure || (!eventLoop.shouldBackpressure() && frames.isEmpty()))
+                out.add(frame);
+            // Otherwise execute async:
+            else
+            {
+                // If the queue is empty, this is the first async execution, so schedule it: we want to schedule only
+                // once, because when it will execute we will try to consume the whole queue.
+                if (frames.isEmpty())
+                    schedule();
+                // Otherwise try offering and fail if unable to:
+                if (!frames.offer(Pair.create(context, frame)))
+                    throw new OverloadedException("Too many pending client requests, dropping the current request.");
+            }
+        }
+
+        @Override
+        public void run()
+        {
+            // Consume frames and pass them to the next handler in the channel pipeline:
+            while (!frames.isEmpty() && !eventLoop.shouldBackpressure())
+            {
+                Pair<ChannelHandlerContext, Frame> contextAndFrame = frames.poll();
+                if (contextAndFrame.left.channel().isActive())
+                    contextAndFrame.left.fireChannelRead(contextAndFrame.right);
+                else
+                    contextAndFrame.right.release();
+            }
+            // If we didn't drain the whole queue, reschedule:
+            if (!frames.isEmpty())
+                schedule();
+        }
+
+        /**
+         * Schedule frame decoding on the back of this event loop.
+         */
+        private void schedule()
+        {
+            eventLoop.execute(new TPCRunnable(
+                this,
+                ExecutorLocals.create(),
+                TPCTaskType.FRAME_DECODE,
+                eventLoop.coreId()));
         }
     }
 }

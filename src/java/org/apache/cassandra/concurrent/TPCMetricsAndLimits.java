@@ -39,7 +39,8 @@ public class TPCMetricsAndLimits implements TPCMetrics
     }
     private final TaskStats[] stats;
 
-    AtomicLong activeCountedTasks = new AtomicLong();
+    AtomicLong externallyCountedTasks = new AtomicLong();
+    AtomicLong backpressuredTasks = new AtomicLong();
 
     int maxConcurrentRequests = DatabaseDescriptor.getTPCConcurrentRequestsLimit();
     int maxPendingQueueSize = DatabaseDescriptor.getTPCPendingRequestsLimit();
@@ -61,7 +62,7 @@ public class TPCMetricsAndLimits implements TPCMetrics
         TaskStats stat = getTaskStats(stage);
         stat.scheduledTasks.add(1);
         if (stage.externalQueue())
-            activeCountedTasks.incrementAndGet();
+            externallyCountedTasks.incrementAndGet();
     }
 
     public void starting(TPCTaskType stage)
@@ -74,7 +75,7 @@ public class TPCMetricsAndLimits implements TPCMetrics
         TaskStats stat = getTaskStats(stage);
         stat.failedTasks.add(1);
         if (stage.externalQueue())
-            activeCountedTasks.decrementAndGet();
+            externallyCountedTasks.decrementAndGet();
     }
 
     public void completed(TPCTaskType stage)
@@ -82,7 +83,7 @@ public class TPCMetricsAndLimits implements TPCMetrics
         TaskStats stat = getTaskStats(stage);
         stat.completedTasks.add(1);
         if (stage.externalQueue())
-            activeCountedTasks.decrementAndGet();
+            externallyCountedTasks.decrementAndGet();
     }
 
     public void cancelled(TPCTaskType stage)
@@ -95,6 +96,8 @@ public class TPCMetricsAndLimits implements TPCMetrics
     {
         TaskStats stat = getTaskStats(stage);
         stat.pendingTasks.add(adjustment);
+        if (stage.backpressured())
+            backpressuredTasks.addAndGet(adjustment);
     }
 
     public void blocked(TPCTaskType stage)
@@ -133,9 +136,15 @@ public class TPCMetricsAndLimits implements TPCMetrics
         return stat.blockedTasks.longValue();
     }
 
+    @Override
+    public long backpressuredTaskCount()
+    {
+        return backpressuredTasks.get();
+    }
+
     public int maxQueueSize()
     {
-        long activeReads = activeCountedTasks.get();
+        long activeReads = externallyCountedTasks.get();
         return (int) Math.max(maxConcurrentRequests - activeReads, 0);
     }
 

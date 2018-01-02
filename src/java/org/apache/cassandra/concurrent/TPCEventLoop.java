@@ -42,6 +42,17 @@ public interface TPCEventLoop extends EventLoop
 
     boolean canExecuteImmediately(TPCTaskType runnable);
 
+    /**
+     * Returns true if the event loop should signal backpressure because overloaded, false otherwise.
+     * <p>
+     * It is up to the implementor to properly define what "overloading" means, and the default implementation just
+     * assumes no overloading/backpressure at all.
+     */
+    default public boolean shouldBackpressure()
+    {
+        return false;
+    }
+
     @Override
     public TPCEventLoopGroup parent();
 }

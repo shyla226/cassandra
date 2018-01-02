@@ -29,6 +29,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Uninterruptibles;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -114,6 +115,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         super(nThreads, TPCThread.newTPCThreadFactory());
 
         this.eventLoops = ImmutableList.copyOf(Iterables.transform(this, e -> (SingleCoreEventLoop) e));
+        this.eventLoops.forEach(e -> e.start());
 
         //Register these loop threads with the Watcher
         ParkedThreadsMonitor.instance.get().addThreadsToMonitor(new ArrayList<>(eventLoops));
@@ -180,6 +182,12 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         /** for schedule check throttling */
         private long lastScheduledCheckTime = lastEpollCheckTime;
 
+       /**
+        * The max allowed number of pending "backpressured" tasks: no new such tasks will be accepted , to avoid
+        * overloading the heap and leave more CPU power to already pending tasks.
+        */
+        private static final int MAX_PENDING = DatabaseDescriptor.getTPCPendingRequestsLimit();
+
         private SingleCoreEventLoop(EpollTPCEventLoopGroup parent, TPCThread.TPCThreadsCreator executor, AIOContext.Config aio)
         {
             super(parent,
@@ -191,7 +199,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
             this.parent = parent;
             this.queue = new MpscArrayQueue<>(1 << 16);
-            this.pendingQueue = new MpscArrayQueue<>(DatabaseDescriptor.getTPCPendingRequestsLimit());
+            this.pendingQueue = new MpscArrayQueue<>(1 << 16);
 
             this.state = ThreadState.WORKING;
             this.lastDrainTime = -1;
@@ -208,8 +216,17 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             this.busySpinStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_SPIN);
             this.yieldStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_YIELD);
             this.parkStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_PARK);
-            // prevent a racing thread start from seeing half initialized instance
+        }
+
+        public void start()
+        {
             racyInit.countDown();
+        }
+
+        @Override
+        public boolean shouldBackpressure()
+        {
+            return metrics.backpressuredTaskCount() >= MAX_PENDING;
         }
 
         @Override
@@ -332,7 +349,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
                 if (tpc.isPendable())
                 {
                     // If we already have something in the pending queue, this task should not jump it.
-                    if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(task, metrics.maxQueueSize()))
+                    if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(tpc, metrics.maxQueueSize()))
                         return;
 
                     if (pendingQueue.relaxedOffer(tpc))
@@ -618,6 +635,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
                 // not the case for MpscArrayQueue.
                 if (queue.relaxedOffer(tpc))
                 {
+                    ++processed;
                     pendingQueue.relaxedPoll();
                     tpc.unsetPending();
                 }
