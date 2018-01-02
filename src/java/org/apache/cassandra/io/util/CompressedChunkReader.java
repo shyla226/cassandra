@@ -93,9 +93,14 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     }
 
     @Override
-    public Rebufferer instantiateRebufferer()
+    @SuppressWarnings("resource") // channel closed by the PrefetchingRebufferer
+    public Rebufferer instantiateRebufferer(FileAccessType accessType)
     {
-        return new BufferManagingRebufferer.Aligned(this);
+        if (accessType == FileAccessType.RANDOM)
+            return new BufferManagingRebufferer.Aligned(this);
+
+        AsynchronousChannelProxy channel = this.channel.maybeBatched(PrefetchingRebufferer.READ_AHEAD_VECTORED);
+        return new PrefetchingRebufferer(new BufferManagingRebufferer.Aligned(withChannel(channel)), channel);
     }
 
     public static class Standard extends CompressedChunkReader
@@ -122,12 +127,6 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 // plus one more for alignment (one part of which sits before wanted data, the rest after it).
                 return TPC.roundUpToBlockSize(size) + TPC.AIO_BLOCK_SIZE;
             });
-        }
-
-        @Override
-        public boolean supportsPrefetch()
-        {
-            return true;
         }
 
         @Override
@@ -257,6 +256,18 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             bufferHandle.recycle();
             futureBuffer.completeExceptionally(new CorruptSSTableException(t, channel.filePath()));
         }
+
+        @Override
+        public boolean isMmap()
+        {
+            return false;
+        }
+
+        @Override
+        public ChunkReader withChannel(AsynchronousChannelProxy channel)
+        {
+            return new Standard(channel, metadata);
+        }
     }
 
     public static class Mmap extends CompressedChunkReader
@@ -267,12 +278,6 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         {
             super(channel, metadata);
             this.regions = regions;
-        }
-
-        @Override
-        public boolean supportsPrefetch()
-        {
-            return false;
         }
 
         @Override
@@ -365,6 +370,18 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         {
             regions.closeQuietly();
             super.close();
+        }
+
+        @Override
+        public boolean isMmap()
+        {
+            return true;
+        }
+
+        @Override
+        public ChunkReader withChannel(AsynchronousChannelProxy channel)
+        {
+            throw new UnsupportedOperationException("Recreating a reader with a new channel not yet implemented for mmap");
         }
     }
 }

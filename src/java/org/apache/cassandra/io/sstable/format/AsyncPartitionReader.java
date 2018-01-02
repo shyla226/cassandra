@@ -44,6 +44,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.FileAccessType;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.Rebufferer.NotInCacheException;
 import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
@@ -295,8 +296,12 @@ class AsyncPartitionReader
                 return true;  // no need to open or read data file, issue directly
             }
 
+            // The call to open the data reader does not include a read and can't throw.
+            // We select RANDOM access mode since a buffer is normally large enough to contain an entire partition
+            // so we don't forecast a sequential access, but note that buffers are capped at 64k so there is room
+            // for improvement for large partitions
             if (dataFileOwner.compareAndSet(DataFileOwner.NONE, DataFileOwner.PARTITION_READER))
-                dfile = table.openDataReader(ReaderConstraint.ASYNC, 0); // This does not include a read and can't throw
+                dfile = table.openDataReader(ReaderConstraint.ASYNC, FileAccessType.RANDOM);
 
             filePos = indexEntry.position;
             state = State.HAVE_DFILE;
@@ -406,9 +411,12 @@ class AsyncPartitionReader
             case PARTITION_SUBSCRIPTION:
                 return dfile;         // already ours, possibly needed async seek to content
             case NONE:
-                // partition reader closed, we need to reopen file
+                // partition reader closed, we need to reopen file, we select RANDOM access mode since
+                // a buffer is normally large enough to contain an entire partition so we don't forecast
+                // a sequential access, but note that buffers are capped at 64k so there is room for improvement
+                // for large partitions
                 dataFileOwner.set(DataFileOwner.PARTITION_SUBSCRIPTION);
-                return dfile = table.openDataReader(ReaderConstraint.ASYNC, 0);
+                return dfile = table.openDataReader(ReaderConstraint.ASYNC, FileAccessType.RANDOM);
             default:
                 throw new AssertionError(); // if it was this, compareAndSet should have worked
             }

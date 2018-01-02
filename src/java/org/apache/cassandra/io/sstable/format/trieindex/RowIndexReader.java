@@ -22,7 +22,6 @@ import java.io.PrintStream;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.tries.SerializationNode;
 import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.tries.TrieSerializer;

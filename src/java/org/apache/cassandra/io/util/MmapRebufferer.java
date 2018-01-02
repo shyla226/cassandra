@@ -65,15 +65,9 @@ public class MmapRebufferer extends AbstractReaderFileProxy implements Rebuffere
     }
 
     @Override
-    public Rebufferer instantiateRebufferer()
+    public Rebufferer instantiateRebufferer(FileAccessType accessType)
     {
         return this;
-    }
-
-    @Override
-    public boolean supportsPrefetch()
-    {
-        return false; // no need to prefetch for mmap, OS does that
     }
 
     @Override

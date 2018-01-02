@@ -19,7 +19,6 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.PrintStream;
 
-import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.tries.ReverseValueIterator;
 import org.apache.cassandra.io.util.FileHandle;

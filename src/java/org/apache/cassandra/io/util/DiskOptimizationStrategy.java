@@ -31,11 +31,6 @@ public abstract class DiskOptimizationStrategy
     private static final int MIN_BUFFER_SIZE = Integer.parseInt(System.getProperty(MIN_BUFFER_SIZE_NAME, "0"));
     private static final int MAX_BUFFER_SIZE = Integer.parseInt(System.getProperty(MAX_BUFFER_SIZE_NAME, "0"));
 
-    /**
-     * How many buffers to prefetch for sequential scans such as compactions or partial scans such as range queries.
-     */
-    public static final int NUM_READ_AHEAD_BUFFERS = Integer.parseInt(System.getProperty("dse.num_read_ahead_buffers", "4"));
-
     private static final Logger logger = LoggerFactory.getLogger(DiskOptimizationStrategy.class);
 
     final int minBufferSize;
@@ -53,8 +48,6 @@ public abstract class DiskOptimizationStrategy
 
         logger.info("Disk optimization strategy for {} using min buffer size of {} bytes and max buffer size of {} bytes",
                     diskType(), minBufferSize, maxBufferSize);
-
-        logger.info("Read ahead for full or range scans (e.g. range queries, compactions) is {} buffers", NUM_READ_AHEAD_BUFFERS);
     }
 
     public static DiskOptimizationStrategy create(Config conf)
@@ -147,4 +140,10 @@ public abstract class DiskOptimizationStrategy
 
         return Math.min(maxBufferSize, ret);
     }
+
+    /**
+     * @return the preferred read ahead size for sequential scans. Tests indicate that 128KB is not sufficient
+     * for spinning disks.
+     */
+    public abstract int readAheadSizeKb();
 }

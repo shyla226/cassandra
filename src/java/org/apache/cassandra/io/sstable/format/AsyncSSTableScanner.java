@@ -33,7 +33,7 @@ import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.util.DiskOptimizationStrategy;
+import org.apache.cassandra.io.util.FileAccessType;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.Throwables;
@@ -69,7 +69,7 @@ public class AsyncSSTableScanner extends FlowSource<FlowableUnfilteredPartition>
         assert sstable != null;
 
         this.sstable = sstable;
-        this.dfile = sstable.openDataReader(Rebufferer.ReaderConstraint.ASYNC, DiskOptimizationStrategy.NUM_READ_AHEAD_BUFFERS);
+        this.dfile = sstable.openDataReader(Rebufferer.ReaderConstraint.ASYNC, FileAccessType.SEQUENTIAL);
         this.columns = columns;
         this.dataRange = dataRange;
         this.ranges = ranges;

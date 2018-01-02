@@ -52,4 +52,10 @@ class SsdDiskOptimizationStrategy extends DiskOptimizationStrategy
 
         return roundBufferSize(recordSize);
     }
+
+    @Override
+    public int readAheadSizeKb()
+    {
+        return 64;
+    }
 }
