@@ -1039,7 +1039,7 @@ public final class SchemaKeyspace
 
         if (!TableMetadata.Flag.isCQLCompatible(flags))
         {
-            throw new IllegalArgumentException(TableMetadata.COMPACT_STORAGE_HALT_MESSAGE);
+            throw new IllegalArgumentException(String.format(TableMetadata.COMPACT_STORAGE_HALT_MESSAGE, keyspaceName, tableName));
         }
 
         return TableMetadata.builder(keyspaceName, tableName, TableId.fromUUID(row.getUUID("id")))
