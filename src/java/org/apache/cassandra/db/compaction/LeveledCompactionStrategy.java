@@ -334,7 +334,13 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
     @Override
     public void addSSTable(SSTableReader added)
     {
-        manifest.add(added);
+        manifest.add(added, false);
+    }
+
+    @Override
+    public void addSSTableFromStreaming(SSTableReader added)
+    {
+        manifest.add(added, true);
     }
 
     @Override

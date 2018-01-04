@@ -24,8 +24,8 @@ import java.net.SocketException;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.zip.Checksum;
-import java.util.Set;
 
+import com.google.common.collect.Multimap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,19 +49,23 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
 
     private static final int BUFFER_SIZE = Integer.getInteger(Config.PROPERTY_PREFIX + ".itc_buffer_size", 1024 * 64);
 
+    private long connectTime = 0;
     private final ProtocolVersion protocolVersion;
     private final boolean compressed;
     private final Socket socket;
-    private final Set<Closeable> group;
-    public InetAddress from;
+    private final Multimap<InetAddress, Closeable> group;
+    public final InetAddress socketFrom;
     private Message.Serializer messageSerializer;
 
-    public IncomingTcpConnection(ProtocolVersion version, boolean compressed, Socket socket, Set<Closeable> group)
+    public InetAddress snitchFrom;
+
+    public IncomingTcpConnection(ProtocolVersion version, boolean compressed, Socket socket, Multimap<InetAddress, Closeable> group)
     {
         super("MessagingService-Incoming-" + socket.getInetAddress());
         this.protocolVersion = version;
         this.compressed = compressed;
         this.socket = socket;
+        this.socketFrom = socket.getInetAddress();
         this.group = group;
         if (DatabaseDescriptor.getInternodeRecvBufferSize() > 0)
         {
@@ -130,7 +134,9 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
         }
         finally
         {
-            group.remove(this);
+            group.remove(socketFrom, this);
+            if (snitchFrom != null)
+                group.remove(snitchFrom, this);
         }
     }
 
@@ -147,10 +153,13 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
         ProtocolVersion maxVersion = ProtocolVersion.fromHandshakeVersion(in.readInt());
         // outbound side will reconnect if necessary to upgrade version
         assert protocolVersion.compareTo(MessagingService.current_version.protocolVersion()) <= 0;
-        from = CompactEndpointSerializationHelper.deserialize(in);
+        snitchFrom = CompactEndpointSerializationHelper.deserialize(in);
         // record the (true) version of the endpoint
-        MessagingService.instance().setVersion(from, MessagingVersion.from(maxVersion));
-        logger.trace("Set version for {} to {} (will use {})", from, maxVersion, MessagingService.instance().getVersion(from));
+        MessagingService.instance().setVersion(snitchFrom, MessagingVersion.from(maxVersion));
+        logger.trace("Set version for {} to {} (will use {})", snitchFrom, maxVersion, MessagingService.instance().getVersion(snitchFrom));
+
+        //Save the connection under snitch address
+        group.put(snitchFrom, this);
 
 
         MessagingVersion version = MessagingVersion.from(protocolVersion);
@@ -180,6 +189,8 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
             in = new NIODataInputStream(channel != null ? channel : Channels.newChannel(socket.getInputStream()), BUFFER_SIZE);
         }
 
+        this.connectTime = System.nanoTime();
+
         while (true)
         {
             receiveMessage(new TrackedDataInputPlus(in));
@@ -191,7 +202,7 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
         int size = messageSerializer.readSerializedSize(input);
         try
         {
-            Message message = messageSerializer.deserialize(input, size, from);
+            Message message = messageSerializer.deserialize(input, size, snitchFrom);
             if (message == null)
             {
                 // callback expired; nothing to do
@@ -208,4 +219,10 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
                 throw e;
         }
     }
+
+    public long getConnectTime()
+    {
+        return connectTime;
+    }
+
 }
