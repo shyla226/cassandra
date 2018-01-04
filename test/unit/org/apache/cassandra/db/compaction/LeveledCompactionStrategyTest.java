@@ -493,7 +493,7 @@ public class LeveledCompactionStrategyTest
             cfs.forceBlockingFlush();
         }
         LeveledCompactionStrategyTest.waitForLeveling(cfs);
-        LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getStrategies().get(1);
+        LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getStrategies().get(1).get(0);
         while (!cfs.getTracker().getCompacting().isEmpty())
             Thread.sleep(100);
         cfs.disableAutoCompaction();
@@ -594,7 +594,7 @@ public class LeveledCompactionStrategyTest
             cfs.forceBlockingFlush();
         }
         LeveledCompactionStrategyTest.waitForLeveling(cfs);
-        LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getStrategies().get(1);
+        LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getStrategies().get(1).get(0);
         cfs.disableAutoCompaction();
         while (!cfs.getTracker().getCompacting().isEmpty())
             Thread.sleep(100);
