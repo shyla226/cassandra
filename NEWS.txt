@@ -48,6 +48,63 @@ Operations
    - DSE is logging by default a heap histogram on OutOfMemoryError. To disable that behavior
      set the 'cassandra.printHeapHistogramOnOutOfMemoryError' System property to 'false'.
 
+    - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
+      The command must be executed on the node where the rebuild operation is running. Streams
+      may continue until they finish or timeout.
+
+Upgrading
+---------
+    - Upgrades from DSE 5.0 might have produced unnecessary schema migrations while
+      there was at least one DSE 5.0 node in the cluster. It is therefore highly
+      recommended to upgrade from DSE 5.0 to at least DSE 5.1.6. The root cause of
+      this schema mismatch was a difference in the way how schema digests were computed
+      in DSE 5.0 and DSE 5.1. To mitigate this issue, DSE 5.1.6 and newer announce
+      DSE 5.0 compatible digests as long as there is at least one DSE 5.0 node in the
+      cluster. Once all nodes have been upgraded, the "real" schema version will be
+      announced. Note: this fix is only necessary in DSE 5.1 and therefore only applies
+      to DSE 5.1. (DB-1477)
+    - DSE is now relying on the JVM options to properly shutdown on OutOfMemoryError. By default it will
+      rely on the OnOutOfMemoryError option as the ExitOnOutOfMemoryError and CrashOnOutOfMemoryError options
+      are not supported by the older 1.7 and 1.8 JVMs. A warning will be logged at startup if none of those JVM
+      options are used. See CASSANDRA-13006 for more details
+    - DSE is logging by default a heap histogram on OutOfMemoryError. To disable that behavior
+      set the 'cassandra.printHeapHistogramOnOutOfMemoryError' System property to 'false'.
+
+
+DSE 5.1.3
+=========
+
+Upgrading
+---------
+    - seed_gossip_probability setting was added to cassandra.yaml.  This setting will pick the percentage of times
+      gossip messages are sent to a seed.  This improves the time it takes for gossip changes to
+      propagate across the cluster. Defaults to 100% (1.0)
+
+Operations
+----------
+    - Added "-Dcassandra.replace_consistency" to support streaming each range from more than one source.
+      By default, node replacement only streams one copy of data which may be stale wrt to QUORUM/LOCAL_QUORUM.
+      After replacing a down node with "-Dcassandra.replace_consistency=LOCAL_DC_QUORUM", replacement node will be up
+      with consistent data assuming data is inserted with LOCAL_QUORUM. Note that streaming multiple copies causes more
+      IO and compactions. Alternatively, operators can run repair before bootstrapping the replacement with the
+      default replace_consistency=ONE.
+      Available options: "ONE"(default), "LOCAL_DC_QUORUM", "GLOBAL_QUORUM".
+   - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
+     The command must be executed on the node where the rebuild operation is running. Streams
+     may continue until they finish or timeout.
+   - Added "-Dcassandra.replace_consistency" to support streaming each range from more than one source.
+     By default, node replacement only streams one copy of data which may be stale wrt to QUORUM/LOCAL_QUORUM.
+     After replacing a down node with "-Dcassandra.replace_consistency=LOCAL_DC_QUORUM", replacement node will be up
+     with consistent data assuming data is inserted with LOCAL_QUORUM. Note that streaming multiple copies causes more
+     IO and compactions. Alternatively, operators can run repair before bootstrapping the replacement with the
+     default replace_consistency=ONE.
+     Available options: "ONE"(default), "LOCAL_DC_QUORUM", "GLOBAL_QUORUM".
+   - DSE is logging by default a heap histogram on OutOfMemoryError. To disable that behavior
+     set the 'cassandra.printHeapHistogramOnOutOfMemoryError' System property to 'false'.
+   - Improved gossip settling added. On startup DSE waits till all nodes are seen before fully joining the cluster.
+     This improves latency spikes when restarting nodes.
+   - LeveledCompactionStrategy SSTables will keep their existing level on nodetool refresh, nodetool move,
+     and nodetool decommission.
 
 Upgrading
 ---------
@@ -83,7 +140,7 @@ Deprecation
       - rpc_interface_prefer_ipv6 -> native_transport_interface_prefer_ipv6
       - broadcast_rpc_address -> native_transport_broadcast_address
       - rpc_keepalive -> native_transport_keepalive
-    - Removed org.apache.cassandra.metrics.Table.{AntiCompactedBytes|NonAntiCompactedBytes} metrics.
+    - Removedorg.apache.cassandra.metrics.Table.{AntiCompactedBytes|NonAntiCompactedBytes} metrics.
     - Removed following properties from cassandra.yaml: concurrent_reads, concurrent_writes,
       concurrent_counter_writes, concurrent_materialized_view_writes, streaming_socket_timeout_in_ms
 
