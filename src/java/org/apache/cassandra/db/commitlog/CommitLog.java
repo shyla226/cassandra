@@ -35,7 +35,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.*;
@@ -72,7 +71,7 @@ public class CommitLog implements CommitLogMBean
 
     // we only permit records HALF the size of a commit log, to ensure we don't spin allocating many mostly
     // empty segments when writing large records
-    final long MAX_MUTATION_SIZE = DatabaseDescriptor.getMaxMutationSize();
+    static final long MAX_MUTATION_SIZE = DatabaseDescriptor.getMaxMutationSize();
 
     final public AbstractCommitLogSegmentManager segmentManager;
 
@@ -263,6 +262,11 @@ public class CommitLog implements CommitLogMBean
         executor.requestExtraSync();
     }
 
+    public static boolean isOversizedMutation(long mutationSize)
+    {
+        return mutationSize + CommitLogSegment.ENTRY_OVERHEAD_SIZE > MAX_MUTATION_SIZE;
+    }
+
     /**
      * Add a Mutation to the commit log. If CDC is enabled, this can fail.
      *
@@ -277,7 +281,7 @@ public class CommitLog implements CommitLogMBean
         int size = serializedMutation.remaining();
 
         int totalSize = size + ENTRY_OVERHEAD_SIZE;
-        if (totalSize > MAX_MUTATION_SIZE)
+        if (isOversizedMutation(size))
         {
             return Single.error(
             new IllegalArgumentException(String.format("Mutation of %s is too large for the maximum size of %s",

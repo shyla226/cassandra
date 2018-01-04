@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.NodeSyncConfig;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -220,6 +221,7 @@ class Validator
                                          .blockForAllTargets()
                                          .observer(observer)
                                          .readRepairDecision(ReadRepairDecision.GLOBAL)
+                                         .readRepairTimeoutInMs(2 * DatabaseDescriptor.getWriteRpcTimeout())
                                          .build(System.nanoTime());
 
         logger.trace("Starting execution of validation on {}", segment());

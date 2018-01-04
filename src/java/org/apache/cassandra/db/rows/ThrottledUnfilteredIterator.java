@@ -212,6 +212,15 @@ public class ThrottledUnfilteredIterator extends AbstractIterator<UnfilteredRowI
     }
 
     /**
+     * Splits a {@link UnfilteredRowIterator} into multiple {@link UnfilteredRowIterator} batches with size no higher
+     * than <b>maxBatchSize</b>
+     */
+    public static CloseableIterator<UnfilteredRowIterator> throttle(UnfilteredRowIterator iterator, int maxBatchSize)
+    {
+        return new ThrottledUnfilteredIterator(iterator, maxBatchSize);
+    }
+
+    /**
      * Splits a {@link UnfilteredPartitionIterator} in {@link UnfilteredRowIterator} batches with size no higher
      * than <b>maxBatchSize</b>
      */

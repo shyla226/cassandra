@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Joiner;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 
 import io.reactivex.Completable;
@@ -31,24 +32,25 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.DataLimits.Counter;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.net.Verbs.Group;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.CloseableIterator;
 
 public class DataResolver extends ResponseResolver<FlowablePartition>
 {
-    private static final boolean DROP_OVERSIZED_READ_REPAIR_MUTATIONS =
-            Boolean.getBoolean("cassandra.drop_oversized_readrepair_mutations");
-    
     DataResolver(ReadCommand command, ReadContext ctx, int maxResponseCount)
     {
         super(command, ctx, maxResponseCount);
@@ -500,52 +502,67 @@ public class DataResolver extends ResponseResolver<FlowablePartition>
             {
                 for (int i = 0; i < repairs.length; i++)
                     if (null != repairs[i])
-                        sendRepairMutation(repairs[i], sources[i]);
+                        sendRepairMutation(repairs[i], sources[i], true);
             }
 
-            private void sendRepairMutation(PartitionUpdate partition, InetAddress destination)
+            private void sendRepairMutation(PartitionUpdate partition, InetAddress destination, boolean logOversizedMutation)
             {
                 Mutation mutation = new Mutation(partition);
-
                 MessagingVersion messagingVersion = MessagingService.instance().getVersion(destination);
-                long mutationSize = Mutation.serializers.get(messagingVersion.groupVersion(Group.WRITES))
-                                                        .serializedSize(mutation);
-
-                int maxMutationSize = DatabaseDescriptor.getMaxMutationSize();
-
-                if (mutationSize <= maxMutationSize)
+                long mutationSize = Mutation.serializers.get(messagingVersion.groupVersion(Group.WRITES)).serializedSize(mutation);
+                if (!CommitLog.isOversizedMutation(mutationSize))
                 {
                     Tracing.trace("Sending read-repair-mutation to {}", destination);
                     if (ctx.readObserver != null)
                         ctx.readObserver.onRepair(destination, partition);
-
-                    // use a separate verb here to avoid writing hints on timeouts
-                    Request<Mutation, EmptyPayload> request = Verbs.WRITES.READ_REPAIR.newRequest(destination, mutation);
-                    MessagingService.instance().send(request, repairResults.getRepairCallback());
-                    ColumnFamilyStore.metricsFor(command.metadata().id).readRepairRequests.mark();
+                    sendMutationInternal(mutation, destination);
+                    return;
                 }
-                else if (DROP_OVERSIZED_READ_REPAIR_MUTATIONS)
+
+                int opCount = partition.operationCount(); // approximated row count
+                if (opCount == 1)
                 {
-                    logger.debug("Encountered an oversized ({}/{}) read repair mutation for table {}, key {}, node {}",
+                    // Unfortunately, we cannot split anymore.
+                    logger.error("Encountered an oversized ({}/{}) read repair mutation of one row for table {}, key {}, node {}. "
+                            + "Increase max_mutation_size_in_kb on all nodes could mitigate the issue.",
                                  mutationSize,
-                                 maxMutationSize,
+                                 DatabaseDescriptor.getMaxMutationSize(),
                                  command.metadata(),
                                  command.metadata().partitionKeyType.getString(partitionKey.getKey()),
                                  destination);
-                }
-                else
-                {
-                    logger.warn("Encountered an oversized ({}/{}) read repair mutation for table {}, key {}, node {}",
-                                mutationSize,
-                                maxMutationSize,
-                                command.metadata(),
-                                command.metadata().partitionKeyType.getString(partitionKey.getKey()),
-                                destination);
-
                     int blockFor = ctx.requiredResponses();
-                    Tracing.trace("Timed out while read-repairing after receiving all {} data and digest responses", blockFor);
-                    throw new ReadTimeoutException(ctx.consistencyLevel, blockFor - 1, blockFor, true);
+                    Tracing.trace("Read repair failed after receiving all {} data and digest responses due to oversized readrepair mutation of one row",
+                                  blockFor);
+                    throw new ReadFailureException(ctx.consistencyLevel,
+                                                   blockFor - 1,
+                                                   blockFor,
+                                                   true,
+                                                   ImmutableMap.of(destination, RequestFailureReason.UNKNOWN));
                 }
+                if (logOversizedMutation)
+                    logger.debug("Encountered an oversized ({}/{}) read repair mutation for table {}, key {}, node {}, will split the mutation by half",
+                                 mutationSize,
+                                 DatabaseDescriptor.getMaxMutationSize(),
+                                 command.metadata(),
+                                 command.metadata().partitionKeyType.getString(partitionKey.getKey()),
+                                 destination);
+
+                int batchSize = (int) Math.ceil(opCount / 2.0); // always split by 2, use ceiling to handle odd number
+
+                try (CloseableIterator<UnfilteredRowIterator> throttled =
+                        ThrottledUnfilteredIterator.throttle(partition.unfilteredIterator(), batchSize))
+                {
+                    while (throttled.hasNext())
+                        sendRepairMutation(PartitionUpdate.fromIterator(throttled.next(), command.columnFilter()), destination, false);
+                }
+            }
+
+            private void sendMutationInternal(Mutation mutation, InetAddress destination)
+            {
+                // use a separate verb here to avoid writing hints on timeouts
+                Request<Mutation, EmptyPayload> request = Verbs.WRITES.READ_REPAIR.newRequest(destination, mutation);
+                MessagingService.instance().send(request, repairResults.getRepairCallback());
+                ColumnFamilyStore.metricsFor(command.metadata().id).readRepairRequests.mark();
             }
         }
     }

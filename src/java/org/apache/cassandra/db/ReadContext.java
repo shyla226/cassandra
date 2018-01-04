@@ -22,6 +22,7 @@ import java.util.List;
 
 import javax.annotation.Nullable;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ReadRepairDecision;
 
@@ -50,6 +51,8 @@ public class ReadContext
     // Caches the value of how much responses we need to satisfy the CL
     private final int consistencyBlockFor;
 
+    private final long readRepairTimeoutInMs;
+
     private ReadContext(Keyspace keyspace,
                         ConsistencyLevel consistencyLevel,
                         ClientState clientState,
@@ -58,7 +61,8 @@ public class ReadContext
                         boolean forContinuousPaging,
                         boolean blockForAllReplicas,
                         ReadReconciliationObserver readObserver,
-                        ReadRepairDecision readRepairDecision)
+                        ReadRepairDecision readRepairDecision,
+                        long readRepairTimeoutInMs)
     {
         this.keyspace = keyspace;
         this.consistencyLevel = consistencyLevel;
@@ -70,6 +74,7 @@ public class ReadContext
         this.readObserver = readObserver;
         this.readRepairDecision = readRepairDecision;
         this.consistencyBlockFor = consistencyLevel.blockFor(keyspace);
+        this.readRepairTimeoutInMs = readRepairTimeoutInMs;
     }
 
     /**
@@ -102,7 +107,8 @@ public class ReadContext
                                forContinuousPaging,
                                blockForAllReplicas,
                                readObserver,
-                               readRepairDecision);
+                               readRepairDecision,
+                               readRepairTimeoutInMs);
     }
 
     /**
@@ -118,7 +124,8 @@ public class ReadContext
                                forContinuousPaging,
                                blockForAllReplicas,
                                readObserver,
-                               readRepairDecision);
+                               readRepairDecision,
+                               readRepairTimeoutInMs);
     }
 
     /**
@@ -140,7 +147,8 @@ public class ReadContext
                                forContinuousPaging,
                                blockForAllReplicas,
                                readObserver,
-                               readRepairDecision);
+                               readRepairDecision,
+                               readRepairTimeoutInMs);
     }
 
     /**
@@ -219,6 +227,7 @@ public class ReadContext
         private boolean blockForAllReplicas;
         private ReadReconciliationObserver readObserver;
         private ReadRepairDecision readRepairDecision = ReadRepairDecision.NONE;
+        private long readRepairTimeoutInMs = DatabaseDescriptor.getWriteRpcTimeout();
 
         private Builder(Keyspace keyspace, ConsistencyLevel consistencyLevel)
         {
@@ -324,6 +333,21 @@ public class ReadContext
             return this;
         }
 
+        /**
+         * Timeout of read repair.
+         * <p>
+         * By default, the read repair timeout is {@link DatabaseDescriptor#getWriteRpcTimeout()} for client queries.
+         * In case of NodeSync, a higher timeout is needed for handling oversized read-repair mutations.
+         *
+         * @param readRepairTimeoutInMs the read repair timeout.
+         * @return this builder.
+         */
+        public Builder readRepairTimeoutInMs(long readRepairTimeoutInMs)
+        {
+            this.readRepairTimeoutInMs = readRepairTimeoutInMs;
+            return this;
+        }
+
         public ReadContext build(long queryStartNanos)
         {
             return new ReadContext(keyspace,
@@ -334,7 +358,8 @@ public class ReadContext
                                    forContinuousPaging,
                                    blockForAllReplicas,
                                    readObserver,
-                                   readRepairDecision);
+                                   readRepairDecision,
+                                   readRepairTimeoutInMs);
         }
     }
 }
