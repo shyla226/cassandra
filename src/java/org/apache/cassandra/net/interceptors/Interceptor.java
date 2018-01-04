@@ -20,14 +20,14 @@ package org.apache.cassandra.net.interceptors;
 import org.apache.cassandra.net.Message;
 
 /**
- * Interface for message "interceptor" that intercept inter-node messages for testing purposes.
+ * Interface for message "interceptor" that intercepts inter-node messages.
  * <p>
- * Interceptors can set through the {@code -Ddse.net.interceptors} system property at startup.
+ * Interceptors can be set through the {@code -Ddse.net.interceptors} system property at startup.
  * When set this way, all message received or sent by the node will pass through the interceptor methods and the
- * interceptor may or may not do something with.
+ * interceptor may or may not do something with them.
  * <p>
- * Interceptors exists for testing: they allow for things like having a node drop certain types of message on the floor
- * temporarily, delaying message delivery by some amount to simulate latency, ....
+ * Interceptors were originally created and are still mainly used for testing: they allow for things like having a node
+ * drop certain types of messages on the floor temporarily, delaying message delivery to simulate latency, etc.
  * <p>
  * It is possible to set more than one interceptor at a time, for instance by passing:
  * {@code -Ddse.net.interceptors='DelayingInterceptor, DroppingInterceptor'}. In that case,
@@ -36,9 +36,9 @@ import org.apache.cassandra.net.Message;
  * Note that most interceptor have a number of additional options to control their behavior, some of them inherited from
  * {@link AbstractInterceptor}.
  *
- * @see DroppingInterceptor for an interceptor that drops certain message on the floor
- * @see DelayingInterceptor for an interceptor that delays message by a configurable amount before delivering them
- * @see FakeWriteInterceptor for an interceptor that drop but acknowledge write messages
+ * @see DroppingInterceptor for an interceptor that drops certain messages on the floor
+ * @see DelayingInterceptor for an interceptor that delays messages by a configurable amount before delivering them
+ * @see FakeWriteInterceptor for an interceptor that drops but acknowledges write messages
  */
 public interface Interceptor
 {

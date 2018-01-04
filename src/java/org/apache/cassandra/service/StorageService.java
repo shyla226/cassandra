@@ -87,6 +87,10 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.*;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.*;
+import org.apache.cassandra.net.interceptors.AbstractInterceptor;
+import org.apache.cassandra.net.interceptors.InterceptionContext;
+import org.apache.cassandra.net.interceptors.Interceptor;
+import org.apache.cassandra.net.interceptors.MessageDirection;
 import org.apache.cassandra.repair.RepairRunnable;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.repair.messages.RepairOption;
@@ -756,6 +760,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (DatabaseDescriptor.getReplaceTokens().size() > 0 || DatabaseDescriptor.getReplaceNode() != null)
                 throw new RuntimeException("Replace method removed; use cassandra.replace_address instead");
 
+            Interceptor gossiperInitGuard = newGossiperInitGuard();
+            MessagingService.instance().addInterceptor(gossiperInitGuard);
             if (!MessagingService.instance().isListening())
                 MessagingService.instance().listen();
 
@@ -813,6 +819,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             int generation = TPCUtils.blockingGet(SystemKeyspace.incrementAndGetGeneration());
             Gossiper.instance.start(generation, appStates); // needed for node-ring gathering.
             gossipActive = true;
+            // Technically we should clean this up in a finally block, but if prepareToJoin() throws unexpectedly, we
+            // would have bigger problems, as node initialization would be seriousy affected.
+            MessagingService.instance().removeInterceptor(gossiperInitGuard);
             // gossip snitch infos (local DC and rack)
             gossipSnitchInfo();
             // gossip Schema.emptyVersion forcing immediate check for schema updates (see MigrationManager#maybeScheduleSchemaPull)
@@ -3978,7 +3987,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
-
     public void setLoggingLevel(String classQualifier, String rawLevel) throws Exception
     {
         ch.qos.logback.classic.Logger logBackLogger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(classQualifier);
@@ -4207,6 +4215,27 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     + "While this generally shouldn't happen (and should be reported if it happens constantly), "
                     + "it should be harmless.");
         }
+    }
+
+    // A MessagingService interceptor that should be active during the period between MessagingService's activation and
+    // Gossiper's full initialization. During this period, we should be able to send and receive messages (e.g. for
+    // bootstrapping communication, for gossip shadow rounds or initialization, etc.), but some messages may need to
+    // be dropped or amended. Currently this includes solely incoming SCHEMA.PUSH messages (see DB-1487).
+    private static final Interceptor newGossiperInitGuard()
+    {
+        final String interceptorName = "Gossiper initialization-guarding interceptor";
+        return new AbstractInterceptor(interceptorName,
+                                       ImmutableSet.of(Verbs.SCHEMA.PUSH),
+                                       Message.Type.all(),
+                                       ImmutableSet.of(MessageDirection.RECEIVING),
+                                       ImmutableSet.of(Message.Locality.REMOTE))
+        {
+            protected <M extends Message<?>> void handleIntercepted(M message, InterceptionContext<M> context)
+            {
+                logger.debug("Message {} intercepted and dropped by {}", message, interceptorName);
+                context.drop(message);
+            }
+        };
     }
 
     private void leaveRing()
