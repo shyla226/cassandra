@@ -19,6 +19,7 @@ package org.apache.cassandra.concurrent;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -40,8 +41,18 @@ public class TPCBoundaries
 {
     private static final Token[] EMPTY_TOKEN_ARRAY = new Token[0];
 
-    // Special boundaries object that map all token to core 0.
+    // Special boundaries that map all tokens to core 0. These boundaries should now only be used when the local ranges
+    // aren't yet available (StorageService not yet initialized) and there were no sstables from which we could
+    // extract local ranges on startup. Local system tables should always use the LOCAL boundaries just below.
     public static TPCBoundaries NONE = new TPCBoundaries(EMPTY_TOKEN_ARRAY);
+
+    // Special boundaries for LOCAL tables, for which we know all the data is local, so we can split
+    // the entire partition range supported by the partitioner. We need these boundaries very early on during
+    // startup and they do not change, therefore they are stored in this static field. The partitioner
+    // needs to support the maximum token, but this is a requirement for partitioners with a splitter.
+    public static final TPCBoundaries LOCAL = compute(Collections.singletonList(new Range(getPartitioner().getMinimumToken(),
+                                                                                          getPartitioner().getMaximumToken())),
+                                                      TPC.getNumCores());
 
     private final Token[] boundaries;
 
@@ -50,6 +61,12 @@ public class TPCBoundaries
         this.boundaries = boundaries;
     }
 
+    private static IPartitioner getPartitioner()
+    {
+        IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
+        assert partitioner.splitter().isPresent() : partitioner.getClass().getName() + " doesn't support cpu boundaries (max token and splitter)";
+        return partitioner;
+    }
     /**
      * Computes TPC boundaries for data distributed over the provided ranges.
      *
@@ -63,8 +80,7 @@ public class TPCBoundaries
         if (numCores == 1)
             return NONE;
 
-        IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
-        assert partitioner.splitter().isPresent() : partitioner.getClass().getName() + " doesn't support cpu boundary splitting";
+        IPartitioner partitioner = getPartitioner();
         Splitter splitter = partitioner.splitter().get();
         List<Token> boundaries = splitter.splitOwnedRanges(numCores,
                                                            localRanges,

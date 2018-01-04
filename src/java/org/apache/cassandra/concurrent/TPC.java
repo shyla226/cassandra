@@ -28,9 +28,7 @@ import io.netty.channel.epoll.Aio;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
-import io.reactivex.Scheduler;
 import io.reactivex.plugins.RxJavaPlugins;
-import io.reactivex.schedulers.Schedulers;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -383,7 +381,7 @@ public class TPC
      */
     public static int getCoreForKey(TPCBoundaries boundaries, DecoratedKey key)
     {
-        // Boundaries are missing if the node is not sufficiently initialized yet, or for local system tables.
+        // Boundaries are missing if the node is not sufficiently initialized yet
         if (boundaries == TPCBoundaries.NONE)
             return 0;
 
@@ -444,7 +442,7 @@ public class TPC
      */
     public static int getCoreForBound(TPCBoundaries boundaries, PartitionPosition position)
     {
-        // Boundaries are missing if the node is not sufficiently initialized yet, or for local system tables.
+        // Boundaries are missing if the node is not sufficiently initialized yet
         if (boundaries == TPCBoundaries.NONE)
             return 0;
 

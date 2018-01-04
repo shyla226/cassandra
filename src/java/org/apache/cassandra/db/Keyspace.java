@@ -397,7 +397,11 @@ public class Keyspace
         if (boundaries == null || boundariesForRingVersion < StorageService.instance.getTokenMetadata().getRingVersion())
         {
             if (!StorageService.instance.isInitialized())
-                return boundaries != null ? boundaries : TPCBoundaries.NONE;
+                return boundaries != null
+                       ? boundaries
+                       : SchemaConstants.isLocalSystemKeyspace(metadata.name)
+                         ? TPCBoundaries.LOCAL
+                         : TPCBoundaries.NONE;
 
             synchronized (this)
             {
@@ -415,7 +419,7 @@ public class Keyspace
     private TPCBoundaries computeTPCBoundaries()
     {
         if (SchemaConstants.isLocalSystemKeyspace(metadata.name))
-            return TPCBoundaries.NONE;
+            return TPCBoundaries.LOCAL;
 
         List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(this);
         return computeTPCBoundaries(localRanges);
