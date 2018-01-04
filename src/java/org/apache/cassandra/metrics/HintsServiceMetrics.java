@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.metrics;
 
+import com.codahale.metrics.Meter;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
@@ -29,4 +30,5 @@ public final class HintsServiceMetrics
     public static final Meter hintsSucceeded = Metrics.meter(factory.createMetricName("HintsSucceeded"));
     public static final Meter hintsFailed    = Metrics.meter(factory.createMetricName("HintsFailed"));
     public static final Meter hintsTimedOut  = Metrics.meter(factory.createMetricName("HintsTimedOut"));
+
 }
