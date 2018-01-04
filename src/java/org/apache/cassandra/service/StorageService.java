@@ -44,6 +44,7 @@ import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.lang3.StringUtils;
 
@@ -726,7 +727,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         String longKey = repeat(key, (int) OutboundTcpConnectionPool.LARGE_MESSAGE_THRESHOLD / key.length() + 1);
         longKey = longKey.substring(0, (int) OutboundTcpConnectionPool.LARGE_MESSAGE_THRESHOLD - 1);
 
-        CFMetaData cf = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.PEERS);
+        //We use local table because PK is a blob and we can make it large enough to
+        //hit the small and large connections
+        CFMetaData cf = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.LOCAL);
+
         DecoratedKey dKey = cf.decorateKey(ByteBuffer.wrap(key.getBytes()));
         DecoratedKey dLongKey = cf.decorateKey(ByteBuffer.wrap(longKey.getBytes()));
 
