@@ -28,13 +28,15 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.schema.SchemaKeyspace;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.WrappedRunnable;
 
 /**
  * Called when node receives updated schema state from the schema migration coordinator node.
  * Such happens when user makes local schema migration on one of the nodes in the ring
- * (which is going to act as coordinator) and that node sends (pushes) it's updated schema state
- * (in form of mutations) to all the alive nodes in the cluster.
+ * (which is going to act as coordinator) and that node sends (pushes) its updated schema state
+ * (in form of mutations) to all the alive nodes in the cluster. Note that the node will not handle
+ * the updated schema state if it's still initializing.
  */
 public class DefinitionsUpdateVerbHandler implements IVerbHandler<Collection<Mutation>>
 {
@@ -42,8 +44,14 @@ public class DefinitionsUpdateVerbHandler implements IVerbHandler<Collection<Mut
 
     public void doVerb(final MessageIn<Collection<Mutation>> message, int id)
     {
-        logger.trace("Received schema mutation push from {}", message.from);
+        // Drop schema pushes before Gossiper has been fully initialized (see DB-1487).
+        if (!StorageService.instance.isGossipActive())
+        {
+            logger.debug("Dropped schema mutation push from {} as node initialization is still ongoing", message.from);
+            return;
+        }
 
+        logger.trace("Received schema mutation push from {}", message.from);
         StageManager.getStage(Stage.MIGRATION).submit(new WrappedRunnable()
         {
             public void runMayThrow() throws ConfigurationException
