@@ -549,7 +549,7 @@ public abstract class CassandraIndex implements Index
         DecoratedKey valueKey = getIndexKeyFor(getIndexedValue(rowKey,
                                                                clustering,
                                                                cell));
-        Row row = ArrayBackedRow.noCellLiveRow(buildIndexClustering(rowKey, clustering, cell), info);
+        Row row = BTreeRow.noCellLiveRow(buildIndexClustering(rowKey, clustering, cell), info);
         PartitionUpdate upd = partitionUpdate(valueKey, row);
         logger.trace("Inserting entry into index for value {}", valueKey);
         return indexCfs.apply(upd, UpdateTransaction.NO_OP, opGroup, null);
@@ -595,7 +595,7 @@ public abstract class CassandraIndex implements Index
                           DeletionTime deletion,
                           OpOrder.Group opGroup)
     {
-        Row row = ArrayBackedRow.emptyDeletedRow(indexClustering, Row.Deletion.regular(deletion));
+        Row row = BTreeRow.emptyDeletedRow(indexClustering, Row.Deletion.regular(deletion));
         PartitionUpdate upd = partitionUpdate(indexKey, row);
         logger.trace("Removing index entry for value {}", indexKey);
         return indexCfs.apply(upd, UpdateTransaction.NO_OP, opGroup, null);

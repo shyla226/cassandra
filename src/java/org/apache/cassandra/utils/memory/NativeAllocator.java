@@ -25,7 +25,7 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.NativeClustering;
 import org.apache.cassandra.db.NativeDecoratedKey;
-import org.apache.cassandra.db.rows.ArrayBackedRow;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.NativeCell;
 import org.apache.cassandra.db.rows.Row;
@@ -62,12 +62,12 @@ public class NativeAllocator extends MemtableAllocator
         this.coreId = coreId;
     }
 
-    private static class CloningRowBuilder extends ArrayBackedRow.Builder
+    private static class CloningBTreeRowBuilder extends BTreeRow.Builder
     {
         final NativeAllocator allocator;
-        private CloningRowBuilder(NativeAllocator allocator)
+        private CloningBTreeRowBuilder(NativeAllocator allocator)
         {
-            super(true, Integer.MIN_VALUE);
+            super(true);
             this.allocator = allocator;
         }
 
@@ -88,7 +88,7 @@ public class NativeAllocator extends MemtableAllocator
 
     public Row.Builder rowBuilder()
     {
-        return new CloningRowBuilder(this);
+        return new CloningBTreeRowBuilder(this);
     }
 
     public DecoratedKey clone(DecoratedKey key)

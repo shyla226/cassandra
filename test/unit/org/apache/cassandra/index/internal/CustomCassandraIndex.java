@@ -483,7 +483,7 @@ public class CustomCassandraIndex implements Index
         DecoratedKey valueKey = getIndexKeyFor(getIndexedValue(rowKey,
                                                                clustering,
                                                                cell));
-        Row row = ArrayBackedRow.noCellLiveRow(buildIndexClustering(rowKey, clustering, cell), info);
+        Row row = BTreeRow.noCellLiveRow(buildIndexClustering(rowKey, clustering, cell), info);
         PartitionUpdate upd = partitionUpdate(valueKey, row);
         logger.debug("Inserted entry into index for value {}", valueKey);
 
@@ -530,7 +530,7 @@ public class CustomCassandraIndex implements Index
                           DeletionTime deletion,
                           OpOrder.Group opGroup)
     {
-        Row row = ArrayBackedRow.emptyDeletedRow(indexClustering, Row.Deletion.regular(deletion));
+        Row row = BTreeRow.emptyDeletedRow(indexClustering, Row.Deletion.regular(deletion));
         PartitionUpdate upd = partitionUpdate(indexKey, row);
         logger.debug("Removed index entry for value {}", indexKey);
 

@@ -33,7 +33,6 @@ import org.junit.Test;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
-import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
@@ -243,7 +242,7 @@ public class RowIndexEntryTest extends CQLTester
         for (int i = 0; i <= DatabaseDescriptor.getColumnIndexSize() / 4; i++)
             execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, String.valueOf(i), i);
 
-        Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs).build());
+        ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs).build());
 
         File tempFile = File.createTempFile("row_index_entry_test", null);
         tempFile.deleteOnExit();

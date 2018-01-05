@@ -1224,11 +1224,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         public void onUpdated(Row existing, Row updated)
         {
-            final Row.Builder toRemove = Row.Builder.sorted();
+            final Row.Builder toRemove = BTreeRow.sortedBuilder();
             toRemove.newRow(existing.clustering());
             toRemove.addPrimaryKeyLivenessInfo(existing.primaryKeyLivenessInfo());
             toRemove.addRowDeletion(existing.deletion());
-            final Row.Builder toInsert = Row.Builder.sorted();
+            final Row.Builder toInsert = BTreeRow.sortedBuilder();
             toInsert.newRow(updated.clustering());
             toInsert.addPrimaryKeyLivenessInfo(updated.primaryKeyLivenessInfo());
             toInsert.addRowDeletion(updated.deletion());
@@ -1371,7 +1371,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 {
                     if (builders[index] == null)
                     {
-                        builders[index] = Row.Builder.sorted();
+                        builders[index] = BTreeRow.sortedBuilder();
                         builders[index].newRow(clustering);
                     }
                     return builders[index];

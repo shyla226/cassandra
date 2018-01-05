@@ -93,7 +93,7 @@ public interface Rebufferer extends ReaderFileProxy
 
         public NotInCacheException(CompletableFuture<Void> cacheReady, String path, long position)
         {
-            super("Requested data (" + path + "@" + position +") is not in cache.");
+            super(String.format("Requested data (%s@%d) is not in cache.", path, position));
             this.cacheReady = cacheReady;
 
             ChunkCache.instance.metrics.notInCacheExceptions.mark();

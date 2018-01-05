@@ -227,7 +227,6 @@ public class DataResolverTest
 
         try (PartitionIterator data = toPartitions(resolver.resolve()))
         {
-            assert data.hasNext();
             try (RowIterator rows = data.next())
             {
                 // We expect the resolved superset to contain both rows
@@ -432,7 +431,6 @@ public class DataResolverTest
 
         try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
-            assert data.hasNext();
             try (RowIterator rows = data.next())
             {
                 Row row = Iterators.getOnlyElement(rows);
@@ -744,7 +742,7 @@ public class DataResolverTest
 
         long[] ts = {100, 200};
 
-        Row.Builder builder = Row.Builder.unsorted(nowInSec);
+        Row.Builder builder = BTreeRow.unsortedBuilder(nowInSec);
         builder.newRow(Clustering.EMPTY);
         builder.addComplexDeletion(m, new DeletionTime(ts[0] - 1, nowInSec));
         builder.addCell(mapCell(0, 0, ts[0]));
@@ -799,7 +797,7 @@ public class DataResolverTest
 
         long[] ts = {100, 200};
 
-        Row.Builder builder = Row.Builder.unsorted(nowInSec);
+        Row.Builder builder = BTreeRow.unsortedBuilder(nowInSec);
         builder.newRow(Clustering.EMPTY);
         builder.addComplexDeletion(m, new DeletionTime(ts[0] - 1, nowInSec));
         builder.addCell(mapCell(0, 0, ts[0]));
@@ -844,7 +842,7 @@ public class DataResolverTest
         long[] ts = {100, 200};
 
         // map column
-        Row.Builder builder = Row.Builder.unsorted(nowInSec);
+        Row.Builder builder = BTreeRow.unsortedBuilder(nowInSec);
         builder.newRow(Clustering.EMPTY);
         DeletionTime expectedCmplxDelete = new DeletionTime(ts[0] - 1, nowInSec);
         builder.addComplexDeletion(m, expectedCmplxDelete);
@@ -895,7 +893,7 @@ public class DataResolverTest
         long[] ts = {100, 200};
 
         // cleared map column
-        Row.Builder builder = Row.Builder.unsorted(nowInSec);
+        Row.Builder builder = BTreeRow.unsortedBuilder(nowInSec);
         builder.newRow(Clustering.EMPTY);
         builder.addComplexDeletion(m, new DeletionTime(ts[0] - 1, nowInSec));
 

@@ -27,7 +27,6 @@ import java.util.*;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
-import org.apache.cassandra.db.partitions.ArrayBackedPartition;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.FileAccessType;
 import org.apache.cassandra.schema.TableMetadata;
@@ -400,7 +399,7 @@ public class Scrubber implements Closeable
     {
         // TODO bitch if the row is too large?  if it is there's not much we can do ...
         outputHandler.warn(String.format("Out of order row detected (%s found after %s)", key, prevKey));
-        outOfOrder.add(ArrayBackedPartition.create(iterator));
+        outOfOrder.add(ImmutableBTreePartition.create(iterator));
     }
 
     private void throwIfFatal(Throwable th)

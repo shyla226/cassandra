@@ -52,7 +52,6 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
-import org.apache.cassandra.db.partitions.ArrayBackedPartition;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -515,7 +514,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
 
     private static Row createRow(int ck1, int ck2, Cell... columns)
     {
-        Row.Builder builder = Row.Builder.sorted();
+        BTreeRow.Builder builder = new BTreeRow.Builder(true);
         builder.newRow(Util.clustering(metadata.comparator, ck1, ck2));
         for (Cell cell : columns)
             builder.addCell(cell);
@@ -584,7 +583,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
                 while (throttled.hasNext())
                 {
                     UnfilteredRowIterator next = throttled.next();
-                    Partition materializedPartition = ArrayBackedPartition.create(next);
+                    ImmutableBTreePartition materializedPartition = ImmutableBTreePartition.create(next);
                     int unfilteredCount = Iterators.size(materializedPartition.unfilteredIterator());
 
                     System.out.println("batchsize " + batchSize + " unfilteredCount " + unfilteredCount + " materializedPartition " + materializedPartition);
@@ -613,7 +612,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
             }
 
             // Verify throttled data after merge
-            Partition partition = ArrayBackedPartition.create(UnfilteredRowIterators.merge(unfilteredRowIterators, FBUtilities.nowInSeconds()));
+            Partition partition = ImmutableBTreePartition.create(UnfilteredRowIterators.merge(unfilteredRowIterators, FBUtilities.nowInSeconds()));
 
             int nowInSec = FBUtilities.nowInSeconds();
 

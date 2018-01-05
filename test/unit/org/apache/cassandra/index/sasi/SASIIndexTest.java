@@ -2543,7 +2543,7 @@ public class SASIIndexTest
 
     private static Row buildRow(Cell... cells)
     {
-        Row.Builder rowBuilder = Row.Builder.sorted();
+        Row.Builder rowBuilder = BTreeRow.sortedBuilder();
         rowBuilder.newRow(Clustering.EMPTY);
         for (Cell c : cells)
             rowBuilder.addCell(c);

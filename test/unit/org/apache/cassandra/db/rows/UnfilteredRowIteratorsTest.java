@@ -132,7 +132,7 @@ public class UnfilteredRowIteratorsTest
 
     public Row row(int ck, Cell... columns)
     {
-        Row.Builder builder = Row.Builder.sorted();
+        BTreeRow.Builder builder = new BTreeRow.Builder(true);
         builder.newRow(Util.clustering(metadata.comparator, ck));
         for (Cell cell : columns)
             builder.addCell(cell);
