@@ -129,15 +129,19 @@ public class CompressedInputStreamTest
             writer.finish();
         }
 
-        CompressionMetadata comp = CompressionMetadata.create(tmp.getAbsolutePath());
         List<Pair<Long, Long>> sections = new ArrayList<>();
-        for (long l : valuesToCheck)
+        CompressionMetadata.Chunk[] chunks = null;
+        long totalSize = 0;
+        try (CompressionMetadata comp = CompressionMetadata.create(tmp.getAbsolutePath()))
         {
-            long position = index.get(l);
-            sections.add(Pair.create(position, position + 8));
+            for (long l : valuesToCheck)
+            {
+                long position = index.get(l);
+                sections.add(Pair.create(position, position + 8));
+            }
+            chunks = comp.getChunksForSections(sections);
+            totalSize = comp.getTotalSizeForSections(sections);
         }
-        CompressionMetadata.Chunk[] chunks = comp.getChunksForSections(sections);
-        long totalSize = comp.getTotalSizeForSections(sections);
         long expectedSize = 0;
         for (CompressionMetadata.Chunk c : chunks)
             expectedSize += c.length + 4;

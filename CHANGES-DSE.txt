@@ -61,6 +61,7 @@ dse 6.0.0:
  * For TWCS, flush to separate sstables based on write time (DB-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (DB-302)
 Merged from dse5.1:
+ * Add autoclosable to CompressionMetadata and fix leaks in SSTableMetadataViewer (DB-1529)
  * Use all columns to calculate estimatedRowSize for aggregation internal query (DB-1336)
  * Allow DiskBoundaryManager to cache different Directories (DB-1454)
  * Do not apply read timeouts to aggregated queries and use a minimum internal page size (DB-1381)

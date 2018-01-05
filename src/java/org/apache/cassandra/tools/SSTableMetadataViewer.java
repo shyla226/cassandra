@@ -321,114 +321,114 @@ public class SSTableMetadataViewer
         ValidationMetadata validation = (ValidationMetadata) metadata.get(MetadataType.VALIDATION);
         StatsMetadata stats = (StatsMetadata) metadata.get(MetadataType.STATS);
         CompactionMetadata compaction = (CompactionMetadata) metadata.get(MetadataType.COMPACTION);
-        CompressionMetadata compression = null;
         File compressionFile = new File(descriptor.filenameFor(Component.COMPRESSION_INFO));
-        if (compressionFile.exists())
-            compression = CompressionMetadata.create(fname);
         SerializationHeader.Component header = (SerializationHeader.Component) metadata
                 .get(MetadataType.HEADER);
 
-        field("SSTable", descriptor);
-        if (scan && descriptor.version.getVersion().compareTo("ma") >= 0)
+        try (CompressionMetadata compression = compressionFile.exists() ? CompressionMetadata.create(fname) : null)
         {
-            printScannedOverview(descriptor, stats);
-        }
-        if (validation != null)
-        {
-            field("Partitioner", validation.partitioner);
-            field("Bloom Filter FP chance", validation.bloomFilterFPChance);
-        }
-        if (stats != null)
-        {
-            field("Minimum timestamp", stats.minTimestamp, toDateString(stats.minTimestamp, tsUnit));
-            field("Maximum timestamp", stats.maxTimestamp, toDateString(stats.maxTimestamp, tsUnit));
-            field("SSTable min local deletion time", stats.minLocalDeletionTime, deletion(stats.minLocalDeletionTime));
-            field("SSTable max local deletion time", stats.maxLocalDeletionTime, deletion(stats.maxLocalDeletionTime));
-            field("Compressor", compression != null ? compression.compressor().getClass().getName() : "-");
-            if (compression != null)
-                field("Compression ratio", stats.compressionRatio);
-            field("TTL min", stats.minTTL, toDurationString(stats.minTTL, TimeUnit.SECONDS));
-            field("TTL max", stats.maxTTL, toDurationString(stats.maxTTL, TimeUnit.SECONDS));
-
-            if (validation != null && header != null)
-                printMinMaxToken(descriptor, FBUtilities.newPartitioner(descriptor), header.getKeyType());
-
-            if (header != null && header.getClusteringTypes().size() == stats.minClusteringValues.size())
+            field("SSTable", descriptor);
+            if (scan && descriptor.version.getVersion().compareTo("ma") >= 0)
             {
-                List<AbstractType<?>> clusteringTypes = header.getClusteringTypes();
-                List<ByteBuffer> minClusteringValues = stats.minClusteringValues;
-                List<ByteBuffer> maxClusteringValues = stats.maxClusteringValues;
-                String[] minValues = new String[clusteringTypes.size()];
-                String[] maxValues = new String[clusteringTypes.size()];
-                for (int i = 0; i < clusteringTypes.size(); i++)
-                {
-                    minValues[i] = clusteringTypes.get(i).getString(minClusteringValues.get(i));
-                    maxValues[i] = clusteringTypes.get(i).getString(maxClusteringValues.get(i));
-                }
-                field("minClusteringValues", Arrays.toString(minValues));
-                field("maxClusteringValues", Arrays.toString(maxValues));
+                printScannedOverview(descriptor, stats);
             }
-            field("Estimated droppable tombstones",
-                  stats.getEstimatedDroppableTombstoneRatio((int) (System.currentTimeMillis() / 1000) - this.gc));
-            field("SSTable Level", stats.sstableLevel);
-            field("Repaired at", stats.repairedAt, toDateString(stats.repairedAt, TimeUnit.MILLISECONDS));
-            field("Pending repair", stats.pendingRepair);
-            field("Replay positions covered", stats.commitLogIntervals);
-            field("totalColumnsSet", stats.totalColumnsSet);
-            field("totalRows", stats.totalRows);
-            field("Estimated tombstone drop times", "");
+            if (validation != null)
+            {
+                field("Partitioner", validation.partitioner);
+                field("Bloom Filter FP chance", validation.bloomFilterFPChance);
+            }
+            if (stats != null)
+            {
+                field("Minimum timestamp", stats.minTimestamp, toDateString(stats.minTimestamp, tsUnit));
+                field("Maximum timestamp", stats.maxTimestamp, toDateString(stats.maxTimestamp, tsUnit));
+                field("SSTable min local deletion time", stats.minLocalDeletionTime, deletion(stats.minLocalDeletionTime));
+                field("SSTable max local deletion time", stats.maxLocalDeletionTime, deletion(stats.maxLocalDeletionTime));
+                field("Compressor", compression != null ? compression.compressor().getClass().getName() : "-");
+                if (compression != null)
+                    field("Compression ratio", stats.compressionRatio);
+                field("TTL min", stats.minTTL, toDurationString(stats.minTTL, TimeUnit.SECONDS));
+                field("TTL max", stats.maxTTL, toDurationString(stats.maxTTL, TimeUnit.SECONDS));
 
-            TermHistogram estDropped = new TermHistogram(stats.estimatedTombstoneDropTime,
-                                                         "Drop Time",
-                                                         offset -> String.format("%d %s",
-                                                                offset,
-                                                                Util.wrapQuiet(toDateString(offset, TimeUnit.SECONDS),
-                                                                                        color)),
-                                                         String::valueOf);
-            estDropped.printHistogram(out, color, unicode);
-            field("Partition Size", "");
-            TermHistogram rowSize = new TermHistogram(stats.estimatedPartitionSize,
-                                                      "Size (bytes)",
-                                                      offset -> String.format("%d %s",
-                                                                              offset,
-                                                                              Util.wrapQuiet(toByteString(offset), color)),
-                                                      String::valueOf);
-            rowSize.printHistogram(out, color, unicode);
-            field("Column Count", "");
-            TermHistogram cellCount = new TermHistogram(stats.estimatedColumnCount,
-                                                        "Columns",
-                                                        String::valueOf,
-                                                        String::valueOf);
-            cellCount.printHistogram(out, color, unicode);
-        }
-        if (compaction != null)
-        {
-            field("Estimated cardinality", compaction.cardinalityEstimator.cardinality());
-        }
-        if (header != null)
-        {
-            EncodingStats encodingStats = header.getEncodingStats();
-            AbstractType<?> keyType = header.getKeyType();
-            List<AbstractType<?>> clusteringTypes = header.getClusteringTypes();
-            Map<ByteBuffer, AbstractType<?>> staticColumns = header.getStaticColumns();
-            Map<String, String> statics = staticColumns.entrySet().stream()
-                    .collect(Collectors.toMap(e -> UTF8Type.instance.getString(e.getKey()),
-                                              e -> e.getValue().toString()));
-            Map<ByteBuffer, AbstractType<?>> regularColumns = header.getRegularColumns();
-            Map<String, String> regulars = regularColumns.entrySet().stream()
-                    .collect(Collectors.toMap(e -> UTF8Type.instance.getString(e.getKey()),
-                                              e -> e.getValue().toString()));
+                if (validation != null && header != null)
+                    printMinMaxToken(descriptor, FBUtilities.newPartitioner(descriptor), header.getKeyType());
 
-            field("EncodingStats minTTL", encodingStats.minTTL,
-                    toDurationString(encodingStats.minTTL, TimeUnit.SECONDS));
-            field("EncodingStats minLocalDeletionTime", encodingStats.minLocalDeletionTime,
-                    toDateString(encodingStats.minLocalDeletionTime, TimeUnit.MILLISECONDS));
-            field("EncodingStats minTimestamp", encodingStats.minTimestamp,
-                    toDateString(encodingStats.minTimestamp, tsUnit));
-            field("KeyType", keyType.toString());
-            field("ClusteringTypes", clusteringTypes.toString());
-            field("StaticColumns", FBUtilities.toString(statics));
-            field("RegularColumns", FBUtilities.toString(regulars));
+                if (header != null && header.getClusteringTypes().size() == stats.minClusteringValues.size())
+                {
+                    List<AbstractType<?>> clusteringTypes = header.getClusteringTypes();
+                    List<ByteBuffer> minClusteringValues = stats.minClusteringValues;
+                    List<ByteBuffer> maxClusteringValues = stats.maxClusteringValues;
+                    String[] minValues = new String[clusteringTypes.size()];
+                    String[] maxValues = new String[clusteringTypes.size()];
+                    for (int i = 0; i < clusteringTypes.size(); i++)
+                    {
+                        minValues[i] = clusteringTypes.get(i).getString(minClusteringValues.get(i));
+                        maxValues[i] = clusteringTypes.get(i).getString(maxClusteringValues.get(i));
+                    }
+                    field("minClusteringValues", Arrays.toString(minValues));
+                    field("maxClusteringValues", Arrays.toString(maxValues));
+                }
+                field("Estimated droppable tombstones",
+                      stats.getEstimatedDroppableTombstoneRatio((int) (System.currentTimeMillis() / 1000) - this.gc));
+                field("SSTable Level", stats.sstableLevel);
+                field("Repaired at", stats.repairedAt, toDateString(stats.repairedAt, TimeUnit.MILLISECONDS));
+                field("Pending repair", stats.pendingRepair);
+                field("Replay positions covered", stats.commitLogIntervals);
+                field("totalColumnsSet", stats.totalColumnsSet);
+                field("totalRows", stats.totalRows);
+                field("Estimated tombstone drop times", "");
+
+                TermHistogram estDropped = new TermHistogram(stats.estimatedTombstoneDropTime,
+                                                             "Drop Time",
+                                                             offset -> String.format("%d %s",
+                                                                    offset,
+                                                                    Util.wrapQuiet(toDateString(offset, TimeUnit.SECONDS),
+                                                                                            color)),
+                                                             String::valueOf);
+                estDropped.printHistogram(out, color, unicode);
+                field("Partition Size", "");
+                TermHistogram rowSize = new TermHistogram(stats.estimatedPartitionSize,
+                                                          "Size (bytes)",
+                                                          offset -> String.format("%d %s",
+                                                                                  offset,
+                                                                                  Util.wrapQuiet(toByteString(offset), color)),
+                                                          String::valueOf);
+                rowSize.printHistogram(out, color, unicode);
+                field("Column Count", "");
+                TermHistogram cellCount = new TermHistogram(stats.estimatedColumnCount,
+                                                            "Columns",
+                                                            String::valueOf,
+                                                            String::valueOf);
+                cellCount.printHistogram(out, color, unicode);
+            }
+            if (compaction != null)
+            {
+                field("Estimated cardinality", compaction.cardinalityEstimator.cardinality());
+            }
+            if (header != null)
+            {
+                EncodingStats encodingStats = header.getEncodingStats();
+                AbstractType<?> keyType = header.getKeyType();
+                List<AbstractType<?>> clusteringTypes = header.getClusteringTypes();
+                Map<ByteBuffer, AbstractType<?>> staticColumns = header.getStaticColumns();
+                Map<String, String> statics = staticColumns.entrySet().stream()
+                        .collect(Collectors.toMap(e -> UTF8Type.instance.getString(e.getKey()),
+                                                  e -> e.getValue().toString()));
+                Map<ByteBuffer, AbstractType<?>> regularColumns = header.getRegularColumns();
+                Map<String, String> regulars = regularColumns.entrySet().stream()
+                        .collect(Collectors.toMap(e -> UTF8Type.instance.getString(e.getKey()),
+                                                  e -> e.getValue().toString()));
+
+                field("EncodingStats minTTL", encodingStats.minTTL,
+                        toDurationString(encodingStats.minTTL, TimeUnit.SECONDS));
+                field("EncodingStats minLocalDeletionTime", encodingStats.minLocalDeletionTime,
+                        toDateString(encodingStats.minLocalDeletionTime, TimeUnit.MILLISECONDS));
+                field("EncodingStats minTimestamp", encodingStats.minTimestamp,
+                        toDateString(encodingStats.minTimestamp, tsUnit));
+                field("KeyType", keyType.toString());
+                field("ClusteringTypes", clusteringTypes.toString());
+                field("StaticColumns", FBUtilities.toString(statics));
+                field("RegularColumns", FBUtilities.toString(regulars));
+            }
         }
     }
 
