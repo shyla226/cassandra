@@ -39,7 +39,6 @@ public class MessageOut<T>
 {
     public final InetAddress from;
     public final MessagingService.Verb verb;
-    public final boolean isGossipMessage;
     public final T payload;
     public final IVersionedSerializer<T> serializer;
     public final Map<String, byte[]> parameters;
@@ -54,34 +53,26 @@ public class MessageOut<T>
 
     public MessageOut(MessagingService.Verb verb, T payload, IVersionedSerializer<T> serializer)
     {
-        this(verb, payload, serializer, MessagingService.verbStages.get(verb) == Stage.GOSSIP);
-    }
-
-    public MessageOut(MessagingService.Verb verb, T payload, IVersionedSerializer<T> serializer, boolean isGossipMessage)
-    {
         this(verb,
              payload,
              serializer,
-             isGossipMessage,
              isTracing()
                  ? Tracing.instance.getTraceHeaders()
                  : Collections.<String, byte[]>emptyMap());
     }
 
-
-    private MessageOut(MessagingService.Verb verb, T payload, IVersionedSerializer<T> serializer, boolean isGossipMessage, Map<String, byte[]> parameters)
+    private MessageOut(MessagingService.Verb verb, T payload, IVersionedSerializer<T> serializer, Map<String, byte[]> parameters)
     {
-        this(FBUtilities.getBroadcastAddress(), verb, payload, serializer, isGossipMessage, parameters);
+        this(FBUtilities.getBroadcastAddress(), verb, payload, serializer, parameters);
     }
 
     @VisibleForTesting
-    public MessageOut(InetAddress from, MessagingService.Verb verb, T payload, IVersionedSerializer<T> serializer, boolean isGossipMessage, Map<String, byte[]> parameters)
+    public MessageOut(InetAddress from, MessagingService.Verb verb, T payload, IVersionedSerializer<T> serializer, Map<String, byte[]> parameters)
     {
         this.from = from;
         this.verb = verb;
         this.payload = payload;
         this.serializer = serializer;
-        this.isGossipMessage = isGossipMessage;
         this.parameters = parameters;
     }
 
@@ -89,7 +80,7 @@ public class MessageOut<T>
     {
         ImmutableMap.Builder<String, byte[]> builder = ImmutableMap.builder();
         builder.putAll(parameters).put(key, value);
-        return new MessageOut<T>(verb, payload, serializer, isGossipMessage, builder.build());
+        return new MessageOut<T>(verb, payload, serializer, builder.build());
     }
 
     public Stage getStage()

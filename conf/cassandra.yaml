@@ -36,7 +36,7 @@ num_tokens: 256
 
 # initial_token allows you to specify tokens manually.  While you can use it with
 # vnodes (num_tokens > 1, above) -- in which case you should provide a 
-# comma-separated list -- it's primarily used when adding nodes to legacy clusters
+# comma-separated list -- it's primarily used when adding nodes to legacy clusters 
 # that do not have vnodes enabled.
 # initial_token:
 
@@ -999,7 +999,7 @@ request_scheduler: org.apache.cassandra.scheduler.NoScheduler
 # RoundRobin
 #   throttle_limit
 #     The throttle_limit is the number of in-flight
-#     requests per client.  Requests beyond
+#     requests per client.  Requests beyond 
 #     that limit are queued up until
 #     running requests can complete.
 #     The value of 80 here is twice the number of
@@ -1141,9 +1141,9 @@ transparent_data_encryption_options:
     key_alias: testing:1
     # CBC IV length for AES needs to be 16 bytes (which is also the default size)
     # iv_length: 16
-    key_provider:
+    key_provider: 
       - class_name: org.apache.cassandra.security.JKSKeyProvider
-        parameters:
+        parameters: 
           - keystore: conf/.keystore
             keystore_password: cassandra
             store_type: JCEKS
@@ -1188,10 +1188,6 @@ gc_warn_threshold_in_ms: 1000
 # early. Any value size larger than this threshold will result into marking an SSTable
 # as corrupted. This should be positive and less than 2048.
 # max_value_size_in_mb: 256
-
-# Probability cassandra will Gossip with one of the seeds during each round of gossip
-# Valid range is between 0.01 and 1.0
-# seed_gossip_probability: 1.0
 
 # Back-pressure settings #
 # If enabled, the coordinator will apply the back-pressure strategy specified below to each mutation

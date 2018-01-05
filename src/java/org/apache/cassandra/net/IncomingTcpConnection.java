@@ -24,8 +24,8 @@ import java.net.SocketException;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.zip.Checksum;
+import java.util.Set;
 
-import com.google.common.collect.Multimap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,22 +50,18 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
 
     private static final int BUFFER_SIZE = Integer.getInteger(Config.PROPERTY_PREFIX + ".itc_buffer_size", 1024 * 4);
 
-    private long connectTime = 0;
     private final int version;
     private final boolean compressed;
     private final Socket socket;
-    private final Multimap<InetAddress, Closeable> group;
-    public final InetAddress socketFrom;
+    private final Set<Closeable> group;
+    public InetAddress from;
 
-    public InetAddress snitchFrom;
-
-    public IncomingTcpConnection(int version, boolean compressed, Socket socket, Multimap<InetAddress, Closeable> group)
+    public IncomingTcpConnection(int version, boolean compressed, Socket socket, Set<Closeable> group)
     {
         super("MessagingService-Incoming-" + socket.getInetAddress());
         this.version = version;
         this.compressed = compressed;
         this.socket = socket;
-        this.socketFrom = socket.getInetAddress();
         this.group = group;
         if (DatabaseDescriptor.getInternodeRecvBufferSize() > 0)
         {
@@ -134,9 +130,7 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
         }
         finally
         {
-            group.remove(socketFrom, this);
-            if (snitchFrom != null)
-                group.remove(snitchFrom, this);
+            group.remove(this);
         }
     }
 
@@ -153,13 +147,10 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
         int maxVersion = in.readInt();
         // outbound side will reconnect if necessary to upgrade version
         assert version <= MessagingService.current_version;
-        snitchFrom = CompactEndpointSerializationHelper.deserialize(in);
+        from = CompactEndpointSerializationHelper.deserialize(in);
         // record the (true) version of the endpoint
-        MessagingService.instance().setVersion(snitchFrom, maxVersion);
-        logger.trace("Set version for {} to {} (will use {})", snitchFrom, maxVersion, MessagingService.instance().getVersion(snitchFrom));
-
-        //Save the connection under snitch address
-        group.put(snitchFrom, this);
+        MessagingService.instance().setVersion(from, maxVersion);
+        logger.trace("Set version for {} to {} (will use {})", from, maxVersion, MessagingService.instance().getVersion(from));
 
         if (compressed)
         {
@@ -183,8 +174,6 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
             in = new NIODataInputStream(channel != null ? channel : Channels.newChannel(socket.getInputStream()), BUFFER_SIZE);
         }
 
-        this.connectTime = System.nanoTime();
-
         while (true)
         {
             MessagingService.validateMagic(in.readInt());
@@ -200,7 +189,7 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
         else
             id = input.readInt();
         long currentTime = ApproximateTime.currentTimeMillis();
-        MessageIn message = MessageIn.read(input, version, id, MessageIn.readConstructionTime(snitchFrom, input, currentTime));
+        MessageIn message = MessageIn.read(input, version, id, MessageIn.readConstructionTime(from, input, currentTime));
         if (message == null)
         {
             // callback expired; nothing to do
@@ -216,10 +205,4 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
         }
         return message.from;
     }
-
-    public long getConnectTime()
-    {
-        return connectTime;
-    }
-
 }

@@ -73,7 +73,7 @@ public class Tracker
     public final boolean loadsstables;
 
     /**
-     * @param memtable     Initial Memtable. Can be null.
+     * @param memtable Initial Memtable. Can be null.
      * @param loadsstables true to indicate to load SSTables (TODO: remove as this is only accessed from 2i)
      */
     public Tracker(Memtable memtable, boolean loadsstables)
@@ -198,16 +198,7 @@ public class Tracker
         notifyAdded(sstables);
     }
 
-    public void addSSTablesFromStreaming(Iterable<SSTableReader> sstables)
-    {
-        addInitialSSTables(sstables);
-        maybeIncrementallyBackup(sstables);
-        notifyAddedFromStreaming(sstables);
-    }
-
-    /**
-     * (Re)initializes the tracker, purging all references.
-     */
+    /** (Re)initializes the tracker, purging all references. */
     @VisibleForTesting
     public void reset(Memtable memtable)
     {
@@ -216,19 +207,6 @@ public class Tracker
                           Collections.emptyMap(),
                           Collections.emptyMap(),
                           SSTableIntervalTree.empty()));
-    }
-
-    @VisibleForTesting
-    public void removeSSTablesFromTrackerUnsafe(Collection<SSTableReader> sstablesToRemove)
-    {
-        View currentView = view.get();
-        Set<SSTableReader> toRemove = new HashSet<>(sstablesToRemove);
-        Map<SSTableReader, SSTableReader> sstables = new HashMap<>(currentView.sstablesMap);
-        for (SSTableReader sstable : toRemove)
-            sstables.remove(sstable);
-
-        view.set(new View(currentView.liveMemtables, currentView.flushingMemtables, sstables, currentView.compactingMap, currentView.intervalTree));
-        notifySSTablesChanged(sstablesToRemove, Collections.emptyList(), OperationType.UNKNOWN, null);
     }
 
     public Throwable dropSSTablesIfInvalid(Throwable accumulate)
@@ -380,7 +358,7 @@ public class Tracker
         notifyDiscarded(memtable);
 
         // TODO: if we're invalidated, should we notifyadded AND removed, or just skip both?
-        fail = notifyAdded(sstables, fail, false);
+        fail = notifyAdded(sstables, fail);
 
         if (!isDummy() && !cfstore.isValid())
             dropSSTables();
@@ -438,9 +416,9 @@ public class Tracker
         return accumulate;
     }
 
-    Throwable notifyAdded(Iterable<SSTableReader> added, Throwable accumulate, boolean fromStreaming)
+    Throwable notifyAdded(Iterable<SSTableReader> added, Throwable accumulate)
     {
-        INotification notification = new SSTableAddedNotification(added, fromStreaming);
+        INotification notification = new SSTableAddedNotification(added);
         for (INotificationConsumer subscriber : subscribers)
         {
             try
@@ -457,12 +435,7 @@ public class Tracker
 
     public void notifyAdded(Iterable<SSTableReader> added)
     {
-        maybeFail(notifyAdded(added, null, false));
-    }
-
-    public void notifyAddedFromStreaming(Iterable<SSTableReader> added)
-    {
-        maybeFail(notifyAdded(added, null, true));
+        maybeFail(notifyAdded(added, null));
     }
 
     public void notifySSTableRepairedStatusChanged(Collection<SSTableReader> repairStatusesChanged)
