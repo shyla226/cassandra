@@ -41,10 +41,13 @@ public class TPCBoundaries
 {
     private static final Token[] EMPTY_TOKEN_ARRAY = new Token[0];
 
-    // Special boundaries that map all tokens to core 0. These boundaries should only be used when the local ranges
-    // aren't available:
-    //  - StorageService not yet initialized and there were no sstables from which we could extract local ranges on startup.
-    //  - the default partitioner in DD does not support splitting, e.g. OrderPreservingPartitioner
+    // Special boundaries that map all tokens to core 0.
+    // For local system tables these boundaries will be used when:
+    // - the partitioner does not support splitting, otherwise the LOCAL boundaries will be used.
+    // For all other tables these boundaries will be used in either of these cases:
+    // - the default partitioner doesn't support splitting, because in this case the local ranges will always be null
+    // - StorageService is not yet initialized AND there are no SSTables
+    // - the available TokenMetadata doesn't contain ranges for a keyspace on a node
     public static TPCBoundaries NONE = new TPCBoundaries(EMPTY_TOKEN_ARRAY);
 
     // Special boundaries for LOCAL tables, for which we know all the data is local, so we can split

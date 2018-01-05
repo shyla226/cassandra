@@ -24,6 +24,7 @@ import java.lang.management.MemoryPoolMXBean;
 import java.net.InetAddress;
 import java.net.URL;
 import java.net.UnknownHostException;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -489,13 +490,17 @@ public class CassandraDaemon
         // Compute per-keyspace boundaries based on the max token range covering existing sstables:
         for (Keyspace ks : Keyspace.nonSystem())
         {
-            List<Range<Token>> ranges = Range.merge(ks.getColumnFamilyStores().stream()
-                .flatMap(cfs -> cfs.getLiveSSTables().stream())
-                .map(sstable -> new Range<>(sstable.first.getToken(), sstable.last.getToken()))
-                .collect(Collectors.toList()));
+            List<Range<Token>> ranges = DatabaseDescriptor.getPartitioner().splitter().isPresent()
+                                        ? Range.merge(ks.getColumnFamilyStores().stream()
+                                                        .flatMap(cfs -> cfs.getLiveSSTables().stream())
+                                                        .map(sstable -> new Range<>(sstable.first.getToken(), sstable.last.getToken()))
+                                                        .collect(Collectors.toList()))
+                                        : Collections.emptyList(); // an empty list will be converted into null ranges by
+                                                                   // StorageService.getStartupTokenRanges, ensuring that we don't
+                                                                   // attempt to split ranges when the partitioner does not support it,
+                                                                   // see assertion in TPCBoundaries.compute
 
             logger.info("Computing default TPC core assignments for {} based on ranges {}...", ks.getName(), ranges);
-
             ks.setDefaultTPCBoundaries(!ranges.isEmpty() ? ranges : StorageService.getStartupTokenRanges(ks));
         }
         
