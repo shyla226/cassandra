@@ -18,9 +18,6 @@
 package org.apache.cassandra.hints;
 
 import java.io.DataInput;
-import java.io.DataOutput;
-import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
@@ -32,7 +29,6 @@ import java.util.regex.Pattern;
 import java.util.zip.CRC32;
 import javax.crypto.Cipher;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import java.util.Objects;
 import com.google.common.collect.ImmutableMap;
@@ -46,7 +42,6 @@ import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.utils.Hex;
@@ -79,7 +74,6 @@ final class HintsDescriptor
 
     final ImmutableMap<String, Object> parameters;
     final ParameterizedClass compressionConfig;
-    private volatile Statistics statistics;
 
     private final Cipher cipher;
     private final ICompressor compressor;
@@ -89,7 +83,6 @@ final class HintsDescriptor
         this.hostId = hostId;
         this.version = version;
         this.timestamp = timestamp;
-        this.statistics = EMPTY_STATS;
         compressionConfig = createCompressionConfig(parameters);
 
         EncryptionData encryption = createEncryption(parameters);
@@ -200,29 +193,9 @@ final class HintsDescriptor
         }
     }
 
-    public void setStatistics(Statistics statistics)
-    {
-        this.statistics = statistics;
-    }
-
-    public Statistics statistics()
-    {
-        return statistics;
-    }
-
     String fileName()
     {
         return String.format("%s-%s-%s.hints", hostId, timestamp, version.code());
-    }
-
-    String statisticsFileName()
-    {
-        return statisticsFileName(hostId, timestamp, version.code());
-    }
-
-    static String statisticsFileName(UUID hostId, long timestamp, int version)
-    {
-        return String.format("%s-%s-%s-Statistics.hints", hostId, timestamp, version);
     }
 
     String checksumFileName()
@@ -239,36 +212,11 @@ final class HintsDescriptor
     {
         try (RandomAccessFile raf = new RandomAccessFile(path.toFile(), "r"))
         {
-            HintsDescriptor descriptor = deserialize(raf);
-            descriptor.loadStatsComponent(path.getParent().toString());
-            StorageMetrics.hintsOnDisk.inc(descriptor.statistics().totalCount());
-            return descriptor;
+            return deserialize(raf);
         }
         catch (IOException e)
         {
             throw new FSReadError(e, path.toFile());
-        }
-    }
-
-    @VisibleForTesting
-    void loadStatsComponent(String hintsDirectory)
-    {
-        File file = new File(hintsDirectory, statisticsFileName());
-        try (RandomAccessFile statsFile = new RandomAccessFile(file, "r"))
-        {
-            this.statistics = Statistics.deserialize(statsFile);
-        }
-        catch (FileNotFoundException e)
-        {
-            // Statistics are only used for metrics; it's ok to ignore an absent component during upgrades
-            logger.warn("Cannot find stats component `{}` for hints descriptor, initialising with empty statistics.", file.toString());
-            this.statistics = EMPTY_STATS;
-        }
-        catch (IOException e)
-        {
-            // Ignore error in case of corruption
-            logger.error("Cannot read stats component `{}` for hints descriptor, initialising with empty statistics.", file.toString(), e);
-            this.statistics = EMPTY_STATS;
         }
     }
 
@@ -418,38 +366,5 @@ final class HintsDescriptor
     {
         if (expected != actual)
             throw new IOException("Hints Descriptor CRC Mismatch");
-    }
-
-    public static Statistics EMPTY_STATS = new Statistics(0);
-
-    public static class Statistics
-    {
-        private final long totalCount;
-
-        public Statistics(long totalCount)
-        {
-            this.totalCount = totalCount;
-        }
-
-        public long totalCount()
-        {
-            return totalCount;
-        }
-
-        public void serialize(DataOutput out) throws IOException
-        {
-            out.writeLong(totalCount);
-        }
-
-        public static Statistics deserialize(DataInput in) throws IOException
-        {
-            long totalCount = in.readLong();
-            return new Statistics(totalCount);
-        }
-
-        public static int serializedSize()
-        {
-            return Long.BYTES;
-        }
     }
 }

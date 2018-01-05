@@ -57,7 +57,6 @@ import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.gms.FailureDetector;
-import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -88,7 +87,6 @@ public class BatchlogManager implements BatchlogManagerMBean
     private static final long REPLAY_INITIAL_DELAY = Long.getLong("dse.batchlog.replay_initial_delay_in_ms", StorageService.RING_DELAY); // milliseconds
     private static final long REPLAY_INTERVAL = Long.getLong("dse.batchlog.replay_interval_in_ms", 10 * 1000); // milliseconds
     static final int DEFAULT_PAGE_SIZE = Integer.getInteger("dse.batchlog.page_size", 128);
-    private static final int MIN_CONNECTION_AGE = Integer.getInteger("dse.batchlog.min_connection_age_seconds", 300);
 
     private static final Logger logger = LoggerFactory.getLogger(BatchlogManager.class);
     public static final BatchlogManager instance = new BatchlogManager();
@@ -872,8 +870,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         @VisibleForTesting
         protected boolean isValid(InetAddress input)
         {
-            return !input.equals(getCoordinator()) &&isAlive(input)&&
-                   (!Gossiper.instance.isEnabled() || MessagingService.instance().hasValidIncomingConnections(input, MIN_CONNECTION_AGE));
+            return !input.equals(getCoordinator()) && isAlive(input);
         }
 
         @VisibleForTesting

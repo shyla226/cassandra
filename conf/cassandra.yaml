@@ -42,7 +42,7 @@ num_tokens: 256
 
 # initial_token allows you to specify tokens manually.  While you can use it with
 # vnodes (num_tokens > 1, above) -- in which case you should provide a 
-# comma-separated list -- it's primarily used when adding nodes to legacy clusters
+# comma-separated list -- it's primarily used when adding nodes to legacy clusters 
 # that do not have vnodes enabled.
 # initial_token:
 
@@ -397,7 +397,7 @@ counter_cache_save_period: 7200
 # If not set, the default directory is $CASSANDRA_HOME/data/saved_caches.
 # saved_caches_directory: /var/lib/cassandra/saved_caches
 
-# commitlog_sync may be either "periodic", "group", or "batch."
+# commitlog_sync may be either "periodic", "group", or "batch." 
 # 
 # When in batch mode, Cassandra won't ack writes until the commit log
 # has been flushed to disk.  Each incoming write will trigger the flush task.
@@ -414,7 +414,7 @@ counter_cache_save_period: 7200
 #
 # the default option is "periodic" where writes may be acked immediately
 # and the CommitLog is simply synced every commitlog_sync_period_in_ms
-# milliseconds.
+# milliseconds. 
 commitlog_sync: periodic
 commitlog_sync_period_in_ms: 10000
 
@@ -1082,9 +1082,9 @@ transparent_data_encryption_options:
     key_alias: testing:1
     # CBC IV length for AES needs to be 16 bytes (which is also the default size)
     # iv_length: 16
-    key_provider:
+    key_provider: 
       - class_name: org.apache.cassandra.security.JKSKeyProvider
-        parameters:
+        parameters: 
           - keystore: conf/.keystore
             keystore_password: cassandra
             store_type: JCEKS
@@ -1133,10 +1133,6 @@ compaction_large_partition_warning_threshold_mb: 100
 # early. Any value size larger than this threshold will result into marking an SSTable
 # as corrupted. This should be positive and less than 2048.
 # max_value_size_in_mb: 256
-
-# Probability cassandra will Gossip with one of the seeds during each round of gossip
-# Valid range is between 0.01 and 1.0
-# seed_gossip_probability: 1.0
 
 # Back-pressure settings #
 # If enabled, the coordinator will apply the back-pressure strategy specified below to each mutation

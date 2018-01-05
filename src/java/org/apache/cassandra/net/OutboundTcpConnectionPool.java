@@ -26,9 +26,6 @@ import java.util.EnumMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
@@ -39,9 +36,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 public class OutboundTcpConnectionPool
 {
-    private static final Logger logger = LoggerFactory.getLogger(OutboundTcpConnectionPool.class);
-    public static final long LARGE_MESSAGE_THRESHOLD =
-            Long.getLong(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64);
+    static final long LARGE_MESSAGE_THRESHOLD = Long.getLong(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64);
 
     // pointer for the real Address.
     private final InetAddress id;
@@ -64,7 +59,7 @@ public class OutboundTcpConnectionPool
 
         connectionByKind = new EnumMap<>(Message.Kind.class);
         for (Message.Kind kind : Message.Kind.values())
-            connectionByKind.put(kind, new OutboundTcpConnection(this, kind.toString(), kind == Message.Kind.GOSSIP));
+            connectionByKind.put(kind, new OutboundTcpConnection(this, kind.toString()));
 
         this.backPressureState = backPressureState;
     }
@@ -100,7 +95,6 @@ public class OutboundTcpConnectionPool
 
     void reset()
     {
-        logger.trace("Reset called for {}", id);
         for (OutboundTcpConnection conn : connectionByKind.values())
             conn.closeSocket(false);
     }
@@ -112,7 +106,6 @@ public class OutboundTcpConnectionPool
      */
     public void reset(InetAddress remoteEP)
     {
-        logger.trace("Reset called for {} remoteEP {}", id, remoteEP);
         resetEndpoint = remoteEP;
         for (OutboundTcpConnection conn : connectionByKind.values())
             conn.softCloseSocket();

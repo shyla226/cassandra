@@ -227,7 +227,7 @@ public class StreamReceiveTask extends StreamTask
 
                         // add sstables (this will build secondary indexes too, see CASSANDRA-10130)
                         logger.debug("[Stream #{}] Received {} sstables from {} ({})", task.session.planId(), readers.size(), task.session.peer, readers);
-                        cfs.addSSTablesFromStreaming(readers);
+                        cfs.addSSTables(readers);
 
                         //invalidate row and counter cache
                         if (cfs.isRowCacheEnabled() || cfs.metadata().isCounter())

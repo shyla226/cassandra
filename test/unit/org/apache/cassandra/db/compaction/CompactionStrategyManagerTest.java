@@ -172,7 +172,7 @@ public class CompactionStrategyManagerTest
                 assertFalse(((SizeTieredCompactionStrategy)csm.compactionStrategyFor(reader)).sstables.contains(reader));
 
                 // Add SSTable again and check that is correctly assigned
-                csm.handleNotification(new SSTableAddedNotification(Collections.singleton(reader), null, false), this);
+                csm.handleNotification(new SSTableAddedNotification(Collections.singleton(reader), null), this);
                 verifySSTableIsAssignedToCorrectStrategy(boundaries, csm, reader);
             }
         }

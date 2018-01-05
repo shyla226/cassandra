@@ -148,21 +148,14 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
     private volatile long completed;
     private final AtomicLong dropped = new AtomicLong();
     private volatile int currentMsgBufferCount = 0;
-    private final boolean isGossip;
 
     private volatile MessagingVersion targetVersion;
     private volatile Message.Serializer messageSerializer;
 
     public OutboundTcpConnection(OutboundTcpConnectionPool pool, String name)
     {
-        this(pool, name, false);
-    }
-
-    public OutboundTcpConnection(OutboundTcpConnectionPool pool, String name, boolean isGossip)
-    {
         super("MessagingService-Outgoing-" + pool.endPoint() + "-" + name);
         this.poolReference = pool;
-        this.isGossip = isGossip;
         cs = newCoalescingStrategy(pool.endPoint().getHostAddress(), this);
 
         // We want to use the most precise version we know because while there is version detection on connect(),
@@ -282,7 +275,6 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
                     Message m = qm.message;
                     if (m == Message.CLOSE_SENTINEL)
                     {
-                        logger.trace("Disconnecting because CLOSE_SENTINEL detected");
                         disconnect();
                         if (isStopped)
                             break outer;
@@ -363,7 +355,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
             messageSerializer.serialize(qm.message, out);
 
             completed++;
-            if (flush || qm.message.verb() == Verbs.GOSSIP.ECHO)
+            if (flush)
                 out.flush();
         }
         catch (Throwable e)
@@ -388,11 +380,6 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
                 logger.error("error writing to {}", poolReference.endPoint(), e);
             }
         }
-    }
-
-    public boolean isSocketOpen()
-    {
-        return socket != null && socket.isConnected();
     }
 
     private void disconnect()
@@ -435,8 +422,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
             {
                 socket = poolReference.newSocket();
                 socket.setKeepAlive(true);
-
-                if (isLocalDC(endpoint) || isGossip)
+                if (isLocalDC(endpoint))
                 {
                     socket.setTcpNoDelay(INTRADC_TCP_NODELAY);
                 }
@@ -444,7 +430,6 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
                 {
                     socket.setTcpNoDelay(DatabaseDescriptor.getInterDCTcpNoDelay());
                 }
-
                 if (DatabaseDescriptor.getInternodeSendBufferSize() > 0)
                 {
                     try

@@ -63,7 +63,7 @@ public class RemoteSyncTask extends SyncTask
     {
         // RemoteSyncTask expects SyncComplete message sent back.
         // Register task to RepairSession to receive response.
-        session.waitForSync(Pair.create(desc, new NodePair(endpoint1, endpoint2)), this);
+        session.waitForSync(Pair.create(desc, new NodePair(r1.endpoint, r2.endpoint)), this);
         InetAddress local = FBUtilities.getBroadcastAddress();
 
         List<Range<Token>> ranges = new ArrayList<>(transferToLeft.size() + transferToRight.size() + 1);
@@ -71,7 +71,7 @@ public class RemoteSyncTask extends SyncTask
         ranges.add(StreamingRepairTask.RANGE_SEPARATOR);
         ranges.addAll(transferToRight);
 
-        SyncRequest request = new SyncRequest(desc, local, endpoint1, endpoint2, ranges, previewKind);
+        SyncRequest request = new SyncRequest(desc, local, r1.endpoint, r2.endpoint, ranges, previewKind);
         String message = String.format("Forwarding streaming repair of %d ranges to %s%s (to be streamed with %s)",
                                        transferToLeft.size(), request.src, transferToLeft.size() != transferToRight.size()?
                                                                            String.format(" and %d ranges from", transferToRight.size()) : "",
@@ -89,7 +89,7 @@ public class RemoteSyncTask extends SyncTask
         }
         else
         {
-            setException(new RepairException(desc, previewKind, String.format("Sync failed between %s and %s", endpoint1, endpoint2)));
+            setException(new RepairException(desc, previewKind, String.format("Sync failed between %s and %s", r1.endpoint, r2.endpoint)));
         }
         finished();
     }

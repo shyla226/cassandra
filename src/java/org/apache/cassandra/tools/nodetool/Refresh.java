@@ -20,7 +20,6 @@ package org.apache.cassandra.tools.nodetool;
 import static com.google.common.base.Preconditions.checkArgument;
 import io.airlift.airline.Arguments;
 import io.airlift.airline.Command;
-import io.airlift.airline.Option;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,13 +33,10 @@ public class Refresh extends NodeToolCmd
     @Arguments(usage = "<keyspace> <table>", description = "The keyspace and table name")
     private List<String> args = new ArrayList<>();
 
-    @Option(title = "reset-levels", name = { "--reset-levels"}, description = "Use --reset-levels to force all sstables to level 0")
-    private boolean resetLevels = false;
-
     @Override
     public void execute(NodeProbe probe)
     {
         checkArgument(args.size() == 2, "refresh requires ks and cf args");
-        probe.loadNewSSTables(args.get(0), args.get(1), resetLevels);
+        probe.loadNewSSTables(args.get(0), args.get(1));
     }
 }

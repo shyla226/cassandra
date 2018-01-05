@@ -19,10 +19,9 @@ package org.apache.cassandra.net;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.net.InetAddress;
 import java.net.Socket;
+import java.util.Set;
 
-import com.google.common.collect.Multimap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,15 +41,13 @@ public class IncomingStreamingConnection extends Thread implements Closeable
 
     private final ProtocolVersion version;
     public final Socket socket;
-    private final InetAddress from;
-    private final Multimap<InetAddress, Closeable> group;
+    private final Set<Closeable> group;
 
-    public IncomingStreamingConnection(ProtocolVersion version, Socket socket, Multimap<InetAddress, Closeable> group)
+    public IncomingStreamingConnection(ProtocolVersion version, Socket socket, Set<Closeable> group)
     {
         super("STREAM-INIT-" + socket.getRemoteSocketAddress());
         this.version = version;
         this.socket = socket;
-        this.from = socket.getInetAddress();
         this.group = group;
     }
 
@@ -101,7 +98,7 @@ public class IncomingStreamingConnection extends Thread implements Closeable
         }
         finally
         {
-            group.remove(from, this);
+            group.remove(this);
         }
     }
 }

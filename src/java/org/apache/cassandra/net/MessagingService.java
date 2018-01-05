@@ -36,10 +36,8 @@ import javax.management.ObjectName;
 import javax.net.ssl.SSLHandshakeException;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Multimap;
-import com.google.common.collect.Multimaps;
+import com.google.common.collect.Sets;
 
 import org.jctools.maps.NonBlockingHashMap;
 
@@ -94,8 +92,6 @@ public final class MessagingService implements MessagingServiceMBean
     private final Interceptors messageInterceptors = new Interceptors();
 
     public final MessagingMetrics metrics = new MessagingMetrics();
-
-    public static final long STARTUP_TIME = System.nanoTime();
 
     /* This records all the results mapped by message Id */
     private final ExpiringMap<Integer, CallbackInfo<?>> callbacks;
@@ -511,7 +507,7 @@ public final class MessagingService implements MessagingServiceMBean
         return getConnectionPool(ep).thenAccept(cp -> {
             if (cp != null)
             {
-                logger.debug("Resetting pool for " + ep);
+                logger.trace("Resetting pool for {}", ep);
                 cp.reset();
             }
             else
@@ -635,7 +631,6 @@ public final class MessagingService implements MessagingServiceMBean
 
     public void destroyConnectionPool(InetAddress to)
     {
-        logger.trace("Destroy pool {}", to);
         OutboundTcpConnectionPool cp = connectionManagers.get(to);
         if (cp == null)
             return;
@@ -685,31 +680,6 @@ public final class MessagingService implements MessagingServiceMBean
                 return np;
             });
         }
-    }
-
-    public boolean hasValidIncomingConnections(InetAddress from, int minAgeInSeconds)
-    {
-        long now = System.nanoTime();
-
-        for (SocketThread socketThread : socketThreads)
-        {
-            Collection<Closeable> sockets = socketThread.connections.get(from);
-            if (sockets != null)
-            {
-                for (Closeable socket : sockets)
-                {
-                    if (socket instanceof IncomingTcpConnection)
-                    {
-                        //If the node just started up we should skip the conenction time check
-                        if ((now - ((IncomingTcpConnection)socket).getConnectTime()) > TimeUnit.SECONDS.toNanos(minAgeInSeconds) ||
-                            TimeUnit.NANOSECONDS.toSeconds(now - STARTUP_TIME) < minAgeInSeconds * 2)
-                            return true;
-                    }
-                }
-            }
-        }
-
-        return false;
     }
 
     public CompletableFuture<OutboundTcpConnection> getConnection(Message msg)
@@ -915,7 +885,7 @@ public final class MessagingService implements MessagingServiceMBean
     {
         private final ServerSocket server;
         @VisibleForTesting
-        public final Multimap<InetAddress, Closeable> connections = Multimaps.synchronizedMultimap(HashMultimap.create());
+        public final Set<Closeable> connections = Sets.newConcurrentHashSet();
 
         SocketThread(ServerSocket server, String name)
         {
@@ -954,9 +924,7 @@ public final class MessagingService implements MessagingServiceMBean
                                   ? new IncomingStreamingConnection(version, socket, connections)
                                   : new IncomingTcpConnection(version, MessagingService.getBits(header, 2, 1) == 1, socket, connections);
                     thread.start();
-
-                    //The connections are removed from this collection when they are closed.
-                    connections.put(socket.getInetAddress(), (Closeable) thread);
+                    connections.add((Closeable) thread);
                 }
                 catch (AsynchronousCloseException e)
                 {
@@ -997,11 +965,9 @@ public final class MessagingService implements MessagingServiceMBean
                 // see https://issues.apache.org/jira/browse/CASSANDRA-12513
                 handleIOExceptionOnClose(e);
             }
-            synchronized (connections)
+            for (Closeable connection : connections)
             {
-                // make a copy to avoid concurrent modification exceptions in close()
-                for (Closeable connection : Lists.newArrayList(connections.values()))
-                    connection.close();
+                connection.close();
             }
         }
 
