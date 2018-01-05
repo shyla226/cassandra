@@ -25,8 +25,10 @@ import java.util.UUID;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -37,6 +39,12 @@ import static junit.framework.Assert.fail;
 
 public class HintsDescriptorTest
 {
+    @BeforeClass
+    public static void setup()
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     @Test
     public void testSerializerNormal() throws IOException
     {

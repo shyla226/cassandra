@@ -93,7 +93,6 @@ public class CleanupTest extends CQLTester
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
-        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
         requireNetwork();
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
