@@ -58,7 +58,7 @@ public class DiskBoundaryManager
                 boundaries = diskBoundaries.get(directories);
                 if (boundaries == null || boundaries.isOutOfDate())
                 {
-                    logger.debug("Refreshing disk boundary cache for {}.{}", cfs.keyspace.getName(), cfs.getTableName());
+                    logger.trace("Refreshing disk boundary cache for {}.{}", cfs.keyspace.getName(), cfs.getTableName());
                     DiskBoundaries oldBoundaries = boundaries;
                     boundaries = getDiskBoundaryValue(cfs, directories);
                     diskBoundaries.put(directories, boundaries);
@@ -92,7 +92,7 @@ public class DiskBoundaryManager
                 // We do this to minimize the amount of data we need to move in rebalancedisks once everything settled
                 localRanges = cfs.keyspace.getReplicationStrategy().getAddressRanges(tmd.cloneAfterAllSettled()).get(FBUtilities.getBroadcastAddress());
             }
-            logger.debug("Got local ranges {} (ringVersion = {})", localRanges, ringVersion);
+            logger.trace("Got local ranges {} (ringVersion = {})", localRanges, ringVersion);
         }
         while (ringVersion != tmd.getRingVersion()); // if ringVersion is different here it means that
                                                      // it might have changed before we calculated localRanges - recalculate
