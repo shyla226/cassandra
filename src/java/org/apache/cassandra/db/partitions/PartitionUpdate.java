@@ -322,15 +322,14 @@ public class PartitionUpdate extends ArrayBackedPartition
     public void updateAllTimestamp(long newTimestamp)
     {
         Holder holder = holder();
-        holder.deletionInfo = ((MutableDeletionInfo)holder.deletionInfo).updateAllTimestamp(newTimestamp - 1);
+        ((MutableDeletionInfo)holder.deletionInfo).updateAllTimestamp(newTimestamp - 1);
 
         for (int i = 0; i < holder.length; i++)
-            holder.rows[i] = holder.rows[i].updateAllTimestamp(newTimestamp);
+            holder.rows[i].updateAllTimestamp(newTimestamp);
 
         Row staticRow = holder.staticRow.updateAllTimestamp(newTimestamp);
         EncodingStats newStats = EncodingStats.Collector.collect(staticRow, iterator(), holder.deletionInfo);
         holder.stats = newStats;
-        holder.staticRow = staticRow;
     }
 
     /**
