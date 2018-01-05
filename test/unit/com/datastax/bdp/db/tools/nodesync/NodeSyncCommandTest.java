@@ -9,8 +9,6 @@ import java.util.regex.Matcher;
 
 import org.junit.Test;
 
-import com.datastax.bdp.db.tools.nodesync.NodeSyncCommand;
-import com.datastax.bdp.db.tools.nodesync.NodeSyncException;
 import com.datastax.driver.core.Metadata;
 import com.datastax.driver.core.TableMetadata;
 import org.apache.cassandra.cql3.CQLTester;
@@ -158,5 +156,14 @@ public class NodeSyncCommandTest extends CQLTester
             return;
         }
         fail("Expected " + expectedException.getName() + " exception with message: " + expectedMsg);
+    }
+
+    @Test
+    public void testFullyQualifiedTableName()
+    {
+        assertEquals("k.t", NodeSyncCommand.fullyQualifiedTableName("k", "t"));
+        assertEquals("\"K\".t", NodeSyncCommand.fullyQualifiedTableName("K", "t"));
+        assertEquals("k.\"T\"", NodeSyncCommand.fullyQualifiedTableName("k", "T"));
+        assertEquals("\"K\".\"T\"", NodeSyncCommand.fullyQualifiedTableName("K", "T"));
     }
 }

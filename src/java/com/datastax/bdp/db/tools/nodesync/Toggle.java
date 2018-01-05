@@ -63,7 +63,7 @@ public abstract class Toggle extends NodeSyncCommand
                                                 .map(selector -> tablesMetadata(metadata, selector))
                                                 .flatMap(Collection::stream)
                                                 .distinct()
-                                                .map(m -> m.getKeyspace().getName() + '.' + m.getName())
+                                                .map(NodeSyncCommand::fullyQualifiedTableName)
                                                 .map(t -> execute(session, t))
                                                 .collect(toList());
         try

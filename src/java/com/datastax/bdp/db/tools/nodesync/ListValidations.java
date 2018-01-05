@@ -99,7 +99,7 @@ public class ListValidations extends NodeSyncCommand
         {
             Map<String, String> map = new HashMap<>(6);
             map.put(ID, validation.key.id);
-            map.put(TABLE, validation.key.keyspace + '.' + validation.key.table);
+            map.put(TABLE, fullyQualifiedTableName(validation.key.keyspace, validation.key.table));
             map.put(STATUS, validation.status.toString());
             map.put(OUTCOME, validation.summarizedOutcome());
             map.put(DURATION, validation.duration().toString());

@@ -13,6 +13,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.annotation.Nullable;
 
+import org.apache.cassandra.cql3.ColumnIdentifier;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Splitter;
 
@@ -201,5 +203,15 @@ public abstract class NodeSyncCommand implements Runnable
     {
         if (!quiet)
             System.err.println(String.format("Warning: " + msg, args));
+    }
+
+    static String fullyQualifiedTableName(TableMetadata metadata)
+    {
+        return fullyQualifiedTableName(metadata.getKeyspace().getName(), metadata.getName());
+    }
+
+    static String fullyQualifiedTableName(String keyspace, String table)
+    {
+        return String.format("%s.%s", ColumnIdentifier.maybeQuote(keyspace), ColumnIdentifier.maybeQuote(table));
     }
 }
