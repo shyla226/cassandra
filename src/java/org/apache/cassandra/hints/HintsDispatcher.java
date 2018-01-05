@@ -31,6 +31,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.metrics.HintsServiceMetrics;
+import org.apache.cassandra.metrics.HintedHandoffMetrics;
+import org.apache.cassandra.metrics.HintsServiceMetrics;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessagingService;
