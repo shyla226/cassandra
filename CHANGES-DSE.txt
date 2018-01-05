@@ -1,4 +1,12 @@
 DSE 5.0.12
+ * Expanded hinted handoff instrumentation (DB-853)
+ * Improve Gossip Dissemination Time (DB-996)
+ * Use more intelligent level picking when we have a non-l0 file (DB-639)
+ * Keep sstable level for decommision, remove and move operations (DB-908)
+ * More quickly detect down nodes for batchlogs using the incoming connections (DB-809)
+ * Fixes for waitForGossiper (DB-671)
+ * LCS levels are not respected for `nodetool refresh` and replacing a node (DB-639)
+ * Keep sstable level for decommision, remove and move operations (DB-908)
  * Print heap histogram on OOM errors by default (DB-1489)
  * Support frozen collection list and set in stress (DB-1464)
  * Improved streams logging (DB-1409)
