@@ -40,9 +40,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
-
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -100,7 +97,6 @@ import org.apache.cassandra.utils.progress.ProgressEventType;
 import org.apache.cassandra.utils.progress.jmx.JMXProgressSupport;
 import org.apache.cassandra.utils.progress.jmx.LegacyJMXProgressSupport;
 
-import static com.google.common.base.Strings.repeat;
 import static java.util.Arrays.asList;
 import static java.util.stream.Collectors.toList;
 import static org.apache.cassandra.index.SecondaryIndexManager.getIndexName;
@@ -702,94 +698,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         initialized = true;
     }
 
-    private void primeConnections()
-    {
-        //Ensure all connections are up
-        Set<InetAddress> liveMembers = Gossiper.instance.getLiveMembers();
-
-        final int MAX_PRIMING_ATTEMPTS = Integer.getInteger("cassandra.max_gossip_priming_attempts", 3);
-        String key = "NULL";
-        String longKey = repeat(key, (int) OutboundTcpConnectionPool.LARGE_MESSAGE_THRESHOLD / key.length() + 1);
-        longKey = longKey.substring(0, (int) OutboundTcpConnectionPool.LARGE_MESSAGE_THRESHOLD - 1);
-
-        //We use local table because PK is a blob and we can make it large enough to
-        //hit the small and large connections
-        CFMetaData cf = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.LOCAL);
-
-        DecoratedKey dKey = cf.decorateKey(ByteBuffer.wrap(key.getBytes()));
-        DecoratedKey dLongKey = cf.decorateKey(ByteBuffer.wrap(longKey.getBytes()));
-
-        // Run priming queries upto N times
-        for (int i = 0; i < MAX_PRIMING_ATTEMPTS; i++)
-        {
-            ReadCommand qs = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), dKey, Slices.ALL);
-            ReadCommand ql = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), dLongKey, Slice.ALL);
-
-            HashMultimap<InetAddress, AsyncOneResponse> responses = HashMultimap.create();
-
-            for (InetAddress ep : liveMembers)
-            {
-                if (ep.equals(FBUtilities.getBroadcastAddress()))
-                    continue;
-
-                OutboundTcpConnectionPool pool = MessagingService.instance().getConnectionPool(ep);
-                try
-                {
-                    pool.waitForStarted();
-                }
-                catch (IllegalStateException e)
-                {
-                    logger.warn("Outgoing Connection pool failed to start for {}", ep);
-                    continue;
-                }
-
-                if (pool.gossipMessages.getTargetVersion() != MessagingService.current_version)
-                    continue;
-
-                MessageOut<?> qm = qs.createMessage(MessagingService.instance().getVersion(ep));
-                responses.put(ep, MessagingService.instance().sendRR(qm, ep));
-
-                qm = ql.createMessage(MessagingService.instance().getVersion(ep));
-                responses.put(ep, MessagingService.instance().sendRR(qm, ep));
-            }
-
-            try
-            {
-                FBUtilities.waitOnFutures(Lists.newArrayList(responses.values()), DatabaseDescriptor.getReadRpcTimeout());
-            }
-            catch (TimeoutException tm)
-            {
-                for (Map.Entry<InetAddress, AsyncOneResponse> entry : responses.entries())
-                {
-                    if (!entry.getValue().isDone())
-                        logger.debug("Timeout waiting for priming response from {}", entry.getKey());
-                }
-
-                continue;
-            }
-
-            logger.debug("All priming requests succeeded");
-            break;
-        }
-
-        for (InetAddress ep : liveMembers)
-        {
-            if (ep.equals(FBUtilities.getBroadcastAddress()))
-                continue;
-
-            OutboundTcpConnectionPool pool = MessagingService.instance().getConnectionPool(ep);
-
-            if (!pool.gossipMessages.isSocketOpen())
-                logger.warn("Gossip connection to {} not open", ep);
-
-            if (!pool.smallMessages.isSocketOpen())
-                logger.warn("Small message connection to {} not open", ep);
-
-            if (!pool.largeMessages.isSocketOpen())
-                logger.warn("Large message connection to {} not open", ep);
-        }
-    }
-
     private void loadRingState()
     {
         if (Boolean.parseBoolean(System.getProperty("cassandra.load_ring_state", "true")))
@@ -896,8 +804,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             appStates.put(ApplicationState.HOST_ID, valueFactory.hostId(localHostId));
             appStates.put(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(FBUtilities.getBroadcastRpcAddress()));
             appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
-            appStates.put(ApplicationState.STATUS, valueFactory.hibernate(true));
-            
+
             // load the persisted ring state. This used to be done earlier in the init process,
             // but now we always perform a shadow round when preparing to join and we have to
             // clear endpoint states after doing that.
@@ -913,7 +820,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Schema.instance.updateVersionAndAnnounce(); // Ensure we know our own actual Schema UUID in preparation for updates
             LoadBroadcaster.instance.startBroadcasting();
             HintsService.instance.startDispatch();
-            Gossiper.waitToSettle("accepting client requests");
             BatchlogManager.instance.start();
         }
     }
@@ -1154,14 +1060,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private void finishJoiningRing(Collection<Token> tokens)
     {
-        primeConnections();
-
         // start participating in the ring.
         SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.COMPLETED);
         setTokens(tokens);
 
         assert tokenMetadata.sortedTokens().size() > 0;
-
         doAuthSetup();
     }
 
@@ -1236,7 +1139,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public boolean isJoined()
     {
-        return joined && !isSurveyMode;
+        return tokenMetadata.isMember(FBUtilities.getBroadcastAddress()) && !isSurveyMode;
     }
 
     public void rebuild(String sourceDc)
@@ -2723,7 +2626,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
         }
 
-        StreamPlan stream = new StreamPlan(StreamOperation.RESTORE_REPLICA_COUNT, true);
+        StreamPlan stream = new StreamPlan(StreamOperation.RESTORE_REPLICA_COUNT);
         for (String keyspaceName : rangesToFetch.keySet())
         {
             for (Map.Entry<InetAddress, Collection<Range<Token>>> entry : rangesToFetch.get(keyspaceName))
@@ -4160,7 +4063,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private class RangeRelocator
     {
-        private final StreamPlan streamPlan = new StreamPlan(StreamOperation.RELOCATION, true);
+        private final StreamPlan streamPlan = new StreamPlan(StreamOperation.RELOCATION);
 
         private RangeRelocator(Collection<Token> tokens, List<String> keyspaceNames)
         {
@@ -4908,7 +4811,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             sessionsToStreamByKeyspace.put(keyspace, rangesPerEndpoint);
         }
 
-        StreamPlan streamPlan = new StreamPlan(StreamOperation.DECOMMISSION, true);
+        StreamPlan streamPlan = new StreamPlan(StreamOperation.DECOMMISSION);
         for (Map.Entry<String, Map<InetAddress, List<Range<Token>>>> entry : sessionsToStreamByKeyspace.entrySet())
         {
             String keyspaceName = entry.getKey();
@@ -5043,9 +4946,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * #{@inheritDoc}
      */
-    public void loadNewSSTables(String ksName, String cfName, boolean resetLevels)
+    public void loadNewSSTables(String ksName, String cfName)
     {
-        ColumnFamilyStore.loadNewSSTables(ksName, cfName, resetLevels);
+        ColumnFamilyStore.loadNewSSTables(ksName, cfName);
     }
 
     /**

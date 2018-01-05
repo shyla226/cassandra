@@ -150,18 +150,11 @@ public class OutboundTcpConnection extends Thread
     private final AtomicLong dropped = new AtomicLong();
     private volatile int currentMsgBufferCount = 0;
     private volatile int targetVersion;
-    private final boolean isGossip;
 
     public OutboundTcpConnection(OutboundTcpConnectionPool pool)
     {
-        this(pool, false);
-    }
-
-    public OutboundTcpConnection(OutboundTcpConnectionPool pool, boolean isGossip)
-    {
         super("MessagingService-Outgoing-" + pool.endPoint());
         this.poolReference = pool;
-        this.isGossip = isGossip;
         cs = newCoalescingStrategy(pool.endPoint().getHostAddress());
 
         // We want to use the most precise version we know because while there is version detection on connect(),
@@ -257,7 +250,6 @@ public class OutboundTcpConnection extends Thread
                     MessageOut<?> m = qm.message;
                     if (m == CLOSE_SENTINEL)
                     {
-                        logger.trace("Disconnecting because CLOSE_SENTINEL detected");
                         disconnect();
                         if (isStopped)
                             break outer;
@@ -344,7 +336,7 @@ public class OutboundTcpConnection extends Thread
             writeInternal(qm.message, qm.id, timestampMillis);
 
             completed++;
-            if (flush || qm.message.verb == MessagingService.Verb.ECHO)
+            if (flush)
                 out.flush();
         }
         catch (Throwable e)
@@ -408,11 +400,6 @@ public class OutboundTcpConnection extends Thread
         out.writeInt(header);
     }
 
-    public boolean isSocketOpen()
-    {
-        return socket != null && socket.isConnected();
-    }
-
     private void disconnect()
     {
         if (socket != null)
@@ -449,8 +436,7 @@ public class OutboundTcpConnection extends Thread
             {
                 socket = poolReference.newSocket();
                 socket.setKeepAlive(true);
-
-                if (isLocalDC(poolReference.endPoint()) || isGossip)
+                if (isLocalDC(poolReference.endPoint()))
                 {
                     socket.setTcpNoDelay(INTRADC_TCP_NODELAY);
                 }
@@ -458,7 +444,6 @@ public class OutboundTcpConnection extends Thread
                 {
                     socket.setTcpNoDelay(DatabaseDescriptor.getInterDCTcpNoDelay());
                 }
-
                 if (DatabaseDescriptor.getInternodeSendBufferSize() != null)
                 {
                     try

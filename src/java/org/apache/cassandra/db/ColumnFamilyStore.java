@@ -656,22 +656,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @param ksName The keyspace name
      * @param cfName The columnFamily name
      */
-    public static synchronized void loadNewSSTables(String ksName, String cfName, boolean resetLevels)
+    public static synchronized void loadNewSSTables(String ksName, String cfName)
     {
         /** ks/cf existence checks will be done by open and getCFS methods for us */
         Keyspace keyspace = Keyspace.open(ksName);
-        keyspace.getColumnFamilyStore(cfName).loadNewSSTables(resetLevels);
-    }
-
-    public synchronized void loadNewSSTables()
-    {
-        loadNewSSTables(false);
+        keyspace.getColumnFamilyStore(cfName).loadNewSSTables();
     }
 
     /**
      * #{@inheritDoc}
      */
-    public synchronized void loadNewSSTables(boolean resetLevels)
+    public synchronized void loadNewSSTables()
     {
         logger.info("Loading new SSTables for {}/{}...", keyspace.getName(), name);
 
@@ -694,17 +689,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                         descriptor));
 
             // force foreign sstables to level 0
-            if (resetLevels)
-            {try
+            try
             {
                 if (new File(descriptor.filenameFor(Component.STATS)).exists())
                     descriptor.getMetadataSerializer().mutateLevel(descriptor, 0);
             }
             catch (IOException e)
             {
-                FileUtils.handleCorruptSSTable(new CorruptSSTableException(e,entry.getKey().filenameFor(Component.STATS)));
+                FileUtils.handleCorruptSSTable(new CorruptSSTableException(e, entry.getKey().filenameFor(Component.STATS)));
                 logger.error("Cannot read sstable {}; other IO error, skipping table", entry, e);
-                continue;}
+                continue;
             }
 
             // Increment the generation until we find a filename that doesn't exist. This is needed because the new
@@ -1326,12 +1320,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public void addSSTables(Collection<SSTableReader> sstables)
     {
         data.addSSTables(sstables);
-        CompactionManager.instance.submitBackground(this);
-    }
-
-    public void addSSTablesFromStreaming(Collection<SSTableReader> sstables)
-    {
-        data.addSSTablesFromStreaming(sstables);
         CompactionManager.instance.submitBackground(this);
     }
 

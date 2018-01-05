@@ -16,12 +16,6 @@ using the provided 'sstableupgrade' tool.
 DSE 5.0.12
 ==========
 
-Upgrading
----------
-    - seed_gossip_probability setting was added to cassandra.yaml.  This setting will pick the percentage of times
-      gossip messages are sent to a seed.  This improves the time it takes for gossip changes to
-      propagate across the cluster. Defaults to 100% (1.0)
-
 Operations
 ----------
    - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
@@ -36,10 +30,6 @@ Operations
      Available options: "ONE"(default), "LOCAL_DC_QUORUM", "GLOBAL_QUORUM".
    - DSE is logging by default a heap histogram on OutOfMemoryError. To disable that behavior
      set the 'cassandra.printHeapHistogramOnOutOfMemoryError' System property to 'false'.
-   - Improved gossip settling added. On startup DSE waits till all nodes are seen before fully joining the cluster.
-     This improves latency spikes when restarting nodes.
-   - LeveledCompactionStrategy SSTables will keep their existing level on nodetool refresh, nodetool move,
-     and nodetool decommission.
 
 DSE 5.0.10
 ==========
@@ -79,7 +69,7 @@ Compact Storage
     - Starting version 4.0, Thrift and COMPACT STORAGE is no longer supported.
       'ALTER ... DROP COMPACT STORAGE' statement makes Compact Tables CQL-compatible,
       exposing internal structure of Thrift/Compact Tables. You can find more details
-      on exposed internal structure under:
+      on exposed internal structure under: 
       http://cassandra.apache.org/doc/latest/cql/appendices.html#appendix-c-dropping-compact-storage
 
       For uninterrupted cluster upgrades, drivers now support 'NO_COMPACT' startup option.
@@ -507,8 +497,8 @@ Upgrading
      the legacy tables, so clients experience no disruption. Issuing DCL
      statements during an upgrade is not supported.
      Once all nodes are upgraded, an operator with superuser privileges should
-     drop the legacy tables, system_auth.users, system_auth.credentials and
-     system_auth.permissions. Doing so will prompt Cassandra to switch over to
+     drop the legacy tables, system_auth.users, system_auth.credentials and 
+     system_auth.permissions. Doing so will prompt Cassandra to switch over to 
      the new tables without requiring any further intervention.
      While the legacy tables are present a restarted node will re-run the data
      conversion and report the outcome so that operators can verify that it is
@@ -677,8 +667,8 @@ Upgrading
     - cqlsh will now display timestamps with a UTC timezone. Previously,
       timestamps were displayed with the local timezone.
     - Commit log files are no longer recycled by default, due to negative
-      performance implications. This can be enabled again with the
-      commitlog_segment_recycling option in your cassandra.yaml
+      performance implications. This can be enabled again with the 
+      commitlog_segment_recycling option in your cassandra.yaml 
     - JMX methods set/getCompactionStrategyClass have been deprecated, use
       set/getCompactionParameters/set/getCompactionParametersJson instead
 
@@ -807,7 +797,7 @@ New features
 Upgrading
 ---------
    - commitlog_sync_batch_window_in_ms behavior has changed from the
-     maximum time to wait between fsync to the minimum time.  We are
+     maximum time to wait between fsync to the minimum time.  We are 
      working on making this more user-friendly (see CASSANDRA-9533) but in the
      meantime, this means 2.1 needs a much smaller batch window to keep
      writer threads from starving.  The suggested default is now 2ms.
@@ -2269,3 +2259,4 @@ key in a given ColumnFamily) is limited by available memory, because
 compaction deserializes each row before merging.
 
 See https://issues.apache.org/jira/browse/CASSANDRA-16
+
