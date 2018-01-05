@@ -36,6 +36,8 @@ public class SSTableAddedNotification implements INotification
     @Nullable
     private final Memtable memtable;
 
+    public final boolean fromStream;
+
     /**
      * Creates a new {@code SSTableAddedNotification} for the specified SSTables and optional memtable.
      *
@@ -43,9 +45,10 @@ public class SSTableAddedNotification implements INotification
      * @param memtable the memtable from which the tables come when they have been added due to a memtable flush,
      *                 or {@code null} if they don't come from a flush
      */
-    public SSTableAddedNotification(Iterable<SSTableReader> added, @Nullable Memtable memtable)
+    public SSTableAddedNotification(Iterable<SSTableReader> added, @Nullable Memtable memtable, boolean fromStream)
     {
         this.added = added;
+        this.fromStream = fromStream;
         this.memtable = memtable;
     }
 

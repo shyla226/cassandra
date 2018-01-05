@@ -607,6 +607,9 @@ public class DatabaseDescriptor
         if (conf.concurrent_materialized_view_builders <= 0)
             throw new ConfigurationException("concurrent_materialized_view_builders should be strictly greater than 0, but was " + conf.concurrent_materialized_view_builders, false);
 
+        if (conf.seed_gossip_probability < 0.01 || conf.seed_gossip_probability > 1.0)
+            throw new ConfigurationException("seed_gossip_probability must be between 0.01 and 1.0", false);
+
         if (conf.sstable_preemptive_open_interval_in_mb > 0 && conf.sstable_preemptive_open_interval_in_mb < 4)
         {
             logger.warn("Setting sstable_preemptive_open_interval_in_mb to a very low value ({}) will increase GC pressure " +
@@ -2606,6 +2609,16 @@ public class DatabaseDescriptor
     public static long getGCWarnThreshold()
     {
         return conf.gc_warn_threshold_in_ms;
+    }
+
+    public static double getSeedGossipProbability()
+    {
+        return conf.seed_gossip_probability;
+    }
+
+    public static void setSeedGossipProbability(double probability)
+    {
+        conf.seed_gossip_probability = probability;
     }
 
     public static boolean isCDCEnabled()

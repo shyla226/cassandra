@@ -32,6 +32,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
 import org.apache.cassandra.metrics.HintsServiceMetrics;
+import org.apache.cassandra.metrics.HintedHandoffMetrics;
+import org.apache.cassandra.metrics.HintsServiceMetrics;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.FailureResponse;
 import org.apache.cassandra.net.MessageCallback;
