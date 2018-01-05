@@ -278,6 +278,13 @@ public abstract class AbstractCompactionStrategy
             addSSTable(sstable);
     }
 
+    // Allow a special path for sstables being streamed from other nodes
+    // Used in LCS
+    public void addSSTableFromStreaming(SSTableReader added)
+    {
+        addSSTable(added);
+    }
+
     public abstract void removeSSTable(SSTableReader sstable);
 
     /**

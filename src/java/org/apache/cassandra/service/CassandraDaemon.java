@@ -434,8 +434,6 @@ public class CassandraDaemon
 
         ScheduledExecutors.optionalTasks.schedule(viewRebuild, StorageService.RING_DELAY, TimeUnit.MILLISECONDS);
 
-        Gossiper.waitToSettle("accepting client requests");
-
         // re-enable auto-compaction after gossip is settled, so correct disk boundaries are used
         for (Keyspace keyspace : Keyspace.all())
         {

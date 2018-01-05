@@ -654,8 +654,9 @@ public interface StorageServiceMBean extends NotificationEmitter
      *
      * @param ksName The parent keyspace name
      * @param tableName The ColumnFamily name where SSTables belong
+     * @param resetLevels Reset all new sstables to level 0
      */
-    public void loadNewSSTables(String ksName, String tableName);
+    public void loadNewSSTables(String ksName, String tableName, boolean resetLevels);
 
     /**
      * Return a List of Tokens representing a sample of keys across all ColumnFamilyStores.
