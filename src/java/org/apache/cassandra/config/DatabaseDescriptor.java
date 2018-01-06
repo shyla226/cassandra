@@ -1045,10 +1045,10 @@ public class DatabaseDescriptor
     {
         try
         {
-            if (System.getProperty(Config.PROPERTY_PREFIX + "replace_address", null) != null)
-                return InetAddress.getByName(System.getProperty(Config.PROPERTY_PREFIX + "replace_address", null));
-            else if (System.getProperty(Config.PROPERTY_PREFIX + "replace_address_first_boot", null) != null)
-                return InetAddress.getByName(System.getProperty(Config.PROPERTY_PREFIX + "replace_address_first_boot", null));
+            if (System.getProperty("cassandra.replace_address", null) != null)
+                return InetAddress.getByName(System.getProperty("cassandra.replace_address", null));
+            else if (System.getProperty("cassandra.replace_address_first_boot", null) != null)
+                return InetAddress.getByName(System.getProperty("cassandra.replace_address_first_boot", null));
             return null;
         }
         catch (UnknownHostException e)
@@ -2041,7 +2041,7 @@ public class DatabaseDescriptor
     {
         conf.otc_backlog_expiration_interval_ms = intervalInMillis;
     }
-
+ 
     public static int getWindowsTimerInterval()
     {
         return conf.windows_timer_interval;
