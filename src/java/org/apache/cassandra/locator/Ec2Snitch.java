@@ -138,6 +138,13 @@ public class Ec2Snitch extends AbstractNetworkTopologySnitch
         return ec2zone;
     }
 
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        assert dc != null;
+        return dc == DEFAULT_DC;
+    }
+
     public String toString()
     {
         return "Ec2Snitch{" +

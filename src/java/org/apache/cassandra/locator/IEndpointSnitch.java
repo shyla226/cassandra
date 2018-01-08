@@ -105,4 +105,13 @@ public interface IEndpointSnitch
      * returns additional cross DC RTT latency in ms applied to cross DC request
      */
     public long getCrossDcRttLatency(InetAddress endpoint);
+
+    /**
+     * @return true if the specified dc is the snitches default dc string object,
+     * specifially if its the static string the snitch uses when no DC is known.
+     *
+     * Implementers should try to use == comparison vs .equals() since a user
+     * might accidentally use the same name as their real dc name
+     */
+    public boolean isDefaultDC(String dc);
 }

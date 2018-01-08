@@ -89,4 +89,10 @@ public abstract class AbstractEndpointSnitch implements IEndpointSnitch
         assert crossDCLatency >= 0;
         return (crossDCLatency == 0 || isInLocalDatacenter(endpoint)) ? 0 : crossDCLatency;
     }
+
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        return false;
+    }
 }

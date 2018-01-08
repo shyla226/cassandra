@@ -37,6 +37,12 @@ public class RackInferringSnitch extends AbstractNetworkTopologySnitch
         return Integer.toString(endpoint.getAddress()[1] & 0xFF, 10);
     }
 
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        return false;
+    }
+
     public String toString()
     {
         return "RackInferringSnitch{" +

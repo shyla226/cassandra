@@ -31,14 +31,16 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public class SimpleSnitch extends AbstractEndpointSnitch
 {
+    private static final String DEFAULT_DC = "datacenter1";
+    private static final String DEFAULT_RACK = "rack1";
     public String getRack(InetAddress endpoint)
     {
-        return "rack1";
+        return DEFAULT_RACK;
     }
 
     public String getDatacenter(InetAddress endpoint)
     {
-        return "datacenter1";
+        return DEFAULT_DC;
     }
 
     public boolean isInLocalDatacenter(InetAddress endpoint)
@@ -62,6 +64,13 @@ public class SimpleSnitch extends AbstractEndpointSnitch
         // Making all endpoints equal ensures we won't change the original ordering (since
         // Collections.sort is guaranteed to be stable)
         return 0;
+    }
+
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        assert dc != null;
+        return dc == DEFAULT_DC;
     }
 
     public String toString()

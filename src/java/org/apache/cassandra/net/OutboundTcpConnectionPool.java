@@ -105,6 +105,13 @@ public class OutboundTcpConnectionPool
             conn.closeSocket(false);
     }
 
+    public void softReset()
+    {
+        logger.trace("Soft reset called for {}", id);
+        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
+            conn.softCloseSocket();
+    }
+
     /**
      * reconnect to @param remoteEP (after the current message backlog is exhausted).
      * Used by Ec2MultiRegionSnitch to force nodes in the same region to communicate over their private IPs.

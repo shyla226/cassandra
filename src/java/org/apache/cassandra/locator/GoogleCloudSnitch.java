@@ -140,6 +140,13 @@ public class GoogleCloudSnitch extends AbstractNetworkTopologySnitch
         return gceZone;
     }
 
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        assert dc != null;
+        return dc == DEFAULT_DC;
+    }
+
     public String toString()
     {
         return "Ec2Snitch{" +

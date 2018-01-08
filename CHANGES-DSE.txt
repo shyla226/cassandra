@@ -123,6 +123,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no internal DB ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no internal DB ticket)
 Merged from dse5.0:
+ * Fix for Local DC connections are compressed despite internode_compression: dc (DB-734)
  * Expanded hinted handoff instrumentation (DB-853)
  * Improve Gossip Dissemination Time (DB-996)
  * Use more intelligent level picking when we have a non-l0 file (DB-639)
