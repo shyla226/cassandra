@@ -732,6 +732,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     continue;
                 }
 
+                if (MessagingService.instance().getVersion(ep) != MessagingService.current_version)
+                    continue;
+
                 responses.put(ep, MessagingService.instance().sendSingleTarget(Verbs.READS.SINGLE_READ.newRequest(ep, qs)));
                 responses.put(ep, MessagingService.instance().sendSingleTarget(Verbs.READS.SINGLE_READ.newRequest(ep, ql)));
             }
