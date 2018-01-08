@@ -214,17 +214,8 @@ public abstract class ModificationStatement implements CQLStatement
         if (hasConditions())
             state.hasColumnFamilyAccess(cfm, CorePermission.SELECT);
 
-        // MV updates need to get the current state from the table, and might update the views
-        // Require Permission.SELECT on the base table, and Permission.MODIFY on the views
-        Iterator<ViewDefinition> views = View.findAll(keyspace(), columnFamily()).iterator();
-        if (views.hasNext())
-        {
-            state.hasColumnFamilyAccess(cfm, CorePermission.SELECT);
-            do
-            {
-                state.hasColumnFamilyAccess(views.next().metadata, CorePermission.MODIFY);
-            } while (views.hasNext());
-        }
+        // Modification on base table with MV should skip SELECT access control to base table and WRITE access control to view table.
+        // RowLevelAccessControl is skipped for System user in DSE and it won't affect view update.
 
         for (Function function : getFunctions())
             state.ensureHasPermission(CorePermission.EXECUTE, function);

@@ -46,6 +46,8 @@ Operations
     - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
       The command must be executed on the node where the rebuild operation is running. Streams
       may continue until they finish or timeout.
+    - Only MODIFY permission on base is required to update table with MV, internally it reads base
+      data and generates updates to MV.
 
 Metrics
 -------
