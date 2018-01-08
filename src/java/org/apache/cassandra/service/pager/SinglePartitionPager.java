@@ -43,7 +43,6 @@ public class SinglePartitionPager extends AbstractQueryPager
     {
         super(command, protocolVersion);
         this.command = command;
-
         if (state != null)
         {
             lastReturned = state.rowMark;
