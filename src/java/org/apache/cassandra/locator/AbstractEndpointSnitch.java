@@ -95,4 +95,10 @@ public abstract class AbstractEndpointSnitch implements IEndpointSnitch
         return Objects.equals(DatabaseDescriptor.getLocalDataCenter(),
                               DatabaseDescriptor.getEndpointSnitch().getDatacenter(target));
     }
+
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        return false;
+    }
 }
