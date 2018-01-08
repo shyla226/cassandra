@@ -108,7 +108,7 @@ public class OutboundTcpConnectionPool
     public void softReset()
     {
         logger.trace("Soft reset called for {}", id);
-        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
+        for (OutboundTcpConnection conn : connectionByKind.values())
             conn.softCloseSocket();
     }
 

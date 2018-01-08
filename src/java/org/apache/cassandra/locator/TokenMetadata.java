@@ -1421,7 +1421,7 @@ public class TokenMetadata
                 (!dc.equals(current.left) || snitch.isDefaultDC(current.left)))
             {
                 logger.debug("Resetting connection to {} due to dc compression", ep);
-                MessagingService.instance().getConnectionPool(ep).softReset();
+                MessagingService.instance().getConnectionPool(ep).join().softReset();
             }
         }
 
