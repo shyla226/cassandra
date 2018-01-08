@@ -80,7 +80,6 @@ import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
-import org.openjdk.jmh.util.HashsetMultimap;
 
 public final class MessagingService implements MessagingServiceMBean
 {
