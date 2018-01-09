@@ -309,13 +309,17 @@ public class SerializationHeader
 
         public SerializationHeader toHeader(TableMetadata metadata)
         {
+            // the type map will only be required if at least one of the columns has a type that is not the
+            // same as the type in the metadata columns
+            boolean typeMapRequired = false;
             Map<ByteBuffer, AbstractType<?>> typeMap = new HashMap<>(staticColumns.size() + regularColumns.size());
             typeMap.putAll(staticColumns);
             typeMap.putAll(regularColumns);
 
             RegularAndStaticColumns.Builder builder = RegularAndStaticColumns.builder();
-            for (ByteBuffer name : typeMap.keySet())
+            for (Map.Entry<ByteBuffer, AbstractType<?>> entry : typeMap.entrySet())
             {
+                ByteBuffer name = entry.getKey();
                 ColumnMetadata column = metadata.getColumn(name);
                 if (column == null)
                 {
@@ -332,9 +336,13 @@ public class SerializationHeader
                     if (column == null)
                         throw new RuntimeException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
                 }
+
+                if (!entry.getValue().equals(column.type))
+                    typeMapRequired = true;
+
                 builder.add(column);
             }
-            return new SerializationHeader(true, keyType, clusteringTypes, builder.build(), stats, typeMap);
+            return new SerializationHeader(true, keyType, clusteringTypes, builder.build(), stats, typeMapRequired ? typeMap : null);
         }
 
         @Override
