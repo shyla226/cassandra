@@ -3738,7 +3738,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 option.getRanges().addAll(getLocalRanges(keyspace));
             }
         }
-        if (option.getRanges().isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor() < 2)
+        if (option.getRanges().isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor() < 2
+                || tokenMetadata.getAllEndpoints().size() < 2)
             return 0;
 
         if (option.isIncremental())

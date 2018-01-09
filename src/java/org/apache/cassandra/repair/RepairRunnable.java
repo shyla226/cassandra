@@ -244,7 +244,9 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
                 Set<InetAddress> neighbors = ActiveRepairService.getNeighbors(keyspace, keyspaceLocalRanges, range,
                                                                               options.getDataCenters(),
                                                                               options.getHosts());
-
+                // local RF = 1 or given range is not part of local range, neighbors would be empty.
+                if (neighbors == null || neighbors.isEmpty())
+                    continue;
                 addRangeToNeighbors(commonRanges, range, neighbors);
                 allNeighbors.addAll(neighbors);
             }
@@ -255,6 +257,14 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
         {
             logger.error("Repair failed:", e);
             fireErrorAndComplete(progress.get(), totalProgress, e.getMessage());
+            return;
+        }
+
+        if (commonRanges.isEmpty())
+        {
+            logger.debug("No common ranges to repair");
+            String completionMessage = String.format("Repair command #%d finished with no common ranges to repair", cmd);
+            fireProgressEvent(new ProgressEvent(ProgressEventType.COMPLETE, progress.get(), totalProgress, completionMessage));
             return;
         }
 
@@ -663,6 +673,7 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
 
     private void addRangeToNeighbors(List<CommonRange> neighborRangeList, Range<Token> range, Set<InetAddress> neighbors)
     {
+        assert !neighbors.isEmpty();
         for (int i = 0; i < neighborRangeList.size(); i++)
         {
             CommonRange cr = neighborRangeList.get(i);
