@@ -42,6 +42,7 @@ import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.RebufferingInputStream;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.utils.BytemanUtil;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
@@ -52,6 +53,11 @@ import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 @RunWith(BMUnitRunner.class)
 public class CommitLogChainedMarkersTest
 {
+    static
+    {
+        BytemanUtil.randomizeBytemanPort();
+    }
+
     private static final String KEYSPACE1 = "CommitLogTest";
     private static final String STANDARD1 = "CommitLogChainedMarkersTest";
 

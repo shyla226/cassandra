@@ -37,6 +37,7 @@ import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.BytemanUtil;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
@@ -50,6 +51,11 @@ import static org.junit.Assert.assertFalse;
 @RunWith(BMUnitRunner.class)
 public class PendingRangeCalculatorServiceTest
 {
+    static
+    {
+        BytemanUtil.randomizeBytemanPort();
+    }
+
     static ReentrantLock calculationLock = new ReentrantLock();
 
     @BeforeClass
