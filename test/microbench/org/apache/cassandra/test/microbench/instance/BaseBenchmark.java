@@ -118,7 +118,7 @@ public class BaseBenchmark
         public void setup(BaseBenchmark benchmark, BenchmarkParams params) throws Throwable
         {
             this.benchmark = benchmark;
-            perThreadInflight = benchmark.inflight/params.getThreads();
+            perThreadInflight = Math.max(benchmark.inflight/params.getThreads(), 1);
 
             Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(IOScheduler.MAX_POOL_SIZE));
             RxJavaPlugins.setComputationSchedulerHandler((s) -> TPC.bestTPCScheduler());
