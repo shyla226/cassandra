@@ -70,6 +70,8 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 import org.junit.After;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 @Ignore
@@ -151,10 +153,8 @@ public abstract class CommitLogTest
         // The first empty file we expect to throw as it's invalid
         // We need to pass the second as well, because allowTruncation will be set to true for the final segment
         runExpecting(() -> {
-            CommitLog.instance.recoverFiles(new File[]{
-            tmpFile(CommitLogDescriptor.current_version),
-            tmpFile(CommitLogDescriptor.current_version)
-            });
+            CommitLog.instance.recoverFiles(tmpFile(CommitLogDescriptor.current_version),
+                                            tmpFile(CommitLogDescriptor.current_version));
             return null;
         }, CommitLogReplayException.class);
     }
@@ -568,21 +568,26 @@ public abstract class CommitLogTest
         }, CommitLogReplayException.class);
     }
 
-    protected void runExpecting(Callable<Void> r, Class<?> expected)
+    protected void runExpecting(Callable<Void> r, Class<?> expected) throws Exception
     {
-        Throwable caught = null;
         try
         {
             r.call();
         }
-        catch (Throwable t)
+        catch (RuntimeException e)
         {
-            if (expected != t.getClass())
-                throw new AssertionError("Expected exception " + expected + ", got " + t, t);
-            caught = t;
+            assertEquals(e.getMessage(), "JVM killed");
         }
-        if (expected != null && caught == null)
-            Assert.fail("Expected exception " + expected + " but call completed successfully.");
+
+        Throwable caught = testKiller.getThrowable();
+
+        assertEquals(testKiller.wasKilled(), expected != null);
+
+        if (expected != null)
+        {
+            assertNotNull("Expected exception " + expected + " but call completed successfully.", caught);
+            assertSame(expected, caught.getClass());
+        }
 
         assertEquals("JVM kill state doesn't match expectation.", expected != null, testKiller.wasKilled());
     }

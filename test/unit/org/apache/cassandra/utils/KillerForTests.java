@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.utils;
 
-import org.junit.Assert;
-
 /**
  * Responsible for stubbing out the System.exit() logic during unit tests.
  */
@@ -28,6 +26,7 @@ public class KillerForTests extends JVMStabilityInspector.Killer
     private boolean killed = false;
     private boolean quiet = false;
     private final boolean expected;
+    private Throwable throwable;
 
     public KillerForTests()
     {
@@ -42,11 +41,9 @@ public class KillerForTests extends JVMStabilityInspector.Killer
     @Override
     protected void killCurrentJVM(Throwable t, boolean quiet)
     {
-        if (!expected)
-            Assert.fail("Saw JVM Kill but did not expect it.");
-
         this.killed = true;
         this.quiet = quiet;
+        this.throwable = t;
     }
 
     public boolean wasKilled()
@@ -57,6 +54,16 @@ public class KillerForTests extends JVMStabilityInspector.Killer
     public boolean wasKilledQuietly()
     {
         return quiet;
+    }
+
+    public Throwable getThrowable()
+    {
+        return throwable;
+    }
+
+    public boolean isExpected()
+    {
+        return expected;
     }
 
     public void reset()

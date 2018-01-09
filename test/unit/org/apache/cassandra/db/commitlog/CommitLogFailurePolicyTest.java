@@ -30,7 +30,6 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.service.CassandraDaemon;
@@ -100,7 +99,7 @@ public class CommitLogFailurePolicyTest
     }
 
     @Test
-    public void testCommitFailurePolicy_ignore_beforeStartup()
+    public void testCommitReplayFailurePolicy_ignore_beforeStartup()
     {
         //startup was not completed successfuly (since method completeSetup() was not called)
         CassandraDaemon daemon = new CassandraDaemon();
@@ -112,20 +111,24 @@ public class CommitLogFailurePolicyTest
         try
         {
             DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.ignore);
-            CommitLog.handleCommitError("Testing ignore policy", new Throwable());
-            //even though policy is ignore, JVM must die because Daemon has not finished initializing
-            Assert.assertTrue(killerForTests.wasKilled());
-            Assert.assertTrue(killerForTests.wasKilledQuietly()); //killed quietly due to startup failure
+            CommitLogReplayer.construct(CommitLog.instance)
+                             .handleUnrecoverableError(new CommitLogReadHandler.CommitLogReadException("", CommitLogReadHandler.CommitLogReadErrorReason.MUTATION_ERROR, false));
+        }
+        catch (RuntimeException e)
+        {
+            Assert.assertEquals(e.getMessage(), "JVM killed");
         }
         finally
         {
+            // even though policy is ignore, JVM must die because Daemon has not finished initializing on _replay_ problem
+            Assert.assertTrue(killerForTests.wasKilled());
             DatabaseDescriptor.setCommitFailurePolicy(oldPolicy);
             JVMStabilityInspector.replaceKiller(originalKiller);
         }
     }
 
     @Test
-    public void testCommitFailurePolicy_ignore_afterStartup() throws Exception
+    public void testCommitFailurePolicy_ignore_afterStartup()
     {
         CassandraDaemon daemon = new CassandraDaemon();
         daemon.completeSetup(); //startup must be completed, otherwise commit log failure must kill JVM regardless of failure policy

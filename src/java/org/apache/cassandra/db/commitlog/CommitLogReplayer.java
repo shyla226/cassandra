@@ -50,6 +50,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.flow.RxThreads;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.WrappedRunnable;
 
 public class CommitLogReplayer implements CommitLogReadHandler
 {
@@ -393,18 +395,25 @@ public class CommitLogReplayer implements CommitLogReadHandler
         }
     }
 
-    public boolean shouldSkipSegmentOnError(CommitLogReadException exception) throws IOException
+    public boolean shouldSkipSegmentOnError(CommitLogReadException exception)
     {
         if (exception.permissible)
+        {
             logger.error("Ignoring commit log replay error likely due to incomplete flush to disk", exception);
+        }
         else if (Boolean.getBoolean(IGNORE_REPLAY_ERRORS_PROPERTY))
+        {
             logger.error("Ignoring commit log replay error", exception);
-        else if (!CommitLog.handleCommitError("Failed commit log replay", exception))
+        }
+        else
         {
             logger.error("Replay stopped. If you wish to override this error and continue starting the node ignoring " +
                          "commit log replay problems, specify -D" + IGNORE_REPLAY_ERRORS_PROPERTY + "=true " +
                          "on the command line");
-            throw new CommitLogReplayException(exception.getMessage(), exception);
+            Throwable t = new CommitLogReplayException(exception.getMessage(), exception);
+            JVMStabilityInspector.killCurrentJVM(t, false);
+            // If JVM killer is mocked, we should't fall into the infinite loop
+            throw new RuntimeException("JVM killed");
         }
         return false;
     }
@@ -412,7 +421,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
     /**
      * The logic for whether or not we throw on an error is identical for the replayer between recoverable or non.
      */
-    public void handleUnrecoverableError(CommitLogReadException exception) throws IOException
+    public void handleUnrecoverableError(CommitLogReadException exception)
     {
         // Don't care about return value, use this simply to throw exception as appropriate.
         shouldSkipSegmentOnError(exception);

@@ -60,9 +60,8 @@ public interface CommitLogReadHandler
      * In instances where we cannot recover from a specific error and don't care what the reader thinks
      *
      * @param exception CommitLogReadException w/details on exception state
-     * @throws IOException
      */
-    void handleUnrecoverableError(CommitLogReadException exception) throws IOException;
+    void handleUnrecoverableError(CommitLogReadException exception);
 
     /**
      * Process a deserialized mutation

@@ -513,7 +513,7 @@ public abstract class CommitLogStressTest
     {
         public boolean shouldSkipSegmentOnError(CommitLogReadException exception) throws IOException { return false; }
 
-        public void handleUnrecoverableError(CommitLogReadException exception) throws IOException { }
+        public void handleUnrecoverableError(CommitLogReadException exception) { }
 
         public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc) { }
     }

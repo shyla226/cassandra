@@ -35,6 +35,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.*;
@@ -491,19 +492,22 @@ public class CommitLog implements CommitLogMBean
     @VisibleForTesting
     public static boolean handleCommitError(String message, Throwable t)
     {
-        JVMStabilityInspector.inspectCommitLogThrowable(t, StorageService.instance.isDaemonSetupCompleted());
-        switch (DatabaseDescriptor.getCommitFailurePolicy())
+        Config.CommitFailurePolicy policy = DatabaseDescriptor.getCommitFailurePolicy();
+        switch (policy)
         {
             // Needed here for unit tests to not fail on default assertion
             case die:
+                JVMStabilityInspector.killCurrentJVM(t, false);
             case stop:
                 StorageService.instance.stopTransportsAsync();
                 //$FALL-THROUGH$
             case stop_commit:
-                logger.error(String.format("%s. Commit disk failure policy is %s; terminating thread", message, DatabaseDescriptor.getCommitFailurePolicy()), t);
+                JVMStabilityInspector.inspectThrowable(t);
+                logger.error(String.format("%s. Commit disk failure policy is %s; terminating thread", message, policy), t);
                 return false;
             case ignore:
-                logger.error(message, t);
+                JVMStabilityInspector.inspectThrowable(t);
+                logger.error(String.format("%s. Commit disk failure policy is %s; ignoring", message, policy), t);
                 return true;
             default:
                 throw new AssertionError(DatabaseDescriptor.getCommitFailurePolicy());
