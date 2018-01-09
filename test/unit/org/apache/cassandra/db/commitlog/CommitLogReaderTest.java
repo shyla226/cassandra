@@ -227,7 +227,7 @@ public class CommitLogReaderTest extends CQLTester
             return false;
         }
 
-        public void handleUnrecoverableError(CommitLogReadException exception) throws IOException
+        public void handleUnrecoverableError(CommitLogReadException exception)
         {
             sawStopOnErrorCheck = true;
         }

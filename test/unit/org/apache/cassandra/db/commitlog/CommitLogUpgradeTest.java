@@ -132,11 +132,19 @@ public class CommitLogUpgradeTest
         testRestore(DATA_DIR + "2.2-lz4-truncated");
     }
 
-    @Test(expected = CommitLogReplayException.class)
+    @Test
     public void test22_bitrot() throws Exception
     {
         shouldBeKilled = true;
-        testRestore(DATA_DIR + "2.2-lz4-bitrot");
+        try
+        {
+            testRestore(DATA_DIR + "2.2-lz4-bitrot");
+        }
+        catch (RuntimeException e)
+        {
+            Assert.assertEquals(e.getMessage(), "JVM killed");
+        }
+        Assert.assertTrue(killerForTests.getThrowable().getClass() == CommitLogReplayException.class);
     }
 
     @Test
@@ -153,11 +161,19 @@ public class CommitLogUpgradeTest
         }
     }
 
-    @Test(expected = CommitLogReplayException.class)
+    @Test
     public void test22_bitrot2() throws Exception
     {
         shouldBeKilled = true;
-        testRestore(DATA_DIR + "2.2-lz4-bitrot2");
+        try
+        {
+            testRestore(DATA_DIR + "2.2-lz4-bitrot2");
+        }
+        catch (RuntimeException e)
+        {
+            Assert.assertEquals(e.getMessage(), "JVM killed");
+        }
+        Assert.assertTrue(killerForTests.getThrowable().getClass() == CommitLogReplayException.class);
     }
 
     @Test
