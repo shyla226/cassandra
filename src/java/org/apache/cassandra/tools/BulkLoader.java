@@ -42,10 +42,18 @@ import org.apache.cassandra.utils.OutputHandler;
 
 public class BulkLoader
 {
-    public static void main(String args[]) throws BulkLoadException
+    public static void main(String args[])
     {
         LoaderOptions options = LoaderOptions.builder().parseArgs(args).build();
-        load(options);
+        try
+        {
+            load(options);
+        }
+        catch (Throwable t)
+        {
+            System.exit(1); // We need that to stop non daemonized threads
+        }
+        System.exit(0);
     }
 
     public static void load(LoaderOptions options) throws BulkLoadException

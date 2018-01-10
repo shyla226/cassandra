@@ -44,18 +44,7 @@ public class BulkLoaderTest extends ToolsTester
     @Test
     public void testBulkLoader_WithArgs() throws Exception
     {
-        try
-        {
-            runTool(0, "org.apache.cassandra.tools.BulkLoader", "-d", "127.9.9.1", sstableDirName("legacy_sstables", "legacy_ma_simple"));
-            fail();
-        }
-        catch (RuntimeException e)
-        {
-            if (!(e.getCause() instanceof BulkLoadException))
-                throw e;
-            if (!(e.getCause().getCause() instanceof NoHostAvailableException))
-                throw e;
-        }
+        runTool(1, "org.apache.cassandra.tools.BulkLoader", "-d", "127.9.9.1", sstableDirName("legacy_sstables", "legacy_ma_simple"));
         assertNoUnexpectedThreadsStarted(null, new String[]{"globalEventExecutor-1-1", "globalEventExecutor-1-2"});
         assertSchemaNotLoaded();
         assertCLSMNotLoaded();
