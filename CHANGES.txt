@@ -1,4 +1,6 @@
 3.11.2
+ * Acquire read lock before accessing CompactionStrategyManager fields (CASSANDRA-14139)
+ * Split CommitLogStressTest to avoid timeout (CASSANDRA-14143)
  * Avoid invalidating disk boundaries unnecessarily (CASSANDRA-14083)
  * Avoid exposing compaction strategy index externally (CASSANDRA-14082)
  * Fix imbalanced disks when replacing node with same address with JBOD (CASSANDRA-14084)
@@ -11,6 +13,7 @@
  * Update jackson JSON jars (CASSANDRA-13949)
  * Avoid locks when checking LCS fanout and if we should defrag (CASSANDRA-13930)
 Merged from 3.0:
+ * Set encoding for javadoc generation (CASSANDRA-14154)
  * Fix index target computation for dense composite tables with dropped compact storage (CASSANDRA-14104)
  * Improve commit log chain marker updating (CASSANDRA-14108)
  * Extra range tombstone bound creates double rows (CASSANDRA-14008)
