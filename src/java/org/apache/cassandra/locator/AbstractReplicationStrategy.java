@@ -178,7 +178,10 @@ public abstract class AbstractReplicationStrategy
         for (Token token : metadata.sortedTokens())
         {
             Range<Token> range = metadata.getPrimaryRangeFor(token);
-            map.putAll(range, calculateNaturalEndpoints(token, metadata));
+            for (InetAddress ep : calculateNaturalEndpoints(token, metadata))
+            {
+                map.put(range, ep);
+            }
         }
 
         return map;
