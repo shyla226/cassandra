@@ -35,6 +35,23 @@ Operations
    - LeveledCompactionStrategy SSTables will keep their existing level on nodetool refresh, nodetool move,
      and nodetool decommission.
 
+Metrics
+-------
+   - New hints dispatcher metrics added: HintsSucceeded / HintsFailed / HintsTimedOut, updated
+     on a per-hint bases on a source node during dispatch, depending on the hint dispatch outcome.
+   - New storage metrics were added:
+     * TotalHintsReplayed: how many hints were successfully replayed on the _target_ node.
+     * HintsOnDisk: how many hints are currently persistent on disk on this node. Metric is updated
+       for the amount of hints contained in the hints file when hints file is written or removed.
+       Values is restored on node startup.
+
+New features
+------------
+   -  Statistics file component was added to Hint Store in order to provide information about
+      amount of hints contained in the hints file withouot replaying it. Stats component is
+      completely backwad-compatible; hint files withouot this component will not be counted.
+      All new hint files will be created with this component. See DB-853 for more details.
+
 DSE 5.0.10
 ==========
 
