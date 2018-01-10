@@ -19,6 +19,7 @@ package org.apache.cassandra.concurrent;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -40,8 +41,20 @@ public class TPCBoundaries
 {
     private static final Token[] EMPTY_TOKEN_ARRAY = new Token[0];
 
-    // Special boundaries object that map all token to core 0.
+    // Special boundaries that map all tokens to core 0.
+    // For local system tables these boundaries will be used when:
+    // - the partitioner does not support splitting, otherwise the LOCAL boundaries will be used.
+    // For all other tables these boundaries will be used in either of these cases:
+    // - the default partitioner doesn't support splitting, because in this case the local ranges will always be null
+    // - StorageService is not yet initialized AND there are no SSTables
+    // - the available TokenMetadata doesn't contain ranges for a keyspace on a node
     public static TPCBoundaries NONE = new TPCBoundaries(EMPTY_TOKEN_ARRAY);
+
+    // Special boundaries for LOCAL tables, for which we know all the data is local, so we can split
+    // the entire partition range supported by the partitioner. We need these boundaries very early on during
+    // startup and they do not change, therefore they are stored in this static field. The partitioner
+    // needs to support the maximum token, but this is a requirement for partitioners with a splitter.
+    public static final TPCBoundaries LOCAL = computeLocalRanges(DatabaseDescriptor.getPartitioner(), TPC.getNumCores());
 
     private final Token[] boundaries;
 
@@ -50,6 +63,13 @@ public class TPCBoundaries
         this.boundaries = boundaries;
     }
 
+    private static TPCBoundaries computeLocalRanges(IPartitioner partitioner, int numCores)
+    {
+        if (!partitioner.splitter().isPresent())
+            return NONE;
+
+        return compute(Collections.singletonList(new Range(partitioner.getMinimumToken(), partitioner.getMaximumToken())), numCores);
+    }
     /**
      * Computes TPC boundaries for data distributed over the provided ranges.
      *
