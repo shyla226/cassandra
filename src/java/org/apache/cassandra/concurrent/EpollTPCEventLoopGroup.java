@@ -480,7 +480,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             // throttle scheduled tasks check
             if (nanoTimeSinceStartup - lastScheduledCheckTime > SCHEDULED_CHECK_INTERVAL_NANOS)
             {
-                processed += transferFromScheduledTasks(nanoTimeSinceStartup);
+                processed += runScheduledTasks(nanoTimeSinceStartup);
             }
 
             processed += processTasks();
@@ -621,15 +621,21 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             return processed;
         }
 
-        private int transferFromScheduledTasks(long nanoTimeSinceStartup)
+        private int runScheduledTasks(long nanoTimeSinceStartup)
         {
             lastScheduledCheckTime = nanoTimeSinceStartup;
             int processed = 0;
-            Runnable scheduledTask = pollScheduledTask(nanoTimeSinceStartup);
-            while (scheduledTask != null)
+            Runnable scheduledTask;
+            while ((scheduledTask = pollScheduledTask(nanoTimeSinceStartup)) != null)
             {
-                addTask(scheduledTask);
-                scheduledTask = pollScheduledTask(nanoTimeSinceStartup);
+                try
+                {
+                    scheduledTask.run();
+                }
+                catch (Throwable t)
+                {
+                    handleTaskException(t);
+                }
                 ++processed;
             }
             return processed;
