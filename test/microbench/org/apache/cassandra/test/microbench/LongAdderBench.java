@@ -20,6 +20,7 @@ package org.apache.cassandra.test.microbench;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.concurrent.LongAdder;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -36,8 +37,8 @@ import org.openjdk.jmh.annotations.Warmup;
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
-@Fork(value = 3, jvmArgsAppend = {
-                                 "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.concurrent.EpollTPCEventLoopGroup",
+@Fork(value = 1, jvmArgsAppend = {
+                                 "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.EpollTPCThreadExecutor",
                                  "-Dagrona.disable.bounds.checks=TRUE"
                                  //,"-XX:+UnlockDiagnosticVMOptions", "-XX:+PrintAssembly"
 //       ,"-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",
