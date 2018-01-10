@@ -678,7 +678,9 @@ public class SelectStatement implements CQLStatement
             this.query = query;
             this.isLocalQuery = options.getConsistency().isSingleNode() && query.queriesOnlyLocalData();
             this.queryStartNanos = queryStartNanos;
-            this.coreId = TPC.getNextCore();
+            // this should be the core of the socket, which can also be found with
+            // ((TPCEventLoop)state.getConnection().channel().eventLoop()).coreId();
+            this.coreId = TPC.bestTPCScheduler().coreId();
         }
 
         public PagingState state(boolean inclusive)

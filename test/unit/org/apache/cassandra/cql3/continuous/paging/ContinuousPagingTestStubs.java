@@ -65,6 +65,16 @@ public class ContinuousPagingTestStubs
 
     public static class DirectEventLoop extends TestEventLoop
     {
+        DirectEventLoop()
+        {
+            this(false);
+        }
+
+        DirectEventLoop(boolean inEventLoop)
+        {
+            super(inEventLoop);
+        }
+
         @Override
         public void execute(Runnable command)
         {
@@ -81,6 +91,16 @@ public class ContinuousPagingTestStubs
 
     public static class BlackholeEventLoop extends TestEventLoop
     {
+        BlackholeEventLoop()
+        {
+            this(false);
+        }
+
+        BlackholeEventLoop(boolean inEventLoop)
+        {
+            super(inEventLoop);
+        }
+
         @Override
         public void execute(Runnable command)
         {
@@ -96,6 +116,16 @@ public class ContinuousPagingTestStubs
     public static class RecordingEventLoop extends TestEventLoop
     {
         public List<Runnable> commands = new CopyOnWriteArrayList<>();
+
+        RecordingEventLoop()
+        {
+            this(false);
+        }
+
+        RecordingEventLoop(boolean inEventLoop)
+        {
+            super(inEventLoop);
+        }
 
         @Override
         public void execute(Runnable command)
@@ -238,6 +268,13 @@ public class ContinuousPagingTestStubs
 
     public abstract static class TestEventLoop extends AbstractEventLoop
     {
+        private final boolean inEventLoop;
+
+        protected TestEventLoop(boolean inEventLoop)
+        {
+            this.inEventLoop = inEventLoop;
+        }
+
         @Override
         public abstract void execute(Runnable command);
 
@@ -253,7 +290,7 @@ public class ContinuousPagingTestStubs
         @Override
         public boolean inEventLoop(Thread thread)
         {
-            throw new UnsupportedOperationException("Not supported yet.");
+            return inEventLoop;
         }
 
         @Override
