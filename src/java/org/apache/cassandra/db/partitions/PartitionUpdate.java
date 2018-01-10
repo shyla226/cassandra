@@ -455,7 +455,6 @@ public class PartitionUpdate extends ArrayBackedPartition
      */
     public long maxTimestamp()
     {
-
         Holder holder = holder();
         Long maxTimestamp = holder.deletionInfo.maxTimestamp();
 
@@ -463,6 +462,7 @@ public class PartitionUpdate extends ArrayBackedPartition
         {
             Row row = holder.rows[i];
 
+            maxTimestamp = Math.max(maxTimestamp, row.primaryKeyLivenessInfo().timestamp());
             maxTimestamp = row.reduce(maxTimestamp, (ts, cd) -> {
                 if (cd.column().isSimple())
                 {

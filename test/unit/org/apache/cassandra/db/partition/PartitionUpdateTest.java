@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.partition;
 
 import org.apache.cassandra.UpdateBuilder;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.RowUpdateBuilder;
@@ -47,4 +48,19 @@ public class PartitionUpdateTest extends CQLTester
         builder.newRow(1).add("a", 1);
         Assert.assertEquals(2, builder.build().operationCount());
     }
+
+
+    @Test
+    public void testMaxTimestampCheck()
+    {
+        createTable("CREATE TABLE %s (name text, val text, scalar int, a1 text, PRIMARY KEY (name, scalar, val))");
+        TableMetadata cfm = currentTableMetadata();
+
+        UpdateBuilder builder = UpdateBuilder.create(cfm,"name").newRow( 1, "val").withTimestamp(4);
+
+        Mutation m = (Mutation) builder.makeMutation();
+
+        Assert.assertEquals(4, m.getPartitionUpdate(cfm).maxTimestamp());
+    }
+
 }
