@@ -29,7 +29,7 @@ import java.util.zip.DataFormatException;
 import java.util.zip.Deflater;
 import java.util.zip.Inflater;
 
-public class DeflateCompressor implements ICompressor
+public final class DeflateCompressor implements ICompressor
 {
     public static final DeflateCompressor instance = new DeflateCompressor();
 
@@ -47,33 +47,27 @@ public class DeflateCompressor implements ICompressor
         return threadLocalScratchBuffer.get();
     }
 
-    private final FastThreadLocal<Deflater> deflater;
-    private final FastThreadLocal<Inflater> inflater;
+    private static final FastThreadLocal<Deflater> deflater = new FastThreadLocal<Deflater>()
+    {
+        @Override
+        protected Deflater initialValue()
+        {
+            return new Deflater();
+        }
+    };
+    private static final FastThreadLocal<Inflater> inflater = new FastThreadLocal<Inflater>()
+    {
+        @Override
+        protected Inflater initialValue()
+        {
+            return new Inflater();
+        }
+    };
 
     public static DeflateCompressor create(Map<String, String> compressionOptions)
     {
         // no specific options supported so far
         return instance;
-    }
-
-    private DeflateCompressor()
-    {
-        deflater = new FastThreadLocal<Deflater>()
-        {
-            @Override
-            protected Deflater initialValue()
-            {
-                return new Deflater();
-            }
-        };
-        inflater = new FastThreadLocal<Inflater>()
-        {
-            @Override
-            protected Inflater initialValue()
-            {
-                return new Inflater();
-            }
-        };
     }
 
     public Set<String> supportedOptions()

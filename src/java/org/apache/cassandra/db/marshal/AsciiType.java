@@ -44,7 +44,7 @@ public class AsciiType extends AbstractType<String>
 
     AsciiType() {super(ComparisonType.BYTE_ORDER, VARIABLE_LENGTH);} // singleton
 
-    private final FastThreadLocal<CharsetEncoder> encoder = new FastThreadLocal<CharsetEncoder>()
+    private static final FastThreadLocal<CharsetEncoder> encoder = new FastThreadLocal<CharsetEncoder>()
     {
         @Override
         protected CharsetEncoder initialValue()

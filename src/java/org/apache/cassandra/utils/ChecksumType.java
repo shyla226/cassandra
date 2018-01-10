@@ -28,11 +28,9 @@ public enum ChecksumType
 {
     Adler32
     {
-
-        @Override
-        public Checksum newInstance()
+        Checksum getTL()
         {
-            return new Adler32();
+            return Adler32_TL.get();
         }
 
         @Override
@@ -44,11 +42,10 @@ public enum ChecksumType
     },
     CRC32
     {
-
         @Override
-        public Checksum newInstance()
+        Checksum getTL()
         {
-            return new CRC32();
+            return CRC32_TL.get();
         }
 
         @Override
@@ -58,21 +55,39 @@ public enum ChecksumType
         }
 
     };
-
-    public abstract Checksum newInstance();
-    public abstract void update(Checksum checksum, ByteBuffer buf);
-
-    private FastThreadLocal<Checksum> instances = new FastThreadLocal<Checksum>()
+    private static final FastThreadLocal<Checksum> CRC32_TL = new FastThreadLocal<Checksum>()
     {
         protected Checksum initialValue() throws Exception
         {
-            return newInstance();
+            return newCRC32();
         }
     };
 
+    public static CRC32 newCRC32()
+    {
+        return new CRC32();
+    }
+
+    private static final FastThreadLocal<Checksum> Adler32_TL = new FastThreadLocal<Checksum>()
+    {
+        protected Checksum initialValue() throws Exception
+        {
+            return newAdler32();
+        }
+    };
+
+    public static Adler32 newAdler32()
+    {
+        return new Adler32();
+    }
+
+    abstract Checksum getTL();
+    public abstract void update(Checksum checksum, ByteBuffer buf);
+
+
     public long of(ByteBuffer buf)
     {
-        Checksum checksum = instances.get();
+        Checksum checksum = getTL();
         checksum.reset();
         update(checksum, buf);
         return checksum.getValue();
@@ -80,7 +95,7 @@ public enum ChecksumType
 
     public long of(byte[] data, int off, int len)
     {
-        Checksum checksum = instances.get();
+        Checksum checksum = getTL();
         checksum.reset();
         checksum.update(data, off, len);
         return checksum.getValue();
