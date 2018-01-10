@@ -56,23 +56,9 @@ DSE 5.1.3
 
 Operations
 ----------
-    - Added "-Dcassandra.replace_consistency" to support streaming each range from more than one source.
-      By default, node replacement only streams one copy of data which may be stale wrt to QUORUM/LOCAL_QUORUM.
-      After replacing a down node with "-Dcassandra.replace_consistency=LOCAL_DC_QUORUM", replacement node will be up
-      with consistent data assuming data is inserted with LOCAL_QUORUM. Note that streaming multiple copies causes more
-      IO and compactions. Alternatively, operators can run repair before bootstrapping the replacement with the
-      default replace_consistency=ONE.
-      Available options: "ONE"(default), "LOCAL_DC_QUORUM", "GLOBAL_QUORUM".
    - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
      The command must be executed on the node where the rebuild operation is running. Streams
      may continue until they finish or timeout.
-   - Added "-Dcassandra.replace_consistency" to support streaming each range from more than one source.
-     By default, node replacement only streams one copy of data which may be stale wrt to QUORUM/LOCAL_QUORUM.
-     After replacing a down node with "-Dcassandra.replace_consistency=LOCAL_DC_QUORUM", replacement node will be up
-     with consistent data assuming data is inserted with LOCAL_QUORUM. Note that streaming multiple copies causes more
-     IO and compactions. Alternatively, operators can run repair before bootstrapping the replacement with the
-     default replace_consistency=ONE.
-     Available options: "ONE"(default), "LOCAL_DC_QUORUM", "GLOBAL_QUORUM".
    - DSE is logging by default a heap histogram on OutOfMemoryError. To disable that behavior
      set the 'cassandra.printHeapHistogramOnOutOfMemoryError' System property to 'false'.
 

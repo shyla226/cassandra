@@ -37,7 +37,6 @@ Merged from dse5.0:
  * Add 'nodetool abortrebuild' (DB-1234)
  * Make assassinate more resilient to missing tokens (DB-1283)
  * Add metrics on coordination of read commands (DB-637)
- * Added "-Dcassandra.replace_consistency" to support replace from multiple sources (DB-247)
  * Add cross_dc_rtt_in_ms to cross dc requests, default 0 (DB-854)
  * Backport CASSANDRA-13299, Throttle base partitions during MV repair streaming to prevent OOM (DB-878)
 

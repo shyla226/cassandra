@@ -16,7 +16,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.locator.*;
@@ -149,9 +148,7 @@ public class RangeStreamerBootstrapTest
         Gossiper.instance.startForTest();
     }
 
-    private void testConsistentRangeMovement(boolean consistentRangeMovement,
-                                             int rf,
-                                             boolean vnodes)
+    private void testConsistentRangeMovement(boolean consistentRangeMovement, int rf, boolean vnodes)
     {
         DatabaseDescriptor.setEndpointSnitch(snitch);
 
@@ -168,12 +165,9 @@ public class RangeStreamerBootstrapTest
         Collection<Token> node3tokens = tokens(2, vnodes);
         InetAddress node3address = addr(3);
 
-        tokenMetadata.updateHostId(UUID.randomUUID(), addr(1));
-        tokenMetadata.updateHostId(UUID.randomUUID(), addr(2));
         tokenMetadata.updateNormalTokens(tokens(0, vnodes), addr(1));
         tokenMetadata.updateNormalTokens(tokens(1, vnodes), addr(2));
 
-        tokenMetadata.updateHostId(UUID.randomUUID(), node3address);
         tokenMetadata.addBootstrapTokens(node3tokens, node3address);
 
         if (Schema.instance.getKeyspaceInstance("ks1") != null)
@@ -211,7 +205,6 @@ public class RangeStreamerBootstrapTest
                                                    addr(3),
                                                    StreamOperation.BOOTSTRAP,
                                                    consistentRangeMovement,
-                                                   RangeStreamer.StreamConsistency.ONE,
                                                    snitch,
                                                    stateStore,
                                                    true,
