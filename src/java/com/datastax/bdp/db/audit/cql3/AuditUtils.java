@@ -1,51 +1,30 @@
 package com.datastax.bdp.db.audit.cql3;
 
-import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
+
+import io.reactivex.Completable;
 
 import com.google.common.base.Preconditions;
-import org.apache.commons.lang3.ArrayUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.cql3.BatchQueryOptions;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.statements.AlterKeyspaceStatement;
-import org.apache.cassandra.cql3.statements.AlterTableStatement;
-import org.apache.cassandra.cql3.statements.BatchStatement;
-import org.apache.cassandra.cql3.statements.CFStatement;
-import org.apache.cassandra.cql3.statements.CreateKeyspaceStatement;
-import org.apache.cassandra.cql3.statements.CreateTableStatement;
-import org.apache.cassandra.cql3.statements.DropIndexStatement;
-import org.apache.cassandra.cql3.statements.DropKeyspaceStatement;
-import org.apache.cassandra.cql3.statements.ModificationStatement;
-import org.apache.cassandra.cql3.statements.ParsedStatement;
-import org.apache.cassandra.cql3.statements.SelectStatement;
-import org.apache.cassandra.cql3.statements.UseStatement;
+import org.apache.cassandra.cql3.statements.*;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.KeyspaceMetadata;
-import org.apache.cassandra.schema.MigrationManager;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.*;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MD5Digest;
 
 public class AuditUtils
 {
@@ -53,50 +32,7 @@ public class AuditUtils
 
     public static String getKeyspace(CQLStatement stmt)
     {
-        // Retrieving the keyspace via reflection is presumably quite expensive,
-        // but this *should* be a relatively rare and non-time critical operation
-        // High frequency/throughput operations like SELECT/UPDATES don't rely on
-        // reflection
-        if (stmt instanceof DropKeyspaceStatement
-            || stmt instanceof UseStatement)
-        {
-            Field field = FBUtilities.getProtectedField(stmt.getClass(), "keyspace");
-            return (getKeyspaceFromSchemaStatement(field, stmt));
-        }
-        else if (stmt instanceof CreateKeyspaceStatement)
-        {
-            Field field = FBUtilities.getProtectedField(stmt.getClass(), "name");
-            return (getKeyspaceFromSchemaStatement(field, stmt));
-        }
-        else if (stmt instanceof CFStatement)
-        {
-            return getKeyspaceOrColumnFamilyFromCFStatement((CFStatement) stmt, true);
-        }
-        else if (stmt instanceof ModificationStatement)
-        {
-            return ((ModificationStatement) stmt).keyspace();
-        }
-        else if (stmt instanceof SelectStatement)
-        {
-            return ((SelectStatement) stmt).table.keyspace;
-        }
-        else
-        {
-            return null;
-        }
-    }
-
-    public static String getKeyspaceFromSchemaStatement(Field field, Object statement)
-    {
-        try
-        {
-            return (String) field.get(statement);
-        }
-        catch (Exception e)
-        {
-            logger.info("Unable to retrieve keyspace from schema altering statement", e);
-            return null;
-        }
+        return stmt instanceof KeyspaceStatement ? ((KeyspaceStatement) stmt).keyspace() : null;
     }
 
     private static String getKeyspaceOrColumnFamilyFromCFStatement(CFStatement stmt, boolean retrieveKeyspace)
@@ -178,26 +114,6 @@ public class AuditUtils
                                                     Collections.emptyList());
 
         TPCUtils.blockingGet(QueryProcessor.instance.processBatch(statement, QueryState.forInternalCalls(), options, System.nanoTime()));
-    }
-
-    public static TableMetadata compile(String keyspaceName, String tableName, String schema)
-    {
-
-        return CreateTableStatement.parse(String.format(schema, keyspaceName, tableName),
-                                          keyspaceName)
-                                   .id(tableIdForDseSystemTable(keyspaceName,
-                                                                tableName))
-                                   .dcLocalReadRepairChance(0)
-                                   .memtableFlushPeriod((int) TimeUnit.HOURS.toMillis(1))
-                                   .gcGraceSeconds((int) TimeUnit.DAYS.toSeconds(90))
-                                   .build();
-
-    }
-
-    public static TableId tableIdForDseSystemTable(String keyspace, String table)
-    {
-        byte[] bytes = ArrayUtils.addAll(keyspace.getBytes(), table.getBytes());
-        return TableId.fromUUID(UUID.nameUUIDFromBytes(bytes));
     }
 
     /***
@@ -349,23 +265,4 @@ public class AuditUtils
     {
         return keyspace == null ? null : Schema.instance.getKeyspaceMetadata(keyspace);
     }
-
-    public static CQLStatement prepareStatement(String cql, QueryState queryState, String errorMessage)
-    {
-        try
-        {
-            ParsedStatement.Prepared stmt = null;
-            while (stmt == null)
-            {
-                MD5Digest stmtId = TPCUtils.blockingGet(QueryProcessor.instance.prepare(cql, queryState)).statementId;
-                stmt = QueryProcessor.instance.getPrepared(stmtId);
-            }
-            return stmt.statement;
-
-        } catch (RequestValidationException e)
-        {
-            throw new RuntimeException(errorMessage, e);
-        }
-    }
-
 }

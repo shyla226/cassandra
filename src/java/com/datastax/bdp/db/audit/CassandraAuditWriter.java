@@ -30,21 +30,22 @@ import org.slf4j.LoggerFactory;
 
 import com.datastax.bdp.db.audit.cql3.AuditUtils;
 import io.reactivex.Completable;
+
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Attributes;
+import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
+import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.TimestampType;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.SystemTimeSource;
-import org.apache.cassandra.utils.TimeSource;
-import org.apache.cassandra.utils.WrappedRunnable;
+import org.apache.cassandra.utils.*;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 
@@ -549,9 +550,26 @@ public class CassandraAuditWriter implements IAuditWriter
             insertString = insertString + " USING TTL ?";
         }
 
-        return (ModificationStatement) AuditUtils.prepareStatement(
-                insertString, QueryState.forInternalCalls(),
-                "Error preparing audit writer");
+        return (ModificationStatement) prepareStatement(insertString);
+    }
+
+    private static CQLStatement prepareStatement(String cql)
+    {
+        try
+        {
+            QueryState queryState = QueryState.forInternalCalls();
+            ParsedStatement.Prepared stmt = null;
+            while (stmt == null)
+            {
+                MD5Digest stmtId = TPCUtils.blockingGet(QueryProcessor.instance.prepare(cql, queryState)).statementId;
+                stmt = QueryProcessor.instance.getPrepared(stmtId);
+            }
+            return stmt.statement;
+
+        } catch (RequestValidationException e)
+        {
+            throw new RuntimeException("Error preparing audit writer", e);
+        }
     }
 
     public Completable recordEvent(final AuditableEvent event)
@@ -583,12 +601,6 @@ public class CassandraAuditWriter implements IAuditWriter
                 throw new RuntimeException("Unable to enqueue audit event", e);
             }
         }
-    }
-
-    @Override
-    public boolean isLoggingEnabled()
-    {
-        return true;
     }
 
     private boolean isSynchronous()

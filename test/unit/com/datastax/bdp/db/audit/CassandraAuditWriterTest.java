@@ -16,6 +16,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -44,7 +45,6 @@ import static org.junit.Assert.assertTrue;
 
 public class CassandraAuditWriterTest extends CQLTester
 {
-
     @Before
     public void setUp() throws Exception
     {
@@ -70,9 +70,12 @@ public class CassandraAuditWriterTest extends CQLTester
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
         logger.setUp();
-        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
-                .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl")
-                .consistencyLevel(ConsistencyLevel.SERIAL).build();
+        AuditableEvent event = newAuditEvent(INSERT,
+                                             UUIDGen.getTimeUUID(),
+                                             "ks",
+                                             "tbl",
+                                             UUID.randomUUID(),
+                                             ConsistencyLevel.SERIAL);
 
         logger.recordEvent(event).blockingAwait();
 
@@ -108,8 +111,13 @@ public class CassandraAuditWriterTest extends CQLTester
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
         logger.setUp();
-        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
-                .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
+        AuditableEvent event = newAuditEvent(INSERT,
+                                             UUIDGen.getTimeUUID(),
+                                             "ks",
+                                             "tbl",
+                                             UUID.randomUUID(),
+                                             null);
+
 
         logger.recordEvent(event).blockingAwait();
 
@@ -122,7 +130,7 @@ public class CassandraAuditWriterTest extends CQLTester
         assertEquals(eventTime.toDateMidnight().toDate(), row.getTimestamp("date"));
         assertEquals(FBUtilities.getBroadcastAddress(), row.getInetAddress("node"));
         assertEquals(eventTime.getHourOfDay() * 60 * 60, row.getInt("day_partition"));
-        assertEquals(UUIDGen.getTimeUUID(event.getTimestamp()).timestamp(), row.getUUID("event_time").timestamp());
+        assertEquals(event.getTimestamp(), UUIDGen.unixTimestamp(row.getUUID("event_time")));
         assertEquals(event.getBatchId(), row.getUUID("batch_id"));
         assertEquals(event.getType().getCategory().toString(), row.getString("category"));
         assertEquals(event.getKeyspace(), row.getString("keyspace_name"));
@@ -144,8 +152,12 @@ public class CassandraAuditWriterTest extends CQLTester
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(1, ConsistencyLevel.ONE, BatchingOptions.SYNC);
         logger.setUp();
-        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
-                .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
+        AuditableEvent event = newAuditEvent(INSERT,
+                                             UUIDGen.getTimeUUID(),
+                                             "ks",
+                                             "tbl",
+                                             null,
+                                             null);
 
         logger.recordEvent(event).blockingAwait();
 
@@ -165,8 +177,13 @@ public class CassandraAuditWriterTest extends CQLTester
         // Logging synchronously to avoid sporadic timeouts (DSP-12301)
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
         logger.setUp();
-        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
-                .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
+        AuditableEvent event = newAuditEvent(INSERT,
+                                             UUIDGen.getTimeUUID(),
+                                             "ks",
+                                             "tbl",
+                                             null,
+                                             null);
+
 
         logger.recordEvent(event).blockingAwait();
 
@@ -180,14 +197,22 @@ public class CassandraAuditWriterTest extends CQLTester
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
         logger.setUp();
 
-        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
-                .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
+        AuditableEvent event = newAuditEvent(INSERT,
+                                             UUIDGen.getTimeUUID(),
+                                             "ks",
+                                             "tbl",
+                                             null,
+                                             null);
 
         logger.recordEvent(event).blockingAwait();
         assertEquals(0, getLoggedEventCount());
 
-        event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
-                .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
+        event = newAuditEvent(INSERT,
+                              UUIDGen.getTimeUUID(),
+                              "ks",
+                              "tbl",
+                              null,
+                              null);
         logger.recordEvent(event).blockingAwait();
 
         waitForEventsToBeWritten(2, 2000);
@@ -203,8 +228,12 @@ public class CassandraAuditWriterTest extends CQLTester
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
         logger.setUp();
 
-        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
-                .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl").build();
+        AuditableEvent event = newAuditEvent(INSERT,
+                                             UUIDGen.getTimeUUID(),
+                                             "ks",
+                                             "tbl",
+                                             null,
+                                             null);
 
         logger.recordEvent(event).blockingAwait();
         // no records should be written until the timer says the flush period has been exceeded
@@ -218,8 +247,12 @@ public class CassandraAuditWriterTest extends CQLTester
     {
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
         logger.setUp();
-        AuditableEvent event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
-                .batch(UUID.randomUUID()).keyspace(null).operation("insert this").columnFamily("tbl").build();
+        AuditableEvent event = newAuditEvent(INSERT,
+                                             UUIDGen.getTimeUUID(),
+                                             null,
+                                             "tbl",
+                                             null,
+                                             null);
 
         logger.recordEvent(event).blockingAwait();
     }
@@ -232,18 +265,15 @@ public class CassandraAuditWriterTest extends CQLTester
     @Test
     public void uuidCollisions() throws Exception
     {
-        List<AuditableEvent.Builder> builders = new ArrayList<>();
+        List<AuditableEvent> events = new ArrayList<>(10);
         for (int i = 0; i < 10; i++)
         {
-            AuditableEvent.Builder builder = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
-                    .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl");
-            builders.add(builder);
-        }
-
-        List<AuditableEvent> events = new ArrayList<>();
-        for (AuditableEvent.Builder builder : builders)
-        {
-            events.add(builder.build());
+            events.add(newAuditEvent(INSERT,
+                                     UUIDGen.getTimeUUID(),
+                                     "ks",
+                                     "tbl",
+                                     null,
+                                     null));
         }
 
         Set<Long> uniqueTimes = new HashSet<>();
@@ -326,18 +356,24 @@ public class CassandraAuditWriterTest extends CQLTester
 
         Assert.assertEquals(0, batches.size());
 
-        AuditableEvent event;
-        event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
-                .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl")
-                .uid(UUIDGen.getTimeUUID(new DateTime(2016, 1, 1, 1, 59, 0, 0).getMillis())).build();
+        AuditableEvent event = newAuditEvent(INSERT,
+                                             UUIDGen.getTimeUUID(new DateTime(2016, 1, 1, 1, 59, 0, 0).getMillis()),
+                                             "ks",
+                                             "tbl",
+                                             null,
+                                             null);
 
         logger.recordEvent(event).blockingAwait();
 
         Assert.assertEquals(0, batches.size());
 
-        event = new AuditableEvent.Builder(INSERT, "blake", "127.0.0.1")
-                .batch(UUID.randomUUID()).keyspace("ks").operation("insert this").columnFamily("tbl")
-                .uid(UUIDGen.getTimeUUID(new DateTime(2016, 1, 1, 2, 0, 0, 0).getMillis())).build();
+        event = newAuditEvent(INSERT,
+                              UUIDGen.getTimeUUID(new DateTime(2016, 1, 1, 2, 0, 0, 0).getMillis()),
+                              "ks",
+                              "tbl",
+                              null,
+                              null);
+
 
         logger.recordEvent(event).blockingAwait();
 
@@ -363,11 +399,29 @@ public class CassandraAuditWriterTest extends CQLTester
         int c = 0;
         for (UntypedResultSet.Row row: query ("SELECT * FROM %s.%s"))
         {
-            if (row.getString("username").equals("blake"))
+            if (row.getString("keyspace_name").equals("ks"))
             {
                 c++;
             }
         }
         return c;
+    }
+
+    private AuditableEvent newAuditEvent(AuditableEventType type,
+                                         UUID uid,
+                                         String keyspace,
+                                         String table,
+                                         UUID batchId,
+                                         ConsistencyLevel cl) throws Exception
+    {
+        return new AuditableEvent(UserRolesAndPermissions.ANONYMOUS,
+                                  type,
+                                  "127.0.0.1",
+                                  uid,
+                                  batchId,
+                                  keyspace,
+                                  table,
+                                  "...cql statement...",
+                                  cl);
     }
 }
