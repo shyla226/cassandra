@@ -112,7 +112,7 @@ public class AuthorizationProxy implements InvocationHandler
             return UserRolesAndPermissions.SYSTEM;
 
         return DatabaseDescriptor.getAuthManager()
-                                 .getUserRolesAndPermissions(name)
+                                 .getUserRolesAndPermissions(name, name)
                                  .blockingGet();
     };
 

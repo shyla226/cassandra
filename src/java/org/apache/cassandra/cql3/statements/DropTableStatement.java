@@ -35,7 +35,7 @@ import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
-public class DropTableStatement extends SchemaAlteringStatement
+public class DropTableStatement extends SchemaAlteringStatement implements TableStatement
 {
     private final boolean ifExists;
 

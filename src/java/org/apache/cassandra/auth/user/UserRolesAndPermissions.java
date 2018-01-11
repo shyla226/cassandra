@@ -146,51 +146,69 @@ public abstract class UserRolesAndPermissions
     private final String name;
 
     /**
+     * The name used for the authentification.
+     */
+    private final String authenticatedName;
+
+    /**
      * The user roles.
      */
     private final Set<RoleResource> roles;
 
+    private UserRolesAndPermissions(String name, String authenticatedName, Set<RoleResource> roles)
+    {
+        this.name = name;
+        this.authenticatedName = authenticatedName;
+        this.roles = roles;
+    }
+
     private UserRolesAndPermissions(String name, Set<RoleResource> roles)
     {
         this.name = name;
+        this.authenticatedName = name;
         this.roles = roles;
     }
 
     /**
      * Creates a new user with the specified name and roles.
      * @param name the user name
+     * @param authenticatedName the name used for the authentification
      * @param roles the user roles
      * @return a new user
      */
-    public static UserRolesAndPermissions newNormalUserRoles(String name, Set<RoleResource> roles)
+    public static UserRolesAndPermissions newNormalUserRoles(String name, String authenticatedName, Set<RoleResource> roles)
     {
-        assert !DatabaseDescriptor.getAuthorizer().requireAuthorization() : "An user without permissions can only created when the authorization are not required";
-        return new NormalUserRoles(name, roles);
+        return new NormalUserRoles(name, authenticatedName, roles);
     }
 
     /**
      * Creates a new user with the specified name, roles and permissions.
      * @param name the user name
+     * @param authenticatedName the name used for the authentification
      * @param roles the user roles
      * @param permissions the permissions per role and resources.
      * @return a new user
      */
     public static UserRolesAndPermissions newNormalUserRolesAndPermissions(String name,
+                                                                           String authenticatedName,
                                                                            Set<RoleResource> roles,
                                                                            Map<RoleResource, Map<IResource, PermissionSets>> permissions)
     {
-        return new NormalUserWithPermissions(name, roles, permissions);
+        return new NormalUserWithPermissions(name, authenticatedName, roles, permissions);
     }
 
     /**
      * Creates a new super user with the specified name and roles.
      * @param name the user name
+     * @param authenticatedName the name used for the authentification
      * @param roles the user roles
      * @return a new super user
      */
-    public static UserRolesAndPermissions createSuperUserRolesAndPermissions(String name, Set<RoleResource> roles)
+    public static UserRolesAndPermissions createSuperUserRolesAndPermissions(String name,
+                                                                             String authenticatedName,
+                                                                             Set<RoleResource> roles)
     {
-        return new SuperUserRoleAndPermissions(name, roles);
+        return new SuperUserRoleAndPermissions(name, authenticatedName, roles);
     }
 
     /**
@@ -200,6 +218,15 @@ public abstract class UserRolesAndPermissions
     public final String getName()
     {
         return name;
+    }
+
+    /**
+     * Returns the name used for the authentification.
+     * @return the name used for the authentification
+     */
+    public final String getAuthenticatedName()
+    {
+        return authenticatedName;
     }
 
     /**
@@ -562,9 +589,9 @@ public abstract class UserRolesAndPermissions
      */
     private static final class SuperUserRoleAndPermissions extends UserRolesAndPermissions
     {
-        public SuperUserRoleAndPermissions(String name, Set<RoleResource> roles)
+        public SuperUserRoleAndPermissions(String name, String authenticatedName, Set<RoleResource> roles)
         {
-            super(name, roles);
+            super(name, authenticatedName, roles);
         }
 
         @Override
@@ -622,10 +649,11 @@ public abstract class UserRolesAndPermissions
         private Map<IResource, PermissionSets> additionalPermissions;
 
         public NormalUserWithPermissions(String name,
+                                         String authenticatedName,
                                          Set<RoleResource> roles,
                                          Map<RoleResource, Map<IResource, PermissionSets>> permissions)
         {
-            super(name, roles);
+            super(name, authenticatedName, roles);
             this.permissions = permissions;
         }
 
@@ -875,9 +903,9 @@ public abstract class UserRolesAndPermissions
      */
     private static final class NormalUserRoles extends UserRolesAndPermissions
     {
-        public NormalUserRoles(String name, Set<RoleResource> roles)
+        public NormalUserRoles(String name, String authenticatedName, Set<RoleResource> roles)
         {
-            super(name, roles);
+            super(name, authenticatedName, roles);
         }
 
         @Override

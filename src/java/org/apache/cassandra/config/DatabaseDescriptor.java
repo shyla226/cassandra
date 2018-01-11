@@ -36,8 +36,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.bdp.db.audit.AuditLogger;
 import com.datastax.bdp.db.audit.AuditLoggingOptions;
+import com.datastax.bdp.db.audit.IAuditLogger;
 import com.sun.management.OperatingSystemMXBean;
 
 import org.apache.cassandra.auth.*;
@@ -117,7 +117,7 @@ public class DatabaseDescriptor
 
     private static final boolean disableSTCSInL0 = Boolean.getBoolean(Config.PROPERTY_PREFIX + "disable_stcs_in_l0");
     private static final boolean unsafeSystem = Boolean.getBoolean(Config.PROPERTY_PREFIX + "unsafesystem");
-    private static AuditLogger auditLogger;
+    private static IAuditLogger auditLogger;
 
     public static void daemonInitialization() throws ConfigurationException
     {
@@ -326,7 +326,7 @@ public class DatabaseDescriptor
 
     private static void applyAuditLoggerConfig()
     {
-        auditLogger = AuditLogger.getInstance();
+        auditLogger = IAuditLogger.fromConfiguration(getRawConfig());
     }
 
     private static void applySimpleConfig()
@@ -2785,14 +2785,14 @@ public class DatabaseDescriptor
     }
 
     /* For tests ONLY, don't use otherwise or all hell will break loose. Tests should restore value at the end. */
-    public static AuditLogger setAuditLoggerUnsafe(AuditLogger logger)
+    public static IAuditLogger setAuditLoggerUnsafe(IAuditLogger logger)
     {
-        AuditLogger old = auditLogger;
+        IAuditLogger old = auditLogger;
         auditLogger = logger;
         return old;
     }
 
-    public static AuditLogger getAuditLogger()
+    public static IAuditLogger getAuditLogger()
     {
         return auditLogger;
     }

@@ -46,7 +46,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 
 import com.datastax.bdp.db.audit.AuditableEvent;
-import com.datastax.bdp.db.audit.cql3.CqlAuditLogger;
+import com.datastax.bdp.db.audit.IAuditLogger;
 
 import org.antlr.runtime.RecognitionException;
 import org.apache.cassandra.auth.user.UserRolesAndPermissions;
@@ -101,7 +101,7 @@ public class QueryProcessor implements QueryHandler
     public static final CQLMetrics metrics = new CQLMetrics();
 
     private static final AtomicInteger lastMinuteEvictionsCount = new AtomicInteger(0);
-    public static CqlAuditLogger auditLogger = new CqlAuditLogger();
+    public static IAuditLogger auditLogger = DatabaseDescriptor.getAuditLogger();
 
     static
     {
@@ -562,7 +562,7 @@ public class QueryProcessor implements QueryHandler
             events = auditLogger.getEventsForPrepare(prepared.statement, queryString, state);
 
             Single<Prepared> single = storePreparedStatement(queryString, rawKeyspace, prepared, storeStatementOnDisk);
-            return maybeAuditLog(events).andThen(single.onErrorResumeNext(maybeAuditLogErrors(events)));
+            return auditLogger.logEvents(events).andThen(single.onErrorResumeNext(maybeAuditLogErrors(events)));
         }
         catch (Exception e)
         {
@@ -955,13 +955,5 @@ public class QueryProcessor implements QueryHandler
             return Single::error;
 
         return e -> auditLogger.logFailedQuery(events, e).andThen(Single.error(e));
-    }
-
-    public static Completable maybeAuditLog(List<AuditableEvent> events)
-    {
-        if (events.isEmpty())
-            return Completable.complete();
-
-        return auditLogger.logEvents(events);
     }
 }

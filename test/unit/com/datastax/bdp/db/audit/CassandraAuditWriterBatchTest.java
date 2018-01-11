@@ -21,7 +21,7 @@ public class CassandraAuditWriterBatchTest extends CassandraAuditWriterTester
     private static final long TIMEOUT = 2000;
 
     @BeforeClass
-    public static void setup() throws Throwable
+    public static void setup()
     {
         requireAuthentication();
         DatabaseDescriptor.setPermissionsValidity(9999);
@@ -32,10 +32,9 @@ public class CassandraAuditWriterBatchTest extends CassandraAuditWriterTester
         BatchingOptions options = new BatchingOptions(20, 1, () -> new DefaultBatchController(flushPeriod, batchSize));
         CassandraAuditWriter writer = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
 
-        AuditFilter filter = AuditFilter.builder().excludeKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME)
-                                                  .excludeKeyspace(SchemaConstants.SCHEMA_KEYSPACE_NAME)
-                                                  .build();
-        AuditLogger auditLogger = new AuditLogger(writer, filter);
+        IAuditFilter filter = AuditFilters.excludeKeyspaces(SchemaConstants.SYSTEM_KEYSPACE_NAME,
+                                                            SchemaConstants.SCHEMA_KEYSPACE_NAME);
+        IAuditLogger auditLogger = IAuditLogger.newInstance(writer, filter);
         DatabaseDescriptor.setAuditLoggerUnsafe(auditLogger);
         requireNetwork();
         auditLogger.setup();

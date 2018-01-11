@@ -52,7 +52,7 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
-public class CreateViewStatement extends SchemaAlteringStatement
+public class CreateViewStatement extends SchemaAlteringStatement implements TableStatement
 {
     private final CFName baseName;
     private final List<RawSelector> selectClause;
