@@ -663,7 +663,7 @@ public class AuditLoggerTest extends CQLTester
                 "APPLY BATCH;";
 
         executeNet(new SimpleStatement(stmt).setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.ONE));
-        Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
+        Stack<AuditableEvent> events = getEvents();
         assertEquals(2, events.size());
         assertAllEventsInSameBatch(events);
         assertEventProperties(events.pop(),
@@ -695,7 +695,7 @@ public class AuditLoggerTest extends CQLTester
                         "APPLY BATCH;";
 
         executeNet(new SimpleStatement(stmt).setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.ONE));
-        Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
+        Stack<AuditableEvent> events = getEvents();
         assertEquals(4, events.size());
         assertAllEventsInSameBatch(events);
         assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, currentTable(),
@@ -721,7 +721,7 @@ public class AuditLoggerTest extends CQLTester
             "   DELETE field0 FROM " + KEYSPACE + "." + currentTable() + " WHERE id = 2 ;" +
           "APPLY BATCH;";
         executeNet(new SimpleStatement(stmt).setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.QUORUM));
-        Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
+        Stack<AuditableEvent> events = getEvents();
         assertEquals(4, events.size());
         assertAllEventsInSameBatch(events);
         assertEventProperties(events.pop(), CQL_DELETE, KEYSPACE, currentTable(),
@@ -750,7 +750,7 @@ public class AuditLoggerTest extends CQLTester
             "   UPDATE " + KEYSPACE + "." + table2 + " SET field0 = 'some other value' WHERE id = 0 ;" +
           "APPLY BATCH;";
         executeNet(new SimpleStatement(stmt).setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.QUORUM));
-        Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
+        Stack<AuditableEvent> events = getEvents();
         assertEquals(4, events.size());
         assertAllEventsInSameBatch(events);
         assertEventProperties(events.pop(), CQL_UPDATE, KEYSPACE, table2,
@@ -782,7 +782,7 @@ public class AuditLoggerTest extends CQLTester
           "APPLY BATCH;";
 
         executeNet(new SimpleStatement(stmt).setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.ONE));
-        Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
+        Stack<AuditableEvent> events = getEvents();
         assertEquals(2, events.size());
         assertAllEventsInSameBatch(events);
         assertEventProperties(events.pop(), CQL_UPDATE, keyspace2, table2,
@@ -833,7 +833,7 @@ public class AuditLoggerTest extends CQLTester
         }
         catch (NoHostAvailableException e)
         {
-            Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
+            Stack<AuditableEvent> events = getEvents();
             assertEventProperties(events.pop(), REQUEST_FAILURE, "test", "test",
                                   "Cannot achieve consistency level QUORUM SELECT * FROM test.test", ConsistencyLevel.QUORUM);
             assertEventProperties(events.pop(), CQL_SELECT, "test", "test",
@@ -863,8 +863,7 @@ public class AuditLoggerTest extends CQLTester
         }
         catch (NoHostAvailableException e)
         {
-            e.printStackTrace();
-            Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
+            Stack<AuditableEvent> events = getEvents();
             assertEventProperties(events.pop(), REQUEST_FAILURE, "test", "test",
                                   "Cannot achieve consistency level QUORUM SELECT * FROM test.test", ConsistencyLevel.QUORUM);
             assertEventProperties(events.pop(), CQL_SELECT, "test", "test",
@@ -886,7 +885,7 @@ public class AuditLoggerTest extends CQLTester
         }
         catch (InvalidQueryException e)
         {
-            Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
+            Stack<AuditableEvent> events = getEvents();
             assertEventProperties(events.pop(), REQUEST_FAILURE, null, null,
                                   "keyspace test does not exist SELECT * FROM test.test", null);
         }
@@ -902,7 +901,7 @@ public class AuditLoggerTest extends CQLTester
         }
         catch (InvalidQueryException e)
         {
-            Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
+            Stack<AuditableEvent> events = getEvents();
             assertEventProperties(events.pop(), REQUEST_FAILURE, null, null,
                                   "keyspace test does not exist SELECT * FROM test.test", null);
         }
@@ -927,7 +926,7 @@ public class AuditLoggerTest extends CQLTester
         }
         catch (NoHostAvailableException e)
         {
-            Stack<AuditableEvent> events = InProcTestAuditWriter.getEvents();
+            Stack<AuditableEvent> events = getEvents();
             assertEventProperties(events.pop(), REQUEST_FAILURE, "test", "test",
                                   "Cannot achieve consistency level QUORUM INSERT INTO test.test (pk, v) VALUES (1, 2);", ConsistencyLevel.QUORUM);
             assertEventProperties(events.pop(), CQL_UPDATE, "test", "test",
