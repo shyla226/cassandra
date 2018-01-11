@@ -245,7 +245,6 @@ public abstract class UserRolesAndPermissions
      */
     public static UserRolesAndPermissions newNormalUserRoles(String name, String authenticatedName, Set<RoleResource> roles)
     {
-        assert !DatabaseDescriptor.getAuthorizer().requireAuthorization() : "An user without permissions can only created when the authorization are not required";
         return new NormalUserRoles(name, authenticatedName, roles);
     }
 

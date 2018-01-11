@@ -9,6 +9,9 @@ import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.auth.RoleResource;
+import org.apache.cassandra.exceptions.ConfigurationException;
+
 import static org.apache.commons.lang3.StringUtils.isBlank;
 
 /**
@@ -16,18 +19,6 @@ import static org.apache.commons.lang3.StringUtils.isBlank;
  */
 final class AuditFilters
 {
-    /**
-     * Creates an {@code IAuditFilter} that accepts only the keyspaces corresponding to
-     * the specified regex.
-     * @param patterns the regexps used to determine which keyspaces to accept
-     * @return an {@code IAuditFilter} that accepts only the keyspaces corresponding to
-     * the specified regex.
-     */
-    public static IAuditFilter includeKeyspaces(String... patterns)
-    {
-        return includeKeyspaces(toPatterns(patterns));
-    }
-
     /**
      * Creates an {@code IAuditFilter} that rejects the keyspaces corresponding to
      * the specified regex.
@@ -38,6 +29,26 @@ final class AuditFilters
     public static IAuditFilter excludeKeyspace(String... patterns)
     {
         return excludeKeyspace(toPatterns(patterns));
+    }
+
+    /**
+     * Creates an {@code IAuditFilter} that accepts only the roles corresponding to
+     * the specified values.
+     * @param roles the accepted roles
+     * @return an {@code IAuditFilter} that accepts only the roles corresponding to
+     * the specified values.
+     */
+    public static IAuditFilter includeRoles(List<RoleResource> roles)
+    {
+        return (event) ->
+        {
+            for (int i = 0, m = roles.size(); i < m ; i++)
+            {
+                if (event.userHasRole(roles.get(i)))
+                    return true;
+            }
+            return false;
+        };
     }
 
     /**
@@ -171,6 +182,7 @@ final class AuditFilters
         List<IAuditFilter> filters = new ArrayList<>();
         addCategoryFilters(options, filters);
         addKeyspaceFilters(options, filters);
+        addRoleFilters(options, filters);
 
         if (filters.isEmpty())
             return AuditFilters.acceptEverything();
@@ -195,7 +207,25 @@ final class AuditFilters
             Set<AuditableEventCategory> categories = toCategories(auditLoggingOptions.excluded_categories);
 
             if (!categories.isEmpty())
-                filters.add(not(includeCategory(categories)));
+                filters.add(excludeCategory(categories));
+        }
+    }
+
+    private static void addRoleFilters(AuditLoggingOptions auditLoggingOptions, List<IAuditFilter> filters)
+    {
+        if (!isBlank(auditLoggingOptions.included_roles))
+        {
+            List<RoleResource> roles = toRoles(auditLoggingOptions.included_roles);
+
+            if (!roles.isEmpty())
+                filters.add(includeRoles(roles));
+        }
+        else if (!isBlank(auditLoggingOptions.excluded_roles))
+        {
+            List<RoleResource> roles = toRoles(auditLoggingOptions.excluded_roles);
+
+            if (!roles.isEmpty())
+                filters.add(not(includeRoles(roles)));
         }
     }
 
@@ -213,7 +243,7 @@ final class AuditFilters
             List<Pattern> patterns = toPatterns(auditLoggingOptions.excluded_keyspaces);
 
             if (!patterns.isEmpty())
-                filters.add(AuditFilters.includeKeyspaces(patterns));
+                filters.add(AuditFilters.excludeKeyspace(patterns));
         }
     }
 
@@ -224,11 +254,32 @@ final class AuditFilters
         {
             value = value.trim();
             if (!value.isEmpty())
-                categories.add(AuditableEventCategory.valueOf(value));
+            {
+                try
+                {
+                    categories.add(AuditableEventCategory.valueOf(value));
+                }
+                catch (IllegalArgumentException e)
+                {
+                    throw new ConfigurationException("Unknown audit event category:  " + value, false);
+                }
+            }
         }
         return categories;
     }
 
+    private static List<RoleResource> toRoles(String rolesAsString)
+    {
+        List<RoleResource> roles = new ArrayList<>();
+        for (String role : rolesAsString.split(","))
+        {
+            role = role.trim();
+            if (!role.isEmpty())
+                roles.add(RoleResource.role(role));
+        }
+        return roles;
+    }
+    
     /**
      * Converts the comma separated regexps into a list of {@code Pattern}s
      * @param patternsAsString a comma separated list of regexps

@@ -152,6 +152,8 @@ final class AuditLogger implements IAuditLogger
         if (!isEnabled() || events.isEmpty())
             return Completable.complete();
 
+        System.out.println("//////////////////////////////////////////////////////////>");
+
         AuditableEventType type = e instanceof UnauthorizedException ? CoreAuditableEventType.UNAUTHORIZED_ATTEMPT
                                                                      : CoreAuditableEventType.REQUEST_FAILURE;
         Completable result = null;

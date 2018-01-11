@@ -1262,6 +1262,11 @@ nodesync:
 #     included_keyspaces:
 #     excluded_keyspaces:
 
+#     # Comma separated list of roles for which the events must be included or excluded from the audit log.
+#     # Specify either included or excluded roles. Specifying both is an error
+#     included_roles:
+#     excluded_roles:
+
 #     # The amount of time, in hours, audit events are retained by supporting loggers
 #     # Currently, only the CassandraAuditWriter supports retention time
 #     # values of 0 or less retain events forever

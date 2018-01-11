@@ -60,7 +60,9 @@ public enum CoreAuditableEventType implements AuditableEventType
 
     // ERROR
     REQUEST_FAILURE(AuditableEventCategory.ERROR),
-    UNKNOWN(AuditableEventCategory.UNKNOWN); // Fallback type
+
+    // Fallback type
+    UNKNOWN(AuditableEventCategory.UNKNOWN); 
 
     private final AuditableEventCategory category;
 
