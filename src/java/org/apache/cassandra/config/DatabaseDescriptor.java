@@ -2527,4 +2527,14 @@ public class DatabaseDescriptor
     {
         return conf.continuous_paging;
     }
+
+    public static boolean isPickLevelOnStreaming()
+    {
+        return conf.pick_level_on_streaming;
+    }
+
+    public static void setPickLevelOnStreaming(boolean pickLevelOnStreaming)
+    {
+        conf.pick_level_on_streaming = pickLevelOnStreaming;
+    }
 }

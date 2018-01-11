@@ -384,6 +384,11 @@ public class Config
 	/** The configuration for continuous paging */
     public ContinuousPagingConfig continuous_paging = new ContinuousPagingConfig();
 
+    /**
+     * Defines whether to use the more intelligent level picking for non-L0 files (leveled compaction strategy).
+     * DB-639
+     */
+    public boolean pick_level_on_streaming;
 
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}
