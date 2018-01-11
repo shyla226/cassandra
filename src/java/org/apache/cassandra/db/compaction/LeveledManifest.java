@@ -25,13 +25,11 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -149,7 +147,7 @@ public class LeveledManifest
 
         //Apply different leveling strategies based on if the file is streaming or
         //normal compaction changes
-        if (isStreaming)
+        if (isStreaming && DatabaseDescriptor.isPickLevelOnStreaming())
             pickedLevel = pickSSTableLevel(level, 0, reader);
         else if (!canAddSSTable(level, reader))
             pickedLevel = 0;

@@ -117,6 +117,7 @@ public class DatabaseDescriptor
     }
 
     public static void forceStaticInitialization() {}
+
     static
     {
         // In client mode, we use a default configuration. Note that the fields of this class will be
@@ -2115,6 +2116,16 @@ public class DatabaseDescriptor
     public static void setSeedGossipProbability(double probability)
     {
         conf.seed_gossip_probability = probability;
+    }
+
+    public static boolean isPickLevelOnStreaming()
+    {
+        return conf.pick_level_on_streaming;
+    }
+
+    public static void setPickLevelOnStreaming(boolean pickLevelOnStreaming)
+    {
+        conf.pick_level_on_streaming = pickLevelOnStreaming;
     }
 
 }

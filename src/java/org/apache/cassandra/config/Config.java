@@ -345,6 +345,12 @@ public class Config
      */
     public UserFunctionTimeoutPolicy user_function_timeout_policy = UserFunctionTimeoutPolicy.die;
 
+    /**
+     * Defines whether to use the more intelligent level picking for non-L0 files (leveled compaction strategy).
+     * DB-639
+     */
+    public boolean pick_level_on_streaming;
+
     public static boolean getOutboundBindAny()
     {
         return outboundBindAny;
