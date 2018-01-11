@@ -46,7 +46,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 
 import com.datastax.bdp.db.audit.AuditableEvent;
-import com.datastax.bdp.db.audit.cql3.CqlAuditLogger;
+import com.datastax.bdp.db.audit.IAuditLogger;
 
 import org.antlr.runtime.RecognitionException;
 import org.apache.cassandra.auth.user.UserRolesAndPermissions;
@@ -101,7 +101,7 @@ public class QueryProcessor implements QueryHandler
     public static final CQLMetrics metrics = new CQLMetrics();
 
     private static final AtomicInteger lastMinuteEvictionsCount = new AtomicInteger(0);
-    public static CqlAuditLogger auditLogger = new CqlAuditLogger();
+    public static IAuditLogger auditLogger = DatabaseDescriptor.getAuditLogger();
 
     static
     {

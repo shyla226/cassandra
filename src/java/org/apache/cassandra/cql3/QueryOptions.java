@@ -336,7 +336,6 @@ public abstract class QueryOptions
         public QueryOptions prepare(List<ColumnSpecification> specs)
         {
             super.prepare(specs);
-
             orderedValues = new ArrayList<>(specs.size());
             for (int i = 0; i < specs.size(); i++)
             {

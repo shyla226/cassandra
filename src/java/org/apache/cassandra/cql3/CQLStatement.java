@@ -33,11 +33,6 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 
 public interface CQLStatement
 {
-    public default String keyspace()
-    {
-        return null;
-    }
-
     /**
      * Returns the type of Audit events associated to this statement.
      * @return the type of Audit events associated to this statement.

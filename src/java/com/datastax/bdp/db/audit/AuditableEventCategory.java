@@ -7,5 +7,5 @@ package com.datastax.bdp.db.audit;
 
 public enum AuditableEventCategory
 {
-    QUERY, DML, DDL, DCL, AUTH, ADMIN, ERROR
+    QUERY, DML, DDL, DCL, AUTH, ADMIN, ERROR, UNKNOWN
 }
