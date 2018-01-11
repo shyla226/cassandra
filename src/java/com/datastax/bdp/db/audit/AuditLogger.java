@@ -15,7 +15,6 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.bdp.db.audit.cql3.AuditUtils;
 import com.datastax.bdp.db.audit.cql3.BatchStatementUtils;
 
 import io.reactivex.Completable;
@@ -152,8 +151,6 @@ final class AuditLogger implements IAuditLogger
         if (!isEnabled() || events.isEmpty())
             return Completable.complete();
 
-        System.out.println("//////////////////////////////////////////////////////////>");
-
         AuditableEventType type = e instanceof UnauthorizedException ? CoreAuditableEventType.UNAUTHORIZED_ATTEMPT
                                                                      : CoreAuditableEventType.REQUEST_FAILURE;
         Completable result = null;
@@ -228,13 +225,13 @@ final class AuditLogger implements IAuditLogger
                                              ConsistencyLevel consistencyLevel)
     {
         AuditableEventType type = getAuditEventType(statement, queryString);
-        String keyspace = AuditUtils.getKeyspace(statement);
+        String keyspace = getKeyspace(statement);
 
         events.add(new AuditableEvent(queryState,
                                       type,
                                       batchID,
                                       keyspace,
-                                      AuditUtils.getColumnFamily(statement),
+                                      getColumnFamily(statement),
                                       getOperation(statement, queryString, variables, boundNames),
                                       consistencyLevel));
 
@@ -330,13 +327,13 @@ final class AuditLogger implements IAuditLogger
                                                     String queryString,
                                                     UUID batchID)
     {
-        String keyspace = AuditUtils.getKeyspace(statement);
+        String keyspace = getKeyspace(statement);
 
         events.add(new AuditableEvent(queryState,
                                       CoreAuditableEventType.CQL_PREPARE_STATEMENT,
                                       batchID,
                                       keyspace,
-                                      AuditUtils.getColumnFamily(statement),
+                                      getColumnFamily(statement),
                                       queryString,
                                       AuditableEvent.NO_CL));
 
@@ -405,5 +402,15 @@ final class AuditLogger implements IAuditLogger
                    .append(spec.type.getString(var));
         }
         return builder.append(']');
+    }
+
+    private static String getKeyspace(CQLStatement stmt)
+    {
+        return stmt instanceof KeyspaceStatement ? ((KeyspaceStatement) stmt).keyspace() : null;
+    }
+
+    private static String getColumnFamily(CQLStatement stmt)
+    {
+        return stmt instanceof TableStatement ? ((TableStatement) stmt).columnFamily() : null;
     }
 }
