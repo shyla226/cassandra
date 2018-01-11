@@ -562,7 +562,7 @@ public class QueryProcessor implements QueryHandler
             events = auditLogger.getEventsForPrepare(prepared.statement, queryString, state);
 
             Single<Prepared> single = storePreparedStatement(queryString, rawKeyspace, prepared, storeStatementOnDisk);
-            return maybeAuditLog(events).andThen(single.onErrorResumeNext(maybeAuditLogErrors(events)));
+            return auditLogger.logEvents(events).andThen(single.onErrorResumeNext(maybeAuditLogErrors(events)));
         }
         catch (Exception e)
         {
@@ -955,13 +955,5 @@ public class QueryProcessor implements QueryHandler
             return Single::error;
 
         return e -> auditLogger.logFailedQuery(events, e).andThen(Single.error(e));
-    }
-
-    public static Completable maybeAuditLog(List<AuditableEvent> events)
-    {
-        if (events.isEmpty())
-            return Completable.complete();
-
-        return auditLogger.logEvents(events);
     }
 }

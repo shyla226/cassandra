@@ -1,3 +1,8 @@
+/**
+ * Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
 package com.datastax.bdp.db.audit.cql3;
 
 import java.nio.ByteBuffer;

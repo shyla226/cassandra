@@ -10,6 +10,7 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.UUID;
 
+import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.service.ClientState;
@@ -169,6 +170,16 @@ public class AuditableEvent
     public String getKeyspace()
     {
         return keyspace;
+    }
+
+    /**
+     * Checks if the user that performed the operation has the specified role.
+     * @param role the role to check
+     * @return {@code true} if the user has the specified role, {@code false} otherwise.
+     */
+    public boolean userHasRole(RoleResource role)
+    {
+        return user.hasRole(role);
     }
 
     public String toString()
