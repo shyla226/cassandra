@@ -67,7 +67,7 @@ public class AuthorizationProxyTest extends CQLTester
         Map<RoleResource, Map<IResource, PermissionSets>> permissions =
             ImmutableMap.of(role1, Collections.singletonMap(osBean, permission(CorePermission.SELECT)));
 
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, permissions))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, permissions))
                                                      .isAuthzRequired(() -> true)
                                                      .build();
 
@@ -83,7 +83,7 @@ public class AuthorizationProxyTest extends CQLTester
         Map<RoleResource, Map<IResource, PermissionSets>> permissions =
             ImmutableMap.of(role1, Collections.singletonMap(osBean, permission(CorePermission.AUTHORIZE)));
 
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, permissions))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, permissions))
                                                      .isAuthzRequired(() -> true)
                                                      .build();
 
@@ -99,7 +99,7 @@ public class AuthorizationProxyTest extends CQLTester
         Map<RoleResource, Map<IResource, PermissionSets>> permissions =
             ImmutableMap.of(role1, Collections.singletonMap(JMXResource.root(), permission(CorePermission.SELECT)));
 
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, permissions))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, permissions))
                 .isAuthzRequired(() -> true)
                 .build();
 
@@ -115,7 +115,7 @@ public class AuthorizationProxyTest extends CQLTester
         Map<RoleResource, Map<IResource, PermissionSets>> permissions =
             ImmutableMap.of(role1, Collections.singletonMap(JMXResource.root(), permission(CorePermission.AUTHORIZE)));
 
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, permissions))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, permissions))
                 .isAuthzRequired(() -> true)
                 .build();
 
@@ -128,7 +128,7 @@ public class AuthorizationProxyTest extends CQLTester
     public void roleHasNoPermissions() throws Throwable
     {
         Set<RoleResource> roles = Collections.singleton(role1);
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, Collections.emptyMap()))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, Collections.emptyMap()))
                                                      .isAuthzRequired(() -> true)
                                                      .build();
 
@@ -141,7 +141,7 @@ public class AuthorizationProxyTest extends CQLTester
     public void roleHasNoPermissionsButIsSuperuser() throws Throwable
     {
         Set<RoleResource> roles = Collections.singleton(role1);
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.createSuperUserRolesAndPermissions(name, roles))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.createSuperUserRolesAndPermissions(name, name, roles))
                                                      .isAuthzRequired(() -> true)
                                                      .build();
 
@@ -154,7 +154,7 @@ public class AuthorizationProxyTest extends CQLTester
     public void roleHasNoPermissionsButAuthzNotRequired() throws Throwable
     {
         Set<RoleResource> roles = Collections.singleton(role1);
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, Collections.emptyMap()))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, Collections.emptyMap()))
                                                      .isAuthzRequired(() -> false)
                                                      .build();
 
@@ -194,7 +194,7 @@ public class AuthorizationProxyTest extends CQLTester
             ImmutableMap.of(role1, Collections.singletonMap(javaLangWildcard, permission(CorePermission.SELECT)));
 
         Set<RoleResource> roles = Collections.singleton(role1);
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, permissions))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, permissions))
                                                      .isAuthzRequired(() -> true)
                                                      .build();
 
@@ -210,7 +210,7 @@ public class AuthorizationProxyTest extends CQLTester
             ImmutableMap.of(role1, Collections.singletonMap(javaLangWildcard, permission(CorePermission.SELECT)));
 
         Set<RoleResource> roles = Collections.singleton(role1);
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, permissions))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, permissions))
                                                      .isAuthzRequired(() -> true)
                                                      .build();
 
@@ -226,7 +226,7 @@ public class AuthorizationProxyTest extends CQLTester
             ImmutableMap.of(role1, Collections.singletonMap(JMXResource.root(), permission(CorePermission.SELECT)));
 
         Set<RoleResource> roles = Collections.singleton(role1);
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, permissions))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, permissions))
                                                      .isAuthzRequired(() -> true)
                                                      .build();
 
@@ -247,7 +247,7 @@ public class AuthorizationProxyTest extends CQLTester
                                                  .build();
         Map<RoleResource, Map<IResource, PermissionSets>> permissions = ImmutableMap.of(role1, Collections.singletonMap(JMXResource.root(), allPerms));
         Set<RoleResource> roles = Collections.singleton(role1);
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, permissions))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, permissions))
                                                      .isAuthzRequired(() -> true)
                                                      .build();
 
@@ -269,7 +269,7 @@ public class AuthorizationProxyTest extends CQLTester
 
         // Hardcode the superuser status check to return true, so any allowed method can be invoked.
         Set<RoleResource> roles = Collections.singleton(role1);
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.createSuperUserRolesAndPermissions(name, roles))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.createSuperUserRolesAndPermissions(name, name, roles))
                                                      .isAuthzRequired(() -> true)
                                                      .build();
 
@@ -308,7 +308,7 @@ public class AuthorizationProxyTest extends CQLTester
 
         // verify that access is granted when setup is complete
         Set<RoleResource> roles = Collections.singleton(role1);
-        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, permissions))
+        AuthorizationProxy proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, permissions))
                                                      .isAuthzRequired(() -> true)
                                                      .build();
 
@@ -317,7 +317,7 @@ public class AuthorizationProxyTest extends CQLTester
                                    new Object[]{ objectName(osBean), "arch" }));
 
         // and denied when it isn't
-        proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, permissions))
+        proxy = new ProxyBuilder().useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, permissions))
                                                      .isAuthzRequired(() -> true)
                                                      .isAuthSetupComplete(() -> false)
                                                      .build();
@@ -343,11 +343,11 @@ public class AuthorizationProxyTest extends CQLTester
         {
             Map<RoleResource, Map<IResource, PermissionSets>> permissions =
                 ImmutableMap.of(role1, Collections.singletonMap(JMXResource.root(), permission(CorePermission.DESCRIBE)));
-            builder.useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, permissions));
+            builder.useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, permissions));
         }
         else
         {
-            builder.useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, roles, Collections.emptyMap()));
+            builder.useRolesAndPermissions((name) -> UserRolesAndPermissions.newNormalUserRolesAndPermissions(name, name, roles, Collections.emptyMap()));
         }
         AuthorizationProxy proxy = builder.build();
 

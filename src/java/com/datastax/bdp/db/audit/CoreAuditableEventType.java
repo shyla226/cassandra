@@ -59,7 +59,8 @@ public enum CoreAuditableEventType implements AuditableEventType
     UNAUTHORIZED_ATTEMPT(AuditableEventCategory.AUTH),
 
     // ERROR
-    REQUEST_FAILURE(AuditableEventCategory.ERROR);
+    REQUEST_FAILURE(AuditableEventCategory.ERROR),
+    UNKNOWN(AuditableEventCategory.UNKNOWN); // Fallback type
 
     private final AuditableEventCategory category;
 

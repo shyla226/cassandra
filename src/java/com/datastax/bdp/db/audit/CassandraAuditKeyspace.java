@@ -5,11 +5,15 @@
  */
 package com.datastax.bdp.db.audit;
 
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+
+import org.apache.commons.lang3.ArrayUtils;
+
 import com.datastax.bdp.db.audit.cql3.AuditUtils;
-import org.apache.cassandra.schema.KeyspaceMetadata;
-import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.Tables;
+
+import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.schema.*;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class CassandraAuditKeyspace
@@ -24,7 +28,7 @@ public class CassandraAuditKeyspace
      * logging is being used in an environment with a ton of requests. In that case, even when
      * partitioned by the hour, rows could still become huge.
      */
-    private static final TableMetadata AuditLog = AuditUtils.compile(
+    private static final TableMetadata AuditLog = compile(
             NAME, AUDIT_LOG,
             "CREATE TABLE IF NOT EXISTS %s.%s (" +
                     "date timestamp," +
@@ -66,5 +70,24 @@ public class CassandraAuditKeyspace
     public static KeyspaceMetadata metadata()
     {
         return KeyspaceMetadata.create(NAME, KeyspaceParams.simple(1), tables());
+    }
+
+    public static TableMetadata compile(String keyspaceName, String tableName, String schema)
+    {
+
+        return CreateTableStatement.parse(String.format(schema, keyspaceName, tableName),
+                                          keyspaceName)
+                                   .id(tableId(keyspaceName, tableName))
+                                   .dcLocalReadRepairChance(0)
+                                   .memtableFlushPeriod((int) TimeUnit.HOURS.toMillis(1))
+                                   .gcGraceSeconds((int) TimeUnit.DAYS.toSeconds(90))
+                                   .build();
+
+    }
+
+    public static TableId tableId(String keyspace, String table)
+    {
+        byte[] bytes = ArrayUtils.addAll(keyspace.getBytes(), table.getBytes());
+        return TableId.fromUUID(UUID.nameUUIDFromBytes(bytes));
     }
 }
