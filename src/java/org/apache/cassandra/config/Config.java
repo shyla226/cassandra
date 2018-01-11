@@ -360,6 +360,12 @@ public class Config
     public volatile boolean back_pressure_enabled = false;
     public volatile ParameterizedClass back_pressure_strategy;
 
+    /**
+     * Defines whether to use the more intelligent level picking for non-L0 files (leveled compaction strategy).
+     * DB-639
+     */
+    public boolean pick_level_on_streaming;
+
     /** The configuration for continuous paging */
     public ContinuousPagingConfig continuous_paging = new ContinuousPagingConfig();
 

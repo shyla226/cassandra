@@ -43,6 +43,7 @@ import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.UpdateBuilder;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -475,73 +476,81 @@ public class LeveledCompactionStrategyTest
     @Test
     public void testLevelPicking() throws Exception
     {
-        Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARDDLEVELED);
-        cfs.truncateBlocking();
-        ByteBuffer value = ByteBuffer.wrap(new byte[100 * 1024]); // 100 B value
-
-        //Single
-        int rows = 128;
-        int columns = 10;
-
-        // Adds enough data to trigger multiple sstable per level
-        for (int r = 0; r < rows; r++)
+        DatabaseDescriptor.setPickLevelOnStreaming(true);
+        try
         {
-            DecoratedKey key = Util.dk(String.valueOf(r));
-            UpdateBuilder builder = UpdateBuilder.create(cfs.metadata.get(), key);
-            for (int c = 0; c < columns; c++)
-                builder.newRow("column" + c).add("val", value);
+            Keyspace keyspace = Keyspace.open(KEYSPACE1);
+            ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARDDLEVELED);
+            cfs.truncateBlocking();
+            ByteBuffer value = ByteBuffer.wrap(new byte[100 * 1024]); // 100 B value
 
-            Mutation rm = new Mutation(builder.build());
-            rm.apply();
-            cfs.forceBlockingFlush();
+            //Single
+            int rows = 128;
+            int columns = 10;
+
+            // Adds enough data to trigger multiple sstable per level
+            for (int r = 0; r < rows; r++)
+            {
+                DecoratedKey key = Util.dk(String.valueOf(r));
+                UpdateBuilder builder = UpdateBuilder.create(cfs.metadata.get(), key);
+                for (int c = 0; c < columns; c++)
+                    builder.newRow("column" + c).add("val", value);
+
+                Mutation rm = new Mutation(builder.build());
+                rm.apply();
+                cfs.forceBlockingFlush();
+            }
+            LeveledCompactionStrategyTest.waitForLeveling(cfs);
+            LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getStrategies().get(1).get(0);
+            while (!cfs.getTracker().getCompacting().isEmpty())
+                Thread.sleep(100);
+            cfs.disableAutoCompaction();
+            int[] startLevels = strategy.getAllLevelSize();
+            int higestLevel = 0;
+            for (int i = 0; i < startLevels.length; i++)
+                if (startLevels[i] != 0)
+                    higestLevel = i;
+
+            logger.info("Starting Levels {}", startLevels);
+
+            Set<SSTableReader> tables = cfs.getLiveSSTables();
+
+            Refs<SSTableReader> refs = Refs.ref(tables);
+
+            //Transfer the tables ontop of itself
+            for (int i = 0; i < 2; i++)
+            {
+                for (SSTableReader table : tables)
+                    transferKeepLevels(table);
+            }
+
+            refs.release(tables);
+
+            long compactionTasks = CompactionManager.instance.getCompletedTasks();
+
+            cfs.enableAutoCompaction();
+            LeveledCompactionStrategyTest.waitForLeveling(cfs);
+            while (!cfs.getTracker().getCompacting().isEmpty())
+                Thread.sleep(100);
+
+            long endCompactionTasks = CompactionManager.instance.getCompletedTasks();
+
+
+            int[] endLevels = strategy.getAllLevelSize();
+            int higestLevelEnd = 0;
+            for (int i = 0; i < endLevels.length; i++)
+                if (endLevels[i] != 0)
+                    higestLevelEnd = i;
+
+
+            logger.info("Ending Levels {} {}", endLevels, endCompactionTasks);
+            Assert.assertEquals(compactionTasks, endCompactionTasks);
+            Assert.assertTrue(higestLevelEnd > higestLevel);
         }
-        LeveledCompactionStrategyTest.waitForLeveling(cfs);
-        LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getStrategies().get(1).get(0);
-        while (!cfs.getTracker().getCompacting().isEmpty())
-            Thread.sleep(100);
-        cfs.disableAutoCompaction();
-        int[] startLevels = strategy.getAllLevelSize();
-        int higestLevel = 0;
-        for (int i = 0; i < startLevels.length; i++)
-            if (startLevels[i] != 0)
-                higestLevel = i;
-
-        logger.info("Starting Levels {}", startLevels);
-
-        Set<SSTableReader> tables = cfs.getLiveSSTables();
-
-        Refs<SSTableReader> refs = Refs.ref(tables);
-
-        //Transfer the tables ontop of itself
-        for (int i = 0; i < 2; i++)
+        finally
         {
-            for (SSTableReader table : tables)
-                transferKeepLevels(table);
+            DatabaseDescriptor.setPickLevelOnStreaming(false);
         }
-
-        refs.release(tables);
-
-        long compactionTasks = CompactionManager.instance.getCompletedTasks();
-
-        cfs.enableAutoCompaction();
-        LeveledCompactionStrategyTest.waitForLeveling(cfs);
-        while (!cfs.getTracker().getCompacting().isEmpty())
-            Thread.sleep(100);
-
-        long endCompactionTasks = CompactionManager.instance.getCompletedTasks();
-
-
-        int[] endLevels = strategy.getAllLevelSize();
-        int higestLevelEnd = 0;
-        for (int i = 0; i < endLevels.length; i++)
-            if (endLevels[i] != 0)
-                higestLevelEnd = i;
-
-
-        logger.info("Ending Levels {} {}", endLevels, endCompactionTasks);
-        Assert.assertEquals(compactionTasks, endCompactionTasks);
-        Assert.assertTrue(higestLevelEnd > higestLevel);
     }
 
     private Collection<StreamSession.SSTableStreamingSections> makeStreamingDetails(Refs<SSTableReader> sstables)
@@ -558,7 +567,6 @@ public class LeveledCompactionStrategyTest
         return details;
     }
 
-
     private void transferKeepLevels(SSTableReader sstable) throws Exception
     {
         StreamPlan streamPlan = new StreamPlan(StreamOperation.OTHER, true, true).transferFiles(LOCAL, makeStreamingDetails(Refs.tryRef(Arrays.asList(sstable))));
@@ -571,7 +579,6 @@ public class LeveledCompactionStrategyTest
         }
         assertTrue(totalBytesSent > 0);
     }
-
 
     @Test
     public void testNodetoolRefreshRelevel() throws InterruptedException
