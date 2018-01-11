@@ -24,7 +24,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 /**
  * Abstract class for statements that apply on a given column family.
  */
-public abstract class CFStatement extends ParsedStatement
+public abstract class CFStatement extends ParsedStatement implements KeyspaceStatement
 {
     protected final CFName cfName;
 
@@ -53,6 +53,7 @@ public abstract class CFStatement extends ParsedStatement
             cfName.setKeyspace(keyspace, true);
     }
 
+    @Override
     public String keyspace()
     {
         assert cfName.hasKeyspace() : "The statement hasn't be prepared correctly";

@@ -8,14 +8,10 @@ package com.datastax.bdp.db.audit;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.net.UnknownHostException;
 import java.util.UUID;
 
-import com.google.common.annotations.VisibleForTesting;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import org.apache.cassandra.auth.AuthenticatedUser;
+import org.apache.cassandra.auth.RoleResource;
+import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
@@ -26,8 +22,6 @@ import static com.google.common.base.Strings.isNullOrEmpty;
 
 public class AuditableEvent
 {
-    private static final Logger logger = LoggerFactory.getLogger(AuditableEvent.class);
-
     private static final String HOST = "host:";
     private static final String SOURCE = "|source:";
     private static final String USER = "|user:";
@@ -42,8 +36,7 @@ public class AuditableEvent
     private static final String CONSISTENCY_LEVEL = "|consistency level:";
 
     private final AuditableEventType type;
-    private final String user;
-    private final String authenticated;
+    private final UserRolesAndPermissions user;
     private final String source;
     private final InetAddress host;
     private final UUID uid;
@@ -55,36 +48,77 @@ public class AuditableEvent
     private final ConsistencyLevel consistencyLevel;
 
     public static final ConsistencyLevel NO_CL = null;
-    private static InetAddress UNKNOWN_SOURCE;
 
-    static
+    /**
+     * The string used for unknown sources
+     */
+    public static String UNKNOWN_SOURCE = "/0.0.0.0";
+
+    public AuditableEvent(UserRolesAndPermissions user,
+                          AuditableEventType type,
+                          String source,
+                          UUID uid,
+                          UUID batchId,
+                          String keyspace,
+                          String table,
+                          String operation,
+                          ConsistencyLevel cl)
     {
-        try
-        {
-            UNKNOWN_SOURCE = InetAddress.getByAddress(new byte[]{ 0, 0, 0, 0 });
-        }
-        catch (UnknownHostException e)
-        {
-            logger.error("Error creating default InetAddress for unknown event sources", e);
-            // fail fast
-            throw new RuntimeException("Unable to initialise constants for audit logging", e);
-        }
+        this.type = type;
+        this.user = user;
+        this.source = source;
+        this.host = FBUtilities.getBroadcastAddress();
+        this.uid = uid;
+        this.timestamp = UUIDGen.unixTimestamp(uid);
+        this.keyspace = keyspace;
+        this.columnFamily = table;
+        this.batch = batchId;
+        this.operation = operation;
+        this.consistencyLevel = cl;
     }
 
-    private AuditableEvent(Builder builder)
+    public AuditableEvent(QueryState state, AuditableEventType type, String operation)
     {
-        this.type = builder.type;
-        this.user = builder.user;
-        this.authenticated = builder.authenticated;
-        this.source = builder.source;
-        this.host = builder.host;
-        this.uid = builder.uid;
-        this.timestamp = builder.timestamp;
-        this.keyspace = builder.keyspace;
-        this.columnFamily = builder.columnFamily;
-        this.batch = builder.batch;
-        this.operation = builder.operation;
-        this.consistencyLevel = builder.consistencyLevel;
+        this(state, type, null, null, null, operation, null);
+    }
+
+    public AuditableEvent(UserRolesAndPermissions user, AuditableEventType type, String source, String operation)
+    {
+        this(user, type, source, UUIDGen.getTimeUUID(), null, null, null, operation, null);
+    }
+
+    public AuditableEvent(QueryState queryState,
+                          AuditableEventType type,
+                          UUID batchId,
+                          String keyspace,
+                          String table,
+                          String operation,
+                          ConsistencyLevel cl)
+    {
+        this(queryState.getUserRolesAndPermissions(),
+             type,
+             getEventSource(queryState.getClientState()),
+             UUIDGen.getTimeUUID(),
+             batchId,
+             keyspace,
+             table,
+             operation,
+             cl);
+    }
+
+    public AuditableEvent(AuditableEvent event, AuditableEventType type, String operation)
+    {
+        this.type = type;
+        this.user = event.user;
+        this.source = event.source;
+        this.host = event.host;
+        this.uid = UUIDGen.getTimeUUID();
+        this.timestamp = event.timestamp;
+        this.keyspace = event.keyspace;
+        this.columnFamily = event.columnFamily;
+        this.batch = event.batch;
+        this.operation = operation;
+        this.consistencyLevel = event.consistencyLevel;
     }
 
     public AuditableEventType getType()
@@ -94,12 +128,12 @@ public class AuditableEvent
 
     public String getUser()
     {
-        return user;
+        return user.getName();
     }
 
     public String getAuthenticated()
     {
-        return authenticated;
+        return user.getAuthenticatedName();
     }
 
     public String getSource()
@@ -147,12 +181,22 @@ public class AuditableEvent
         return keyspace;
     }
 
+    /**
+     * Checks if the user that performed the operation has the specified role.
+     * @param role the role to check
+     * @return {@code true} if the user has the specified role, {@code false} otherwise.
+     */
+    public boolean userHasRole(RoleResource role)
+    {
+        return user.hasRole(role);
+    }
+
     public String toString()
     {
         StringBuilder builder =  new StringBuilder(HOST).append(host)
                                                         .append(SOURCE).append(source)
-                                                        .append(USER).append(user)
-                                                        .append(AUTHENTICATED).append(authenticated)
+                                                        .append(USER).append(user.getName())
+                                                        .append(AUTHENTICATED).append(user.getAuthenticatedName())
                                                         .append(TIMESTAMP).append(timestamp)
                                                         .append(CATEGORY).append(type.getCategory())
                                                         .append(TYPE).append(type);
@@ -175,158 +219,16 @@ public class AuditableEvent
         return builder.toString();
     }
 
-    public static class Builder
+    private static String getEventSource(ClientState state)
     {
-        private final String user;
-        private final String authenticated;
-        private final String source;
-        private final InetAddress host;
-
-        private AuditableEventType type;
-        private long timestamp;
-        private String keyspace = null;
-        private String columnFamily = null;
-        private UUID batch = null;
-        private String operation = null;
-        private ConsistencyLevel consistencyLevel;
-        private UUID uid = null;
-
-        // user -> authorization user
-        public Builder(AuditableEventType type, String user, String authenticated, String source)
+        SocketAddress sockAddress = state.getRemoteAddress();
+        if (sockAddress instanceof InetSocketAddress)
         {
-            this.user = user;
-            this.authenticated = authenticated;
-            this.source = source;
-            this.type = type;
-            this.host = FBUtilities.getBroadcastAddress();
+            InetSocketAddress inetSocketAddress = (InetSocketAddress) sockAddress;
+            if (!inetSocketAddress.isUnresolved())
+                return inetSocketAddress.getAddress().toString();
         }
 
-        public Builder(String user, String source)
-        {
-            this(null, user, user, source);
-        }
-
-        public Builder(AuthenticatedUser user, String source)
-        {
-            this(null, user.getName(), user.getAuthenticatedName(), source);
-        }
-
-        public Builder(AuditableEventType type, String user, String source)
-        {
-            this(type, user, user, source);
-        }
-
-        public Builder type(AuditableEventType type)
-        {
-            this.type = type;
-            return this;
-        }
-
-        private static InetAddress getEventSource(ClientState state)
-        {
-            SocketAddress sockAddress = state.getRemoteAddress();
-            if (sockAddress == null)
-                return UNKNOWN_SOURCE;
-
-            if (sockAddress instanceof InetSocketAddress && !(((InetSocketAddress) sockAddress).isUnresolved()))
-            {
-                return ((InetSocketAddress) sockAddress).getAddress();
-            }
-            else
-            {
-                return UNKNOWN_SOURCE;
-            }
-        }
-
-        public static Builder fromQueryState(QueryState queryState)
-        {
-            return new Builder(queryState.getUser(), getEventSource(queryState.getClientState()).toString());
-        }
-
-        public static Builder fromEvent(AuditableEvent event)
-        {
-            Builder builder = new Builder(event.type, event.user, event.authenticated, event.source);
-            builder.timestamp = event.timestamp;
-            builder.keyspace = event.keyspace;
-            builder.columnFamily = event.columnFamily;
-            builder.batch = event.batch;
-            builder.operation = event.operation;
-            builder.consistencyLevel = event.consistencyLevel;
-            return builder;
-        }
-
-        public boolean isTypeSet()
-        {
-            return type != null;
-        }
-
-        public Builder keyspace(String keyspace)
-        {
-            this.keyspace = keyspace;
-            return this;
-        }
-
-        public Builder columnFamily(String columnFamily)
-        {
-            this.columnFamily = columnFamily;
-            return this;
-        }
-
-        public Builder batch(UUID batchId)
-        {
-            this.batch = batchId;
-            return this;
-        }
-
-        public Builder batch(String batchId)
-        {
-            if (batchId == null || batchId.length() == 0)
-            {
-                this.batch = null;
-                return this;
-            }
-
-            try
-            {
-                return batch(UUID.fromString(batchId));
-            }
-            catch (IllegalArgumentException e)
-            {
-                this.batch = null;
-                return this;
-            }
-        }
-
-        public Builder operation(String operation)
-        {
-            this.operation = operation;
-            return this;
-        }
-
-        public Builder consistencyLevel(ConsistencyLevel consistencyLevel)
-        {
-            this.consistencyLevel = consistencyLevel;
-            return this;
-        }
-
-        @VisibleForTesting
-        Builder uid(UUID uid)
-        {
-            this.uid = uid;
-            return this;
-        }
-
-        public AuditableEvent build()
-        {
-            if (null == type)
-                throw new IllegalStateException("Cannot build event without a type");
-
-            if (uid == null)
-            {
-                uid = UUIDGen.getTimeUUID();
-            }
-            timestamp = UUIDGen.unixTimestamp(uid);
-            return new AuditableEvent(this);
-        }
+        return UNKNOWN_SOURCE;
     }
 }

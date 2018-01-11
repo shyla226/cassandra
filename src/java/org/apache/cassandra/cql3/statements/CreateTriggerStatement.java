@@ -39,7 +39,7 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 import org.apache.cassandra.triggers.TriggerExecutor;
 
-public class CreateTriggerStatement extends SchemaAlteringStatement
+public class CreateTriggerStatement extends SchemaAlteringStatement implements TableStatement
 {
     private static final Logger logger = LoggerFactory.getLogger(CreateTriggerStatement.class);
 

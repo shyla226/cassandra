@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import java.util.Optional;
+
 import io.reactivex.Maybe;
 import io.reactivex.Single;
 
@@ -40,7 +42,7 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
-public class DropIndexStatement extends SchemaAlteringStatement
+public class DropIndexStatement extends SchemaAlteringStatement implements TableStatement
 {
     public final String indexName;
     public final boolean ifExists;
@@ -60,8 +62,12 @@ public class DropIndexStatement extends SchemaAlteringStatement
 
     public String columnFamily()
     {
-        TableMetadata metadata = lookupIndexedTable();
-        return metadata == null ? null : metadata.name;
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(keyspace());
+        if (ksm == null)
+            return null;
+
+        Optional<TableMetadata> indexedTable = ksm.findIndexedTable(indexName);
+        return indexedTable.isPresent() ? indexedTable.get().name : null;
     }
 
     @Override

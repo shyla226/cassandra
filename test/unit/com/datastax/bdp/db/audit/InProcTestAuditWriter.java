@@ -5,16 +5,12 @@
  */
 package com.datastax.bdp.db.audit;
 
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
 import java.util.Stack;
+
+import io.reactivex.Completable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import io.reactivex.Completable;
-import org.codehaus.jackson.map.ObjectMapper;
 
 public class InProcTestAuditWriter implements IAuditWriter
 {
@@ -27,8 +23,7 @@ public class InProcTestAuditWriter implements IAuditWriter
     {
         logger.debug("Record event: {}", event);
 
-        events.add(event);
-        return Completable.complete();
+        return Completable.fromAction(() -> events.add(event));
     }
 
     public static Stack<AuditableEvent> getEvents()
@@ -53,33 +48,5 @@ public class InProcTestAuditWriter implements IAuditWriter
     public static boolean hasEvents()
     {
         return ! events.isEmpty();
-    }
-
-    @Override
-    public boolean isLoggingEnabled()
-    {
-        return true;
-    }
-
-    public static String asString() throws IOException
-    {
-        return new ObjectMapper().writeValueAsString(events);
-    }
-
-    public static Stack<AuditableEvent> fromString(String s) throws IOException
-    {
-        Stack<AuditableEvent> events = new Stack<AuditableEvent>();
-        List<Map<String, String>> rawEvents = new ObjectMapper().readValue(s, List.class);
-        for (Map<String, String> values : rawEvents)
-        {
-            events.push(new AuditableEvent.Builder(values.get("user"), values.get("source"))
-                            .batch(values.get("batchId"))
-                            .columnFamily(values.get("columnFamily"))
-                            .keyspace(values.get("keyspace"))
-                            .operation(values.get("operation"))
-                            .type(CoreAuditableEventType.valueOf(values.get("type")))
-                            .build());
-        }
-        return events;
     }
 }

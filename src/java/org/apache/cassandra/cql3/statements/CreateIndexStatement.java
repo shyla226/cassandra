@@ -52,7 +52,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 /** A <code>CREATE INDEX</code> statement parsed from a CQL query. */
-public class CreateIndexStatement extends SchemaAlteringStatement
+public class CreateIndexStatement extends SchemaAlteringStatement implements TableStatement
 {
     private static final Logger logger = LoggerFactory.getLogger(CreateIndexStatement.class);
 

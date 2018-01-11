@@ -1,12 +1,13 @@
-/**
+/*
  * Copyright DataStax, Inc.
  *
  * Please see the included license file for details.
  */
 package com.datastax.bdp.db.audit;
 
-import java.util.HashSet;
-import java.util.Set;
+import org.apache.cassandra.exceptions.ConfigurationException;
+
+import static org.apache.commons.lang3.StringUtils.isNotBlank;
 
 public class AuditLoggingOptions
 {
@@ -18,43 +19,21 @@ public class AuditLoggingOptions
     public String excluded_categories = null;
     public String included_keyspaces = null;
     public String excluded_keyspaces = null;
+    public String included_roles = null;
+    public String excluded_roles = null;
     public int retention_time = 0;
 
     public CassandraAuditWriterOptions cassandra_audit_writer_options = new CassandraAuditWriterOptions();
 
-    private static Set<String> commaSeparatedStrToSet(String valueString)
+    public void validateFilters()
     {
-        if (valueString == null)
-            return new HashSet<>();
+        if (isNotBlank(excluded_keyspaces) && isNotBlank(included_keyspaces))
+            throw new ConfigurationException("Can't specify both included and excluded keyspaces for audit logger", false);
 
-        if (valueString.trim().length() == 0)
-            return new HashSet<>();
+        if (isNotBlank(excluded_categories) && isNotBlank(included_categories))
+            throw new ConfigurationException("Can't specify both included and excluded categories for audit logger", false);
 
-        Set<String> values = new HashSet<>();
-        for (String value : valueString.split(","))
-            if (value.trim().length() > 0)
-                values.add(value.trim());
-
-        return values;
-    }
-
-    public Set<String> getAuditIncludedKeyspaces()
-    {
-        return commaSeparatedStrToSet(included_keyspaces);
-    }
-
-    public Set<String> getAuditExcludedKeyspaces()
-    {
-        return commaSeparatedStrToSet(excluded_keyspaces);
-    }
-
-    public Set<String> getAuditIncludedCategories()
-    {
-        return commaSeparatedStrToSet(included_categories);
-    }
-
-    public Set<String> getAuditExcludedCategories()
-    {
-        return commaSeparatedStrToSet(excluded_categories);
+        if (isNotBlank(excluded_roles) && isNotBlank(included_roles))
+            throw new ConfigurationException("Can't specify both included and excluded roles for audit logger", false);
     }
 }
