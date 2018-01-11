@@ -149,7 +149,7 @@ public class AuditLoggerFilteringTest extends CQLTester
     }
 
     @Test
-    public void testLoggingForConsistencyFailuresWithPreparedStatement() throws Throwable
+    public void testFilteringForConsistencyFailures() throws Throwable
     {
         executeNet(new SimpleStatement("CREATE KEYSPACE test WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 3 };")
                    .setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.ONE));
@@ -225,7 +225,7 @@ public class AuditLoggerFilteringTest extends CQLTester
     }
 
     @Test
-    public void testLoggingForInvalidQueries() throws Exception
+    public void testFilteringForInvalidQueries() throws Exception
     {
         // Test filtering for ERROR category
         AuditLoggingOptions options = new AuditLoggingOptions();

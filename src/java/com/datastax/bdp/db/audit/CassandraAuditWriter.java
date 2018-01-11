@@ -6,14 +6,7 @@
 package com.datastax.bdp.db.audit;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -28,15 +21,11 @@ import org.apache.commons.lang3.concurrent.BasicThreadFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.bdp.db.audit.cql3.AuditUtils;
 import io.reactivex.Completable;
 
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.Attributes;
-import org.apache.cassandra.cql3.CQLStatement;
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
@@ -331,7 +320,7 @@ public class CassandraAuditWriter implements IAuditWriter
 
             try
             {
-                AuditUtils.processBatchBlocking(stmt, writeConsistency, values);
+                processBatchBlocking(stmt, writeConsistency, values);
             }
             catch (RequestExecutionException | RequestValidationException e)
             {
@@ -342,8 +331,28 @@ public class CassandraAuditWriter implements IAuditWriter
                 }
             }
         }
+
+        /**
+         * Processes a batch statement and awaits its completion.
+         *
+         * @param statement - the prepared statement to process
+         * @param cl - the consistency level
+         * @param values - the list of values to bind to the prepared statement
+         */
+        private void processBatchBlocking(BatchStatement statement, ConsistencyLevel cl, List<List<ByteBuffer>> values)
+        {
+            BatchQueryOptions options =
+            BatchQueryOptions.withPerStatementVariables(QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()),
+                                                        values,
+                                                        Collections.emptyList());
+
+            TPCUtils.blockingGet(QueryProcessor.instance.processBatch(statement, QueryState.forInternalCalls(), options, System.nanoTime()));
+        }
     }
 
+
+
+    
     private class EventBatcher implements Runnable
     {
         private final BatchController controller;
