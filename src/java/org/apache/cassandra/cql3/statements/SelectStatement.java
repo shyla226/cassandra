@@ -115,7 +115,7 @@ import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
  * QueryHandler implementations, so before reducing their accessibility
  * due consideration should be given.
  */
-public class SelectStatement implements CQLStatement, KeyspaceStatement
+public class SelectStatement implements CQLStatement, TableStatement
 {
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
 
