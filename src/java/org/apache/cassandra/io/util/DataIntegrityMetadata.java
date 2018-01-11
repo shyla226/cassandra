@@ -104,7 +104,7 @@ public class DataIntegrityMetadata
         public FileDigestValidator(Descriptor descriptor) throws IOException
         {
             this.descriptor = descriptor;
-            checksum = ChecksumType.CRC32.newInstance();
+            checksum = ChecksumType.newCRC32();
             digestReader = RandomAccessReader.open(new File(descriptor.filenameFor(Component.DIGEST)));
             dataReader = RandomAccessReader.open(new File(descriptor.filenameFor(Component.DATA)));
             try

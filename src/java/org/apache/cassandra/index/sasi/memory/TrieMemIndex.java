@@ -244,7 +244,7 @@ public class TrieMemIndex extends MemIndex
     // but it's still better comparing to underestimate since it gives more breathing room for other memory users.
     private static class SizeEstimatingNodeFactory extends SmartArrayBasedNodeFactory
     {
-        private final FastThreadLocal<Long> updateSize = new FastThreadLocal<Long>()
+        private static final FastThreadLocal<Long> updateSize = new FastThreadLocal<Long>()
         {
             protected Long initialValue() throws Exception
             {

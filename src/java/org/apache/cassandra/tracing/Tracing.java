@@ -85,12 +85,11 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
 
     protected static final Logger logger = LoggerFactory.getLogger(Tracing.class);
 
-    private final InetAddress localAddress = FBUtilities.getLocalAddress();
+    private static final FastThreadLocal<TraceState> state = new FastThreadLocal<>();
+    private static final InetAddress localAddress = FBUtilities.getLocalAddress();
+    private static final TracingMetrics metrics = new TracingMetrics();
 
-    private final FastThreadLocal<TraceState> state = new FastThreadLocal<>();
-
-    protected final ConcurrentMap<UUID, TraceState> sessions = new ConcurrentHashMap<>();
-    private final TracingMetrics metrics = new TracingMetrics();
+    protected static final ConcurrentMap<UUID, TraceState> sessions = new ConcurrentHashMap<>();
 
     public static final Tracing instance;
 
