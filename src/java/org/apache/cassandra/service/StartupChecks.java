@@ -107,6 +107,7 @@ public class StartupChecks
                                                                       checkClockSource,
                                                                       checkCgroupCpuSets,
                                                                       checkCpu,
+                                                                      checkPCID,
                                                                       checkZoneReclaimMode,
                                                                       checkUlimits,
                                                                       checkThpDefrag,
@@ -640,6 +641,18 @@ public class StartupChecks
         }).collect(Collectors.toList());
     }
 
+    public static final StartupCheck checkPCID = (logger) ->
+    {
+        if (!FBUtilities.isLinux)
+            return;
+
+        Set<String> flags = cpuinfoFlags(logger);
+        if (!flags.contains("pcid"))
+            logger.warn("CPU does not have PCID (enabled). This will cause an unnecessary performance regression with " +
+                        "a kernel having kernel-page-tables-isolation enabled, which should be the case to since " +
+                        "CVE-2017-5754 (\"Meltdown\").");
+    };
+
     public static final StartupCheck checkClockSource = (logger) ->
     {
         if (!FBUtilities.isLinux)
@@ -663,16 +676,7 @@ public class StartupChecks
                 logger.warn("Unknown content in {}: {}", fClockSource, clocksource);
             else
             {
-                Set<String> flags = Collections.emptySet();
-                try
-                {
-                    FBUtilities.CpuInfo cpuInfo = FBUtilities.CpuInfo.load();
-                    flags = cpuInfo.getProcessors().get(0).getFlags();
-                }
-                catch (Exception e)
-                {
-                    logger.warn("Could not read /proc/cpuinfo");
-                }
+                Set<String> flags = cpuinfoFlags(logger);
 
                 String cs = clocksource.get(0);
                 switch (cs)
@@ -702,6 +706,21 @@ public class StartupChecks
             }
         }
     };
+
+    private static Set<String> cpuinfoFlags(Logger logger)
+    {
+        Set<String> flags = Collections.emptySet();
+        try
+        {
+            FBUtilities.CpuInfo cpuInfo = FBUtilities.CpuInfo.load();
+            flags = cpuInfo.getProcessors().get(0).getFlags();
+        }
+        catch (Exception e)
+        {
+            logger.warn("Could not read /proc/cpuinfo");
+        }
+        return flags;
+    }
 
     public static final StartupCheck checkVirtualization = (logger) ->
     {
