@@ -53,26 +53,17 @@ calculate_system_memory_sizes()
         system_cpu_cores="1"
     fi
 
-    # set max heap size based on the following
-    # max(min(1/2 ram, 1024MB), min(1/4 ram, 8GB))
-    # calculate 1/2 ram and cap to 1024MB
-    # calculate 1/4 ram and cap to 8192MB
-    # pick the max
+    # cap here to 32765M because the JVM switches to 64 bit references at 32767M
+    # details are described in http://java-performance.info/over-32g-heap-java/
+    capped_heap_size="32765"
+
+    # set max heap size by calculating 1/2 ram and capping to 32Gb
     half_system_memory_in_mb=`expr $system_memory_in_mb / 2`
-    quarter_system_memory_in_mb=`expr $half_system_memory_in_mb / 2`
-    if [ "$half_system_memory_in_mb" -gt "1024" ]
+    if [ "$half_system_memory_in_mb" -gt "$capped_heap_size" ]
     then
-        half_system_memory_in_mb="1024"
-    fi
-    if [ "$quarter_system_memory_in_mb" -gt "8192" ]
-    then
-        quarter_system_memory_in_mb="8192"
-    fi
-    if [ "$half_system_memory_in_mb" -gt "$quarter_system_memory_in_mb" ]
-    then
-        max_heap_size_in_mb="$half_system_memory_in_mb"
+        max_heap_size_in_mb="$capped_heap_size"
     else
-        max_heap_size_in_mb="$quarter_system_memory_in_mb"
+        max_heap_size_in_mb="$half_system_memory_in_mb"
     fi
 
     system_memory_sizes_calculated=true
@@ -187,8 +178,22 @@ elif [ "x$MAX_HEAP_SIZE" = "x" ] ||  [ "x$HEAP_NEWSIZE" = "x" -a $USING_G1 -ne 0
     exit 1
 fi
 
-# Allow all system memory to be taken as off-heap
-MAX_DIRECT_MEMORY="${system_memory_in_mb}M"
+heap_size_in_mb=0
+if [[ ("$MAX_HEAP_SIZE" == *g) || ("$MAX_HEAP_SIZE" == *G) ]]
+then
+    heap_size_in_mb="$((${MAX_HEAP_SIZE%?} * 1024))"
+elif [[ ("$MAX_HEAP_SIZE" == *m) || ("$MAX_HEAP_SIZE" == *M) ]]
+then
+    heap_size_in_mb="${MAX_HEAP_SIZE%?}"
+elif [[ ("$MAX_HEAP_SIZE" == *k) || ("$MAX_HEAP_SIZE" == *K) ]]
+then
+    heap_size_in_mb="$((${MAX_HEAP_SIZE%?} / 1024))"
+fi
+
+memory_remaining_in_mb="$((${system_memory_in_mb} - ${heap_size_in_mb}))"
+
+# Calculate direct memory as 1/3 of memory available after heap:
+MAX_DIRECT_MEMORY="$((memory_remaining_in_mb / 3))M"
 
 JVM_OPTS="$JVM_OPTS -XX:MaxDirectMemorySize=$MAX_DIRECT_MEMORY"
 
