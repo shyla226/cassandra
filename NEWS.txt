@@ -77,6 +77,8 @@ Operations
      This improves latency spikes when restarting nodes.
    - LeveledCompactionStrategy SSTables will keep their existing level on nodetool refresh, nodetool move,
      and nodetool decommission.
+   - Only MODIFY permission on base is required to update table with MV, internally it reads base
+     data and generates updates to MV.
 
 Upgrading
 ---------
