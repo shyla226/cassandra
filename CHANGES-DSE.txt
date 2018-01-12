@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Wait RING_DELAY for schema to settle before starting view builder (DB-1328)
  * Make `ReservedKeywords` mutable (DB-1637)
  * Non-disruptive seed node list reload (DB-1626)
  * Fix tpc connection being reset due to dc compression and flush socket before reset (DB-1636)

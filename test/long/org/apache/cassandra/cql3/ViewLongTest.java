@@ -26,6 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CyclicBarrier;
 
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -49,8 +50,17 @@ public class ViewLongTest extends CQLTester
     @BeforeClass
     public static void startup()
     {
+        //one node, so no need for gossip to settle
+        System.setProperty("cassandra.mv.builder.gossip_settle_wait_in_ms", "0");
         requireNetwork();
     }
+
+    @AfterClass
+    public static void afterClass()
+    {
+        System.clearProperty("cassandra.mv.builder.gossip_settle_wait_in_ms");
+    }
+
     @Before
     public void begin()
     {

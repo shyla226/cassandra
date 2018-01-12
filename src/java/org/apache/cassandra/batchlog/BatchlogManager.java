@@ -118,6 +118,8 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static void remove(UUID id)
     {
+        if (logger.isTraceEnabled())
+            logger.trace("Removing batch {}", id);
         new Mutation(PartitionUpdate.fullPartitionDelete(SystemKeyspace.Batches,
                                                          UUIDType.instance.decompose(id),
                                                          FBUtilities.timestampMicros(),
@@ -132,6 +134,8 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static void store(Batch batch, boolean durableWrites)
     {
+        if (logger.isTraceEnabled())
+            logger.trace("Storing batch {}", batch.id);
         RowUpdateBuilder builder =
             new RowUpdateBuilder(SystemKeyspace.Batches, batch.creationTime, batch.id)
                 .clustering()

@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
@@ -29,6 +30,7 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.Schema;
@@ -44,10 +46,12 @@ import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.ReadQuery;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -57,6 +61,8 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public class View
 {
+    private static final int GOSSIP_SETTLE_WAIT_IN_MS = Integer.getInteger("cassandra.mv.builder.gossip_settle_wait_in_ms", StorageService.RING_DELAY);
+
     private static final Logger logger = LoggerFactory.getLogger(View.class);
 
     public final String name;
@@ -180,7 +186,7 @@ public class View
         if (select == null)
         {
             ClientState state = ClientState.forInternalCalls();
-            state.setKeyspace(baseCfs.keyspace.getName());
+            state.setKeyspace(keyspace());
             rawSelect.prepareKeyspace(state);
             ParsedStatement.Prepared prepared = rawSelect.prepare(true, ClientState.forInternalCalls());
             select = (SelectStatement) prepared.statement;
@@ -206,15 +212,38 @@ public class View
 
     public synchronized void build()
     {
+        stopBuild();
+
+        final ViewBuilder builder = new ViewBuilder(baseCfs, this);
+        this.builder = builder;
+
+        long delay = 0;
+        if (!SystemKeyspace.isViewBuilt(keyspace(), name) && SystemKeyspace.getViewBuildStatus(keyspace(), name) == null)
+        {
+            logger.debug("Will wait {} milliseconds for schema to be propagated to all nodes " +
+                         "before building view {}.{} for the first time.", GOSSIP_SETTLE_WAIT_IN_MS,
+                         baseCfs.metadata.ksName, baseCfs.name);
+            delay = GOSSIP_SETTLE_WAIT_IN_MS;
+        }
+
+        ScheduledExecutors.nonPeriodicTasks.schedule(() -> CompactionManager.instance.submitViewBuilder(builder),
+                                                     delay,
+                                                     TimeUnit.MILLISECONDS);
+    }
+
+    protected synchronized void stopBuild()
+    {
         if (this.builder != null)
         {
             logger.debug("Stopping current view builder due to schema change");
             this.builder.stop();
             this.builder = null;
         }
+    }
 
-        this.builder = new ViewBuilder(baseCfs, this);
-        CompactionManager.instance.submitViewBuilder(builder);
+    private String keyspace()
+    {
+        return baseCfs.keyspace.getName();
     }
 
     @Nullable
