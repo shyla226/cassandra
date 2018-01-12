@@ -26,7 +26,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -34,6 +38,7 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class FileUtilsTest
@@ -43,6 +48,132 @@ public class FileUtilsTest
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
+    }
+
+    @Test
+    public void testCpuIdVendorId() throws Exception
+    {
+        assertEquals("GenuineIntel", FileUtils.cpuIdVendorId("   0x00000000 0x00: eax=0x00000014 ebx=0x756e6547 ecx=0x6c65746e edx=0x49656e69\n"));
+    }
+
+    @Test
+    public void testBrokenCpuid()
+    {
+        // virtualization detection must not break startup procedure, if cpuid executable
+        // is not installed.
+
+        String[] save = FileUtils.CPUID_COMMANDLINE;
+        try
+        {
+            FileUtils.CPUID_COMMANDLINE = new String[]{"this_crazy_thing_might_exist_on_someones_computer_somewhere_in_the_universe"};
+            FileUtils.detectVirtualization();
+        }
+        finally
+        {
+            FileUtils.CPUID_COMMANDLINE = save;
+        }
+    }
+
+    @Test
+    public void testDetectVirtualization()
+    {
+        // bare metal - all good
+        String result = FileUtils.detectVirtualization(() -> baremetalCpuid,
+                                                       Collections::emptyList,
+                                                       () -> null,
+                                                       filter -> null);
+        assertNull(result);
+        result = FileUtils.detectVirtualization(() -> baremetalCpuid,
+                                                Collections::emptyList,
+                                                () -> new File[0],
+                                                filter -> new File[0]);
+        assertNull(result);
+
+        // VMwareVMware vendor-ID in CPUID
+        //0000000   G   e   n   u   i   n   e   I   n   t   e   l  \n
+        //0000000    6547    756e    6e69    4965    746e    6c65    000a
+        //0000000   V   M   w   a   r   e   V   M   w   a   r   e  \n
+        //0000000    4d56    6177    6572    4d56    6177    6572    000a
+        result = FileUtils.detectVirtualization(() -> baremetalCpuid.replace("ebx=0x756e6547 ecx=0x6c65746e edx=0x49656e69", // GenuineIntel
+                                                                             "ebx=0x61774d56 ecx=0x65726177 edx=0x4d566572"), // VMwareVMware
+                                                Collections::emptyList,
+                                                () -> null,
+                                                filter -> null);
+        assertEquals("VMWare", result);
+
+        // VirtualBox returns "GenuineIntel" as the Vendor-ID for CPUID.
+        // But bit 31 of ECX for CPUID leaf 1 is set.
+        result = FileUtils.detectVirtualization(() -> virtualboxCpuid,
+                                                Collections::emptyList,
+                                                () -> null,
+                                                filter -> null);
+        assertEquals("unknown (CPUID leaf 1 ECX bit 31 set)", result);
+
+        // VirtualBox returns "GenuineIntel" as the Vendor-ID for CPUID.
+        // Bit 31 of ECX for CPUID leaf 1 is is cleared in this test
+        // but the hypervisor specific leafs are present.
+        result = FileUtils.detectVirtualization(() -> virtualboxCpuid.replace("0x00000001 0x00: eax=0x00040661 ebx=0x02040800 ecx=0xdef82203 edx=0x178bfbff",
+                                                                              "0x00000001 0x00: eax=0x00040661 ebx=0x02040800 ecx=0x5ef82203 edx=0x178bfbff"),
+                                                Collections::emptyList,
+                                                () -> null,
+                                                filter -> null);
+        assertEquals("unknown (CPUID hypervisor leafs)", result);
+
+        // detection via /sys/hypervisor/properties/capabilities
+        result = FileUtils.detectVirtualization(() -> baremetalCpuid,
+                                                () -> Collections.singletonList("xen-3.0-x86_64 xen-3.0-x86_32p hvm-3.0-x86_32 hvm-3.0-x86_32p hvm-3.0-x86_64"),
+                                                () -> null,
+                                                filter -> null);
+        assertEquals("Xen HVM", result);
+
+        // detection via /sys/hypervisor/properties/capabilities
+        result = FileUtils.detectVirtualization(() -> baremetalCpuid,
+                                                () -> Collections.singletonList("xen-3.0-x86_64 xen-3.0-x86_32p"),
+                                                () -> null,
+                                                filter -> null);
+        assertEquals("Xen", result);
+
+        // detection whether there are Xen devices
+        result = FileUtils.detectVirtualization(() -> baremetalCpuid,
+                                                Collections::emptyList,
+                                                () -> new File[]{ new File("/foobarbaz") },
+                                                filter -> null);
+        assertEquals("Xen", result);
+
+        // detection via disks-by-id
+        result = FileUtils.detectVirtualization(() -> baremetalCpuid,
+                                                Collections::emptyList,
+                                                () -> null,
+                                                filter -> {
+                                                    switch (filter)
+                                                    {
+                                                        case "-QEMU_":
+                                                            return new File[]{
+                                                            new File("/dev/disk/by-id/ata-QEMU_HARDDISK_VBc7f3f571-49b6d797")
+                                                            };
+                                                        case "-VBOX_":
+                                                        default:
+                                                            return null;
+                                                    }
+                                                });
+        assertEquals("Xen/KVM", result);
+
+        result = FileUtils.detectVirtualization(() -> baremetalCpuid,
+                                                Collections::emptyList,
+                                                () -> null,
+                                                filter -> {
+                                                    switch (filter)
+                                                    {
+                                                        case "-VBOX_":
+                                                            return new File[]{
+                                                            new File("/dev/disk/by-id/ata-VBOX_HARDDISK_VBc7f3f571-49b6d797")
+                                                            };
+                                                        case "-QEMU_":
+                                                        default:
+                                                            return null;
+                                                    }
+                                                });
+        assertEquals("VirtualBox", result);
     }
 
     @Test
@@ -64,17 +195,27 @@ public class FileUtilsTest
         "/dev/nvme0n1p2 /var/lib/docker/aufs ext4 rw,relatime,errors=remount-ro,data=ordered 0 0\n" +
         "diskstation:/volume1/backup-bear /home/snazy/backup-bear nfs4 rw,relatime,vers=4.0 0 0\n";
 
-        Map<Path, String> expected = new LinkedHashMap<>();
+        Map<Path, FileUtils.MountPoint> expected = new LinkedHashMap<>();
         // The order is important! We want the path with the most components first.
-        expected.put(Paths.get("/var/lib/docker/aufs"), "nvme0n1p2");
-        expected.put(Paths.get("/home/snazy/backup-bear"), "WE_DO_NOT_KNOW");
-        expected.put(Paths.get("/boot/efi"), "nvme0n1p1");
-        expected.put(Paths.get("/foobar"), "sda3");
-        expected.put(Paths.get("/"), "nvme0n1p2");
+        expected.put(Paths.get("/var/lib/docker/aufs"), new FileUtils.MountPoint(Paths.get("/var/lib/docker/aufs"),
+                                                                                 "nvme0n1p2",
+                                                                                 "ext4"));
+        expected.put(Paths.get("/home/snazy/backup-bear"), new FileUtils.MountPoint(Paths.get("/home/snazy/backup-bear"),
+                                                                                    "WE_DO_NOT_KNOW",
+                                                                                    "nfs4"));
+        expected.put(Paths.get("/boot/efi"), new FileUtils.MountPoint(Paths.get("/boot/efi"),
+                                                                      "nvme0n1p1",
+                                                                      "vfat"));
+        expected.put(Paths.get("/foobar"), new FileUtils.MountPoint(Paths.get("/foobar"),
+                                                                    "sda3",
+                                                                    "ext4"));
+        expected.put(Paths.get("/"), new FileUtils.MountPoint(Paths.get("/"),
+                                                              "nvme0n1p2",
+                                                              "ext4"));
 
-        Map<Path, String> mounts = FileUtils.getDiskPartitions(new StringReader(procMounts));
-        ArrayList<Map.Entry<Path, String>> mountsList = new ArrayList<>(mounts.entrySet());
-        ArrayList<Map.Entry<Path, String>> expectedList = new ArrayList<>(expected.entrySet());
+        Map<Path, FileUtils.MountPoint> mounts = FileUtils.getDiskPartitions(new StringReader(procMounts));
+        ArrayList<Map.Entry<Path, FileUtils.MountPoint>> mountsList = new ArrayList<>(mounts.entrySet());
+        ArrayList<Map.Entry<Path, FileUtils.MountPoint>> expectedList = new ArrayList<>(expected.entrySet());
         assertEquals(expectedList, mountsList);
     }
 
@@ -141,4 +282,81 @@ public class FileUtilsTest
         }
         return file;
     }
+
+    static final String virtualboxCpuid = "CPU:\n" +
+                                          "   0x00000000 0x00: eax=0x0000000d ebx=0x756e6547 ecx=0x6c65746e edx=0x49656e69\n" +
+                                          "   0x00000001 0x00: eax=0x00040661 ebx=0x02040800 ecx=0xdef82203 edx=0x178bfbff\n" +
+                                          "   0x00000002 0x00: eax=0x76036301 ebx=0x00f0b5ff ecx=0x00000000 edx=0x00c10000\n" +
+                                          "   0x00000003 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x00000004 0x00: eax=0x0c000121 ebx=0x01c0003f ecx=0x0000003f edx=0x00000000\n" +
+                                          "   0x00000004 0x01: eax=0x0c000122 ebx=0x01c0003f ecx=0x0000003f edx=0x00000000\n" +
+                                          "   0x00000004 0x02: eax=0x0c000143 ebx=0x01c0003f ecx=0x000001ff edx=0x00000000\n" +
+                                          "   0x00000004 0x03: eax=0x0c000163 ebx=0x02c0003f ecx=0x00001fff edx=0x00000006\n" +
+                                          "   0x00000004 0x04: eax=0x0c000183 ebx=0x03c0f03f ecx=0x00001fff edx=0x00000004\n" +
+                                          "   0x00000005 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x00000006 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x00000007 0x00: eax=0x00000000 ebx=0x00002000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x00000008 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x00000009 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x0000000a 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x0000000b 0x00: eax=0x00000000 ebx=0x00000001 ecx=0x00000100 edx=0x00000002\n" +
+                                          "   0x0000000b 0x01: eax=0x00000002 ebx=0x00000004 ecx=0x00000201 edx=0x00000002\n" +
+                                          "   0x0000000c 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x0000000d 0x00: eax=0x00000007 ebx=0x00000340 ecx=0x00000340 edx=0x00000000\n" +
+                                          "   0x0000000d 0x01: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x0000000d 0x02: eax=0x00000100 ebx=0x00000240 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x40000000 0x00: eax=0x40000001 ebx=0x4b4d564b ecx=0x564b4d56 edx=0x0000004d\n" +
+                                          "   0x40000001 0x00: eax=0x01000089 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x80000000 0x00: eax=0x80000008 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x80000001 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000021 edx=0x28100800\n" +
+                                          "   0x80000002 0x00: eax=0x65746e49 ebx=0x2952286c ecx=0x726f4320 edx=0x4d542865\n" +
+                                          "   0x80000003 0x00: eax=0x37692029 ebx=0x3839342d ecx=0x20514830 edx=0x20555043\n" +
+                                          "   0x80000004 0x00: eax=0x2e322040 ebx=0x48473038 ecx=0x0000007a edx=0x00000000\n" +
+                                          "   0x80000005 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x80000006 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x01006040 edx=0x00000000\n" +
+                                          "   0x80000007 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000100\n" +
+                                          "   0x80000008 0x00: eax=0x00003027 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0x80860000 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                          "   0xc0000000 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n";
+    static final String baremetalCpuid = "CPU:\n" +
+                                         "   0x00000000 0x00: eax=0x00000014 ebx=0x756e6547 ecx=0x6c65746e edx=0x49656e69\n" +
+                                         "   0x00000001 0x00: eax=0x000406f1 ebx=0x0a100800 ecx=0x7ffefbbf edx=0xbfebfbff\n" +
+                                         "   0x00000002 0x00: eax=0x76036301 ebx=0x00f0b5ff ecx=0x00000000 edx=0x00c30000\n" +
+                                         "   0x00000003 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x00000004 0x00: eax=0x1c004121 ebx=0x01c0003f ecx=0x0000003f edx=0x00000000\n" +
+                                         "   0x00000004 0x01: eax=0x1c004122 ebx=0x01c0003f ecx=0x0000003f edx=0x00000000\n" +
+                                         "   0x00000004 0x02: eax=0x1c004143 ebx=0x01c0003f ecx=0x000001ff edx=0x00000000\n" +
+                                         "   0x00000004 0x03: eax=0x1c03c163 ebx=0x04c0003f ecx=0x00003fff edx=0x00000006\n" +
+                                         "   0x00000005 0x00: eax=0x00000040 ebx=0x00000040 ecx=0x00000003 edx=0x00002120\n" +
+                                         "   0x00000006 0x00: eax=0x00000077 ebx=0x00000002 ecx=0x00000001 edx=0x00000000\n" +
+                                         "   0x00000007 0x00: eax=0x00000000 ebx=0x021cbfbb ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x00000008 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x00000009 0x00: eax=0x00000001 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x0000000a 0x00: eax=0x07300403 ebx=0x00000000 ecx=0x00000000 edx=0x00000603\n" +
+                                         "   0x0000000b 0x00: eax=0x00000001 ebx=0x00000002 ecx=0x00000100 edx=0x0000000a\n" +
+                                         "   0x0000000b 0x01: eax=0x00000004 ebx=0x00000010 ecx=0x00000201 edx=0x0000000a\n" +
+                                         "   0x0000000c 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x0000000d 0x00: eax=0x00000007 ebx=0x00000340 ecx=0x00000340 edx=0x00000000\n" +
+                                         "   0x0000000d 0x01: eax=0x00000001 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x0000000d 0x02: eax=0x00000100 ebx=0x00000240 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x0000000e 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x0000000f 0x00: eax=0x00000000 ebx=0x0000003f ecx=0x00000000 edx=0x00000002\n" +
+                                         "   0x0000000f 0x01: eax=0x00000000 ebx=0x00008000 ecx=0x0000003f edx=0x00000007\n" +
+                                         "   0x00000010 0x00: eax=0x00000000 ebx=0x00000002 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x00000010 0x01: eax=0x00000013 ebx=0x000c0000 ecx=0x00000004 edx=0x0000000f\n" +
+                                         "   0x00000011 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x00000012 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x00000013 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x00000014 0x00: eax=0x00000000 ebx=0x00000001 ecx=0x00000001 edx=0x00000000\n" +
+                                         "   0x80000000 0x00: eax=0x80000008 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x80000001 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000121 edx=0x2c100800\n" +
+                                         "   0x80000002 0x00: eax=0x65746e49 ebx=0x2952286c ecx=0x726f4320 edx=0x4d542865\n" +
+                                         "   0x80000003 0x00: eax=0x37692029 ebx=0x3039362d ecx=0x43204b30 edx=0x40205550\n" +
+                                         "   0x80000004 0x00: eax=0x322e3320 ebx=0x7a484730 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x80000005 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x80000006 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x01006040 edx=0x00000000\n" +
+                                         "   0x80000007 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000100\n" +
+                                         "   0x80000008 0x00: eax=0x0000302e ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
+                                         "   0x80860000 0x00: eax=0x00000000 ebx=0x00000001 ecx=0x00000001 edx=0x00000000\n" +
+                                         "   0xc0000000 0x00: eax=0x00000000 ebx=0x00000001 ecx=0x00000001 edx=0x00000000\n";
 }

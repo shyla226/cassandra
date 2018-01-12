@@ -76,7 +76,7 @@ public class TPC
                                             && Epoll.isAvailable();
     public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("dse.io.aio.enabled", "true"))
                                           && Aio.isAvailable() && USE_EPOLL &&
-                                          (Boolean.parseBoolean(System.getProperty("dse.io.aio.force", "false")) || DatabaseDescriptor.isSSD());
+                                          (Boolean.parseBoolean(System.getProperty("dse.io.aio.force", "false")) || DatabaseDescriptor.assumeDataDirectoriesOnSSD());
     public static final int AIO_BLOCK_SIZE = 512;
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task

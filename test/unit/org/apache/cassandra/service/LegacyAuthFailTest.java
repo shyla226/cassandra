@@ -26,10 +26,6 @@ import com.google.common.base.Joiner;
 
 import org.junit.Test;
 
-import org.slf4j.Logger;
-import org.slf4j.helpers.MessageFormatter;
-import org.slf4j.helpers.NOPLogger;
-
 import org.apache.cassandra.ForwardingLogger;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.exceptions.StartupException;
@@ -47,13 +43,13 @@ public class LegacyAuthFailTest extends CQLTester
     public void testLegacyTablesCheck() throws Throwable
     {
         // no legacy tables found
-        MockLogger l = new MockLogger();
+        ForwardingLogger.MockLogger l = new ForwardingLogger.MockLogger();
         StartupChecks.checkLegacyAuthTables.execute(l);
         assertTrue(l.warnings.isEmpty());
 
         FailureTester tester = (tables) -> 
         {
-            MockLogger logger = new MockLogger();
+            ForwardingLogger.MockLogger logger = new ForwardingLogger.MockLogger();
             try
             {
                 StartupChecks.checkLegacyAuthTables.execute(logger);
@@ -76,13 +72,13 @@ public class LegacyAuthFailTest extends CQLTester
     public void testObsoleteTablesCheck() throws Throwable
     {
         // no obsolete tables found
-        MockLogger l = new MockLogger();
+        ForwardingLogger.MockLogger l = new ForwardingLogger.MockLogger();
         StartupChecks.checkObsoleteAuthTables.execute(l);
         assertTrue(l.warnings.isEmpty());
 
         FailureTester tester = (tables) -> 
         {
-            MockLogger logger = new MockLogger();
+            ForwardingLogger.MockLogger logger = new ForwardingLogger.MockLogger();
             StartupChecks.checkObsoleteAuthTables.execute(logger);
             assertEquals(1, logger.warnings.size());
             String msg = logger.warnings.get(0);
@@ -135,30 +131,5 @@ public class LegacyAuthFailTest extends CQLTester
         }
 
         void executeCheckAndValidateOutput(List<String> legacyTables) throws Exception;
-    }
- 
-    /**
-     * Mock Logger used to capture the warnings written by the checks
-     */
-    private static class MockLogger extends ForwardingLogger
-    {
-        public List<String> warnings = new ArrayList<>();
-
-        public MockLogger()
-        {
-        }
-
-        @Override
-        public void warn(String format, Object arg1, Object arg2)
-        {
-            warnings.add(MessageFormatter.format(format, arg1, arg2).getMessage());
-            super.warn(format, arg1, arg2);
-        }
-
-        @Override
-        protected Logger delegate()
-        {
-            return NOPLogger.NOP_LOGGER;
-        }
     }
 }

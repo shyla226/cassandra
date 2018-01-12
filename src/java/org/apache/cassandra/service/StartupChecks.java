@@ -23,19 +23,22 @@ import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
 import java.nio.file.*;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
+import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-
-import io.netty.channel.unix.FileDescriptor;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.bdp.db.util.CGroups;
+import io.netty.channel.unix.FileDescriptor;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.Config;
@@ -100,7 +103,14 @@ public class StartupChecks
                                                                       checkObsoleteAuthTables,
                                                                       warnOnUnsupportedPlatform,
                                                                       warnOnLackOfAIO,
-                                                                      checkClockSource);
+                                                                      checkVirtualization,
+                                                                      checkClockSource,
+                                                                      checkCgroupCpuSets,
+                                                                      checkCpu,
+                                                                      checkZoneReclaimMode,
+                                                                      checkUlimits,
+                                                                      checkThpDefrag,
+                                                                      checkFilesystems);
 
     public StartupChecks withDefaultTests()
     {
@@ -120,7 +130,7 @@ public class StartupChecks
 
     /**
      * Run the configured tests and return a report detailing the results.
-     * @throws org.apache.cassandra.exceptions.StartupException if any test determines that the
+     * @throws StartupException if any test determines that the
      * system is not in an valid state to startup
      */
     public void verify() throws StartupException
@@ -528,7 +538,7 @@ public class StartupChecks
             else
                 logger.warn("EPoll doesn't seem to be available: this may result in subpar performance.");
         }
-        else if (DatabaseDescriptor.isSSD())
+        else if (DatabaseDescriptor.assumeDataDirectoriesOnSSD())
         {
             if (TPC.USE_AIO)
             {
@@ -553,7 +563,7 @@ public class StartupChecks
             // I/O queue if not throttled properly. Also note that since AIO is disabled on HDD by default (see TPC.USE_AIO
             // definition), having it enabled means the user forced it.
             if (TPC.USE_AIO)
-                logger.warn("Forcing Asynchronous I/O as requested with the 'dse.io.aio.enabled' system property "
+                logger.warn("Forcing Asynchronous I/O as requested with the 'dse.io.aio.force' system property "
                             + " despite not using SSDs; please note that this is not the recommended configuration.");
         }
     };
@@ -636,7 +646,6 @@ public class StartupChecks
             return;
 
         File fClockSource = new File("/sys/devices/system/clocksource/clocksource0/current_clocksource");
-        File fCpuInfo = new File("/proc/cpuinfo");
 
         if (!fClockSource.exists())
             logger.warn("Could not find {}", fClockSource);
@@ -654,25 +663,16 @@ public class StartupChecks
                 logger.warn("Unknown content in {}: {}", fClockSource, clocksource);
             else
             {
-                boolean cpuinfo = false;
-                Set<String> flags = new HashSet<>();
-                if (fCpuInfo.exists())
+                Set<String> flags = Collections.emptySet();
+                try
                 {
-                    List<String> cpuinfoLines = FileUtils.readLines(fCpuInfo);
-                    for (String cpuinfoLine : cpuinfoLines)
-                    {
-                        if (cpuinfoLine.matches("^flags\\W.*$"))
-                        {
-                            cpuinfo = true;
-                            for (StringTokenizer st = new StringTokenizer(cpuinfoLine.substring(cpuinfoLine.indexOf(':') + 1), " ");
-                                 st.hasMoreTokens();)
-                                flags.add(st.nextToken());
-                            break;
-                        }
-                    }
+                    FBUtilities.CpuInfo cpuInfo = FBUtilities.CpuInfo.load();
+                    flags = cpuInfo.getProcessors().get(0).getFlags();
                 }
-                if (!cpuinfo)
+                catch (Exception e)
+                {
                     logger.warn("Could not read /proc/cpuinfo");
+                }
 
                 String cs = clocksource.get(0);
                 switch (cs)
@@ -702,4 +702,260 @@ public class StartupChecks
             }
         }
     };
+
+    public static final StartupCheck checkVirtualization = (logger) ->
+    {
+        if (!FBUtilities.isLinux)
+            return;
+
+        String virutalization = FileUtils.detectVirtualization();
+        if (virutalization == null)
+            logger.info("No virtualization/hypervisor detected");
+        else
+            logger.info("Virtualization/hypervisor '{}' detected. " +
+                        "Make sure the disk_optimization_strategy settings reflect the actual hardware. " +
+                        "Be aware that certain startup checks may return wrong results due to virtualization/hypervisors. " +
+                        "Be also aware that running on virtualized environments can lead to serious performance penalties.",
+                        virutalization);
+    };
+
+    public static final StartupCheck checkCgroupCpuSets = (logger) ->
+    {
+        if (!FBUtilities.isLinux)
+            return;
+
+        FBUtilities.CpuInfo cpuInfo = FBUtilities.CpuInfo.load();
+        if (CGroups.blkioThrottled())
+            logger.warn("Block I/O is throttled for this process via Linux cgroups");
+        Integer cpus = CGroups.countCpus();
+        if (cpus != null && cpus != cpuInfo.cpuCount())
+            logger.warn("Some CPUs are not usable because their usage has been restricted via Linux cgroups. Can only use {} of {} CPUs.",
+                        CGroups.countCpus(), cpuInfo.cpuCount());
+        if (CGroups.memoryLimit() != CGroups.MEM_UNLIMITED)
+            logger.warn("Not all memory is accessable by this process as it has been restricted via Linux cgroups. Can only use {}.",
+                        FileUtils.stringifyFileSize(CGroups.memoryLimit()));
+    };
+
+    public static final StartupCheck checkCpu = (logger) ->
+    {
+        if (!FBUtilities.isLinux)
+            return;
+
+        try
+        {
+            verifyCpu(logger, FBUtilities.CpuInfo::load);
+        }
+        catch (Exception e)
+        {
+            logger.warn("Could not read /proc/cpuinfo");
+        }
+    };
+
+    static void verifyCpu(Logger logger, Supplier<FBUtilities.CpuInfo> cpuInfoSupplier)
+    {
+        FBUtilities.CpuInfo cpuInfo = cpuInfoSupplier.get();
+
+        logger.info("CPU information: {} physical processors: {}",
+                    cpuInfo.getProcessors().size(),
+                    cpuInfo.getProcessors().stream()
+                                      .map(p -> p.getName() + " (" +
+                                                p.getCores() + " cores, " +
+                                                p.getThreadsPerCore() + " threads-per-core, " +
+                                                p.getCacheSize() + " cache)")
+                                      .collect(Collectors.joining(", ")));
+
+        Map<String, List<Integer>> governors = cpuInfo.getProcessors().stream()
+                                                      .flatMap(p -> p.cpuIds().boxed())
+                                                      .collect(Collectors.groupingBy(cpuInfo::fetchCpuScalingGovernor));
+        logger.info("CPU scaling governors: {}", governors.entrySet().stream()
+                                                          .map(e -> "CPUs " + FBUtilities.CpuInfo.niceCpuIdList(e.getValue()) + ": " + e.getKey())
+                                                          .collect(Collectors.joining(", ")));
+        if (governors.size() != 1 || !governors.containsKey("performance"))
+            logger.warn("CPU scaling governors not set go 'performance' (see above)");
+    }
+
+    public static final StartupCheck checkZoneReclaimMode = (logger) ->
+    {
+        if (!FBUtilities.isLinux)
+            return;
+
+        try
+        {
+            String reclaimMode = FileUtils.readLine(new File("/proc/sys/vm/zone_reclaim_mode"));
+            verifyZoneReclaimMode(logger, reclaimMode);
+        }
+        catch (RuntimeException e)
+        {
+            logger.warn("Unable to read /sys/kernel/mm/transparent_hugepage/defrag");
+        }
+    };
+
+    static void verifyZoneReclaimMode(Logger logger, String reclaimMode)
+    {
+        if ("0".equals(reclaimMode))
+            logger.info("Linux NUMA zone-reclaim-mode is set to '0'");
+        else
+            logger.warn("Linux NUMA zone-reclaim-mode is set to '{}', but should be '0'", reclaimMode);
+    }
+
+    public static final StartupCheck checkUlimits = (logger) ->
+    {
+        if (!FBUtilities.isLinux)
+            return;
+
+        // typical contents of /proc/self/limits
+        // Limit                     Soft Limit           Hard Limit           Units
+        // Max cpu time              unlimited            unlimited            seconds
+        // Max file size             unlimited            unlimited            bytes
+        // Max data size             unlimited            unlimited            bytes
+        // Max stack size            8388608              unlimited            bytes
+        // Max core file size        unlimited            unlimited            bytes
+        // Max resident set          unlimited            unlimited            bytes
+        // Max processes             32768                32768                processes
+        // Max open files            100000               100000               files
+        // Max locked memory         unlimited            unlimited            bytes
+        // Max address space         unlimited            unlimited            bytes
+        // Max file locks            unlimited            unlimited            locks
+        // Max pending signals       256677               256677               signals
+        // Max msgqueue size         819200               819200               bytes
+        // Max nice priority         0                    0
+        // Max realtime priority     0                    0
+        // Max realtime timeout      unlimited            unlimited            us
+
+        try
+        {
+            List<String> limits = FileUtils.readLines(new File("/proc/self/limits"));
+            verifyLimits(logger, limits);
+        }
+        catch (RuntimeException e)
+        {
+            logger.warn("Unable to read /proc/self/limits");
+        }
+    };
+
+    private static boolean verifyLimit(Logger logger, Map<String, List<String>> limitsMap,
+                                    String name, String shortName, int limit)
+    {
+        List<String> lst = limitsMap.get(name);
+        String value = lst.get(0);
+        int intValue = "unlimited".equals(value)
+                       ? Integer.MAX_VALUE
+                       : Integer.parseInt(value);
+
+        if (intValue < limit)
+        {
+            logger.warn("Limit for '{}' ({}) is recommended to be '{}', but is '{}'",
+                        shortName,
+                        name,
+                        limit == Integer.MAX_VALUE ? "unlimited" : Integer.toString(limit),
+                        "soft:" + lst.get(0) + ", hard:" + lst.get(1) + " [" + lst.get(2) + ']');
+            return false;
+        }
+        return true;
+    }
+
+    static void verifyLimits(Logger logger, List<String> limits)
+    {
+        Pattern twoSpaces = Pattern.compile("[ ][ ]+");
+        Map<String, List<String>> limitsMap = limits.stream().skip(1)
+                                                    .map(twoSpaces::split)
+                                                    .map(arr -> Arrays.stream(arr).map(String::trim).collect(Collectors.toList()))
+                                                    .collect(Collectors.toMap(l -> l.get(0), l -> l.subList(1, l.size())));
+
+        // DataStax recommended prod settings page recommends:
+        // <cassandra_user> - memlock unlimited
+        // <cassandra_user> - nofile 100000
+        // <cassandra_user> - nproc 32768
+        // <cassandra_user> - as unlimited
+
+        boolean ok;
+        ok = verifyLimit(logger, limitsMap, "Max locked memory", "memlock", Integer.MAX_VALUE);
+        ok &= verifyLimit(logger, limitsMap, "Max open files", "nofile", 100000);
+        ok &= verifyLimit(logger, limitsMap, "Max processes", "nproc", 32768);
+        ok &= verifyLimit(logger, limitsMap, "Max address space", "as", Integer.MAX_VALUE);
+        if (ok)
+            logger.info("Limits configured according to recommended production settings");
+    }
+
+    public static final StartupCheck checkThpDefrag = (logger) ->
+    {
+        if (!FBUtilities.isLinux)
+            return;
+
+        try
+        {
+            String defrag = FileUtils.readLine(new File("/sys/kernel/mm/transparent_hugepage/defrag"));
+            verifyThpDefrag(logger, defrag);
+        }
+        catch (RuntimeException e)
+        {
+            logger.warn("Unable to read /sys/kernel/mm/transparent_hugepage/defrag");
+        }
+    };
+
+    static void verifyThpDefrag(Logger logger, String defrag)
+    {
+        Matcher m = Pattern.compile(".*\\[(.+)].*").matcher(defrag);
+        if (m.matches())
+        {
+            defrag = m.group(1);
+            switch (defrag)
+            {
+                case "never":
+                    logger.info("Linux THP defrag is set to 'never'");
+                    // OK
+                    break;
+                default:
+                    logger.warn("Linux THP defrag is set to '{}', but should be 'never'", defrag);
+                    break;
+            }
+        }
+        else
+        {
+            logger.warn("Unable to parse content '{}' of  /sys/kernel/mm/transparent_hugepage/defrag", defrag);
+        }
+    }
+
+    public static final StartupCheck checkFilesystems = (logger) ->
+    {
+        if (!FBUtilities.isLinux)
+            return;
+
+        try
+        {
+            checkMountpoint(logger, "saved caches", DatabaseDescriptor.getSavedCachesLocation());
+            checkMountpoint(logger, "commitlog", DatabaseDescriptor.getCommitLogLocation());
+
+            for (String dataDirectory : DatabaseDescriptor.getAllDataFileLocations())
+                checkMountpoint(logger, "data", dataDirectory);
+        }
+        catch (Exception e)
+        {
+            logger.warn("Unable to inspect mounted partitions");
+        }
+    };
+
+    private static void checkMountpoint(Logger logger, String type, String directory) throws IOException
+    {
+        FileUtils.MountPoint mountpoint = FileUtils.mountPointForDirectory(directory);
+        if (mountpoint == null)
+        {
+            logger.warn("Could not detect mountpoint for directory {} {}", type, directory);
+            return;
+        }
+        boolean onSsd = FileUtils.isPartitionOnSSD(mountpoint.device);
+        String ssd = onSsd ? "SSD" : "rotational";
+        switch (mountpoint.fstype)
+        {
+            case "ext4":
+            case "xfs":
+                logger.info("{} directory {} is on device {} (appears to be {}), formatted using {} file system",
+                            type, directory, mountpoint.device, ssd, mountpoint.fstype);
+                break;
+            default:
+                logger.warn("{} directory {} on device {} (appears to be {})) uses a not recommended file system type '{}' (mounted as {})",
+                            type, directory, mountpoint.device, ssd, mountpoint.fstype, mountpoint.mountpoint);
+                break;
+        }
+    }
 }

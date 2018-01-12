@@ -2280,9 +2280,10 @@ public class DatabaseDescriptor
         return diskOptimizationStrategy;
     }
 
-    public static boolean isSSD()
+    public static boolean assumeDataDirectoriesOnSSD()
     {
-        return FileUtils.isSSD(conf.disk_optimization_strategy == Config.DiskOptimizationStrategy.ssd, getAllDataFileLocations());
+        return FileUtils.isSSD(conf.disk_optimization_strategy == Config.DiskOptimizationStrategy.ssd,
+                               Arrays.asList(getAllDataFileLocations()));
     }
 
     public static double getDiskOptimizationEstimatePercentile()

@@ -144,7 +144,10 @@ public class Server implements CassandraDaemon.Server
 
         // Bind and start to accept incoming connections.
         logger.info("Using Netty Version: {}", Version.identify().entrySet());
-        logger.info("Netty Epoll = {}, AIO = {}, SSD = {}", TPC.USE_EPOLL, TPC.USE_AIO, DatabaseDescriptor.isSSD());
+        logger.info("Effective settings: Netty Epoll = {}, AIO = {}, data directories on SSD = {}",
+                    TPC.USE_EPOLL,
+                    TPC.USE_AIO,
+                    DatabaseDescriptor.assumeDataDirectoriesOnSSD());
         logger.info("Starting listening for CQL clients on {} ({})...", socket, this.useSSL ? "encrypted" : "unencrypted");
 
         ChannelFuture bindFuture = bootstrap.bind(socket);

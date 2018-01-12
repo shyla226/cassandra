@@ -6,8 +6,17 @@
 package org.apache.cassandra;
 
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import org.slf4j.Logger;
 import org.slf4j.Marker;
+import org.slf4j.helpers.MessageFormatter;
+import org.slf4j.helpers.NOPLogger;
+
+import static org.junit.Assert.assertEquals;
 
 /**
  * A {@code Logger} that can be used to decorate another logger.
@@ -385,5 +394,90 @@ public abstract class ForwardingLogger implements Logger
     public void error(Marker marker, String msg, Throwable t)
     {
         delegate().error(marker, msg, t);
+    }
+
+    /**
+     * Mock Logger used to capture the warnings written by the checks
+     */
+    public static class MockLogger extends ForwardingLogger
+    {
+        public List<String> infos = new ArrayList<>();
+        public List<String> warnings = new ArrayList<>();
+
+        public MockLogger()
+        {
+        }
+
+        @Override
+        public void info(String format, Object arg1, Object arg2)
+        {
+            infos.add(MessageFormatter.format(format, arg1, arg2).getMessage());
+            super.info(format, arg1, arg2);
+        }
+
+        @Override
+        public void info(String format, Object arg1)
+        {
+            infos.add(MessageFormatter.format(format, arg1).getMessage());
+            super.info(format, arg1);
+        }
+
+        @Override
+        public void info(String format, Object... args)
+        {
+            infos.add(MessageFormatter.arrayFormat(format, args).getMessage());
+            super.info(format, args);
+        }
+
+        @Override
+        public void info(String message)
+        {
+            infos.add(message);
+            super.info(message);
+        }
+
+        @Override
+        public void warn(String format, Object arg1, Object arg2)
+        {
+            warnings.add(MessageFormatter.format(format, arg1, arg2).getMessage());
+            super.warn(format, arg1, arg2);
+        }
+
+        @Override
+        public void warn(String format, Object arg1)
+        {
+            warnings.add(MessageFormatter.format(format, arg1).getMessage());
+            super.warn(format, arg1);
+        }
+
+        @Override
+        public void warn(String format, Object... args)
+        {
+            warnings.add(MessageFormatter.arrayFormat(format, args).getMessage());
+            super.warn(format, args);
+        }
+
+        @Override
+        public void warn(String message)
+        {
+            warnings.add(message);
+            super.warn(message);
+        }
+
+        @Override
+        protected Logger delegate()
+        {
+            return NOPLogger.NOP_LOGGER;
+        }
+
+        public void assertWarnings(String... expected)
+        {
+            assertEquals(Arrays.stream(expected).collect(Collectors.joining("\n")), warnings.stream().collect(Collectors.joining("\n")));
+        }
+
+        public void assertInfos(String... expected)
+        {
+            assertEquals(Arrays.stream(expected).collect(Collectors.joining("\n")), infos.stream().collect(Collectors.joining("\n")));
+        }
     }
 }

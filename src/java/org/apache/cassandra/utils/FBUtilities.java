@@ -24,6 +24,9 @@ import java.net.*;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.IntStream;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
@@ -928,6 +931,216 @@ public class FBUtilities
                         message,
                         getStackTrace(stacks.get(object)),
                         getStackTrace());
+        }
+    }
+
+    public static class CpuInfo
+    {
+        private final List<PhysicalProcessor> processors = new ArrayList<>();
+
+        @VisibleForTesting
+        protected CpuInfo()
+        {
+        }
+
+        public static String niceCpuIdList(List<Integer> cpuIds)
+        {
+            StringBuilder sb = new StringBuilder();
+            Integer rangeStart = null;
+            Integer previous = null;
+            Integer id;
+            for (Iterator<Integer> i = cpuIds.iterator(); ; previous = id)
+            {
+                if (!i.hasNext())
+                {
+                    if (rangeStart == null)
+                        break;
+                    if (sb.length() > 0)
+                        sb.append(',');
+                    if (previous.equals(rangeStart))
+                        sb.append(rangeStart);
+                    else
+                        sb.append(rangeStart).append('-').append(previous);
+                    break;
+                }
+                id = i.next();
+                if (rangeStart == null)
+                {
+                    rangeStart = id;
+                }
+                else
+                {
+                    if (previous + 1 == id)
+                    {
+                        // range continues
+                        continue;
+                    }
+                    // range ended
+                    if (sb.length() > 0)
+                        sb.append(',');
+                    if (previous.equals(rangeStart))
+                        sb.append(rangeStart);
+                    else
+                        sb.append(rangeStart).append('-').append(previous);
+                    rangeStart = id;
+                }
+            }
+            return sb.toString();
+        }
+
+        public List<PhysicalProcessor> getProcessors()
+        {
+            return processors;
+        }
+
+        public static CpuInfo load()
+        {
+            File fCpuInfo = new File("/proc/cpuinfo");
+            if (!fCpuInfo.exists())
+                throw new IOError(new FileNotFoundException(fCpuInfo.getAbsolutePath()));
+            List<String> cpuinfoLines = FileUtils.readLines(fCpuInfo);
+
+            return loadFrom(cpuinfoLines);
+        }
+
+        public static CpuInfo loadFrom(List<String> lines)
+        {
+            CpuInfo cpuInfo = new CpuInfo();
+
+            Pattern linePattern = Pattern.compile("^([A-Za-z _-]+)\\t*[:] (.*)$");
+            Map<String, String> info = new HashMap<>();
+            for (String cpuinfoLine : lines)
+            {
+                if (cpuinfoLine.isEmpty())
+                {
+                    cpuInfo.addCpu(info);
+                    info.clear();
+                }
+                else
+                {
+                    Matcher matcher = linePattern.matcher(cpuinfoLine);
+                    if (matcher.matches())
+                        info.put(matcher.group(1), matcher.group(2));
+                }
+            }
+            cpuInfo.addCpu(info);
+
+            return cpuInfo;
+        }
+
+        private void addCpu(Map<String, String> info)
+        {
+            if (info.isEmpty())
+                return;
+
+            try
+            {
+                int physicalId = Integer.parseInt(info.get("physical id"));
+                int cores = Integer.parseInt(info.get("cpu cores"));
+                int cpuId = Integer.parseInt(info.get("processor"));
+                int coreId = Integer.parseInt(info.get("core id"));
+                String modelName = info.get("model name");
+                String mhz = info.get("cpu MHz");
+                String cacheSize = info.get("cache size");
+                Set<String> flags = new HashSet<>(Arrays.asList(info.get("flags").split(" ")));
+
+                while (processors.size() < physicalId + 1)
+                    processors.add(null);
+                PhysicalProcessor processor = processors.get(physicalId);
+                if (processor == null)
+                {
+                    processor = new PhysicalProcessor(modelName, mhz, cacheSize, flags, cores);
+                    processors.set(physicalId, processor);
+                }
+                processor.addCpu(coreId, cpuId);
+            }
+            catch (Exception e)
+            {
+                // ignore - parsing errors for /proc/cpuinfo are not that relevant...
+            }
+        }
+
+        public String fetchCpuScalingGovernor(int cpuId)
+        {
+            return FileUtils.readLine(new File(String.format("/sys/devices/system/cpu/cpu%d/cpufreq/scaling_governor", cpuId)));
+        }
+
+        public int cpuCount()
+        {
+            return processors.stream()
+                      .mapToInt(p -> p.cpuCount())
+                      .sum();
+        }
+
+        public static class PhysicalProcessor
+        {
+            private final String name;
+            private final String mhz;
+            private final String cacheSize;
+            private final Set<String> flags;
+            private final int cores;
+            private final BitSet cpuIds = new BitSet();
+            private final BitSet coreIds = new BitSet();
+
+            PhysicalProcessor(String name, String mhz, String cacheSize, Set<String> flags, int cores)
+            {
+                this.name = name;
+                this.mhz = mhz;
+                this.cacheSize = cacheSize;
+                this.flags = flags;
+                this.cores = cores;
+            }
+
+            public String getName()
+            {
+                return name;
+            }
+
+            public String getMhz()
+            {
+                return mhz;
+            }
+
+            public int getCores()
+            {
+                return cores;
+            }
+
+            public String getCacheSize()
+            {
+                return cacheSize;
+            }
+
+            public Set<String> getFlags()
+            {
+                return flags;
+            }
+
+            public boolean hasFlag(String flag)
+            {
+                return flags.contains(flag);
+            }
+
+            public int getThreadsPerCore()
+            {
+                return cpuIds.cardinality() / coreIds.cardinality();
+            }
+
+            public IntStream cpuIds()
+            {
+                return cpuIds.stream();
+            }
+
+            void addCpu(int coreId, int cpuId)
+            {
+                cpuIds.set(cpuId);
+                coreIds.set(coreId);
+            }
+
+            public int cpuCount()
+            {
+                return cpuIds.cardinality();
+            }
         }
     }
 }

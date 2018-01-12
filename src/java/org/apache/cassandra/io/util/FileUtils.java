@@ -19,6 +19,7 @@ package org.apache.cassandra.io.util;
 
 import java.io.*;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -27,19 +28,17 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileAttributeView;
 import java.nio.file.attribute.FileStoreAttributeView;
 import java.text.DecimalFormat;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.TreeMap;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.utils.*;
-import org.apache.cassandra.utils.UnsafeCopy;
 import sun.nio.ch.DirectBuffer;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -48,10 +47,12 @@ import org.apache.cassandra.io.FSErrorHandler;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
-import static org.apache.cassandra.utils.UnsafeByteBufferAccess.DIRECT_BYTE_BUFFER_CLASS;
 
 public final class FileUtils
 {
@@ -66,6 +67,8 @@ public final class FileUtils
     private static final DecimalFormat df = new DecimalFormat("#.##");
     public static final boolean isCleanerAvailable;
     private static final AtomicReference<Optional<FSErrorHandler>> fsErrorHandler = new AtomicReference<>(Optional.empty());
+
+    static String[] CPUID_COMMANDLINE = { "cpuid", "-1", "-r" };
 
     static
     {
@@ -590,6 +593,12 @@ public final class FileUtils
         }
     }
 
+    public static String readLine(File file)
+    {
+        List<String> lines = readLines(file);
+        return lines == null || lines.size() < 1 ? null : lines.get(0);
+    }
+
     public static List<String> readLines(File file)
     {
         try
@@ -610,12 +619,29 @@ public final class FileUtils
         fsErrorHandler.getAndSet(Optional.ofNullable(handler));
     }
 
+    public static MountPoint mountPointForDirectory(String dir) throws IOException
+    {
+        Map<Path, MountPoint> dirToPartition = getDiskPartitions();
+
+        Path path = Paths.get(dir).toAbsolutePath();
+        boolean found = false;
+        for (Map.Entry<Path, MountPoint> entry : dirToPartition.entrySet())
+        {
+            if (path.startsWith(entry.getKey()))
+            {
+                return entry.getValue();
+            }
+        }
+
+        return null;
+    }
+
     /**
      * Lists the physical disk devices the data directories are on.
      * This only works on Linux.
      * @throws IOException
      */
-    public static Map<Path, String> getDiskPartitions() throws IOException
+    public static Map<Path, MountPoint> getDiskPartitions() throws IOException
     {
         try (Reader source = new InputStreamReader(new FileInputStream("/proc/mounts"), "UTF-8"))
         {
@@ -623,11 +649,42 @@ public final class FileUtils
         }
     }
 
-    public static Map<Path, String> getDiskPartitions(Reader source) throws IOException
+    public static class MountPoint
+    {
+        public final Path mountpoint;
+        public final String device;
+        public final String fstype;
+
+        public MountPoint(Path mountpoint, String device, String fstype)
+        {
+            this.mountpoint = mountpoint;
+            this.device = device;
+            this.fstype = fstype;
+        }
+
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            MountPoint that = (MountPoint) o;
+            return Objects.equals(mountpoint, that.mountpoint) &&
+                   Objects.equals(device, that.device) &&
+                   Objects.equals(fstype, that.fstype);
+        }
+
+        public int hashCode()
+        {
+            return Objects.hash(mountpoint, device, fstype);
+        }
+    }
+
+    @VisibleForTesting
+    public static Map<Path, MountPoint> getDiskPartitions(Reader source) throws IOException
     {
         assert FBUtilities.isLinux;
 
-        Map<Path, String> dirToDisk = new TreeMap<>((a,b) ->
+        Map<Path, MountPoint> dirToDisk = new TreeMap<>((a,b) ->
                                                     {
                                                         int cmp = -Integer.compare(a.getNameCount(), b.getNameCount());
                                                         if (cmp != 0)
@@ -661,8 +718,11 @@ public final class FileUtils
                     partition = "WE_DO_NOT_KNOW";
                 }
 
+                String fstype = parts[2];
+
                 // /home, /dev/sda
-                dirToDisk.put(Paths.get(parts[1]), partition);
+                Path mp = Paths.get(parts[1]);
+                dirToDisk.put(mp, new MountPoint(mp, partition, fstype));
             }
         }
 
@@ -700,33 +760,36 @@ public final class FileUtils
     }
 
     /**
-     * Detects if data directories are all SSDs.
+     * Detects if the given directories are all on SSDs.
      * In the case of Linux we check the block device info under /sys
      *
      * For non-Linux we use the disk_optimization_strategy in cassandra.yaml
      *
      * @return true if data directories are all SSD
      */
-    public static boolean isSSD(boolean diskOptimStrategyIsSSD, String[] dataFileLocations)
+    public static boolean isSSD(boolean diskOptimStrategyIsSSD, List<String> directories)
     {
+        if (directories.isEmpty())
+            return false;
+
         boolean isSSD = diskOptimStrategyIsSSD;
 
         if (FBUtilities.isLinux)
         {
             try
             {
-                Map<Path, String> dirToPartition = getDiskPartitions();
+                Map<Path, MountPoint> dirToPartition = getDiskPartitions();
 
-                for (String dataDir : dataFileLocations)
+                for (String dir : directories)
                 {
-                    Path dataPath = Paths.get(dataDir).toAbsolutePath();
+                    Path path = Paths.get(dir).toAbsolutePath();
                     boolean found = false;
-                    for (Map.Entry<Path, String> entry : dirToPartition.entrySet())
+                    for (Map.Entry<Path, MountPoint> entry : dirToPartition.entrySet())
                     {
-                        if (dataPath.startsWith(entry.getKey()))
+                        if (path.startsWith(entry.getKey()))
                         {
                             found = true;
-                            if (!isPartitionOnSSD(entry.getValue()))
+                            if (!isPartitionOnSSD(entry.getValue().device))
                                 isSSD = false;
 
                             break;
@@ -734,26 +797,212 @@ public final class FileUtils
                     }
 
                     if (!found)
-                        throw new IOException("Unable to locate the disk for " + dataDir);
+                        logger.debug("Could not determine if disk for {} is an SSD.", dir);
                 }
-            }
-            catch (FileNotFoundException fnfe)
-            {
-                //probably the disk is behind a virtual volume like lvm - so no need to log the exception
-                logger.warn("Could not determine if disk is SSD - falling back to disk_optimization_strategy in cassandra.yaml.");
             }
             catch (IOException e)
             {
-                logger.warn("Could not determine if disk is SSD - falling back to disk_optimization_strategy in cassandra.yaml.", e);
+                logger.debug("Could not determine if disk(s) for {} is SSD.", directories, e);
             }
         }
-        else
+
+        return isSSD;
+    }
+
+    /**
+     * Best-effort checks to detect wether and eventually on which virtualization we're running.
+     *
+     * @return {@code null} if unable to detect virtualization (which is usually a good sign) or
+     *         the name of the virtualization type.
+     */
+    public static String detectVirtualization()
+    {
+        if (!FBUtilities.isLinux)
+            return null;
+
+        return detectVirtualization(() ->
+                                    {
+                                        try
+                                        {
+                                            Process proc = Runtime.getRuntime().exec(CPUID_COMMANDLINE);
+                                            proc.waitFor(1, TimeUnit.SECONDS);
+                                            InputStream in = proc.getInputStream();
+                                            byte[] buf = new byte[in.available()];
+                                            for (int p = 0; p < buf.length; )
+                                            {
+                                                int rd = in.read(buf, p, buf.length - p);
+                                                if (rd < 0)
+                                                    break;
+                                                p += rd;
+                                            }
+                                            return new String(buf, StandardCharsets.UTF_8);
+                                        }
+                                        catch (Exception e)
+                                        {
+                                            throw new RuntimeException(e);
+                                        }
+                                    },
+                                    () ->
+                                    {
+                                        File hypervisorCaps = new File("/sys/hypervisor/properties/capabilities");
+                                        if (hypervisorCaps.exists() && hypervisorCaps.canRead())
+                                        {
+                                            return FileUtils.readLines(hypervisorCaps);
+                                        }
+                                        return null;
+                                    },
+                                    () -> new File("/sys/bus/xen/devices/").listFiles(),
+                                    (filter) -> new File("/dev/disk/by-id").listFiles(n -> n.getName().contains(filter)));
+    }
+
+    @VisibleForTesting
+    static String detectVirtualization(Supplier<String> cpuid,
+                                       Supplier<List<String>> hypervisorCaps,
+                                       Supplier<File[]> xenDevices,
+                                       Function<String, File[]> disksByIdFilter)
+    {
+        try
         {
-            logger.warn("Unable to detect if disks are SSD. Relying on disk_optimization_strategy in cassandra.yaml");
+            // The most reliable way to detect virtualization/hypervisor is to check the CPUID.
+            // Bit 31 of ECX of CPUID is reserved for this reason. 
+            // https://kb.vmware.com/s/article/1009458
+            // https://en.wikipedia.org/wiki/CPUID
+
+            try
+            {
+                String cpuidOutput = cpuid.get();
+                String[] cpuidLines = cpuidOutput.split("\n");
+                String vendorId = cpuIdVendorId(cpuidLine(cpuidLines, "0x00000000", "0x00"));
+                switch (vendorId)
+                {
+                    case "AuthenticAMD":
+                    case "GenuineIntel":
+                    case "CentaurHauls":
+                    case "AMDisbetter!":
+                    case "CyrixInstead":
+                    case "TransmetaCPU":
+                    case "GenuineTMx86":
+                    case "Geode by NSC":
+                    case "NexGenDriven":
+                    case "RiseRiseRise":
+                    case "SiS SiS SiS ":
+                    case "UMC UMC UMC ":
+                    case "VIA VIA VIA ":
+                    case "Vortex86 SoC":
+                        // these are known vendor-IDs of "bare metal" CPUs
+                        break;
+                    case "bhyve bhyve ":
+                        return "bhyve";
+                    case "KVMKVMKVMKVM":
+                        return "KVM";
+                    case "Microsoft Hv":
+                        return "MS Hyper-V";
+                    case " lrpepyh vr":
+                        return "Parallels";
+                    case "VMwareVMware":
+                        return "VMWare";
+                    case "XenVMMXenVMM":
+                        return "Xen HVM";
+                    default:
+                        return vendorId + " (unknown vendor in CPUID)";
+                }
+
+                int[] cpuidLeaf1 = cpuIdParse(cpuidLine(cpuidLines, "0x00000001", "0x00"));
+                boolean hypervisorFlag = (cpuidLeaf1[2] & 0x80000000) != 0;
+                if (hypervisorFlag)
+                    return "unknown (CPUID leaf 1 ECX bit 31 set)";
+
+                // 0x40000000..0x400000FF reserved for hypervisor custom stuff
+                boolean hypervisorLeafsPresent = Arrays.stream(cpuidLines).anyMatch(s -> s.startsWith("   0x400000"));
+                if (hypervisorLeafsPresent)
+                    return "unknown (CPUID hypervisor leafs)";
+            }
+            catch (Exception e)
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Unable to parse CPUID information. This is usually because 'cpuid' tool is not installed on the system.", e);
+                else
+                    logger.debug("Unable to parse CPUID information ({}). This is usually because 'cpuid' tool is not installed on the system.", e.toString());
+            }
+
+            // the easy way - read sysfs
+            // http://www.brendangregg.com/blog/2014-05-09/xen-feature-detection.html
+
+            List<String> hCaps = hypervisorCaps.get();
+            if (hCaps != null)
+            {
+                Set<String> caps = hypervisorCaps.get().stream()
+                                                 .flatMap(s -> Arrays.stream(s.split(" ")))
+                                                 .map(s -> s.split("-")[0])
+                                                 .collect(Collectors.toSet());
+
+                if (caps.contains("xen") && caps.contains("hvm"))
+                    return "Xen HVM";
+
+                if (caps.contains("xen"))
+                    return "Xen";
+
+                if (!caps.isEmpty())
+                    return "unknwon (hypervisor capabilities)";
+            }
+
+            File[] xenDevs = xenDevices.get();
+            if (xenDevs != null && xenDevs.length > 0)
+                return "Xen";
+
+            // disk by-id method
+            // https://techglimpse.com/xen-kvm-virtualbox-vm-detection-command/
+
+            File[] disks = disksByIdFilter.apply("-QEMU_");
+            if (disks != null && disks.length > 0)
+                return "Xen/KVM";
+            disks = disksByIdFilter.apply("-VBOX_");
+            if (disks != null && disks.length > 0)
+                return "VirtualBox";
+
+        }
+        catch (Exception e)
+        {
+            if (logger.isTraceEnabled())
+                logger.warn("Unable to detect virtualization/hypervisor", e);
+            else
+                logger.warn("Unable to detect virtualization/hypervisor");
         }
 
-        logger.info("Data directories are SSD: {}", isSSD);
-        return isSSD;
+        return null;
+    }
+
+    private static String cpuidLine(String[] cpuidLines, String leaf, String ecx)
+    {
+        return Arrays.stream(cpuidLines)
+                     .map(String::trim)
+                     .filter(s -> s.startsWith(leaf + ' ' + ecx + ':'))
+                     .findFirst()
+                     .orElse(null);
+    }
+
+    static int[] cpuIdParse(String cpuidLine)
+    {
+        StringTokenizer vendorIdLine = new StringTokenizer(cpuidLine);
+        vendorIdLine.nextToken(); // EAX input
+        vendorIdLine.nextToken(); // ECX input
+        int eax = (int) Long.parseLong(vendorIdLine.nextToken().substring(6), 16);
+        int ebx = (int) Long.parseLong(vendorIdLine.nextToken().substring(6), 16);
+        int ecx = (int) Long.parseLong(vendorIdLine.nextToken().substring(6), 16);
+        int edx = (int) Long.parseLong(vendorIdLine.nextToken().substring(6), 16);
+        return new int[]{ eax, ebx, ecx, edx };
+    }
+
+    static String cpuIdVendorId(String cpuidLine) throws IOException
+    {
+        int[] registers = cpuIdParse(cpuidLine);
+        ByteBuffer bb = ByteBuffer.allocate(12);
+        bb.order(ByteOrder.LITTLE_ENDIAN);
+        // Order for VendorID is EBX, EDX, ECX
+        bb.putInt(registers[1]);
+        bb.putInt(registers[3]);
+        bb.putInt(registers[2]);
+        return new String(bb.array(), StandardCharsets.UTF_8);
     }
 
     /**
