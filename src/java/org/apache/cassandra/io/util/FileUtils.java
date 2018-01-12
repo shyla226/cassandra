@@ -624,7 +624,6 @@ public final class FileUtils
         Map<Path, MountPoint> dirToPartition = getDiskPartitions();
 
         Path path = Paths.get(dir).toAbsolutePath();
-        boolean found = false;
         for (Map.Entry<Path, MountPoint> entry : dirToPartition.entrySet())
         {
             if (path.startsWith(entry.getKey()))
@@ -696,8 +695,9 @@ public final class FileUtils
             String line;
             while ((line = bufferedReader.readLine()) != null)
             {
-                String parts[] = line.split(" +");
-                assert parts.length > 2;
+                String[] parts = line.split(" +");
+                if (parts.length <= 2)
+                    continue;
 
                 String partition =  parts[0];
 
@@ -753,6 +753,9 @@ public final class FileUtils
         Path device = sysClassBlock.getParent();
         Path queue = device.resolve("queue");
         Path rotational = queue.resolve("rotational");
+        if (!rotational.toFile().exists())
+            // assume it's rotational, if that file's not there
+            return false;
 
         // "rotational" contains 0 for non-rotational
 
@@ -800,7 +803,7 @@ public final class FileUtils
                         logger.debug("Could not determine if disk for {} is an SSD.", dir);
                 }
             }
-            catch (IOException e)
+            catch (Throwable e)
             {
                 logger.debug("Could not determine if disk(s) for {} is SSD.", directories, e);
             }
