@@ -80,6 +80,8 @@ import org.apache.cassandra.io.util.FileUtils;
  */
 public class ByteBufferUtil
 {
+    public static final ByteBuffer[] EMPTY_BUFFER_ARRAY = new ByteBuffer[0];
+
     public static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.wrap(new byte[0]);
     /** Represents an unset value in bound variables */
     public static final ByteBuffer UNSET_BYTE_BUFFER = ByteBuffer.wrap(new byte[]{});
@@ -415,12 +417,36 @@ public class ByteBufferUtil
 
     public static ByteBuffer read(DataInput in, int length) throws IOException
     {
+        return read(in, length, null);
+    }
+
+    /**
+     * This method will attempt to reuse the passed in ByteBuffer, in which case it will be cleared, position will be
+     * 0 and the limit will be length. If we choose not to reuse the buffer we will return a new buffer.
+     *
+     * @param in to read from
+     * @param length bytes to read
+     * @param reusableBuffer to be reused (if possible)
+     * @return a byte buffer, position=0, limit=length, new or reused
+     * @throws IOException from
+     */
+    public static ByteBuffer read(DataInput in, int length, ByteBuffer reusableBuffer) throws IOException
+    {
         if (length == 0)
             return EMPTY_BYTE_BUFFER;
 
-        byte[] buff = new byte[length];
-        in.readFully(buff);
-        return ByteBuffer.wrap(buff);
+        if (reusableBuffer == null || reusableBuffer.capacity() < length || !reusableBuffer.hasArray())
+        {
+            byte[] buff = new byte[length];
+            in.readFully(buff);
+            return ByteBuffer.wrap(buff);
+        }
+        else
+        {
+            in.readFully(reusableBuffer.array(), reusableBuffer.arrayOffset(), length);
+            reusableBuffer.clear().limit(length);
+            return reusableBuffer;
+        }
     }
 
     public static byte[] readBytes(DataInput in, int length) throws IOException

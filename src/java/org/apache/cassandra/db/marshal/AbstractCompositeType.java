@@ -30,6 +30,8 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BUFFER_ARRAY;
+
 /**
  * A class avoiding class duplication between CompositeType and
  * DynamicCompositeType.
@@ -105,7 +107,7 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
             l.add(ByteBufferUtil.readBytesWithShortLength(bb));
             bb.get(); // skip end-of-component
         }
-        return l.toArray(new ByteBuffer[0]);
+        return l.toArray(EMPTY_BUFFER_ARRAY);
     }
     private static final String COLON = ":";
     private static final Pattern COLON_PAT = Pattern.compile(COLON);

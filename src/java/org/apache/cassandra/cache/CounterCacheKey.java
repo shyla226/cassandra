@@ -41,6 +41,8 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.*;
 
+import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BUFFER_ARRAY;
+
 public final class CounterCacheKey extends CacheKey
 {
     private static final long EMPTY_SIZE = ObjectSizes.measure(new CounterCacheKey(TableMetadata.builder("ks", "tab")
@@ -103,7 +105,7 @@ public final class CounterCacheKey extends CacheKey
         List<ByteBuffer> buffers = CompositeType.splitName(ByteBuffer.wrap(cellName));
         assert buffers.size() >= clusteringSize + 1; // See makeCellName above
 
-        Clustering clustering = Clustering.make(buffers.subList(0, clusteringSize).toArray(new ByteBuffer[0]));
+        Clustering clustering = Clustering.make(buffers.subList(0, clusteringSize).toArray(EMPTY_BUFFER_ARRAY));
         ColumnMetadata column = metadata.getColumn(buffers.get(clusteringSize));
         // This can theoretically happen if a column is dropped after the cache is saved and we
         // try to load it. Not point if failing in any case, just skip the value.

@@ -22,8 +22,6 @@ import org.apache.cassandra.utils.ObjectSizes;
 
 public abstract class AbstractBufferClusteringPrefix extends AbstractClusteringPrefix
 {
-    public static final ByteBuffer[] EMPTY_VALUES_ARRAY = new ByteBuffer[0];
-
     protected final Kind kind;
     protected final ByteBuffer[] values;
 
