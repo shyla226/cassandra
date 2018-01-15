@@ -8,7 +8,6 @@ package com.datastax.bdp.db.audit;
 import org.junit.BeforeClass;
 
 import com.datastax.bdp.db.audit.CassandraAuditWriter.BatchingOptions;
-import com.datastax.bdp.db.audit.CassandraAuditWriter.DefaultBatchController;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -27,9 +26,9 @@ public class CassandraAuditWriterBatchTest extends CassandraAuditWriterTester
         DatabaseDescriptor.setPermissionsValidity(9999);
         DatabaseDescriptor.setPermissionsUpdateInterval(9999);
 
-        final int flushPeriod = 100;
+        final int flushPeriod = 500;
         final int batchSize = 2;
-        BatchingOptions options = new BatchingOptions(20, 1, () -> new DefaultBatchController(flushPeriod, batchSize));
+        BatchingOptions options = new BatchingOptions(batchSize, flushPeriod, 100);
         CassandraAuditWriter writer = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
 
         IAuditFilter filter = AuditFilters.excludeKeyspaces(SchemaConstants.SYSTEM_KEYSPACE_NAME,

@@ -24,7 +24,9 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.AlterTableStatement;
 import org.apache.cassandra.cql3.statements.CFStatement;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.service.QueryState;
@@ -239,5 +241,23 @@ public class CassandraAuditKeyspace
     private static KeyspaceMetadata getKeyspaceMetadata(String keyspace)
     {
         return keyspace == null ? null : Schema.instance.getKeyspaceMetadata(keyspace);
+    }
+
+    /**
+     * Returns the keyspace used to store the audit logs
+     * @return the keyspace used to store the audit logs
+     */
+    public static Keyspace getKeyspace()
+    {
+        return Keyspace.open(NAME);
+    }
+
+    /**
+     * Returns the partitioner of the audit log table.
+     * @return the partitioner of the audit log table.
+     */
+    public static IPartitioner getAuditLogPartitioner()
+    {
+        return AuditLog.partitioner;
     }
 }

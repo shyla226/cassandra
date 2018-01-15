@@ -193,13 +193,16 @@ public class AuditableEvent
 
     public String toString()
     {
-        StringBuilder builder =  new StringBuilder(HOST).append(host)
-                                                        .append(SOURCE).append(source)
-                                                        .append(USER).append(user.getName())
-                                                        .append(AUTHENTICATED).append(user.getAuthenticatedName())
-                                                        .append(TIMESTAMP).append(timestamp)
-                                                        .append(CATEGORY).append(type.getCategory())
-                                                        .append(TYPE).append(type);
+        // Profiling the server with AuditLogging and SLF4JAuditWriter showed that StringBuilder resize was generating
+        // a lot of garbage. The estimated size for most queries should be between 250 and 400 characters.
+        StringBuilder builder =  new StringBuilder(400).append(HOST)
+                                                       .append(host)
+                                                       .append(SOURCE).append(source)
+                                                       .append(USER).append(user.getName())
+                                                       .append(AUTHENTICATED).append(user.getAuthenticatedName())
+                                                       .append(TIMESTAMP).append(timestamp)
+                                                       .append(CATEGORY).append(type.getCategory())
+                                                       .append(TYPE).append(type);
         // optional fields
         if ( batch != null )
             builder.append(BATCH).append(batch);
