@@ -2734,6 +2734,21 @@ public class DatabaseDescriptor
         return Math.max(cores, 1);
     }
 
+    public static int getTPCIOCores()
+    {
+        return Math.min(getTPCCores(),
+                        conf == null || conf.tpc_io_cores == null
+                        ? (int)Math.ceil((double)getIOGlobalQueueDepth() / 4)
+                        : conf.tpc_io_cores);
+    }
+
+    public static int getIOGlobalQueueDepth()
+    {
+        return conf == null || conf.io_global_queue_depth == null
+               ? 128
+               : conf.io_global_queue_depth;
+    }
+
     public static NodeSyncConfig getNodeSyncConfig()
     {
         return conf.nodesync;
