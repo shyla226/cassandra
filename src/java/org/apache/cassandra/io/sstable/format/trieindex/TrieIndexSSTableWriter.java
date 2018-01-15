@@ -54,7 +54,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.*;
-import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
@@ -82,7 +82,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                           long keyCount,
                           long repairedAt,
                           UUID pendingRepair,
-                          TableMetadataRef metadata,
+                          TableMetadata metadata,
                           MetadataCollector metadataCollector, 
                           SerializationHeader header,
                           Collection<SSTableFlushObserver> observers,
@@ -108,7 +108,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                     WRITER_OPTION);
         }
         dbuilder = new FileHandle.Builder(descriptor.filenameFor(Component.DATA)).compressed(compression)
-                                                                                 .mmapped(metadata.get().diskAccessMode == Config.AccessMode.mmap);
+                                                                                 .mmapped(metadata.diskAccessMode == Config.AccessMode.mmap);
         chunkCache.ifPresent(dbuilder::withChunkCache);
         iwriter = new IndexWriter(keyCount);
 

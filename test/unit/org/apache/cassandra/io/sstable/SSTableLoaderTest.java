@@ -32,7 +32,6 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.*;
@@ -107,9 +106,9 @@ public class SSTableLoaderTest
                 addRangeForEndpoint(range, FBUtilities.getBroadcastAddress());
         }
 
-        public TableMetadataRef getTableMetadata(String tableName)
+        public TableMetadata getTableMetadata(String tableName)
         {
-            return Schema.instance.getTableMetadataRef(keyspace, tableName);
+            return Schema.instance.getTableMetadataRef(keyspace, tableName).get();
         }
     }
 

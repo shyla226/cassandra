@@ -78,7 +78,7 @@ class ViewBuilder
     {
         this.baseCfs = baseCfs;
         this.view = view;
-        ksName = baseCfs.metadata.keyspace;
+        ksName = baseCfs.metadata().keyspace;
     }
 
     public void start()

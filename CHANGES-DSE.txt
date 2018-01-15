@@ -1,4 +1,6 @@
 dse 6.0.0:
+ * Use immutable TableMetadata in SSTables (DB-1444)
+ * Do not fetch columns that are not in the filter fetched set (DB-1444)
  * Abort repair when there is only one node (DB-1511)
  * Fix OutOfMemory during view update (DB-1493)
  * Drop response on view lock acquisition timeout and add ViewLockAcquisitionTimeouts metric (DB-1522)

@@ -25,7 +25,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -45,7 +44,6 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Pair;
 
 import com.google.common.collect.ArrayListMultimap;
@@ -97,7 +95,7 @@ public class SSTableFlushObserverTest
                                          sstableFormat);
         SSTableWriter writer = desc.getFormat().getWriterFactory().
                 open(desc,
-                     10L, 0L, null, TableMetadataRef.forOfflineTools(cfm),
+                     10L, 0L, null, cfm,
                      new MetadataCollector(cfm.comparator).sstableLevel(0),
                      new SerializationHeader(true, cfm, cfm.regularAndStaticColumns(), EncodingStats.NO_STATS),
                      Collections.singletonList(observer),

@@ -24,10 +24,9 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
-import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * Writable version of the big format identifier. Used by tests which need to check that old-format files are read
@@ -47,7 +46,7 @@ public class WritableBigFormat extends BigFormat
                                   long keyCount,
                                   long repairedAt,
                                   UUID pendingRepair,
-                                  TableMetadataRef metadata,
+                                  TableMetadata metadata,
                                   MetadataCollector metadataCollector,
                                   SerializationHeader header,
                                   Collection<SSTableFlushObserver> observers,

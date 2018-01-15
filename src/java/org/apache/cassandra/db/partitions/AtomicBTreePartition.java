@@ -27,7 +27,6 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.Single;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -62,9 +61,9 @@ public class AtomicBTreePartition extends AbstractBTreePartition
 
     private volatile Holder ref;
 
-    private final TableMetadataRef metadata;
+    private final TableMetadata metadata;
 
-    public AtomicBTreePartition(TableMetadataRef metadata, DecoratedKey partitionKey, MemtableAllocator allocator)
+    public AtomicBTreePartition(TableMetadata metadata, DecoratedKey partitionKey, MemtableAllocator allocator)
     {
         // involved in potential bug? partition columns may be a subset if we alter columns while it's in memtable
         super(partitionKey);
@@ -75,7 +74,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
 
     public TableMetadata metadata()
     {
-        return metadata.get();
+        return metadata;
     }
 
     protected boolean canHaveShadowedData()

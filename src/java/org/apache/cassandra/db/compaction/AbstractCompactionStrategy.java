@@ -522,7 +522,7 @@ public abstract class AbstractCompactionStrategy
                                                        Collection<Index> indexes,
                                                        LifecycleTransaction txn)
     {
-        return SimpleSSTableMultiWriter.create(descriptor, keyCount, repairedAt, pendingRepair, cfs.metadata, meta, header, indexes, txn);
+        return SimpleSSTableMultiWriter.create(descriptor, keyCount, repairedAt, pendingRepair, cfs.metadata(), meta, header, indexes, txn);
     }
 
     public boolean supportsEarlyOpen()

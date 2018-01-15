@@ -358,15 +358,15 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         {
             metadata = Schema.instance.getTableMetadataRef(descriptor.ksname, descriptor.cfname);
         }
-        return open(descriptor, metadata);
+        return open(descriptor, metadata.get());
     }
 
-    public static SSTableReader open(Descriptor desc, TableMetadataRef metadata)
+    public static SSTableReader open(Descriptor desc, TableMetadata metadata)
     {
         return open(desc, componentsFor(desc), metadata);
     }
 
-    public static SSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+    public static SSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadata metadata)
     {
         return open(descriptor, components, metadata, true, true);
     }
@@ -374,11 +374,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     // use only for offline or "Standalone" operations
     public static SSTableReader openNoValidation(Descriptor descriptor, Set<Component> components, ColumnFamilyStore cfs)
     {
-        return open(descriptor, components, cfs.metadata, false, false); // do not track hotness
+        return open(descriptor, components, cfs.metadata(), false, false); // do not track hotness
     }
 
     // use only for offline or "Standalone" operations
-    public static SSTableReader openNoValidation(Descriptor descriptor, TableMetadataRef metadata)
+    public static SSTableReader openNoValidation(Descriptor descriptor, TableMetadata metadata)
     {
         return open(descriptor, componentsFor(descriptor), metadata, false, false); // do not track hotness
     }
@@ -392,7 +392,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @return opened SSTableReader
      * @throws IOException
      */
-    public static SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+    public static SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadata metadata)
     {
         checkRequiredComponents(descriptor, components, true);
 
@@ -414,7 +414,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         // Check if sstable is created using same partitioner.
         // Partitioner can be null, which indicates older version of sstable or no stats available.
         // In that case, we skip the check.
-        String partitionerName = metadata.get().partitioner.getClass().getCanonicalName();
+        String partitionerName = metadata.partitioner.getClass().getCanonicalName();
         if (validationMetadata != null && !partitionerName.equals(validationMetadata.partitioner))
         {
             logger.error("Cannot open {}; partitioner {} does not match system partitioner {}.  Note that the default partitioner starting with Cassandra 1.2 is Murmur3Partitioner, so you will need to edit that to match your old partitioner if upgrading.",
@@ -430,7 +430,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                              System.currentTimeMillis(),
                                              statsMetadata,
                                              OpenReason.NORMAL,
-                                             header.toHeader(metadata.get()));
+                                             header.toHeader(metadata));
 
         try(FileHandle.Builder dbuilder = sstable.dataFileHandleBuilder())
         {
@@ -469,7 +469,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public static SSTableReader open(Descriptor descriptor,
                                      Set<Component> components,
-                                     TableMetadataRef metadata,
+                                     TableMetadata metadata,
                                      boolean validate,
                                      boolean trackHotness)
     {
@@ -494,7 +494,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         // Check if sstable is created using same partitioner.
         // Partitioner can be null, which indicates older version of sstable or no stats available.
         // In that case, we skip the check.
-        String partitionerName = metadata.get().partitioner.getClass().getCanonicalName();
+        String partitionerName = metadata.partitioner.getClass().getCanonicalName();
         if (validationMetadata != null && !partitionerName.equals(validationMetadata.partitioner))
         {
             logger.error("Cannot open {}; partitioner {} does not match system partitioner {}.  Note that the default partitioner starting with Cassandra 1.2 is Murmur3Partitioner, so you will need to edit that to match your old partitioner if upgrading.",
@@ -510,7 +510,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                              System.currentTimeMillis(),
                                              statsMetadata,
                                              OpenReason.NORMAL,
-                                             header.toHeader(metadata.get()));
+                                             header.toHeader(metadata));
 
         try
         {
@@ -556,7 +556,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                     SSTableReader sstable;
                     try
                     {
-                        sstable = open(entry.getKey(), entry.getValue(), metadata);
+                        sstable = open(entry.getKey(), entry.getValue(), metadata.get());
                     }
                     catch (CorruptSSTableException ex)
                     {
@@ -594,7 +594,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     protected static SSTableReader internalOpen(final Descriptor descriptor,
                                             Set<Component> components,
-                                            TableMetadataRef metadata,
+                                            TableMetadata metadata,
                                             Long maxDataAge,
                                             StatsMetadata sstableMetadata,
                                             OpenReason openReason,
@@ -607,7 +607,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     protected SSTableReader(final Descriptor desc,
                             Set<Component> components,
-                            TableMetadataRef metadata,
+                            TableMetadata metadata,
                             long maxDataAge,
                             StatsMetadata sstableMetadata,
                             OpenReason openReason,
@@ -2065,7 +2065,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         public abstract SSTableReader open(final Descriptor descriptor,
                                            Set<Component> components,
-                                           TableMetadataRef metadata,
+                                           TableMetadata metadata,
                                            Long maxDataAge,
                                            StatsMetadata sstableMetadata,
                                            OpenReason openReason,

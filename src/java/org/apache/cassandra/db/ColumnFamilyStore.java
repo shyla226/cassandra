@@ -812,7 +812,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             SSTableReader reader;
             try
             {
-                reader = SSTableReader.open(newDescriptor, entry.getValue(), metadata);
+                reader = SSTableReader.open(newDescriptor, entry.getValue(), metadata.get());
             }
             catch (CorruptSSTableException ex)
             {
@@ -1979,7 +1979,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     if (logger.isTraceEnabled())
                         logger.trace("using snapshot sstable {}", entries.getKey());
                     // open without tracking hotness
-                    sstable = SSTableReader.open(entries.getKey(), entries.getValue(), metadata, true, false);
+                    sstable = SSTableReader.open(entries.getKey(), entries.getValue(), metadata.get(), true, false);
                     refs.tryRef(sstable);
                     // release the self ref as we never add the snapshot sstable to DataTracker where it is otherwise released
                     sstable.selfRef().release();

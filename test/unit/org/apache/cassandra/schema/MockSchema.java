@@ -99,7 +99,7 @@ public class MockSchema
                 throw new RuntimeException(e);
             }
         }
-        SSTableReader reader = TrieIndexFormatUtil.emptyReader(descriptor, components, cfs.metadata,
+        SSTableReader reader = TrieIndexFormatUtil.emptyReader(descriptor, components, cfs.metadata.get(),
                                                                RANDOM_ACCESS_READER_FACTORY.sharedCopy(), RANDOM_ACCESS_READER_FACTORY.sharedCopy());
         reader.first = reader.last = readerBounds(generation);
         if (!keepRef)

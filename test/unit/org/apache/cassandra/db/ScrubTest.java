@@ -59,6 +59,7 @@ import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexSSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -352,7 +353,7 @@ public class ScrubTest
 
             try
             {
-                SSTableReader.open(desc, cfs.metadata);
+                SSTableReader.open(desc, cfs.metadata.get());
                 fail("SSTR validation should have caught the out-of-order rows");
             }
             catch (CorruptSSTableException ise)
@@ -624,7 +625,7 @@ public class ScrubTest
     {
         SerializationHeader header = new SerializationHeader(true, metadata.get(), metadata.get().regularAndStaticColumns(), EncodingStats.NO_STATS);
         MetadataCollector collector = new MetadataCollector(metadata.get().comparator).sstableLevel(0);
-        return new TestMultiWriter(new TestWriter(descriptor, keyCount, 0, null, metadata, collector, header, txn), txn);
+        return new TestMultiWriter(new TestWriter(descriptor, keyCount, 0, null, metadata.get(), collector, header, txn), txn);
     }
 
     private static class TestMultiWriter extends SimpleSSTableMultiWriter
@@ -640,7 +641,7 @@ public class ScrubTest
      */
     private static class TestWriter extends TrieIndexSSTableWriter
     {
-        TestWriter(Descriptor descriptor, long keyCount, long repairedAt, UUID pendingRepair, TableMetadataRef metadata,
+        TestWriter(Descriptor descriptor, long keyCount, long repairedAt, UUID pendingRepair, TableMetadata metadata,
                    MetadataCollector collector, SerializationHeader header, LifecycleTransaction txn)
         {
             super(descriptor, keyCount, repairedAt, pendingRepair, metadata, collector, header, Collections.emptySet(), txn);

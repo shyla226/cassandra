@@ -28,6 +28,7 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.io.FSError;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -93,7 +94,7 @@ public class SSTableLoader implements StreamEventHandler
 
                                           Set<Component> components = mainComponentsPresent(desc);
 
-                                          TableMetadataRef metadata = client.getTableMetadata(desc.cfname);
+                                          TableMetadata metadata = client.getTableMetadata(desc.cfname);
                                           if (metadata == null)
                                           {
                                               outputHandler.output(String.format("Skipping file %s: table %s.%s doesn't exist", name, keyspace, desc.cfname));
@@ -271,9 +272,9 @@ public class SSTableLoader implements StreamEventHandler
          * Validate that {@code keyspace} is an existing keyspace and {@code
          * cfName} one of its existing column family.
          */
-        public abstract TableMetadataRef getTableMetadata(String tableName);
+        public abstract TableMetadata getTableMetadata(String tableName);
 
-        public void setTableMetadata(TableMetadataRef cfm)
+        public void setTableMetadata(TableMetadata cfm)
         {
             throw new RuntimeException();
         }

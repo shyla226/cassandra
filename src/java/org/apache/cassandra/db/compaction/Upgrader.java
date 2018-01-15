@@ -84,7 +84,7 @@ public class Upgrader
                                     estimatedRows,
                                     repairedAt,
                                     parentRepair,
-                                    cfs.metadata,
+                                    cfs.metadata.get(),
                                     sstableMetadataCollector,
                                     SerializationHeader.make(cfs.metadata(), Sets.newHashSet(sstable)),
                                     cfs.indexManager.listIndexes(),

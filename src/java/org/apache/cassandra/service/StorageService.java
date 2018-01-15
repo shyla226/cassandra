@@ -5473,9 +5473,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 }
             }
 
-            public TableMetadataRef getTableMetadata(String tableName)
+            public TableMetadata getTableMetadata(String tableName)
             {
-                return Schema.instance.getTableMetadataRef(keyspace, tableName);
+                return Schema.instance.getTableMetadataRef(keyspace, tableName).get();
             }
         };
 

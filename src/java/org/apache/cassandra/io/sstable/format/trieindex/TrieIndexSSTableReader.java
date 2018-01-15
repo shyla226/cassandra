@@ -54,7 +54,7 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
-import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -73,7 +73,7 @@ class TrieIndexSSTableReader extends SSTableReader
     protected FileHandle rowIndexFile;
     protected PartitionIndex partitionIndex;
 
-    TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header)
+    TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadata metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header)
     {
         super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header);
     }
@@ -140,7 +140,7 @@ class TrieIndexSSTableReader extends SSTableReader
      */
     static TrieIndexSSTableReader internalOpen(Descriptor desc,
                                                Set<Component> components,
-                                               TableMetadataRef metadata,
+                                               TableMetadata metadata,
                                                FileHandle ifile,
                                                FileHandle dfile,
                                                PartitionIndex partitionIndex,

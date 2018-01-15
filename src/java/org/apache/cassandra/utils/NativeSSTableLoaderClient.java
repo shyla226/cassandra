@@ -36,7 +36,7 @@ import org.apache.cassandra.schema.TableMetadata;
 
 public class NativeSSTableLoaderClient extends SSTableLoader.Client
 {
-    protected final Map<String, TableMetadataRef> tables;
+    protected final Map<String, TableMetadata> tables;
     private final Collection<InetAddress> hosts;
     private final int port;
     private final AuthProvider authProvider;
@@ -93,13 +93,13 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
         }
     }
 
-    public TableMetadataRef getTableMetadata(String tableName)
+    public TableMetadata getTableMetadata(String tableName)
     {
         return tables.get(tableName);
     }
 
     @Override
-    public void setTableMetadata(TableMetadataRef cfm)
+    public void setTableMetadata(TableMetadata cfm)
     {
         tables.put(cfm.name, cfm);
     }
@@ -128,9 +128,9 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
      * Note: It is not safe for this class to use static methods from SchemaKeyspace (static final fields are ok)
      * as that triggers initialization of the class, which fails in client mode.
      */
-    private static Map<String, TableMetadataRef> fetchTables(String keyspace, Session session, IPartitioner partitioner, Types types)
+    private static Map<String, TableMetadata> fetchTables(String keyspace, Session session, IPartitioner partitioner, Types types)
     {
-        Map<String, TableMetadataRef> tables = new HashMap<>();
+        Map<String, TableMetadata> tables = new HashMap<>();
         String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.TABLES);
 
         for (Row row : session.execute(query, keyspace))
@@ -142,9 +142,9 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
         return tables;
     }
 
-    private static Map<String, TableMetadataRef> fetchViews(String keyspace, Session session, IPartitioner partitioner, Types types)
+    private static Map<String, TableMetadata> fetchViews(String keyspace, Session session, IPartitioner partitioner, Types types)
     {
-        Map<String, TableMetadataRef> tables = new HashMap<>();
+        Map<String, TableMetadata> tables = new HashMap<>();
         String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.VIEWS);
 
         for (Row row : session.execute(query, keyspace))
@@ -156,13 +156,13 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
         return tables;
     }
 
-    private static TableMetadataRef createTableMetadata(String keyspace,
-                                                        Session session,
-                                                        IPartitioner partitioner,
-                                                        boolean isView,
-                                                        Row row,
-                                                        String name,
-                                                        Types types)
+    private static TableMetadata createTableMetadata(String keyspace,
+                                                     Session session,
+                                                     IPartitioner partitioner,
+                                                     boolean isView,
+                                                     Row row,
+                                                     String name,
+                                                     Types types)
     {
         TableMetadata.Builder builder = TableMetadata.builder(keyspace, name, TableId.fromUUID(row.getUUID("id")))
                                                      .partitioner(partitioner);
@@ -188,7 +188,7 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
         }
         builder.droppedColumns(droppedColumns);
 
-        return TableMetadataRef.forOfflineTools(builder.build());
+        return builder.build();
     }
 
     private static ColumnMetadata createDefinitionFromRow(Row row, String keyspace, String table, Types types)
