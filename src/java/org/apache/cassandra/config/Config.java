@@ -416,16 +416,6 @@ public class Config
         return audit_logging_options.cassandra_audit_writer_options.mode;
     }
 
-    public int getAuditLoggerCassAsyncQueueSize()
-    {
-        return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.queue_size);
-    }
-
-    public int getAuditLoggerNumCassLoggers()
-    {
-        return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.num_writers);
-    }
-
     public int getAuditCassFlushTime()
     {
         return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.flush_time);
@@ -434,6 +424,11 @@ public class Config
     public int getAuditCassBatchSize()
     {
         return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.batch_size);
+    }
+
+    public int getAuditLoggerCassAsyncQueueSize()
+    {
+        return Integer.parseInt(audit_logging_options.cassandra_audit_writer_options.queue_size);
     }
 
     public enum CommitLogSync

@@ -7,34 +7,36 @@ package com.datastax.bdp.db.audit;
 
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import io.reactivex.Completable;
+import io.reactivex.Single;
+
 import com.google.common.annotations.VisibleForTesting;
-import org.apache.commons.lang3.concurrent.BasicThreadFactory;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Completable;
-
-import org.apache.cassandra.concurrent.TPCUtils;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
-import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.TimestampType;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.*;
+import org.jctools.queues.MpmcArrayQueue;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 
@@ -43,11 +45,8 @@ import org.joda.time.DateTimeZone;
  *
  * Can be run either synchronously or asychronously. When run synchronously, the event is written
  * to the table before the recordEvent method will return. When run asychronously, recordEvent pushes
- * the event into a queue, then returns. The queue is consumed by one or more EventBatcher instances,
- * which consume events from the queue until a specified number of events have been consumed, or a
- * specified amount of time has passed. The events are then written into the C* table in a batch query.
- * If a queue size is specified, recordEvent will block if the queue is full.
- *
+ * the event into a queue, then returns. The queue is consumed by some periodic task.
+ * The events are then written into the C* table in a batch query.
  *
  */
 public class CassandraAuditWriter implements IAuditWriter
@@ -65,23 +64,44 @@ public class CassandraAuditWriter implements IAuditWriter
     /**
      * The writer possible states.
      */
-    private enum State { NOT_STARTED, STARTING, READY };
+    private enum State { NOT_STARTED, STARTING, READY, STOPPING, STOPPED };
+
+    /**
+     * The startup time.
+     */
+    private long startupTime;
 
     final int retentionPeriod;
-    ModificationStatement insertStatement;
 
-    private final ExecutorService executorService;
+    /**
+     * The statement used to perform the inserts.
+     */
+    private ModificationStatement insertStatement;
 
-    private final BlockingQueue<EventBindings> eventQueue;
+    /**
+     * The event that need to be persisted (in async mode only).
+     */
+    private final Queue<EventBindings> eventQueue;
 
+    /**
+     * The consistency level at which the writes must be performed.
+     */
     private final ConsistencyLevel writeConsistency;
 
+    /**
+     * The batching options.
+     */
     private final BatchingOptions batchingOptions;
 
     /**
      * The writer's state.
      */
     private final AtomicReference<State> state = new AtomicReference<>(State.NOT_STARTED);
+
+    /**
+     * The partition of the last batch executed.
+     */
+    private volatile EventPartition lastPartition;
 
     @Override
     public boolean isSetUpComplete()
@@ -95,115 +115,64 @@ public class CassandraAuditWriter implements IAuditWriter
         if (state.compareAndSet(State.NOT_STARTED, State.STARTING))
         {
             CassandraAuditKeyspace.maybeConfigure();
-            insertStatement = prepareInsertBlocking(retentionPeriod > 0);
+            insertStatement = prepareInsertStatement(retentionPeriod > 0);
+            startupTime = System.currentTimeMillis();
+
+            if (!batchingOptions.synchronous)
+            {
+                scheduleNextFlush();
+            }
+
+            Runtime.getRuntime().addShutdownHook(new Thread(new WrappedRunnable()
+            {
+                @Override
+                protected void runMayThrow() throws Exception
+                {
+                    logger.debug("Shutting down CassandraAuditWritter");
+                    state.compareAndSet(State.READY, State.STOPPING);
+                }
+            }, "Audit shutdown"));
+
             state.set(State.READY);
         }
     }
 
     @VisibleForTesting
-    interface BatchController
-    {
-        /**
-         * Reset the timer, called each time we enter the main loop in EventBatcher
-         */
-        void reset();
-
-        /**
-         * Check whether the max period has been exceeded for flushing a non-empty batch
-         */
-        boolean flushPeriodExceeded();
-
-        /**
-         * Return the number of milliseconds to poll the consumer queue of events.
-         */
-        long getNextPollPeriod();
-
-        /**
-         * Get the max size for a batch of insert statements
-         */
-        int getBatchSize();
-    }
-
-    @VisibleForTesting
-    static class DefaultBatchController implements BatchController
-    {
-        final int flushPeriod;
-        final int batchSize;
-
-        private long start;
-        private long lastCheckpoint;
-        private final TimeSource timeSource;
-
-        DefaultBatchController(int flushPeriod, int batchSize)
-        {
-            this(flushPeriod, batchSize, new SystemTimeSource());
-        }
-
-        DefaultBatchController(int flushPeriod, int batchSize, TimeSource timeSource)
-        {
-            this.flushPeriod = flushPeriod;
-            this.batchSize = batchSize;
-            this.timeSource = timeSource;
-            reset();
-        }
-
-        @Override
-        public void reset()
-        {
-            start = timeSource.currentTimeMillis();
-            lastCheckpoint = start;
-        }
-
-        @Override
-        public boolean flushPeriodExceeded()
-        {
-            lastCheckpoint = timeSource.currentTimeMillis();
-            return (lastCheckpoint - start) > flushPeriod;
-        }
-
-        @Override
-        public long getNextPollPeriod()
-        {
-            return flushPeriod - (lastCheckpoint - start);
-        }
-
-        @Override
-        public int getBatchSize()
-        {
-            return batchSize;
-        }
-    }
-
-    @VisibleForTesting
-    interface BatchControllerFactory
-    {
-        BatchController newController();
-    }
-
-    @VisibleForTesting
     static class BatchingOptions
     {
-        static BatchingOptions SYNC = new BatchingOptions();
+        static BatchingOptions SYNC = new BatchingOptions(true, 1, 0, 0);
 
-        final BatchControllerFactory controllerFactory;
-        final int queueSize;
-        final int concurrentWriters;
-        final boolean synchronous;
+        /**
+         * {@code true} if the writes must be performed in a synchronous way, {@code false} otherwise.
+         */
+        public final boolean synchronous;
 
-        private BatchingOptions()
+        /**
+         * The maximum size of the batches.
+         */
+        public final int batchSize;
+
+        /**
+         * The interval of time between 2 flushes.
+         */
+        public final int flushPeriodInMillis;
+
+        /**
+         * The queue size.
+         */
+        public final int queueSize;
+
+        public BatchingOptions(int batchSize, int flushPeriodInMillis, int queueSize)
         {
-            queueSize = 0;
-            concurrentWriters = 0;
-            controllerFactory = null;
-            synchronous = true;
+            this(false, batchSize, flushPeriodInMillis, queueSize);
         }
 
-        BatchingOptions(int queueSize, int concurrentWriters, BatchControllerFactory controllerFactory)
+        private BatchingOptions(boolean synchronous, int batchSize, int flushPeriodInMillis, int queueSize)
         {
+            this.synchronous = synchronous;
+            this.batchSize = batchSize;
+            this.flushPeriodInMillis = flushPeriodInMillis;
             this.queueSize = queueSize;
-            this.concurrentWriters = concurrentWriters;
-            this.controllerFactory = controllerFactory;
-            this.synchronous = false;
         }
     }
 
@@ -219,6 +188,13 @@ public class CassandraAuditWriter implements IAuditWriter
             dayPartition = eventTime.getHourOfDay() * 60 * 60;
         }
 
+        public DecoratedKey getPartitionKey(IPartitioner partitioner)
+        {
+            return partitioner.decorateKey(CompositeType.build(TimestampType.instance.decompose(date),
+                                                               nodeIp,
+                                                               ByteBufferUtil.bytes(dayPartition)));
+        }
+
         @Override
         public boolean equals(Object o)
         {
@@ -227,8 +203,7 @@ public class CassandraAuditWriter implements IAuditWriter
 
             EventPartition that = (EventPartition) o;
 
-            if (dayPartition != that.dayPartition) return false;
-            return date.equals(that.date);
+            return dayPartition == that.dayPartition && date.equals(that.date);
         }
 
         @Override
@@ -298,9 +273,9 @@ public class CassandraAuditWriter implements IAuditWriter
     class EventBatch
     {
         final EventPartition partition;
-        final List<ModificationStatement> modifications = new LinkedList<>();  // this will always be insertStatement
-        final List<List<ByteBuffer>> values = new LinkedList<>();
-        final List<AuditableEvent> events = new LinkedList<>();
+        final List<ModificationStatement> modifications = new ArrayList<>();  // this will always be insertStatement
+        final List<List<ByteBuffer>> values = new ArrayList<>();
+        final List<AuditableEvent> events = new ArrayList<>();
 
         public EventBatch(EventPartition partition)
         {
@@ -314,99 +289,134 @@ public class CassandraAuditWriter implements IAuditWriter
             events.add(event.event);
         }
 
+        int size()
+        {
+            return modifications.size();
+        }
+
         void execute()
         {
             BatchStatement stmt = new BatchStatement(0, BatchStatement.Type.UNLOGGED, modifications, Attributes.none());
+            lastPartition = partition;
 
             try
             {
-                processBatchBlocking(stmt, writeConsistency, values);
+                executeBatch(stmt, writeConsistency, values).doOnError(e -> logDroppedEvents(e))
+                                                            .subscribe();
             }
             catch (RequestExecutionException | RequestValidationException e)
             {
-                logger.error("Exception writing audit events to table", e);
-                for (AuditableEvent event: events)
-                {
-                    droppedEventLogger.warn(event.toString());
-                }
+                logDroppedEvents(e);
+            }
+        }
+
+        private void logDroppedEvents(Throwable e)
+        {
+            logger.error("Exception writing audit events to table", e);
+            for (AuditableEvent event: events)
+            {
+                droppedEventLogger.warn(event.toString());
             }
         }
 
         /**
-         * Processes a batch statement and awaits its completion.
+         * Execute the batch statement.
          *
          * @param statement - the prepared statement to process
          * @param cl - the consistency level
          * @param values - the list of values to bind to the prepared statement
          */
-        private void processBatchBlocking(BatchStatement statement, ConsistencyLevel cl, List<List<ByteBuffer>> values)
+        private Single<ResultMessage> executeBatch(BatchStatement statement, ConsistencyLevel cl, List<List<ByteBuffer>> values)
         {
             BatchQueryOptions options =
             BatchQueryOptions.withPerStatementVariables(QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()),
                                                         values,
                                                         Collections.emptyList());
 
-            TPCUtils.blockingGet(QueryProcessor.instance.processBatch(statement, QueryState.forInternalCalls(), options, System.nanoTime()));
+            return QueryProcessor.instance.processBatch(statement, QueryState.forInternalCalls(), options, System.nanoTime());
         }
     }
 
-
-
-    
-    private class EventBatcher implements Runnable
+    /**
+     * Schedules the next flush.
+     */
+    private void scheduleNextFlush()
     {
-        private final BatchController controller;
-
-        private EventBatcher(BatchController controller)
+        // Check if we are stopping
+        if (!state.compareAndSet(State.STOPPING, State.STOPPED))
         {
-            this.controller = controller;
+            // To reschedule the task, we need to compute the delay before the next expected flush.
+            long currentTimeMillis = System.currentTimeMillis();
+            long nextFlushTime = nextFlushAfter(currentTimeMillis);
+            long delay = nextFlushTime - currentTimeMillis;
+
+            flushTask().doOnError(e -> logger.error("Audit logging batching task failed.", e))
+                       .doFinally(() -> scheduleNextFlush())
+                       .delaySubscription(delay, TimeUnit.MILLISECONDS, getTpcSchedulerForNextFlush())
+                       .subscribe();
         }
+    }
 
-        private void consume()
+    /**
+     * Returns the scheduler to use for the next flush.
+     * <p>We want to try to schedule the next flush on the same scheduler as the batches. By doing so the next flush
+     * should only be triggered when all the batches have been executed. If the system get overloaded the queue
+     * will get full and some events will be dropped releasing some pressure on the system.</p>
+     * @return the scheduler to use for the next flush
+     */
+    private TPCScheduler getTpcSchedulerForNextFlush()
+    {
+        return lastPartition == null ? TPC.bestTPCScheduler() 
+                                     : TPC.getForKey(CassandraAuditKeyspace.getKeyspace(),
+                                                     lastPartition.getPartitionKey(CassandraAuditKeyspace.getAuditLogPartitioner()));
+    }
+
+    /**
+     * Computes the timestamp of the next flush after the specified time.
+     * @param currentTimeMillis the curent time in milliseconds
+     * @return the timestamp of the next flush after the specified time
+     */
+    private long nextFlushAfter(long currentTimeMillis)
+    {
+        long floor = floor(currentTimeMillis, startupTime, batchingOptions.flushPeriodInMillis);
+        return floor + batchingOptions.flushPeriodInMillis;
+    }
+
+    /**
+     * Computes the largest timestamp which is less or equals to the current timestamp an a multiple of the period.
+     * @param currentTime the current time in ms
+     * @param startupTime the time representing the start of the process in ms
+     * @param period the time period in ms
+     * @return the largest timestamp which is less or equals to the current timestamp an a multiple of the period.
+     */
+    private static long floor(long currentTime, long startupTime, int period)
+    {
+        long delta = (currentTime - startupTime) % period;
+        return currentTime - delta;
+    }
+
+    /**
+     * Creates a task that will flush the events that are waiting in the queue.
+     * Once it is terminated the task will reschedule itself.
+     * @return the flush task.
+     */
+    private Single<Boolean> flushTask()
+    {
+        return Single.fromCallable(new Callable<Boolean>()
         {
-            while (!Thread.interrupted())
+            @Override
+            public Boolean call() throws Exception
             {
-                // indicates that the thread should be interrupted and return
-                // after saving the current set of audit events
-                boolean interrupt = false;
-
                 Map<EventPartition, EventBatch> batches = new HashMap<>();
-
-                int numEvents = 0;
-                controller.reset();
-                while (true)
+                int numberOfEvents = 0;
+                do
                 {
-                    if (Thread.interrupted())
-                    {
-                        interrupt = true;
-                        break;
-                    }
+                    EventBindings event = eventQueue.poll();
 
-                    // check that we're not out of time for this batch
-                    if (numEvents > 0)
-                    {
-                        if (controller.flushPeriodExceeded())
-                            break;
-                    }
-                    else
-                    {
-                        controller.reset();
-                    }
-
-                    // get the next audit event to include in this batch
-                    EventBindings event;
-                    try
-                    {
-                        event = eventQueue.poll(controller.getNextPollPeriod(), TimeUnit.MILLISECONDS);
-                        if (event == null)
-                            continue;
-                    }
-                    catch (InterruptedException e)
-                    {
-                        interrupt = true;
+                    if (event == null)
                         break;
-                    }
-                    logger.trace("batching event {} into partition {}", event, event.partition);
+
+                    numberOfEvents++;
 
                     EventBatch batch = batches.get(event.partition);
                     if (batch == null)
@@ -414,53 +424,29 @@ public class CassandraAuditWriter implements IAuditWriter
                         batch = new EventBatch(event.partition);
                         batches.put(event.partition, batch);
                     }
+
                     batch.addEvent(event);
 
-                    // check if we have enough events to persist
-                    numEvents++;
-                    if (numEvents >= controller.getBatchSize())
-                        break;
+                    if (batch.size() >= batchingOptions.batchSize)
+                    {
+                        executeBatches(Collections.singletonList(batch));
+                        batches.remove(event.partition);
+                    }
                 }
+                while (numberOfEvents < batchingOptions.queueSize); // We do not want to cause starvation
 
-                // persist the audit events
-                if (numEvents > 0)
-                {
-                    executeBatches(batches.values());
-                }
+                executeBatches(batches.values());
 
-                if (interrupt)
-                    break;
+                return Boolean.TRUE;
             }
-            Thread.currentThread().interrupt();
-        }
-
-        @Override
-        public void run()
-        {
-            // catch and log any errors generated by the queue consumption loop
-            // consume() only returns if the thread has been interrupted, so this returns if consume() does
-            while (true)
-            {
-                try
-                {
-                    consume();
-                    return;
-                }
-                catch (Throwable e)
-                {
-                    logger.error(e.getMessage(), e);
-                }
-            }
-        }
+        });
     }
 
     @VisibleForTesting
-    void executeBatches(Collection<EventBatch> batches)
+    protected void executeBatches(Collection<EventBatch> batches)
     {
         for (EventBatch batch: batches)
-        {
             batch.execute();
-        }
     }
 
     public CassandraAuditWriter()
@@ -469,17 +455,9 @@ public class CassandraAuditWriter implements IAuditWriter
              DatabaseDescriptor.getRawConfig().getAuditCassConsistencyLevel(),
              DatabaseDescriptor.getRawConfig().getAuditLoggerCassMode().equals("sync")
                 ? BatchingOptions.SYNC
-                : new BatchingOptions(DatabaseDescriptor.getRawConfig().getAuditLoggerCassAsyncQueueSize(),
-                                      DatabaseDescriptor.getRawConfig().getAuditLoggerNumCassLoggers(),
-                                      new BatchControllerFactory()
-                                      {
-                                          @Override
-                                          public BatchController newController()
-                                          {
-                                              return new DefaultBatchController(DatabaseDescriptor.getRawConfig().getAuditCassFlushTime(),
-                                                                                DatabaseDescriptor.getRawConfig().getAuditCassBatchSize());
-                                          }
-                                      })
+                : new BatchingOptions(DatabaseDescriptor.getRawConfig().getAuditCassBatchSize(),
+                                      DatabaseDescriptor.getRawConfig().getAuditCassFlushTime(),
+                                      DatabaseDescriptor.getRawConfig().getAuditLoggerCassAsyncQueueSize())
             );
 
     }
@@ -487,8 +465,7 @@ public class CassandraAuditWriter implements IAuditWriter
     /**
      * @param retentionPeriod the period of time audit events are kept. If null, events are kept forever
      * @param cl the consistency level with which to perform writes
-     * @param batchingOptions specifies queue & batch size, concurrency factor, plus a BatchControllerFactory
-     *                        to provide the controllers which decide when to batches get flushed. Use
+     * @param batchingOptions specifies batching options (e.g. batch size, flush period). Use
      *                        BatchingOptions.SYNC to perform inserts synchronously
      */
     @VisibleForTesting
@@ -499,41 +476,17 @@ public class CassandraAuditWriter implements IAuditWriter
         this.retentionPeriod = (int) TimeUnit.SECONDS.convert(retentionPeriod, TimeUnit.HOURS);
         this.writeConsistency = cl;
         this.batchingOptions = batchingOptions;
-
-        if (!isSynchronous())
-        {
-            if (batchingOptions.queueSize > 0)
-                eventQueue = new ArrayBlockingQueue<>(batchingOptions.queueSize);
-            else
-                eventQueue = new LinkedBlockingQueue<>();
-
-            ThreadFactory threadFactory = new BasicThreadFactory.Builder().namingPattern("CassandraAuditWriter-%d").build();
-            executorService = Executors.newFixedThreadPool(batchingOptions.concurrentWriters, threadFactory);
-
-            EventBatcher eventBatcher = new EventBatcher(batchingOptions.controllerFactory.newController());
-            for (int i=0; i<batchingOptions.concurrentWriters; i++)
-                executorService.submit(eventBatcher);
-
-            Runtime.getRuntime().addShutdownHook(new Thread(new WrappedRunnable()
-            {
-                @Override
-                protected void runMayThrow() throws Exception
-                {
-                    logger.debug("Shutting down executor service");
-                    executorService.shutdown();
-                    logger.debug("Executor service shutdown complete");
-                }
-            }, "Audit shutdown"));
-        }
-        else
-        {
-            logger.info(String.format("%s starting in synchronous mode", CassandraAuditWriter.class.getSimpleName()));
-            executorService = null;
-            eventQueue = null;
-        }
+        this.eventQueue = batchingOptions.synchronous ? null 
+                                                      : batchingOptions.queueSize > 0 ? new MpmcArrayQueue<>(batchingOptions.queueSize)
+                                                                                      : new ConcurrentLinkedQueue<>();
     }
 
-    static ModificationStatement prepareInsertBlocking(boolean hasTTL)
+    /**
+     * Prepares the {@code CQLStatement} used to perform the inserts.
+     * @param hasTTL {@code true} if the data has a limited retention period
+     * @return the {@code CQLStatement} used to perform the inserts
+     */
+    private static ModificationStatement prepareInsertStatement(boolean hasTTL)
     {
         String insertString = String.format(
                 "INSERT INTO %s.%s (" +
@@ -562,54 +515,41 @@ public class CassandraAuditWriter implements IAuditWriter
         return (ModificationStatement) prepareStatement(insertString);
     }
 
+    /**
+     * Gets the CQL statement corresponding to the specified CQL.
+     * @param cql the CQL query
+     * @return the {@code CQLStatement} corresponding to the specified CQL
+     */
     private static CQLStatement prepareStatement(String cql)
     {
         try
         {
             QueryState queryState = QueryState.forInternalCalls();
-            ParsedStatement.Prepared stmt = null;
-            while (stmt == null)
-            {
-                MD5Digest stmtId = TPCUtils.blockingGet(QueryProcessor.instance.prepare(cql, queryState)).statementId;
-                stmt = QueryProcessor.instance.getPrepared(stmtId);
-            }
-            return stmt.statement;
-
-        } catch (RequestValidationException e)
+            return QueryProcessor.getStatement(cql, queryState).statement;
+        }
+        catch (Exception e)
         {
-            throw new RuntimeException("Error preparing audit writer", e);
+            throw new IllegalStateException("Error preparing audit writer", e);
         }
     }
 
+    @Override
     public Completable recordEvent(final AuditableEvent event)
     {
         EventBindings bindings = new EventBindings(event);
 
         if (isSynchronous())
+            return insertStatement.execute(QueryState.forInternalCalls(),
+                                           bindings.getBindings(),
+                                           System.nanoTime())
+                                  .toCompletable();
+
+        if (!eventQueue.add(bindings))
         {
-            try
-            {
-                return insertStatement.execute(QueryState.forInternalCalls(),
-                                               bindings.getBindings(),
-                                               System.nanoTime()).toCompletable();
-            }
-            catch (RequestValidationException | RequestExecutionException e)
-            {
-                throw new RuntimeException(e);
-            }
+            // queue is full
+            droppedEventLogger.warn(event.toString());
         }
-        else
-        {
-            try
-            {
-                eventQueue.put(bindings);
-                return Completable.complete();
-            }
-            catch (InterruptedException e)
-            {
-                throw new RuntimeException("Unable to enqueue audit event", e);
-            }
-        }
+        return Completable.complete();
     }
 
     private boolean isSynchronous()

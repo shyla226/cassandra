@@ -33,10 +33,7 @@ import org.apache.cassandra.utils.UUIDGen;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 
-import static com.datastax.bdp.db.audit.CassandraAuditWriter.BatchController;
-import static com.datastax.bdp.db.audit.CassandraAuditWriter.BatchControllerFactory;
 import static com.datastax.bdp.db.audit.CassandraAuditWriter.BatchingOptions;
-import static com.datastax.bdp.db.audit.CassandraAuditWriter.DefaultBatchController;
 import static com.datastax.bdp.db.audit.CoreAuditableEventType.*;
 
 import static org.junit.Assert.assertEquals;
@@ -191,39 +188,11 @@ public class CassandraAuditWriterTest extends CQLTester
     }
 
     @Test
-    public void checkEventsArentSavedUntilBatchSizeIsMet() throws Exception
-    {
-        BatchingOptions options = new BatchingOptions(20, 1, () -> new DefaultBatchController(100, 2));
-        CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
-        logger.setUp();
-
-        AuditableEvent event = newAuditEvent(INSERT,
-                                             UUIDGen.getTimeUUID(),
-                                             "ks",
-                                             "tbl",
-                                             null,
-                                             null);
-
-        logger.recordEvent(event).blockingAwait();
-        assertEquals(0, getLoggedEventCount());
-
-        event = newAuditEvent(INSERT,
-                              UUIDGen.getTimeUUID(),
-                              "ks",
-                              "tbl",
-                              null,
-                              null);
-        logger.recordEvent(event).blockingAwait();
-
-        waitForEventsToBeWritten(2, 2000);
-    }
-
-    @Test
     public void checkEventsArentSavedUntilFlushTimeIsMet() throws Exception
     {
         final int flushPeriod = 100;
         final int batchSize = 2;
-        BatchingOptions options = new BatchingOptions(20, 1, () -> new DefaultBatchController(flushPeriod, batchSize));
+        BatchingOptions options = new BatchingOptions(batchSize, flushPeriod, 100);
 
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options);
         logger.setUp();
@@ -333,19 +302,12 @@ public class CassandraAuditWriterTest extends CQLTester
     @Test
     public void batchPartitionSplit() throws Exception
     {
-        BatchingOptions options = new BatchingOptions(20, 1, new BatchControllerFactory()
-        {
-            @Override
-            public BatchController newController()
-            {
-                return new DefaultBatchController(Integer.MAX_VALUE, 2);
-            }
-        });
+        BatchingOptions options = new BatchingOptions(20, 100, 100);
 
         final Set<CassandraAuditWriter.EventBatch> batches = new HashSet<>();
         CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, options) {
             @Override
-            void executeBatches(Collection<EventBatch> b)
+            protected void executeBatches(Collection<EventBatch> b)
             {
                 batches.addAll(b);
                 super.executeBatches(b);
@@ -363,7 +325,7 @@ public class CassandraAuditWriterTest extends CQLTester
                                              null,
                                              null);
 
-        logger.recordEvent(event).blockingAwait();
+        logger.recordEvent(event);
 
         Assert.assertEquals(0, batches.size());
 
@@ -375,7 +337,7 @@ public class CassandraAuditWriterTest extends CQLTester
                               null);
 
 
-        logger.recordEvent(event).blockingAwait();
+        logger.recordEvent(event);
 
         waitForEventsToBeWritten(2, 2000);
         Assert.assertEquals(2, batches.size());
