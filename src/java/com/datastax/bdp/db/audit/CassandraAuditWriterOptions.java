@@ -8,7 +8,6 @@ package com.datastax.bdp.db.audit;
 public class CassandraAuditWriterOptions
 {
     public String mode = "sync";
-    public String num_writers = "10";
     public String batch_size = "50";
     public String flush_time = "500";
     public String queue_size = "10000";

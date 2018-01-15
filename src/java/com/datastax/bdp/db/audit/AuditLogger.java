@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -186,7 +185,8 @@ final class AuditLogger implements IAuditLogger
         if (query == null)
             return e.getLocalizedMessage();
 
-        return new StringBuilder(e.getLocalizedMessage()).append(' ').append(query).toString();
+        int length = e.getLocalizedMessage().length() + query.length() + 1;
+        return new StringBuilder(length).append(e.getLocalizedMessage()).append(' ').append(query).toString();
     }
 
     @Override
@@ -209,49 +209,41 @@ final class AuditLogger implements IAuditLogger
             {
                 ModificationStatement stmt = statements.get(i);
                 BatchStatementUtils.Meta stmtMeta = batchStatements.get(i);
-                appendEvent(events,
-                            queryState,
-                            stmt,
-                            stmtMeta.query,
-                            batchID,
-                            stmtMeta.getSubList(queryOptions.getValues()),
-                            stmtMeta.getSubList(boundNames),
-                            queryOptions.getConsistency());
+                events.add(getEvent(queryState,
+                                    stmt,
+                                    stmtMeta.query,
+                                    batchID,
+                                    stmtMeta.getSubList(queryOptions.getValues()),
+                                    stmtMeta.getSubList(boundNames),
+                                    queryOptions.getConsistency()));
             }
             return events;
         }
 
-        return appendEvent(new ArrayList<>(1),
-                           queryState,
-                           statement,
-                           queryString,
-                           null,
-                           queryOptions.getValues(),
-                           boundNames,
-                           queryOptions.getConsistency());
+        return Collections.singletonList(getEvent(queryState,
+                                                  statement,
+                                                  queryString,
+                                                  null,
+                                                  queryOptions.getValues(),
+                                                  boundNames,
+                                                  queryOptions.getConsistency()));
     }
 
-    private List<AuditableEvent> appendEvent(List<AuditableEvent> events,
-                                             QueryState queryState,
-                                             CQLStatement statement,
-                                             String queryString,
-                                             UUID batchID,
-                                             List<ByteBuffer> variables,
-                                             List<ColumnSpecification> boundNames,
-                                             ConsistencyLevel consistencyLevel)
+    private AuditableEvent getEvent(QueryState queryState,
+                                    CQLStatement statement,
+                                    String queryString,
+                                    UUID batchID,
+                                    List<ByteBuffer> variables,
+                                    List<ColumnSpecification> boundNames,
+                                    ConsistencyLevel consistencyLevel)
     {
-        AuditableEventType type = getAuditEventType(statement, queryString);
-        String keyspace = getKeyspace(statement);
-
-        events.add(new AuditableEvent(queryState,
-                                      type,
-                                      batchID,
-                                      keyspace,
-                                      getTable(statement),
-                                      getOperation(statement, queryString, variables, boundNames),
-                                      consistencyLevel));
-
-        return events;
+        return new AuditableEvent(queryState,
+                                  getAuditEventType(statement, queryString),
+                                  batchID,
+                                  getKeyspace(statement),
+                                  getTable(statement),
+                                  getOperation(statement, queryString, variables, boundNames),
+                                  consistencyLevel);
     }
 
     @Override
@@ -264,7 +256,7 @@ final class AuditLogger implements IAuditLogger
 
         UUID batchId = UUID.randomUUID();
         List<Object> queryOrIdList = queryOptions.getQueryOrIdList();
-        List<AuditableEvent> events = Lists.newArrayList();
+        List<AuditableEvent> events = new ArrayList<>(queryOrIdList.size());
         for (int i=0; i<queryOrIdList.size(); i++)
         {
             Object queryOrId = queryOrIdList.get(i);
@@ -274,14 +266,13 @@ final class AuditLogger implements IAuditLogger
                 // column specs for bind vars are not available, so we pass the
                 // variables + an empty list of specs so we log the fact that
                 // they exit, but can't be logged
-                appendEvent(events,
-                            queryState,
-                            batch.getStatements().get(i),
-                            (String) queryOrId,
-                            batchId,
-                            queryOptions.forStatement(i).getValues(),
-                            queryOptions.forStatement(i).getColumnSpecifications(),
-                            queryOptions.getConsistency());
+                events.add(getEvent(queryState,
+                                    batch.getStatements().get(i),
+                                    (String) queryOrId,
+                                    batchId,
+                                    queryOptions.forStatement(i).getValues(),
+                                    queryOptions.forStatement(i).getColumnSpecifications(),
+                                    queryOptions.getConsistency()));
             }
             else if (queryOrId instanceof MD5Digest)
             {
@@ -301,14 +292,13 @@ final class AuditLogger implements IAuditLogger
                     continue;
                 }
 
-                appendEvent(events,
-                            queryState,
-                            preparedStatement.statement,
-                            preparedStatement.rawCQLStatement,
-                            batchId,
-                            queryOptions.forStatement(i).getValues(),
-                            preparedStatement.boundNames,
-                            queryOptions.getConsistency());
+                events.add(getEvent(queryState,
+                                    preparedStatement.statement,
+                                    preparedStatement.rawCQLStatement,
+                                    batchId,
+                                    queryOptions.forStatement(i).getValues(),
+                                    preparedStatement.boundNames,
+                                    queryOptions.getConsistency()));
             }
             else
                 throw new IllegalArgumentException("Got unexpected " + queryOrId);
@@ -332,31 +322,25 @@ final class AuditLogger implements IAuditLogger
             List<AuditableEvent> events = new ArrayList<>(batchStatements.size());
             for (int i = 0, m = batchStatements.size(); i < m; i++)
             {
-                appendPrepareEvent(events, queryState, statements.get(i), batchStatements.get(i).query, batchID);
+                events.add(getEventForPrepared(queryState, statements.get(i), batchStatements.get(i).query, batchID));
             }
             return events;
         }
-
-        return appendPrepareEvent(new ArrayList<>(1), queryState, statement, queryString, null);
+        return Collections.singletonList(getEventForPrepared(queryState, statement, queryString, null));
     }
 
-    private List<AuditableEvent> appendPrepareEvent(List<AuditableEvent> events,
-                                                    QueryState queryState,
-                                                    CQLStatement statement,
-                                                    String queryString,
-                                                    UUID batchID)
+    private AuditableEvent getEventForPrepared(QueryState queryState,
+                                               CQLStatement statement,
+                                               String queryString,
+                                               UUID batchID)
     {
-        String keyspace = getKeyspace(statement);
-
-        events.add(new AuditableEvent(queryState,
-                                      CoreAuditableEventType.CQL_PREPARE_STATEMENT,
-                                      batchID,
-                                      keyspace,
-                                      getTable(statement),
-                                      queryString,
-                                      AuditableEvent.NO_CL));
-
-        return events;
+        return new AuditableEvent(queryState,
+                                  CoreAuditableEventType.CQL_PREPARE_STATEMENT,
+                                  batchID,
+                                  getKeyspace(statement),
+                                  getTable(statement),
+                                  queryString,
+                                  AuditableEvent.NO_CL);
     }
 
     private boolean isPagingQuery(QueryOptions options)
@@ -382,7 +366,9 @@ final class AuditLogger implements IAuditLogger
         if (null == variables || variables.isEmpty())
             return obfuscatePasswordsIfNeeded(stmt, queryString);
 
-        StringBuilder builder = new StringBuilder(queryString).append(' ');
+        int estimatedSize = queryString.length() + (22 * variables.size()) + 2;
+        StringBuilder builder = new StringBuilder(estimatedSize).append(queryString)
+                                                                .append(' ');
         appendBindVariables(builder, boundNames, variables);
         return obfuscatePasswordsIfNeeded(stmt, builder.toString());
     }
