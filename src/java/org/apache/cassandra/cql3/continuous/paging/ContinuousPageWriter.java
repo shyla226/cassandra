@@ -231,6 +231,8 @@ class ContinuousPageWriter
         {
             if (pauseMicros > 0)
                 channel.eventLoop().schedule(this, pauseMicros, TimeUnit.MICROSECONDS);
+            else if (channel.eventLoop().inEventLoop())
+                run();
             else
                 channel.eventLoop().execute(this);
         }

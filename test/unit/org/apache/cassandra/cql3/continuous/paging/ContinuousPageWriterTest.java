@@ -13,7 +13,13 @@ public class ContinuousPageWriterTest
     @Test
     public void testSendPage()
     {
-        ContinuousPagingTestStubs.RecordingEventLoop eventLoop = new ContinuousPagingTestStubs.RecordingEventLoop();
+        testSendPage(true);
+        testSendPage(false);
+    }
+
+    private void testSendPage(boolean inEventLoop)
+    {
+        ContinuousPagingTestStubs.RecordingEventLoop eventLoop = new ContinuousPagingTestStubs.RecordingEventLoop(inEventLoop);
         ContinuousPagingTestStubs.RecordingChannel channel = new ContinuousPagingTestStubs.RecordingChannel(eventLoop);
         int pages = 2;
 
