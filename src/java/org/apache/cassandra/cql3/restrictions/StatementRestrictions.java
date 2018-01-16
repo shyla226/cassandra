@@ -327,8 +327,6 @@ public class StatementRestrictions
             if (type.isDelete() || type.isUpdate())
                 throw invalidRequest("Invalid restrictions on clustering columns since the %s statement modifies only static columns",
                                      type);
-            if (type.isSelect())
-                throw invalidRequest("Cannot restrict clustering columns when selecting only static columns");
         }
 
         processClusteringColumnsRestrictions(hasQueriableIndex,
@@ -366,7 +364,7 @@ public class StatementRestrictions
         filterRestrictions = filterRestrictionsBuilder.build();
 
         if (usesSecondaryIndexing)
-            validateSecondaryIndexSelections(selectsOnlyStaticColumns);
+            validateSecondaryIndexSelections();
 
         authRestrictions = getAuthRestrictions(table, type);
     }
@@ -909,15 +907,10 @@ public class StatementRestrictions
                         && nonPrimaryKeyRestrictions.hasMultipleContains());
     }
 
-    protected void validateSecondaryIndexSelections(boolean selectsOnlyStaticColumns)
+    protected void validateSecondaryIndexSelections()
     {
         checkFalse(keyIsInRelation(),
                    "Select on indexed columns and with IN clause for the PRIMARY KEY are not supported");
-        // When the user only select static columns, the intent is that we don't query the whole partition but just
-        // the static parts. But 1) we don't have an easy way to do that with 2i and 2) since we don't support index on
-        // static columns
-        // so far, 2i means that you've restricted a non static column, so the query is somewhat non-sensical.
-        checkFalse(selectsOnlyStaticColumns, "Queries using 2ndary indexes don't support selecting only static columns");
     }
 
     /**

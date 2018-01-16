@@ -74,7 +74,7 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
                                                         RowFilter.NONE,
                                                         DataLimits.NONE,
                                                         partitionKey,
-                                                        new ClusteringIndexSliceFilter(Slices.ALL, false));
+                                                        command.clusteringIndexFilter(partitionKey));
 
             Flow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
             return partition.skippingMap(p -> filterStaleEntry(p,
