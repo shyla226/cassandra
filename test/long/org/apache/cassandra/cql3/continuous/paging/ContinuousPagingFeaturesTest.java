@@ -317,11 +317,23 @@ public class ContinuousPagingFeaturesTest extends CQLTester
      * Test interrupting optimized paging after N pages, and then resuming again.
      */
     @Test
-    public void testResume() throws Throwable
+    public void testResume_v1() throws Throwable
+    {
+        testResume(ProtocolVersion.DSE_V1);
+    }
+
+    @Test
+    public void testResume_v2() throws Throwable
+    {
+        testResume(ProtocolVersion.DSE_V2);
+    }
+
+    private void testResume(ProtocolVersion protocolVersion) throws Throwable
     {
         try(TestHelper helper = new TestBuilder(this).numPartitions(100)
                                                      .numClusterings(100)
                                                      .partitionSize(1000)
+                                                     .protocolVersion(protocolVersion)
                                                      .schemaSupplier(b -> new FixedSizeSchema(b.numPartitions, b.numClusterings, b.partitionSize))
                                                      .checkRows(true)
                                                      .build())
