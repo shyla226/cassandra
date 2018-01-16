@@ -600,11 +600,11 @@ public class AuditLoggerTest extends CQLTester
     {
         useSuperUser();
 
-        executeNet("CREATE ROLE foo WITH PASSWORD  =  'bar' AND LOGIN = true");
-        assertMatchingEventInList(getEvents(), CREATE_ROLE, null, null, formatQuery("CREATE ROLE foo WITH PASSWORD = '*****' AND LOGIN = true"));
+        executeNet("CREATE ROLE foo WITH PaSsWoRd  =  'bar' AND LOGIN = true");
+        assertMatchingEventInList(getEvents(), CREATE_ROLE, null, null, formatQuery("CREATE ROLE foo WITH PaSsWoRd  =  '*****' AND LOGIN = true"));
 
-        executeNet("ALTER ROLE foo WITH PASSWORD  =  'baz' AND LOGIN = true");
-        assertMatchingEventInList(getEvents(), ALTER_ROLE, null, null, formatQuery("ALTER ROLE foo WITH PASSWORD = '*****' AND LOGIN = true"));
+        executeNet("ALTER ROLE foo WITH passWORD  =  'baz' AND LOGIN = true");
+        assertMatchingEventInList(getEvents(), ALTER_ROLE, null, null, formatQuery("ALTER ROLE foo WITH passWORD  =  '*****' AND LOGIN = true"));
 
         executeNet("DROP ROLE foo");
         assertMatchingEventInList(getEvents(), DROP_ROLE, null, null, formatQuery("DROP ROLE foo"));
@@ -616,10 +616,10 @@ public class AuditLoggerTest extends CQLTester
         useSuperUser();
 
         executeNet("CREATE USER 'foo' WITH  PASSWORD  'bar'");
-        assertMatchingEventInList(getEvents(), CREATE_ROLE, null, null, formatQuery("CREATE USER 'foo' WITH  PASSWORD '*****'"));
+        assertMatchingEventInList(getEvents(), CREATE_ROLE, null, null, formatQuery("CREATE USER 'foo' WITH  PASSWORD  '*****'"));
 
         executeNet("ALTER USER 'foo' WITH  PASSWORD  'baz'");
-        assertMatchingEventInList(getEvents(), ALTER_ROLE, null, null, formatQuery("ALTER USER 'foo' WITH  PASSWORD '*****'"));
+        assertMatchingEventInList(getEvents(), ALTER_ROLE, null, null, formatQuery("ALTER USER 'foo' WITH  PASSWORD  '*****'"));
 
         executeNet("DROP USER foo");
         assertMatchingEventInList(getEvents(), DROP_ROLE, null, null, formatQuery("DROP USER foo"));

@@ -16,7 +16,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 public class CassandraAuditWriterSyncTest extends CassandraAuditWriterTester
 {
     @BeforeClass
-    public static void setup() throws Throwable
+    public static void setup()
     {
         requireAuthentication();
         DatabaseDescriptor.setPermissionsValidity(9999);

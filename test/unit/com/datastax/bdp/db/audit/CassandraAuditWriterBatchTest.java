@@ -21,7 +21,7 @@ public class CassandraAuditWriterBatchTest extends CassandraAuditWriterTester
     private static final long TIMEOUT = 2000;
 
     @BeforeClass
-    public static void setup() throws Throwable
+    public static void setup()
     {
         requireAuthentication();
         DatabaseDescriptor.setPermissionsValidity(9999);
