@@ -112,6 +112,12 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
+        if (pageCommand == null)
+        {
+            exhausted = true;
+            return EmptyIterators.unfilteredPartition(cfm, false);
+        }
+
         internalPager = new UnfilteredPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
         return Transformation.apply(pageCommand.executeLocally(executionController), internalPager);
     }
@@ -125,6 +131,12 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
+        if (pageCommand == null)
+        {
+            exhausted = true;
+            return EmptyIterators.partition();
+        }
+
         internalPager = new RowPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
         return Transformation.apply(itSupplier.apply(pageCommand), internalPager);
     }
@@ -263,10 +275,12 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
             if (!row.isEmpty())
             {
-                remainingInPartition = limits.perPartitionCount();
+                if (!currentKey.equals(lastKey))
+                    remainingInPartition = limits.perPartitionCount();
                 lastKey = currentKey;
                 lastRow = row;
             }
+
             return row;
         }
 

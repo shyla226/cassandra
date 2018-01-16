@@ -137,9 +137,9 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
 
                     /*
                      * For index queries over a range, we can't do a whole lot better than querying everything for the key range, though for
-                     * slice queries where we can slightly restrict the beginning and end.
+                     * slice queries where we can slightly restrict the beginning and end. We can not do this optimisation for static column indexes.
                      */
-                    if (!dataRange.isNamesQuery())
+                    if (!dataRange.isNamesQuery() && !index.indexedColumn.isStatic())
                     {
                         ClusteringIndexSliceFilter startSliceFilter = ((ClusteringIndexSliceFilter) dataRange.clusteringIndexFilter(
                                                                                                                                    startKey));
