@@ -56,14 +56,21 @@ calculate_system_memory_sizes()
     # cap here to 32765M because the JVM switches to 64 bit references at 32767M
     # details are described in http://java-performance.info/over-32g-heap-java/
     capped_heap_size="32765"
-
-    # set max heap size by calculating 1/2 ram and capping to 32Gb
     half_system_memory_in_mb=`expr $system_memory_in_mb / 2`
-    if [ "$half_system_memory_in_mb" -gt "$capped_heap_size" ]
+    quarter_system_memory_in_mb=`expr $half_system_memory_in_mb / 2`
+    if [ "$half_system_memory_in_mb" -gt "1024" ]
     then
-        max_heap_size_in_mb="$capped_heap_size"
-    else
+        half_system_memory_in_mb="1024"
+    fi
+    if [ "$quarter_system_memory_in_mb" -gt "$capped_heap_size" ]
+    then
+        quarter_system_memory_in_mb="$capped_heap_size"
+    fi
+    if [ "$half_system_memory_in_mb" -gt "$quarter_system_memory_in_mb" ]
+    then
         max_heap_size_in_mb="$half_system_memory_in_mb"
+    else
+        max_heap_size_in_mb="$quarter_system_memory_in_mb"
     fi
 
     system_memory_sizes_calculated=true
