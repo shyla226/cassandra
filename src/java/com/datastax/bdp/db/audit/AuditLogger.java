@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
@@ -34,6 +36,7 @@ import org.apache.cassandra.utils.MD5Digest;
 final class AuditLogger implements IAuditLogger
 {
     private static final Logger logger = LoggerFactory.getLogger(AuditLogger.class);
+    private static final Pattern obfuscatePasswordPattern = Pattern.compile("(?i)(PASSWORD\\s+(=\\s+)?)'[^']*'");
 
     /**
      * The writer used to log the events
@@ -231,7 +234,7 @@ final class AuditLogger implements IAuditLogger
                                       type,
                                       batchID,
                                       keyspace,
-                                      getColumnFamily(statement),
+                                      getTable(statement),
                                       getOperation(statement, queryString, variables, boundNames),
                                       consistencyLevel));
 
@@ -294,6 +297,8 @@ final class AuditLogger implements IAuditLogger
                             preparedStatement.boundNames,
                             queryOptions.getConsistency());
             }
+            else
+                throw new IllegalArgumentException("Got unexpected " + queryOrId);
         }
         return events;
     }
@@ -318,6 +323,7 @@ final class AuditLogger implements IAuditLogger
             }
             return events;
         }
+
         return appendPrepareEvent(new ArrayList<>(1), queryState, statement, queryString, null);
     }
 
@@ -333,7 +339,7 @@ final class AuditLogger implements IAuditLogger
                                       CoreAuditableEventType.CQL_PREPARE_STATEMENT,
                                       batchID,
                                       keyspace,
-                                      getColumnFamily(statement),
+                                      getTable(statement),
                                       queryString,
                                       AuditableEvent.NO_CL));
 
@@ -350,10 +356,8 @@ final class AuditLogger implements IAuditLogger
     private static String obfuscatePasswordsIfNeeded(CQLStatement stmt, String queryString)
     {
         if (stmt instanceof CreateRoleStatement || stmt instanceof AlterRoleStatement)
-        {
-            queryString = queryString.replaceAll("(?i)PASSWORD\\s+'.*'", "PASSWORD '*****'");
-            queryString = queryString.replaceAll("(?i)PASSWORD\\s+=\\s+'.*'", "PASSWORD = '*****'");
-        }
+            queryString = obfuscatePasswordPattern.matcher(queryString)
+                                                  .replaceAll("$1'*****'");
         return queryString;
     }
 
@@ -409,7 +413,7 @@ final class AuditLogger implements IAuditLogger
         return stmt instanceof KeyspaceStatement ? ((KeyspaceStatement) stmt).keyspace() : null;
     }
 
-    private static String getColumnFamily(CQLStatement stmt)
+    private static String getTable(CQLStatement stmt)
     {
         return stmt instanceof TableStatement ? ((TableStatement) stmt).columnFamily() : null;
     }
