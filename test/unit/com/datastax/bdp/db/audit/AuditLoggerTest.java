@@ -45,7 +45,7 @@ public class AuditLoggerTest extends CQLTester
     public static void setUpClass()
     {
         requireAuthentication();
-        IAuditFilter filter = AuditFilters.excludeKeyspace("system.*");
+        IAuditFilter filter = AuditFilters.excludeKeyspaces("system.*");
         IAuditLogger auditLogger = IAuditLogger.newInstance(new InProcTestAuditWriter(), filter);
 
         // We don't need to set the AL to its old state as we'll be resetting

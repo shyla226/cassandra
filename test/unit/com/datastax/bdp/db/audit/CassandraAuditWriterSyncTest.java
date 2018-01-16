@@ -22,8 +22,8 @@ public class CassandraAuditWriterSyncTest extends CassandraAuditWriterTester
         DatabaseDescriptor.setPermissionsValidity(9999);
         DatabaseDescriptor.setPermissionsUpdateInterval(9999);
         CassandraAuditWriter writer = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
-        IAuditFilter filter = AuditFilters.excludeKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME,
-                                                           SchemaConstants.SCHEMA_KEYSPACE_NAME);
+        IAuditFilter filter = AuditFilters.excludeKeyspaces(SchemaConstants.SYSTEM_KEYSPACE_NAME,
+                                                            SchemaConstants.SCHEMA_KEYSPACE_NAME);
         IAuditLogger auditLogger = IAuditLogger.newInstance(writer, filter);
         DatabaseDescriptor.setAuditLoggerUnsafe(auditLogger);
         requireNetwork();
