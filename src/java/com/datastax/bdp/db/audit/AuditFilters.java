@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright DataStax, Inc.
  *
  * Please see the included license file for details.
@@ -10,7 +10,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.auth.RoleResource;
-import org.apache.cassandra.exceptions.ConfigurationException;
 
 import static org.apache.commons.lang3.StringUtils.isBlank;
 
@@ -19,18 +18,6 @@ import static org.apache.commons.lang3.StringUtils.isBlank;
  */
 final class AuditFilters
 {
-    /**
-     * Creates an {@code IAuditFilter} that rejects the keyspaces corresponding to
-     * the specified regex.
-     * @param patterns the regexps used to determine which keyspaces to reject
-     * @return an {@code IAuditFilter} that rejects the keyspaces corresponding to
-     * the specified regex
-     */
-    public static IAuditFilter excludeKeyspace(String... patterns)
-    {
-        return excludeKeyspace(toPatterns(patterns));
-    }
-
     /**
      * Creates an {@code IAuditFilter} that accepts only the roles corresponding to
      * the specified values.
@@ -42,33 +29,16 @@ final class AuditFilters
     {
         return (event) ->
         {
-            for (int i = 0, m = roles.size(); i < m ; i++)
-            {
-                if (event.userHasRole(roles.get(i)))
+            for (RoleResource role : roles)
+                if (event.userHasRole(role))
                     return true;
-            }
             return false;
         };
     }
 
-    /**
-     * Creates an {@code IAuditFilter} that accepts only the specified event categories.
-     * @param categories the accepted categories
-     * @return an {@code IAuditFilter} that accepts only the specified event categories
-     */
-    public static IAuditFilter includeCategory(AuditableEventCategory... categories)
+    public static IAuditFilter excludeRoles(List<RoleResource> roles)
     {
-        return AuditFilters.includeCategory(toSet(categories));
-    }
-
-    /**
-     * Creates an {@code IAuditFilter} that rejects the specified event categories.
-     * @param categories the rejected categories
-     * @return an {@code IAuditFilter} that rejects the specified event categories
-     */
-    public static IAuditFilter excludeCategory(AuditableEventCategory... categories)
-    {
-        return AuditFilters.excludeCategory(toSet(categories));
+        return not(includeRoles(roles));
     }
 
     public static <T> Set<T> toSet(T[] elements)
@@ -92,11 +62,9 @@ final class AuditFilters
             if (keyspace == null)
                 return false;
 
-            for (int i = 0, m = patterns.size(); i < m; i++)
-            {
-                if (patterns.get(i).matcher(keyspace).matches())
+            for (Pattern pattern : patterns)
+                if (pattern.matcher(keyspace).matches())
                     return true;
-            }
             return false;
         };
     }
@@ -108,7 +76,19 @@ final class AuditFilters
      * @return an {@code IAuditFilter} that rejects the keyspaces corresponding to
      * the specified regex
      */
-    public static IAuditFilter excludeKeyspace(List<Pattern> patterns)
+    public static IAuditFilter excludeKeyspaces(String... patterns)
+    {
+        return excludeKeyspaces(toPatterns(patterns));
+    }
+
+    /**
+     * Creates an {@code IAuditFilter} that rejects the keyspaces corresponding to
+     * the specified regex.
+     * @param patterns the regexps used to determine which keyspaces to reject
+     * @return an {@code IAuditFilter} that rejects the keyspaces corresponding to
+     * the specified regex
+     */
+    public static IAuditFilter excludeKeyspaces(List<Pattern> patterns)
     {
         return not(includeKeyspaces(patterns));
     }
@@ -118,7 +98,7 @@ final class AuditFilters
      * @param categories the accepted categories
      * @return an {@code IAuditFilter} that accepts only the specified event categories
      */
-    public static IAuditFilter includeCategory(Set<AuditableEventCategory> categories)
+    public static IAuditFilter includeCategories(Set<AuditableEventCategory> categories)
     {
         return (event) -> categories.contains(event.getType().getCategory());
     }
@@ -128,9 +108,9 @@ final class AuditFilters
      * @param categories the rejected categories
      * @return an {@code IAuditFilter} that rejects the specified event categories
      */
-    public static IAuditFilter excludeCategory(Set<AuditableEventCategory> categories)
+    public static IAuditFilter excludeCategories(Set<AuditableEventCategory> categories)
     {
-        return not(includeCategory(categories));
+        return not(includeCategories(categories));
     }
 
     /**
@@ -161,11 +141,9 @@ final class AuditFilters
     {
         return (event) ->
         {
-            for (int i = 0, m = filters.size(); i < m; i++)
-            {
-                if (!filters.get(i).accept(event))
+            for (IAuditFilter filter : filters)
+                if (!filter.accept(event))
                     return false;
-            }
             return true;
         };
     }
@@ -200,14 +178,14 @@ final class AuditFilters
             Set<AuditableEventCategory> categories = toCategories(auditLoggingOptions.included_categories);
 
             if (!categories.isEmpty())
-                filters.add(includeCategory(categories));
+                filters.add(includeCategories(categories));
         }
         else if (!isBlank(auditLoggingOptions.excluded_categories))
         {
             Set<AuditableEventCategory> categories = toCategories(auditLoggingOptions.excluded_categories);
 
             if (!categories.isEmpty())
-                filters.add(excludeCategory(categories));
+                filters.add(excludeCategories(categories));
         }
     }
 
@@ -225,7 +203,7 @@ final class AuditFilters
             List<RoleResource> roles = toRoles(auditLoggingOptions.excluded_roles);
 
             if (!roles.isEmpty())
-                filters.add(not(includeRoles(roles)));
+                filters.add(excludeRoles(roles));
         }
     }
 
@@ -243,41 +221,26 @@ final class AuditFilters
             List<Pattern> patterns = toPatterns(auditLoggingOptions.excluded_keyspaces);
 
             if (!patterns.isEmpty())
-                filters.add(AuditFilters.excludeKeyspace(patterns));
+                filters.add(AuditFilters.excludeKeyspaces(patterns));
         }
     }
 
     private static Set<AuditableEventCategory> toCategories(String categoriesAsString)
     {
-        Set<AuditableEventCategory> categories = new HashSet<>();
-        for (String value : categoriesAsString.split(","))
-        {
-            value = value.trim();
-            if (!value.isEmpty())
-            {
-                try
-                {
-                    categories.add(AuditableEventCategory.valueOf(value));
-                }
-                catch (IllegalArgumentException e)
-                {
-                    throw new ConfigurationException("Unknown audit event category:  " + value, false);
-                }
-            }
-        }
-        return categories;
+        return Arrays.stream(categoriesAsString.split(","))
+                     .map(String::trim)
+                     .filter(s -> !s.isEmpty())
+                     .map(AuditableEventCategory::fromString)
+                     .collect(Collectors.toCollection(() -> EnumSet.noneOf(AuditableEventCategory.class)));
     }
 
     private static List<RoleResource> toRoles(String rolesAsString)
     {
-        List<RoleResource> roles = new ArrayList<>();
-        for (String role : rolesAsString.split(","))
-        {
-            role = role.trim();
-            if (!role.isEmpty())
-                roles.add(RoleResource.role(role));
-        }
-        return roles;
+        return Arrays.stream(rolesAsString.split(","))
+                     .map(String::trim)
+                     .filter(s -> !s.isEmpty())
+                     .map(RoleResource::role)
+                     .collect(Collectors.toList());
     }
     
     /**
@@ -287,14 +250,7 @@ final class AuditFilters
      */
     private static List<Pattern> toPatterns(String patternsAsString)
     {
-        Set<Pattern> patterns = new HashSet<>();
-        for (String value : patternsAsString.split(","))
-        {
-            value = value.trim();
-            if (!value.isEmpty())
-                patterns.add(Pattern.compile(value));
-        }
-        return new ArrayList<>(patterns);
+        return toPatterns(patternsAsString.split(","));
     }
 
     /**
@@ -304,7 +260,11 @@ final class AuditFilters
      */
     private static List<Pattern> toPatterns(String[] patterns)
     {
-        return Arrays.stream(patterns).map(Pattern::compile).collect(Collectors.toList());
+        return Arrays.stream(patterns)
+                     .map(String::trim)
+                     .filter(s -> !s.isEmpty())
+                     .map(Pattern::compile)
+                     .collect(Collectors.toList());
     }
 
     private AuditFilters()
