@@ -322,35 +322,6 @@ commit_failure_policy: stop
 # Default value ("auto") is 1/256th of the heap or 10MB, whichever is greater
 prepared_statements_cache_size_mb:
 
-# Maximum size of the key cache in memory.
-#
-# Each key cache hit saves 1 seek and each row cache hit saves 2 seeks at the
-# minimum, sometimes more. The key cache is fairly tiny for the amount of
-# time it saves, so it's worthwhile to use it at large numbers.
-# The row cache saves even more time, but must contain the entire row,
-# so it is extremely space-intensive. It's best to only use the
-# row cache if you have hot rows or static rows.
-#
-# NOTE: if you reduce the size, you may not get you hottest keys loaded on startup.
-#
-# Default value is empty to make it "auto" (min(5% of Heap (in MB), 100MB)). Set to 0 to disable key cache.
-key_cache_size_in_mb:
-
-# Duration in seconds after which Cassandra should
-# save the key cache. Caches are saved to saved_caches_directory as
-# specified in this configuration file.
-#
-# Saved caches greatly improve cold-start speeds, and is relatively cheap in
-# terms of I/O for the key cache. Row cache saving is much more expensive and
-# has limited use.
-#
-# Default is 14400 or 4 hours.
-key_cache_save_period: 14400
-
-# Number of keys from the key cache to save
-# Disabled by default, meaning all keys are going to be saved
-# key_cache_keys_to_save: 100
-
 # Row cache implementation class name. Available implementations:
 #
 # org.apache.cassandra.cache.OHCProvider
@@ -564,11 +535,6 @@ memtable_allocation_type: heap_buffers
 # and flush size and frequency. More is not better you just need enough flush writers
 # to never stall waiting for flushing to free memory.
 #
-# TODO for Jake: I lowered the flush writers back from 12 to 2 because otherwise the calculation for
-# memtable_cleanup_threshold makes no sense and CASSANDRA-12228 deprecated MCT, which means
-# the warning breaks tests if we specify MCT in the yaml. You seemed OK with removing MCT in 12228,
-# so I am not quite sure what we want to do, and also why do we need as many flush writers as 12
-# (given that it is 12 per disk)
 memtable_flush_writers: 2
 
 # Total space to use for change-data-capture logs on disk.
@@ -671,9 +637,6 @@ native_transport_port: 9042
 # from native_transport_port will use encryption for native_transport_port_ssl while
 # keeping native_transport_port unencrypted.
 # native_transport_port_ssl: 9142
-# The maximum threads for handling requests (note that idle threads are stopped
-# after 30 seconds so there is not corresponding minimum setting).
-# native_transport_max_threads: 128
 #
 # The maximum size of allowed frame. Frame (requests) larger than this will
 # be rejected as invalid. The default is 256MB. If you're changing this parameter,
