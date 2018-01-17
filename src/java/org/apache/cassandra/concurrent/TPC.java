@@ -232,7 +232,7 @@ public class TPC
     /**
      * @return the TPC scheduler associated to the next TPC core, see {@link #getNextCore()}.
      */
-    public static TPCScheduler getNextTPCSchduler()
+    public static TPCScheduler getNextTPCScheduler()
     {
         return getForCore(getNextCore());
     }
