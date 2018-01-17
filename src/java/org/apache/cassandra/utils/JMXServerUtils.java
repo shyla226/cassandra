@@ -19,6 +19,7 @@
 package org.apache.cassandra.utils;
 
 import java.io.IOException;
+import sun.misc.ObjectInputFilter;
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
@@ -309,6 +310,12 @@ public class JMXServerUtils
         private Remote connectorServer;
 
         public Remote exportObject(Remote obj, int port, RMIClientSocketFactory csf, RMIServerSocketFactory ssf)
+        throws RemoteException
+        {
+            return exportObject(obj, port, csf, ssf, null);
+        }
+
+        public Remote exportObject(Remote obj, int port, RMIClientSocketFactory csf, RMIServerSocketFactory ssf, ObjectInputFilter filter)
         throws RemoteException
         {
             Remote remote = new UnicastServerRef2(port, csf, ssf).exportObject(obj, null, true);
