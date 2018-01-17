@@ -115,6 +115,18 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              null);
     }
 
+    public static PartitionRangeReadCommand allDataRead(CFMetaData metadata, ColumnFilter columnFilter, int nowInSec)
+    {
+        return new PartitionRangeReadCommand(false, 0, false,
+                                             metadata,
+                                             nowInSec,
+                                             columnFilter,
+                                             RowFilter.NONE,
+                                             DataLimits.NONE,
+                                             DataRange.allData(metadata.partitioner),
+                                             null);
+    }
+
     public DataRange dataRange()
     {
         return dataRange;
