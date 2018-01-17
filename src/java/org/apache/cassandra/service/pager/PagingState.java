@@ -38,6 +38,8 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BUFFER_ARRAY;
+
 public class PagingState
 {
     public final ByteBuffer partitionKey;  // Can be null for single partition queries.
@@ -328,7 +330,7 @@ public class PagingState
                                           ? CompositeType.splitName(value)
                                           : Collections.singletonList(value);
 
-            return Clustering.make(components.subList(0, Math.min(csize, components.size())).toArray(new ByteBuffer[0]));
+            return Clustering.make(components.subList(0, Math.min(csize, components.size())).toArray(EMPTY_BUFFER_ARRAY));
         }
 
         @Override

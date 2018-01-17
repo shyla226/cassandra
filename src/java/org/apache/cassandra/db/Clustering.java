@@ -33,11 +33,11 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.memory.AbstractAllocator;
 
-import static org.apache.cassandra.db.AbstractBufferClusteringPrefix.EMPTY_VALUES_ARRAY;
+import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BUFFER_ARRAY;
 
 public interface Clustering extends ClusteringPrefix
 {
-    static final long EMPTY_SIZE = ObjectSizes.measure(new BufferClustering(EMPTY_VALUES_ARRAY));
+    static final long EMPTY_SIZE = ObjectSizes.measure(new BufferClustering(EMPTY_BUFFER_ARRAY));
 
     public static final Serializer serializer = new Serializer();
 
@@ -101,7 +101,7 @@ public interface Clustering extends ClusteringPrefix
      * The special cased clustering used by all static rows. It is a special case in the
      * sense that it's always empty, no matter how many clustering columns the table has.
      */
-    public static final Clustering STATIC_CLUSTERING = new BufferClustering(EMPTY_VALUES_ARRAY)
+    public static final Clustering STATIC_CLUSTERING = new BufferClustering(EMPTY_BUFFER_ARRAY)
     {
         @Override
         public Kind kind()
@@ -123,7 +123,7 @@ public interface Clustering extends ClusteringPrefix
     };
 
     /** Empty clustering for tables having no clustering columns. */
-    public static final Clustering EMPTY = new BufferClustering(EMPTY_VALUES_ARRAY)
+    public static final Clustering EMPTY = new BufferClustering(EMPTY_BUFFER_ARRAY)
     {
         @Override
         public String toString(TableMetadata metadata)

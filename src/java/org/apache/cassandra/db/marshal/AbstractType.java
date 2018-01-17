@@ -548,12 +548,20 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     {
         return readValue(in, Integer.MAX_VALUE);
     }
+
     public final ByteBuffer readValue(DataInputPlus in, int maxValueSize) throws IOException
+    {
+        return readValue(in, maxValueSize, null);
+    }
+
+    public final ByteBuffer readValue(DataInputPlus in, int maxValueSize, ByteBuffer byteBuffer) throws IOException
     {
         int length = valueLengthIfFixed();
 
         if (isValueLengthFixed(length))
-            return ByteBufferUtil.read(in, length);
+        {
+            return ByteBufferUtil.read(in, length, byteBuffer);
+        }
         else
         {
             int l = (int)in.readUnsignedVInt();
@@ -565,7 +573,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
                                                     "which is set via max_value_size_in_mb in cassandra.yaml",
                                                     l, maxValueSize));
 
-            return ByteBufferUtil.read(in, l);
+            return ByteBufferUtil.read(in, l, byteBuffer);
         }
     }
 

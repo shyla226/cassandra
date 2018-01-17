@@ -25,15 +25,17 @@ import java.util.List;
 
 import org.apache.cassandra.utils.memory.AbstractAllocator;
 
+import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BUFFER_ARRAY;
+
 /**
  * The start or end of a range of clusterings, either inclusive or exclusive.
  */
 public class ClusteringBound extends ClusteringBoundOrBoundary
 {
     /** The smallest start bound, i.e. the one that starts before any row. */
-    public static final ClusteringBound BOTTOM = new ClusteringBound(Kind.INCL_START_BOUND, EMPTY_VALUES_ARRAY);
+    public static final ClusteringBound BOTTOM = new ClusteringBound(Kind.INCL_START_BOUND, EMPTY_BUFFER_ARRAY);
     /** The biggest end bound, i.e. the one that ends after any row. */
-    public static final ClusteringBound TOP = new ClusteringBound(Kind.INCL_END_BOUND, EMPTY_VALUES_ARRAY);
+    public static final ClusteringBound TOP = new ClusteringBound(Kind.INCL_END_BOUND, EMPTY_BUFFER_ARRAY);
 
     protected ClusteringBound(Kind kind, ByteBuffer[] values)
     {

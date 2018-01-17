@@ -19,20 +19,24 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.Arrays;
+import java.util.List;
 
 import com.google.common.hash.Hasher;
 
 import org.apache.cassandra.cache.IMeasurableMemory;
-import org.apache.cassandra.config.*;
-import org.apache.cassandra.db.marshal.CompositeType;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ByteSource;
+
+import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BUFFER_ARRAY;
 
 /**
  * A clustering prefix is the unit of what a {@link ClusteringComparator} can compare.
@@ -490,6 +494,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
         private int deserializedSize;
         private ByteBuffer[] nextValues;
 
+
         public Deserializer(ClusteringComparator comparator, DataInputPlus in, SerializationHeader header)
         {
             this.comparator = comparator;
@@ -512,8 +517,15 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
             // between elements if 1) we haven't returned the previous element (if we have, nextValues will be null) and 2)
             // nextValues is of the proper size. Note that the 2nd condition may not hold for range tombstone bounds, but all
             // rows have a fixed size clustering, so we'll still save in the common case.
-            if (nextValues == null || nextValues.length != nextSize)
+            if (nextValues == null)
+            {
                 this.nextValues = new ByteBuffer[nextSize];
+            }
+            else if (nextValues.length < nextSize)
+            {
+                // keep the already allocated ByteBuffers too
+                this.nextValues = Arrays.copyOf(nextValues, nextSize);
+            }
         }
 
         public int compareNextTo(ClusteringBoundOrBoundary bound) throws IOException
@@ -558,9 +570,24 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
                 nextHeader = in.readUnsignedVInt();
 
             int i = deserializedSize++;
-            nextValues[i] = Serializer.isNull(nextHeader, i)
-                          ? null
-                          : (Serializer.isEmpty(nextHeader, i) ? ByteBufferUtil.EMPTY_BYTE_BUFFER : serializationHeader.clusteringTypes().get(i).readValue(in, DatabaseDescriptor.getMaxValueSize()));
+
+            final ByteBuffer nextValue;
+            if (Serializer.isNull(nextHeader, i))
+            {
+                nextValue = null;
+            }
+            else if (Serializer.isEmpty(nextHeader, i))
+            {
+                nextValue = ByteBufferUtil.EMPTY_BYTE_BUFFER;
+            }
+            else
+            {
+                final AbstractType<?> type = serializationHeader.clusteringTypes().get(i);
+
+                // null is valid return from read, as well as a new BB, but we're hopeful about reuse here
+                nextValue = type.readValue(in, DatabaseDescriptor.getMaxValueSize(), nextValues[i]);
+            }
+            nextValues[i] = nextValue;
             return true;
         }
 
@@ -574,8 +601,8 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
         {
             assert !nextIsRow;
             deserializeAll();
-            ClusteringBoundOrBoundary bound = ClusteringBoundOrBoundary.create(nextKind, nextValues);
-            nextValues = null;
+            final ByteBuffer[] values = detachValues();
+            ClusteringBoundOrBoundary bound = ClusteringBoundOrBoundary.create(nextKind, values);
             return bound;
         }
 
@@ -583,9 +610,19 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
         {
             assert nextIsRow;
             deserializeAll();
-            Clustering clustering = Clustering.make(nextValues);
-            nextValues = null;
+
+            final ByteBuffer[] values = detachValues();
+            Clustering clustering = Clustering.make(values);
             return clustering;
+        }
+
+        private ByteBuffer[] detachValues()
+        {
+            if (nextSize == 0)
+                return EMPTY_BUFFER_ARRAY;
+            final ByteBuffer[] values = Arrays.copyOf(nextValues, nextSize);
+            Arrays.fill(nextValues, 0, nextSize , null);
+            return values;
         }
 
         public ClusteringPrefix.Kind skipNext() throws IOException

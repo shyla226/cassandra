@@ -25,13 +25,13 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.UnsafeCopy;
 
+import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BUFFER_ARRAY;
+
 /**
  * An off-heap region of memory that must be manually free'd when no longer needed.
  */
 public class Memory implements AutoCloseable
 {
-    private static final ByteBuffer[] NO_BYTE_BUFFERS = new ByteBuffer[0];
-
     protected long peer;
     // size of the memory region
     protected final long size;
@@ -219,7 +219,7 @@ public class Memory implements AutoCloseable
     {
         checkBounds(offset, offset + length);
         if (size() == 0)
-            return NO_BYTE_BUFFERS;
+            return EMPTY_BUFFER_ARRAY;
 
         ByteBuffer[] result = new ByteBuffer[(int) (length / Integer.MAX_VALUE) + 1];
         int size = (int) (size() / result.length);
