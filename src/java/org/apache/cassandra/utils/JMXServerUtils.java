@@ -19,9 +19,9 @@
 package org.apache.cassandra.utils;
 
 import java.io.IOException;
-import sun.misc.ObjectInputFilter;
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -32,6 +32,7 @@ import java.rmi.server.UnicastRemoteObject;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.management.remote.*;
 import javax.management.remote.rmi.RMIConnectorServer;
@@ -89,7 +90,9 @@ public class JMXServerUtils
 
         // Make sure we use our custom exporter so a full GC doesn't get scheduled every
         // sun.rmi.dgc.server.gcInterval millis (default is 3600000ms/1 hour)
-        env.put(RMIExporter.EXPORTER_ATTRIBUTE, new Exporter());
+        env.put(RMIExporter.EXPORTER_ATTRIBUTE, Proxy.newProxyInstance(JMXServerUtils.class.getClassLoader(),
+                                                                       new Class[] { RMIExporter.class, Supplier.class },
+                                                                       new ExporterProxy()));
 
 
         int rmiPort = Integer.getInteger("com.sun.management.jmxremote.rmi.port", 0);
@@ -113,7 +116,8 @@ public class JMXServerUtils
 
     private static void configureRMIRegistry(int port, Map<String, Object> env) throws RemoteException
     {
-        Exporter exporter = (Exporter)env.get(RMIExporter.EXPORTER_ATTRIBUTE);
+        Remote remote = (Remote) ((Supplier) env.get(RMIExporter.EXPORTER_ATTRIBUTE)).get();
+
         // If ssl is enabled, make sure it's also in place for the RMI registry
         // by using the SSL socket factories already created and stashed in env
         if (Boolean.getBoolean("com.sun.management.jmxremote.ssl"))
@@ -121,11 +125,11 @@ public class JMXServerUtils
             registry = new Registry(port,
                                    (RMIClientSocketFactory)env.get(RMIConnectorServer.RMI_CLIENT_SOCKET_FACTORY_ATTRIBUTE),
                                    (RMIServerSocketFactory)env.get(RMIConnectorServer.RMI_SERVER_SOCKET_FACTORY_ATTRIBUTE),
-                                   exporter.connectorServer);
+                                   remote);
         }
         else
         {
-            registry = new Registry(port, exporter.connectorServer);
+            registry = new Registry(port, remote);
         }
     }
 
@@ -301,21 +305,47 @@ public class JMXServerUtils
      *  * https://bugs.openjdk.java.net/browse/JDK-6760712 for info on setting the exporter
      *  * sun.management.remote.ConnectorBootstrap to trace how the inbuilt management agent
      *    sets up the JMXConnectorServer
+     *
+     * Due to interface changes in JDK8_161 and for compatibility with preivous JDK8
+     * versions, this class is implemented as proxy.
      */
-    private static class Exporter implements RMIExporter
-    {
+    public static class ExporterProxy implements InvocationHandler {
+
+        private final static String toString = "toString";
+        private final static String hashCode = "hashCode";
+        private final static String equals = "equals";
+        private final static String export = "exportObject";
+        private final static String unexport = "unexportObject";
+        private final static String get = "get";
+
         // the first object to be exported by this instance is *always* the JMXConnectorServer
         // instance created by createJMXServer. Keep a handle to it, as it needs to be supplied
         // to our custom Registry too.
         private Remote connectorServer;
 
-        public Remote exportObject(Remote obj, int port, RMIClientSocketFactory csf, RMIServerSocketFactory ssf)
-        throws RemoteException
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable
         {
-            return exportObject(obj, port, csf, ssf, null);
+            switch (method.getName())
+            {
+                case toString:
+                    return "Exporter@" + Integer.toHexString(hashCode());
+                case hashCode:
+                    return hashCode();
+                case equals:
+                    return proxy.equals(args[0]);
+                case get:
+                    return connectorServer;
+                case export:
+                    // Ignore ObjectInputFilter, which is passed as a 5th argument on JDKs after 161
+                    return exportObject((Remote) args[0], (int) args[1], (RMIClientSocketFactory) args[2], (RMIServerSocketFactory) args[3]);
+                case unexport:
+                    return unexportObject((Remote) args[0], (boolean) args[1]);
+                default:
+                    throw new UnsupportedOperationException("Can't execute " + method);
+            }
         }
 
-        public Remote exportObject(Remote obj, int port, RMIClientSocketFactory csf, RMIServerSocketFactory ssf, ObjectInputFilter filter)
+        private Remote exportObject(Remote obj, int port, RMIClientSocketFactory csf, RMIServerSocketFactory ssf)
         throws RemoteException
         {
             Remote remote = new UnicastServerRef2(port, csf, ssf).exportObject(obj, null, true);
@@ -326,7 +356,7 @@ public class JMXServerUtils
             return remote;
         }
 
-        public boolean unexportObject(Remote obj, boolean force) throws NoSuchObjectException
+        private boolean unexportObject(Remote obj, boolean force) throws NoSuchObjectException
         {
             return UnicastRemoteObject.unexportObject(obj, force);
         }
