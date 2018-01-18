@@ -23,7 +23,7 @@ package org.apache.cassandra.cache;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -67,7 +67,6 @@ public class ChunkCache
     static class Key
     {
         final ChunkReader file;
-        final String path;
         final long position;
 
         public Key(ChunkReader file, long position)
@@ -75,14 +74,13 @@ public class ChunkCache
             super();
             this.file = file;
             this.position = position;
-            this.path = file.channel().filePath();
         }
 
         public int hashCode()
         {
             final int prime = 31;
             int result = 1;
-            result = prime * result + path.hashCode();
+            result = prime * result + path().hashCode();
             result = prime * result + file.getClass().hashCode();
             result = prime * result + Long.hashCode(position);
             return result;
@@ -98,29 +96,32 @@ public class ChunkCache
             Key other = (Key) obj;
             return (position == other.position)
                     && file.getClass() == other.file.getClass()
-                    && path.equals(other.path);
+                    && path().equals(other.path());
+        }
+
+        public String path()
+        {
+            return file.channel().filePath();
         }
 
         public String toString()
         {
-            return path + '@' + position;
+            return path() + '@' + position;
         }
     }
 
     public static class Buffer implements Rebufferer.BufferHolder
     {
-        private final Key key;
         private final ByteBuffer buffer;
-        private final long offset;
-        private final AtomicInteger references;
+        private final Key key;
 
-        public Buffer(Key key, ByteBuffer buffer, long offset)
+        private volatile int references = 1; // Start referenced
+
+        private static final AtomicIntegerFieldUpdater<Buffer> referencesUpdater = AtomicIntegerFieldUpdater.newUpdater(Buffer.class, "references");
+
+        public Buffer(Key key, ByteBuffer buffer)
         {
             this.key = key;
-            this.offset = offset;
-
-            // Start referenced
-            this.references = new AtomicInteger(1);
             this.buffer = buffer;
         }
 
@@ -129,14 +130,15 @@ public class ChunkCache
             int refCount;
             do
             {
-                refCount = references.get();
+                refCount = references;
 
                 if (refCount == 0)
                 {
                     // Buffer was released before we managed to reference it.
                     return null;
                 }
-            } while (!references.compareAndSet(refCount, refCount + 1));
+
+            } while (!referencesUpdater.compareAndSet(this, refCount, refCount + 1));
 
             return this;
         }
@@ -144,14 +146,14 @@ public class ChunkCache
         @Override
         public ByteBuffer buffer()
         {
-            assert references.get() > 0;
+            assert references > 0;
             return buffer.duplicate();
         }
 
         @Override
         public long offset()
         {
-            return offset;
+            return key.position;
         }
 
         @Override
@@ -159,13 +161,14 @@ public class ChunkCache
         {
             //The read from disk read may be in flight
             //We need to keep this buffer till the async callback has fired
-            if (references.decrementAndGet() == 0)
+            if (referencesUpdater.decrementAndGet(this) == 0)
                 BufferPool.put(buffer);
         }
 
+        @Override
         public String toString()
         {
-            return "ChunkCacheBuffer " + key;
+            return "ChunkCache$Buffer(" + key + ")";
         }
     }
 
@@ -195,7 +198,7 @@ public class ChunkCache
             assert !buffer.isDirect() || (UnsafeByteBufferAccess.getAddress(buffer) & (512 - 1)) == 0 : "Buffer from pool is not properly aligned!";
 
             return rebufferer.readChunk(key.position, buffer)
-                             .thenApply(b -> new Buffer(key, b, key.position))
+                             .thenApply(b -> new Buffer(key, b))
                              .whenComplete((b, t) -> ctx.close());
         }
         catch (Throwable t)
@@ -243,7 +246,7 @@ public class ChunkCache
     @VisibleForTesting
     public void invalidateFile(String fileName)
     {
-        cache.synchronous().invalidateAll(Iterables.filter(cache.synchronous().asMap().keySet(), x -> x.path.equals(fileName)));
+        cache.synchronous().invalidateAll(Iterables.filter(cache.synchronous().asMap().keySet(), x -> x.path().equals(fileName)));
     }
 
     @VisibleForTesting
@@ -339,7 +342,7 @@ public class ChunkCache
              * Notify the caller this page isn't ready
              * but don't give them the buffer because it has not been referenced.
              */
-            throw new NotInCacheException(asyncBuffer.thenAccept(buffer -> {}), key.path, key.position);
+            throw new NotInCacheException(asyncBuffer.thenAccept(buffer -> {}), key.path(), key.position);
         }
 
         @Override

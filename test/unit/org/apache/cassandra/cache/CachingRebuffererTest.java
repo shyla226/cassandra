@@ -20,6 +20,7 @@ package org.apache.cassandra.cache;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -31,14 +32,17 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.AsynchronousChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
+import org.apache.cassandra.io.util.FileAccessType;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.mockito.Matchers;
 import org.mockito.Mockito;
@@ -79,6 +83,90 @@ public class CachingRebuffererTest
         when(chunkReader.channel()).thenReturn(channel);
 
         ChunkCache.instance.invalidateFile(file.getPath());
+    }
+
+    // Helper test to estimate the memory overhead caused by buffer cache
+    @Ignore
+    @Test
+    public void calculateMemoryOverhead() throws InterruptedException
+    {
+        class EmptyAllocatingChunkReader implements ChunkReader
+        {
+            public CompletableFuture<ByteBuffer> readChunk(long position, ByteBuffer buffer)
+            {
+                return CompletableFuture.completedFuture(ByteBuffer.allocateDirect(PAGE_SIZE));
+            }
+
+            public int chunkSize()
+            {
+                return PAGE_SIZE;
+            }
+
+            public BufferType preferredBufferType()
+            {
+                return BufferType.OFF_HEAP;
+            }
+
+            public boolean isMmap()
+            {
+                return false;
+            }
+
+            public ChunkReader withChannel(AsynchronousChannelProxy channel)
+            {
+                return this;
+            }
+
+            public Rebufferer instantiateRebufferer(FileAccessType accessType)
+            {
+                return null;
+            }
+
+            public void close()
+            {
+
+            }
+
+            public AsynchronousChannelProxy channel()
+            {
+                return channel;
+            }
+
+            public long fileLength()
+            {
+                return 0;
+            }
+
+            public double getCrcCheckChance()
+            {
+                return 0;
+            }
+        }
+
+        Rebufferer rebufferer = ChunkCache.instance.maybeWrap(new EmptyAllocatingChunkReader()).instantiateRebufferer();
+
+        // Ask the runtime to GC
+        for (int i = 0; i < 10; i++)
+            Runtime.getRuntime().gc();
+
+        long mem = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed();
+
+        // Allocate 1,5M items
+        long count = 1_500_000;
+
+        // Cache them
+        for (long i = 0; i < count; i++)
+            rebufferer.rebufferAsync(i * PAGE_SIZE);
+
+        // Ask the runtime to GC again
+        for (int i = 0; i < 10; i++)
+            Runtime.getRuntime().gc();
+
+        // Sleep a bit to be more sure GC is actually triggered
+        Thread.sleep(10000);
+
+        long memAfter = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed();
+        System.out.println("(memAfter - mem) = " + ((memAfter - mem) / count));
     }
 
     @Test
