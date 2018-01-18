@@ -24,11 +24,13 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.concurrent.StagedScheduler;
-import org.apache.cassandra.concurrent.TPCTaskType;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.disposables.Disposable;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
 
 /**
  * Implementation of {@link DeferredFlow}.
@@ -58,7 +60,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
     private volatile FlowSubscriber<T> subscriber;
     private volatile FlowSubscriptionRecipient subscriptionRecipient;
     private volatile FlowSubscription subscription;
-    private volatile Disposable timeoutTask;
+    private volatile TimeoutTask<T> timeoutTask;
 
     private final AtomicBoolean subscribed = new AtomicBoolean(false);
 
@@ -125,22 +127,16 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
             return;
         }
 
-        timeoutTask = schedulerSupplier.get().schedule(() -> {
-            timeoutTask = null;
-            if (!hasSource()) // important to check because it is expensive to create an exception, due to the callstack
-                onSource(timeoutSupplier.get());
-        }, TPCTaskType.TIMED_TIMEOUT, timeoutNanos, TimeUnit.NANOSECONDS);
+        timeoutTask = new TimeoutTask<>(this, timeoutSupplier, schedulerSupplier);
+        timeoutTask.submit(timeoutNanos, TimeUnit.NANOSECONDS);
     }
 
-    /** Dispose the timeout task, if available.
-     * <p>
-     * It's important to dispose of any pending timeout tasks in order to avoid keeping references to
-     * the entire topology, which would cause the heap survivor and tenured areas to fill up and as a
-     * consequence terrible performance due to high GC activity and long pauses
+    /**
+     * Dispose the timeout task, if available.
      */
     private void disposeTimeoutTask()
     {
-        Disposable timeoutTask = this.timeoutTask;
+        TimeoutTask<T> timeoutTask = this.timeoutTask;
         if (timeoutTask != null)
             timeoutTask.dispose();
 
@@ -169,5 +165,58 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
         disposeTimeoutTask();
 
         source.get().requestFirst(subscriber, subscriptionRecipient);
+    }
+
+    /**
+     * We create a static class to avoid keeping a reference to the flow, so that we're able to set it null as soon
+     * the timeout task is finished (at the timeout itself might be disposed later).
+     * <p>
+     * It's important to dispose of any pending timeout tasks in order to avoid keeping references to
+     * the entire topology, which would cause the heap survivor and tenured areas to fill up and as a
+     * consequence terrible performance due to high GC activity and long pauses
+     */
+    private static class TimeoutTask<T> implements Runnable
+    {
+        private final AtomicReference<DeferredFlow<T>> flowRef;
+        private final Supplier<Flow<T>> timeoutSupplier;
+        private final Supplier<StagedScheduler> schedulerSupplier;
+        private volatile Disposable disposable;
+
+        public TimeoutTask(DeferredFlow<T> flow, Supplier<Flow<T>> timeoutSupplier, Supplier<StagedScheduler> schedulerSupplier)
+        {
+            this.flowRef = new AtomicReference<>(flow);
+            this.timeoutSupplier = timeoutSupplier;
+            this.schedulerSupplier = schedulerSupplier;
+        }
+
+        @Override
+        public void run()
+        {
+            try
+            {
+                DeferredFlow<T> flow = flowRef.get();
+                // Might have been disposed (nulled) or set (the source) in the meantime: important to check because it
+                // is expensive to create an exception, due to the callstack.
+                if (flow != null && !flow.hasSource())
+                    flow.onSource(timeoutSupplier.get().lift(Threads.requestOn(schedulerSupplier.get(), TPCTaskType.READ_TIMEOUT)));
+            }
+            finally
+            {
+                flowRef.set(null);
+            }
+        }
+
+        public void submit(long timeoutNanos, TimeUnit timeUnit)
+        {
+            disposable = TPC.bestTPCTimer().onTimeout(this, timeoutNanos, timeUnit);
+        }
+
+        public void dispose()
+        {
+            if (disposable != null)
+                disposable.dispose();
+
+            flowRef.set(null);
+        }
     }
 }

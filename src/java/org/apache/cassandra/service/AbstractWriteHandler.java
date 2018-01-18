@@ -23,10 +23,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import org.apache.cassandra.concurrent.TPCTimer;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.reactivex.Completable;
-import io.reactivex.CompletableSource;
+import io.reactivex.CompletableObserver;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.internal.disposables.EmptyDisposable;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -34,14 +37,18 @@ import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.FailureResponse;
-import org.apache.cassandra.rx.CompletableTimeout;
+
+import static org.apache.cassandra.service.WriteHandler.logger;
 
 abstract class AbstractWriteHandler extends WriteHandler
 {
+    private static final TimeoutException TIMEOUT_EXCEPTION = new TimeoutException();
+
     protected final WriteEndpoints endpoints;
     protected final ConsistencyLevel consistency;
     protected final WriteType writeType;
     private final long queryStartNanos;
+    private final TPCTimer requestExpirer;
 
     protected final int blockFor;
 
@@ -52,12 +59,14 @@ abstract class AbstractWriteHandler extends WriteHandler
                          ConsistencyLevel consistency,
                          int blockFor,
                          WriteType writeType,
-                         long queryStartNanos)
+                         long queryStartNanos,
+                         TPCTimer requestExpirer)
     {
         this.endpoints = endpoints;
         this.consistency = consistency;
         this.writeType = writeType;
         this.queryStartNanos = queryStartNanos;
+        this.requestExpirer = requestExpirer;
 
         this.blockFor = blockFor < 0
                         ? consistency.blockFor(endpoints.keyspace()) + pendingToBlockFor()
@@ -117,29 +126,40 @@ abstract class AbstractWriteHandler extends WriteHandler
 
     public Completable toObservable()
     {
-        return Completable.create(subscriber -> whenComplete((result, error) -> {
-            if (logger.isTraceEnabled())
-                logger.trace("{} - Completed with {}/{}", AbstractWriteHandler.this.hashCode(), result, error == null ? null : error.getClass().getName());
-            if (error != null)
-                subscriber.onError(error);
-            else
-                subscriber.onComplete();
-            })).compose(s -> new CompletableTimeout(s, currentTimeout(), TimeUnit.NANOSECONDS))
-               .onErrorResumeNext(exc -> {
-               if (exc instanceof TimeoutException)
-               {
-                   int acks = ackCount();
-                   // It's pretty unlikely, but we can race between exiting get() above and here, so
-                   // that we could now have enough acks. In that case, we "lie" on the acks count to
-                   // avoid sending confusing info to the user (see CASSANDRA-6491).
-                   if (acks >= blockFor)
-                       acks = blockFor - 1;
-                   return Completable.error(new WriteTimeoutException(writeType, consistency, acks, blockFor));
-               }
-               if (logger.isTraceEnabled())
-                   logger.trace("{} - Returning error {}", AbstractWriteHandler.this.hashCode(), exc.getClass().getName());
-               return Completable.error(exc);
-          });
+        return new Completable()
+        {
+            protected void subscribeActual(CompletableObserver subscriber)
+            {
+                subscriber.onSubscribe(EmptyDisposable.INSTANCE);
+                Disposable timeout = requestExpirer.onTimeout(() -> completeExceptionally(TIMEOUT_EXCEPTION), currentTimeout(), TimeUnit.NANOSECONDS);
+
+                whenComplete((result, error) -> {
+                    if (logger.isTraceEnabled())
+                        logger.trace("{} - Completed with {}/{}", AbstractWriteHandler.this.hashCode(), result, error == null ? null : error.getClass().getName());
+
+                    timeout.dispose();
+                    if (error != null)
+                    {
+                        if (logger.isTraceEnabled())
+                            logger.trace("{} - Returning error {}", AbstractWriteHandler.this.hashCode(), error.getClass().getName());
+                        if (error instanceof TimeoutException)
+                        {
+                            int acks = ackCount();
+                            // It's pretty unlikely, but we can race between exiting get() above and here, so
+                            // that we could now have enough acks. In that case, we "lie" on the acks count to
+                            // avoid sending confusing info to the user (see CASSANDRA-6491).
+                            if (acks >= blockFor)
+                                acks = blockFor - 1;
+                            subscriber.onError(new WriteTimeoutException(writeType, consistency, acks, blockFor));
+                        }
+                        else
+                            subscriber.onError(error);
+                    }
+                    else
+                        subscriber.onComplete();
+                });
+            }
+        };
     }
 
     /**

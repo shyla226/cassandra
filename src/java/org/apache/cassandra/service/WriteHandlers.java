@@ -29,6 +29,7 @@ import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.Response;
+import org.apache.cassandra.concurrent.TPCTimer;
 
 abstract class WriteHandlers
 {
@@ -46,9 +47,10 @@ abstract class WriteHandlers
                       ConsistencyLevel consistency,
                       int blockFor,
                       WriteType writeType,
-                      long queryStartNanos)
+                      long queryStartNanos,
+                      TPCTimer timer)
         {
-            super(endpoints, consistency, blockFor, writeType, queryStartNanos);
+            super(endpoints, consistency, blockFor, writeType, queryStartNanos, timer);
         }
 
         public void onResponse(Response<EmptyPayload> response)
@@ -82,9 +84,10 @@ abstract class WriteHandlers
                                ConsistencyLevel consistency,
                                int blockFor,
                                WriteType writeType,
-                               long queryStartNanos)
+                               long queryStartNanos,
+                               TPCTimer timer)
         {
-            super(endpoints, consistency, blockFor, writeType, queryStartNanos);
+            super(endpoints, consistency, blockFor, writeType, queryStartNanos, timer);
         }
 
         protected int pendingToBlockFor()
@@ -115,9 +118,10 @@ abstract class WriteHandlers
                               ConsistencyLevel consistency,
                               int blockFor,
                               WriteType writeType,
-                              long queryStartNanos)
+                              long queryStartNanos,
+                              TPCTimer timer)
         {
-            super(endpoints, consistency, blockFor, writeType, queryStartNanos);
+            super(endpoints, consistency, blockFor, writeType, queryStartNanos, timer);
             assert consistency == ConsistencyLevel.EACH_QUORUM;
 
             NetworkTopologyStrategy strategy = (NetworkTopologyStrategy) endpoints.keyspace().getReplicationStrategy();

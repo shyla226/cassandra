@@ -561,7 +561,8 @@ public class BatchlogManager implements BatchlogManagerMBean
                 WriteHandler handler = WriteHandler.builder(endpoints,
                                                             ConsistencyLevel.ALL,
                                                             WriteType.UNLOGGED_BATCH,
-                                                            queryStartNanos)
+                                                            queryStartNanos,
+                                                            TPC.bestTPCTimer())
                                                    .blockFor(endpoints.liveCount())
                                                    .build();
                 return new ReplayWriteHandler(handler);

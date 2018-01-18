@@ -48,6 +48,7 @@ public abstract class WrappingWriteHandler extends WriteHandler
             else
                 completeExceptionally(t);
         });
+        // We also want the other way around and that's why we override the complete methods below.
     }
 
     public WriteEndpoints endpoints()
@@ -94,5 +95,21 @@ public abstract class WrappingWriteHandler extends WriteHandler
     public void onTimeout(InetAddress host)
     {
         wrapped.onTimeout(host);
+    }
+
+    @Override
+    public boolean complete(Void value)
+    {
+        if (!wrapped.isDone())
+            wrapped.complete(value);
+        return super.complete(value);
+    }
+
+    @Override
+    public boolean completeExceptionally(Throwable ex)
+    {
+        if (!wrapped.isDone())
+            wrapped.completeExceptionally(ex);
+        return super.completeExceptionally(ex);
     }
 }

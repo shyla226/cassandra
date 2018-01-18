@@ -25,11 +25,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import com.google.common.collect.ImmutableList;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Completable;
-import io.reactivex.CompletableObserver;
+import org.apache.cassandra.concurrent.TPCTimer;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
@@ -43,7 +44,6 @@ import org.apache.cassandra.net.FailureResponse;
 import org.apache.cassandra.net.MessageCallback;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.Response;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 public abstract class WriteHandler extends CompletableFuture<Void> implements MessageCallback<EmptyPayload>
@@ -86,17 +86,19 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
     public static WriteHandler create(WriteEndpoints endpoints,
                                       ConsistencyLevel consistencyLevel,
                                       WriteType writeType,
-                                      long queryStartNanos)
+                                      long queryStartNanos,
+                                      TPCTimer timer)
     {
-        return builder(endpoints, consistencyLevel, writeType, queryStartNanos).build();
+        return builder(endpoints, consistencyLevel, writeType, queryStartNanos, timer).build();
     }
 
     public static Builder builder(WriteEndpoints endpoints,
                                   ConsistencyLevel consistencyLevel,
                                   WriteType writeType,
-                                  long queryStartNanos)
+                                  long queryStartNanos,
+                                  TPCTimer timer)
     {
-        return new Builder(endpoints, consistencyLevel, writeType, queryStartNanos);
+        return new Builder(endpoints, consistencyLevel, writeType, queryStartNanos, timer);
     }
 
     public static class Builder
@@ -105,6 +107,7 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
         private final ConsistencyLevel consistencyLevel;
         private final WriteType writeType;
         private final long queryStartNanos;
+        private final TPCTimer timer;
 
         private int blockFor = -1;
         private ConsistencyLevel idealConsistencyLevel;
@@ -116,12 +119,14 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
         private Builder(WriteEndpoints endpoints,
                         ConsistencyLevel consistencyLevel,
                         WriteType writeType,
-                        long queryStartNanos)
+                        long queryStartNanos,
+                        TPCTimer timer)
         {
             this.endpoints = endpoints;
             this.consistencyLevel = consistencyLevel;
             this.writeType = writeType;
             this.queryStartNanos = queryStartNanos;
+            this.timer = timer;
         }
 
         /**
@@ -222,11 +227,11 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
         private WriteHandler makeHandler()
         {
             if (consistencyLevel.isDatacenterLocal())
-                return new WriteHandlers.DatacenterLocalHandler(endpoints, consistencyLevel, blockFor, writeType, queryStartNanos);
+                return new WriteHandlers.DatacenterLocalHandler(endpoints, consistencyLevel, blockFor, writeType, queryStartNanos, timer);
             else if (consistencyLevel == ConsistencyLevel.EACH_QUORUM && (endpoints.keyspace().getReplicationStrategy() instanceof NetworkTopologyStrategy))
-                return new WriteHandlers.DatacenterSyncHandler(endpoints, consistencyLevel, blockFor, writeType, queryStartNanos);
+                return new WriteHandlers.DatacenterSyncHandler(endpoints, consistencyLevel, blockFor, writeType, queryStartNanos, timer);
             else
-                return new WriteHandlers.SimpleHandler(endpoints, consistencyLevel, blockFor, writeType, queryStartNanos);
+                return new WriteHandlers.SimpleHandler(endpoints, consistencyLevel, blockFor, writeType, queryStartNanos, timer);
         }
 
         private static <T> List<T> freeze(List<T> l)
@@ -271,7 +276,7 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
 
         private WriteHandler withIdealConsistencyLevel(WriteHandler handler)
         {
-            final WriteHandler delegateHandler = WriteHandler.create(endpoints, idealConsistencyLevel, writeType, queryStartNanos);
+            final WriteHandler delegateHandler = WriteHandler.create(endpoints, idealConsistencyLevel, writeType, queryStartNanos, timer);
             KeyspaceMetrics metrics = endpoints.keyspace().metric;
 
             delegateHandler.thenRun(() -> metrics.idealCLWriteLatency.addNano(System.nanoTime() - queryStartNanos))

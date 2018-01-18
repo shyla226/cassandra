@@ -22,17 +22,22 @@ import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import com.google.common.collect.ImmutableList;
+
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.reactivex.disposables.Disposable;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.concurrent.TPCTimer;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.net.EmptyPayload;
@@ -40,8 +45,10 @@ import org.apache.cassandra.net.Response;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.FBUtilities;
+import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class WriteHandlerTest
@@ -214,9 +221,44 @@ public class WriteHandlerTest
         assertEquals(0, ks.metric.idealCLWriteLatency.totalLatency.getCount());
     }
 
+    @Test
+    public void testCompletion() throws Throwable
+    {
+        TPCTimer timer = Mockito.mock(TPCTimer.class);
+        Disposable timeout = Mockito.mock(Disposable.class);
+        Mockito.when(timer.onTimeout(Mockito.any(), Mockito.anyInt(), Mockito.any())).thenReturn(timeout);
+
+        WriteHandler handler = writeHandler(ConsistencyLevel.ONE, ConsistencyLevel.ONE, System.nanoTime(), timer);
+
+        handler.onResponse(createDummyMessage(0));
+
+        assertNull(handler.toObservable().blockingGet(1, TimeUnit.MILLISECONDS));
+        Mockito.verify(timeout).dispose();
+    }
+
+    @Test
+    public void testTimeout() throws Throwable
+    {
+        TPCTimer timer = Mockito.mock(TPCTimer.class);
+        Disposable timeout = Mockito.mock(Disposable.class);
+        Mockito.when(timer.onTimeout(Mockito.any(), Mockito.anyInt(), Mockito.any())).thenReturn(timeout);
+
+        WriteHandler handler = writeHandler(ConsistencyLevel.ONE, ConsistencyLevel.ONE, System.nanoTime(), timer);
+
+        handler.completeExceptionally(new TimeoutException());
+
+        assertEquals(WriteTimeoutException.class, handler.toObservable().blockingGet(1, TimeUnit.MILLISECONDS).getClass());
+        Mockito.verify(timeout).dispose();
+    }
+
     private WriteHandler writeHandler(ConsistencyLevel cl, ConsistencyLevel idealCl, long nanoTime)
     {
-        return WriteHandler.builder(WriteEndpoints.withLive(ks, targets), cl, WriteType.SIMPLE, nanoTime)
+        return writeHandler(cl, idealCl, nanoTime, Mockito.mock(TPCTimer.class));
+    }
+
+    private WriteHandler writeHandler(ConsistencyLevel cl, ConsistencyLevel idealCl, long nanoTime, TPCTimer timer)
+    {
+        return WriteHandler.builder(WriteEndpoints.withLive(ks, targets), cl, WriteType.SIMPLE, nanoTime, timer)
                            .withIdealConsistencyLevel(idealCl)
                            .build();
     }

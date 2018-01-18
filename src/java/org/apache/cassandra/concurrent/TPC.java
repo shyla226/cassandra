@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.concurrent;
 
+import java.util.ArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -28,6 +29,7 @@ import io.netty.channel.epoll.Aio;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
+import io.netty.util.concurrent.FastThreadLocal;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
@@ -72,6 +74,8 @@ public class TPC
                                                                        .equalsIgnoreCase("true");
 
     private static final int NUM_CORES = DatabaseDescriptor.getTPCCores();
+    private static final int TIMERS_RATIO = Integer.valueOf(System.getProperty("dse.tpc.timers_ratio", "5"));
+
     private static final int NIO_IO_RATIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     public static final boolean USE_EPOLL = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"))
                                             && Epoll.isAvailable();
@@ -85,13 +89,24 @@ public class TPC
                                                                            DatabaseDescriptor.getIOGlobalQueueDepth());
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
-    private final static AtomicLong roundRobinIndex = new AtomicLong(0);
+    private final static AtomicLong schedulerRoundRobinIndex = new AtomicLong(0);
+    private final static FastThreadLocal<AtomicLong> timerRoundRobinIndex = new FastThreadLocal<AtomicLong>()
+    {
+        @Override
+        protected AtomicLong initialValue()
+        {
+            return new AtomicLong();
+        }
+    };
 
     // The core event loops as a Netty EventLoopGroup. The group is created to contain exactly NUM_CORES loops.
     private static final TPCEventLoopGroup eventLoopGroup;
 
     // Maps each core ID to its TPCScheduler (which wraps the corresponding event loop from eventLoopGroup).
     private final static TPCScheduler[] perCoreSchedulers = new TPCScheduler[NUM_CORES];
+
+    // Maps each scheduler to its timer.
+    private final static ArrayList<TPCTimer> timers = new ArrayList<>(getNumTimers());
 
     private final static IOScheduler ioScheduler = new IOScheduler();
 
@@ -137,6 +152,8 @@ public class TPC
         // to access said thread easily and 2) we set thread locals as part of the initialization.
         eventLoopGroup.eventLoops().forEach(TPC::register);
 
+        logger.info("Created {} TPC timers due to configured ratio of {}.", timers.size(), TIMERS_RATIO);
+
         initRx();
 
         // Publish metrics.
@@ -155,6 +172,17 @@ public class TPC
 
         TPCScheduler scheduler = new TPCScheduler(loop);
         perCoreSchedulers[coreId] = scheduler;
+
+        if (timers.size() < getNumTimers())
+            timers.add(new TPCHashedWheelTimer(scheduler));
+    }
+
+    /**
+     * Number of timers, as a ratio between NUM_CORES and TIMERS_RATIO.
+     */
+    private static int getNumTimers()
+    {
+        return Math.max(1, getNumCores() / TIMERS_RATIO);
     }
 
     private static void initRx()
@@ -227,6 +255,14 @@ public class TPC
     {
         int coreId = getCoreId();
         return isValidCoreId(coreId) ? getForCore(coreId) : getForCore(getNextCore());
+    }
+
+    /**
+     * Returns the "best" TPC timer: the implementation currently returns timers in round robin.
+     */
+    public static TPCTimer bestTPCTimer()
+    {
+        return timers.get((int) (timerRoundRobinIndex.get().incrementAndGet() % getNumTimers()));
     }
 
     /**
@@ -353,7 +389,7 @@ public class TPC
      */
     public static int getNextCore()
     {
-        return (int)(roundRobinIndex.getAndIncrement() % getNumCores());
+        return (int)(schedulerRoundRobinIndex.getAndIncrement() % getNumCores());
     }
 
     /**

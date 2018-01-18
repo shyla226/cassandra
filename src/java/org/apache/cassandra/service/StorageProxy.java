@@ -48,6 +48,7 @@ import org.apache.cassandra.batchlog.BatchRemove;
 import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
@@ -475,7 +476,7 @@ public class StorageProxy implements StorageProxyMBean
                 submitHint(mutation, endpointsToHint, null);
         }
 
-        WriteHandler.Builder builder = WriteHandler.builder(endpoints, consistencyLevel, WriteType.SIMPLE, queryStartNanoTime)
+        WriteHandler.Builder builder = WriteHandler.builder(endpoints, consistencyLevel, WriteType.SIMPLE, queryStartNanoTime, TPC.bestTPCTimer())
                                                    .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel());
         if (shouldHint)
             builder.hintOnTimeout(mutation);
@@ -721,7 +722,7 @@ public class StorageProxy implements StorageProxyMBean
         List<WriteHandler> handlers = ImmutableList.copyOf(Lists.transform(mutationsAndEndpoints, mae ->
         {
             viewWriteMetrics.viewReplicasAttempted.inc(mae.endpoints.liveCount());
-            WriteHandler handler = WriteHandler.builder(mae.endpoints, ConsistencyLevel.ONE, WriteType.BATCH, queryStartNanoTime)
+            WriteHandler handler = WriteHandler.builder(mae.endpoints, ConsistencyLevel.ONE, WriteType.BATCH, queryStartNanoTime, TPC.bestTPCTimer())
                                                .onResponse(onReplicaResponse)
                                                .build();
 
@@ -831,7 +832,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             Keyspace keyspace = mae.endpoints.keyspace();
             AsyncLatch toCleanupLatch = new AsyncLatch(batchConsistencyLevel.blockFor(keyspace), cleanupLatch::countDown);
-            return WriteHandler.builder(mae.endpoints, consistencyLevel, WriteType.BATCH, queryStartNanoTime)
+            return WriteHandler.builder(mae.endpoints, consistencyLevel, WriteType.BATCH, queryStartNanoTime, TPC.bestTPCTimer())
                                .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
                                .onResponse(r -> toCleanupLatch.countDown())
                                .build();
@@ -915,7 +916,8 @@ public class StorageProxy implements StorageProxyMBean
         WriteHandler handler = WriteHandler.create(endpoints,
                                                    endpoints.liveCount() == 1 ? ConsistencyLevel.ONE : ConsistencyLevel.TWO,
                                                    WriteType.BATCH_LOG,
-                                                   queryStartNanoTime);
+                                                   queryStartNanoTime,
+                                                   TPC.bestTPCTimer());
 
         Batch batch = Batch.createLocal(uuid, FBUtilities.timestampMicros(), mutations);
         MessagingService.instance().send(Verbs.WRITES.BATCH_STORE.newDispatcher(endpoints.live(), batch), handler);
@@ -950,7 +952,7 @@ public class StorageProxy implements StorageProxyMBean
         // exit early if we can't fulfill the CL at this time
         endpoints.checkAvailability(consistencyLevel);
 
-        WriteHandler handler = WriteHandler.builder(endpoints, consistencyLevel, writeType, queryStartNanoTime)
+        WriteHandler handler = WriteHandler.builder(endpoints, consistencyLevel, writeType, queryStartNanoTime, TPC.bestTPCTimer())
                                            .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
                                            .hintOnTimeout(mutation)
                                            .build();
@@ -1085,7 +1087,8 @@ public class StorageProxy implements StorageProxyMBean
         WriteHandler handler = WriteHandler.create(WriteEndpoints.withLive(keyspace, Collections.singletonList(endpoint)),
                                                    ConsistencyLevel.ONE,
                                                    WriteType.COUNTER,
-                                                   queryStartNanoTime);
+                                                   queryStartNanoTime,
+                                                   TPC.bestTPCTimer());
 
         // While we mostly use the same path whether the leader is the local host or not (we rely on MS doing a simple
         // local delivery in the former case), only indicate forwarding if we're truly using a remote forwarding
@@ -1149,7 +1152,7 @@ public class StorageProxy implements StorageProxyMBean
             result -> {
 
                 WriteEndpoints endpoints = WriteEndpoints.compute(cm.getKeyspaceName(), cm.key());
-                WriteHandler handler = WriteHandler.builder(endpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime)
+                WriteHandler handler = WriteHandler.builder(endpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime, TPC.bestTPCTimer())
                                                    .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
                                                    .hintOnTimeout(result)
                                                    .build();

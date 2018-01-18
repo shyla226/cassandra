@@ -17,11 +17,9 @@
  */
 package org.apache.cassandra.utils;
 
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -30,31 +28,26 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
+import io.reactivex.disposables.Disposable;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTimer;
 
 public class ExpiringMap<K, V>
 {
     private static final Logger logger = LoggerFactory.getLogger(ExpiringMap.class);
     private volatile boolean shutdown;
 
-    public static class CacheableObject<T>
+    public static class ExpiringObject<T>
     {
         private final T value;
-        private final long createdAtNanos;
         private final long timeout;
+        private volatile Disposable disposable;
 
-        private CacheableObject(T value, long timeout)
+        private ExpiringObject(T value, long timeout)
         {
             assert value != null;
             this.value = value;
             this.timeout = timeout;
-            this.createdAtNanos = Clock.instance.nanoTime();
-        }
-
-        private boolean isReadyToDieAt(long atNano)
-        {
-            return atNano - createdAtNanos > TimeUnit.MILLISECONDS.toNanos(timeout);
         }
 
         /**
@@ -65,80 +58,68 @@ public class ExpiringMap<K, V>
             return value;
         }
 
+        /**
+         * The timeout when this will expire.
+         */
         public long timeoutMillis()
         {
             return timeout;
         }
+
+        void cancel()
+        {
+            if (disposable != null)
+                disposable.dispose();
+        }
+
+        void makeCancellable(Disposable disposable)
+        {
+            this.disposable = disposable;
+        }
     }
 
-    // if we use more ExpiringMaps we may want to add multiple threads to this executor
-    private static final ScheduledExecutorService service = new DebuggableScheduledThreadPoolExecutor("EXPIRING-MAP-REAPER");
-
-    private final ConcurrentMap<K, CacheableObject<V>> cache = new ConcurrentHashMap<K, CacheableObject<V>>();
+    private final ConcurrentMap<K, ExpiringObject<V>> cache = new ConcurrentHashMap<>();
     private final long defaultExpiration;
+    private final Consumer<Pair<K, ExpiringObject<V>>> postExpireHook;
 
     /**
-     *
-     * @param defaultExpiration the TTL for objects in the cache in milliseconds
+     * @param defaultExpiration The default TTL for objects in the cache in milliseconds
+     * @param postExpireHook The task to execute at expiration.
      */
-    public ExpiringMap(long defaultExpiration, final Consumer<Pair<K,CacheableObject<V>>> postExpireHook)
+    public ExpiringMap(long defaultExpiration, Consumer<Pair<K, ExpiringObject<V>>> postExpireHook)
     {
-        this.defaultExpiration = defaultExpiration;
-
         if (defaultExpiration <= 0)
-        {
             throw new IllegalArgumentException("Argument specified must be a positive number");
-        }
 
-        Runnable runnable = new Runnable()
-        {
-            public void run()
-            {
-                long start = Clock.instance.nanoTime();
-                int n = 0;
-                for (Map.Entry<K, CacheableObject<V>> entry : cache.entrySet())
-                {
-                    if (entry.getValue().isReadyToDieAt(start))
-                    {
-                        if (cache.remove(entry.getKey()) != null)
-                        {
-                            n++;
-                            if (postExpireHook != null)
-                                postExpireHook.accept(Pair.create(entry.getKey(), entry.getValue()));
-                        }
-                    }
-                }
-                logger.trace("Expired {} entries", n);
-            }
-        };
-        service.scheduleWithFixedDelay(runnable, defaultExpiration / 2, defaultExpiration / 2, TimeUnit.MILLISECONDS);
-    }
-
-    public boolean shutdownBlocking()
-    {
-        service.shutdown();
-        try
-        {
-            return service.awaitTermination(defaultExpiration * 2, TimeUnit.MILLISECONDS);
-        }
-        catch (InterruptedException e)
-        {
-            throw new AssertionError(e);
-        }
+        this.defaultExpiration = defaultExpiration;
+        this.postExpireHook = postExpireHook;
     }
 
     public void reset()
     {
         shutdown = false;
+        cache.forEach((k, v) -> v.cancel());
         cache.clear();
+    }
+
+    public boolean shutdownBlocking(long timeout)
+    {
+        shutdown = true;
+        Uninterruptibles.sleepUninterruptibly(timeout, TimeUnit.MILLISECONDS);
+        return cache.isEmpty();
     }
 
     public V put(K key, V value)
     {
-        return put(key, value, this.defaultExpiration);
+        return put(key, value, this.defaultExpiration, TPC.bestTPCTimer());
     }
 
     public V put(K key, V value, long timeout)
+    {
+        return put(key, value, timeout, TPC.bestTPCTimer());
+    }
+
+    public V put(K key, V value, long timeout, TPCTimer timer)
     {
         if (shutdown)
         {
@@ -157,18 +138,34 @@ public class ExpiringMap<K, V>
                 return null;
             }
         }
-        CacheableObject<V> previous = cache.put(key, new CacheableObject<V>(value, timeout));
+
+        ExpiringObject<V> current = new ExpiringObject<>(value, timeout);
+        ExpiringObject<V> previous = cache.put(key, current);
+        if (previous != null)
+            previous.cancel();
+
+        current.makeCancellable(timer.onTimeout(() ->
+        {
+            ExpiringObject<V> removed = cache.remove(key);
+            if (removed != null)
+                postExpireHook.accept(Pair.create(key, removed));
+        }, timeout, TimeUnit.MILLISECONDS));
+
         return (previous == null) ? null : previous.value;
     }
 
-    public CacheableObject<V> get(K key)
+    public ExpiringObject<V> get(K key)
     {
         return cache.get(key);
     }
 
-    public CacheableObject<V> remove(K key)
+    public ExpiringObject<V> remove(K key)
     {
-        return cache.remove(key);
+        ExpiringObject<V> removed = cache.remove(key);
+        if (removed != null)
+            removed.cancel();
+
+        return removed;
     }
 
     public int size()

@@ -47,6 +47,8 @@ public enum TPCTaskType
     FRAME_DECODE(Features.PENDABLE),
     /** Single-partition read request */
     READ(Features.PENDABLE),
+    /** Read timeout, used to signal read timeout errors */
+    READ_TIMEOUT(Features.EXCLUDE_FROM_TOTALS),
     /** Single-partition read request that will be first scheduled on an eventloop */
     READ_DEFERRED(Features.PENDABLE),
     /** Single-partition read scheduled on local node */

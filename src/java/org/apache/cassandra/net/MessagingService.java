@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.net;
 
+
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.net.*;
@@ -143,7 +144,7 @@ public final class MessagingService implements MessagingServiceMBean
         if (!testOnly)
             droppedMessages.scheduleLogging();
 
-        Consumer<Pair<Integer, ExpiringMap.CacheableObject<CallbackInfo<?>>>> timeoutReporter = pair ->
+        Consumer<Pair<Integer, ExpiringMap.ExpiringObject<CallbackInfo<?>>>> timeoutReporter = pair ->
         {
             CallbackInfo expiredCallbackInfo = pair.right.get();
             MessageCallback<?> callback = expiredCallbackInfo.callback;
@@ -735,7 +736,7 @@ public final class MessagingService implements MessagingServiceMBean
         logger.info("Waiting for messaging service to quiesce");
 
         // the important part
-        if (!callbacks.shutdownBlocking())
+        if (!callbacks.shutdownBlocking(DatabaseDescriptor.getMinRpcTimeout() * 2))
             logger.warn("Failed to wait for messaging service callbacks shutdown");
 
         // attempt to humor tests that try to stop and restart MS
@@ -793,18 +794,17 @@ public final class MessagingService implements MessagingServiceMBean
     // Only required by legacy serialization. Can inline in following method when we get rid of that.
     CallbackInfo<?> getRegisteredCallback(int id, boolean remove, InetAddress from)
     {
-        ExpiringMap.CacheableObject<CallbackInfo<?>> cObj = remove ? callbacks.remove(id) : callbacks.get(id);
-        if (cObj == null)
+        ExpiringMap.ExpiringObject<CallbackInfo<?>> expiring = remove ? callbacks.remove(id) : callbacks.get(id);
+        if (expiring == null)
         {
             String msg = "Callback already removed for message {} from {}, ignoring response";
             logger.trace(msg, id, from);
             Tracing.trace(msg, id, from);
+
             return null;
         }
         else
-        {
-            return cObj.get();
-        }
+            return expiring.get();
     }
 
     @SuppressWarnings("unchecked")
