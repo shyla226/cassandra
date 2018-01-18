@@ -1,6 +1,4 @@
 dse 6.0.0:
- * Use immutable TableMetadata in SSTables (DB-1444)
- * Do not fetch columns that are not in the filter fetched set (DB-1444)
  * Abort repair when there is only one node (DB-1511)
  * Fix OutOfMemory during view update (DB-1493)
  * Drop response on view lock acquisition timeout and add ViewLockAcquisitionTimeouts metric (DB-1522)
@@ -64,6 +62,9 @@ dse 6.0.0:
  * For TWCS, flush to separate sstables based on write time (DB-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (DB-302)
 Merged from dse5.1:
+ * Switch RMIExporter to dynamic proxy (DB-1591)
+ * Use immutable TableMetadata in SSTables (DB-1444)
+ * Do not fetch columns that are not in the filter fetched set (DB-1444)
  * Allow selecting static column only when querying static index (DB-1467)
  * Require only MODIFY permission on base when updating table with MV (DB-1089)
  * Force sstableloader exit to prevent hanging due to non-daemon threads running (DB-1560)
