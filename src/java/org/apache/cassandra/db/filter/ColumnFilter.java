@@ -23,6 +23,9 @@ import java.util.*;
 import com.google.common.collect.SortedSetMultimap;
 import com.google.common.collect.TreeMultimap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
@@ -61,6 +64,8 @@ import org.apache.cassandra.net.MessagingService;
  */
 public class ColumnFilter
 {
+    private static final Logger logger = LoggerFactory.getLogger(ColumnFilter.class);
+
     public static final Serializer serializer = new Serializer();
 
     // True if _fetched_ is all the columns, in which case metadata must not be null. If false,
@@ -111,6 +116,36 @@ public class ColumnFilter
     public static ColumnFilter selection(CFMetaData metadata, PartitionColumns queried)
     {
         return new ColumnFilter(true, metadata.partitionColumns(), queried, null);
+    }
+
+    /**
+     * Return this column filter if all the partition columns are included in the fetched columns,
+     * or de-optimised column filter with {@code fetchAllRegulars} set to false and this filter's
+     * fetched columns taken as queried.
+     *
+     * This is required because occasionally we may receive column filters that are stale, for example
+     * if a coordinator has sent a request bound to an older schema version, or if a prepared statement
+     * hasn't been updated.
+     *
+     * @param partitionColumns - the columns of the partition that will use this filter
+     * @return this filter or a de-optimised copy
+     */
+    public ColumnFilter withPartitionColumnsVerified(PartitionColumns partitionColumns)
+    {
+        if (isFetchAll && !fetched.includes(partitionColumns))
+        {
+            logger.info("Columns mismatch: `{}` does not include `{}`, falling back to the original set of columns.", fetched, partitionColumns);
+
+            // if fetched doesn't contain all the columns that we may be asked to filter, then we cannot
+            // optimize based on fetchAllRegulars == true but we need to disable some optimizations and
+            // fall back to checking if the column is a part of fetched set
+            return new ColumnFilter(false, (PartitionColumns) null, fetched, subSelections);
+        }
+        else
+        {
+            // optimize the most common case, which is that all columns are included
+            return this;
+        }
     }
 
     /**

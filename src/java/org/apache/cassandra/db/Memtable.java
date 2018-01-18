@@ -339,7 +339,7 @@ public class Memtable implements Comparable<Memtable>
                              100 * allocator.onHeap().ownershipRatio(), 100 * allocator.offHeap().ownershipRatio());
     }
 
-    public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange, final boolean isForThrift)
+    public MemtableUnfilteredPartitionIterator makePartitionIterator(ColumnFilter columnFilter, final DataRange dataRange, final boolean isForThrift)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -552,7 +552,7 @@ public class Memtable implements Comparable<Memtable>
             this.iter = iter;
             this.isForThrift = isForThrift;
             this.minLocalDeletionTime = minLocalDeletionTime;
-            this.columnFilter = columnFilter;
+            this.columnFilter = columnFilter.withPartitionColumnsVerified(metadata().partitionColumns());
             this.dataRange = dataRange;
         }
 
