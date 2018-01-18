@@ -525,16 +525,17 @@ public class Memtable implements Comparable<Memtable>
                 // if we get here we know that currentPartitions has at least one item because of the check in requestFirst() and
                 // at the end of this method, when there are no more items we either call onComplete or onFinal respectively
                 java.util.Map.Entry<PartitionPosition, AtomicBTreePartition> entry = currentPartitions.next();
+                AtomicBTreePartition partition = entry.getValue();
                 PartitionPosition position = entry.getKey();
                 assert position instanceof DecoratedKey;
                 DecoratedKey key = (DecoratedKey) position;
                 ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
-                FlowableUnfilteredPartition partition = filter.getFlowableUnfilteredPartition(columnFilter, entry.getValue());
+                FlowableUnfilteredPartition fup = filter.getFlowableUnfilteredPartition(columnFilter.withPartitionColumnsVerified(partition.columns()), partition);
 
                 if (currentPartitions.hasNext())
-                    subscriber.onNext(partition);
+                    subscriber.onNext(fup);
                 else
-                    subscriber.onFinal(partition);
+                    subscriber.onFinal(fup);
             }
 
             public void close() throws Exception

@@ -151,10 +151,15 @@ public class PartitionRangeReadCommand extends ReadCommand
      */
     public static PartitionRangeReadCommand allDataRead(TableMetadata metadata, int nowInSec)
     {
+        return allDataRead(metadata, ColumnFilter.all(metadata), nowInSec);
+    }
+
+    public static PartitionRangeReadCommand allDataRead(TableMetadata metadata, ColumnFilter columnFilter, int nowInSec)
+    {
         return new PartitionRangeReadCommand(null,
                                              metadata,
                                              nowInSec,
-                                             ColumnFilter.all(metadata),
+                                             columnFilter,
                                              RowFilter.NONE,
                                              DataLimits.NONE,
                                              DataRange.allData(metadata.partitioner),

@@ -20,11 +20,13 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 import java.util.*;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.SortedSetMultimap;
 import com.google.common.collect.TreeMultimap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
@@ -33,7 +35,6 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingVersion;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.versioning.VersionDependent;
@@ -68,6 +69,8 @@ import org.apache.cassandra.utils.versioning.Versioned;
  */
 public class ColumnFilter
 {
+    private static final Logger logger = LoggerFactory.getLogger(ColumnFilter.class);
+
     public static final Versioned<ReadVersion, Serializer> serializers = ReadVersion.versioned(Serializer::new);
 
     // True if _fetched_ includes all regular columns (and any static in _queried_), in which case metadata must not be
@@ -148,6 +151,36 @@ public class ColumnFilter
     public static ColumnFilter selection(TableMetadata metadata, RegularAndStaticColumns queried)
     {
         return new ColumnFilter(true, metadata, queried, null);
+    }
+
+    /**
+     * Return this column filter if all the partition columns are included in the fetched columns,
+     * or de-optimised column filter with {@code fetchAllRegulars} set to false and this filter's
+     * fetched columns taken as queried.
+     *
+     * This is required because occasionally we may receive column filters that are stale, for example
+     * if a coordinator has sent a request bound to an older schema version, or if a prepared statement
+     * hasn't been updated.
+     *
+     * @param partitionColumns - the columns of the partition that will use this filter
+     * @return this filter or a de-optimised copy
+     */
+    public ColumnFilter withPartitionColumnsVerified(RegularAndStaticColumns partitionColumns)
+    {
+        if (fetchAllRegulars && !fetched.includes(partitionColumns))
+        {
+            logger.info("Columns mismatch: `{}` does not include `{}`, falling back to the original set of columns.", fetched, partitionColumns);
+
+            // if fetched doesn't contain all the columns that we may be asked to filter, then we cannot
+            // optimize based on fetchAllRegulars == true but we need to disable some optimizations and
+            // fall back to checking if the column is a part of fetched set
+            return new ColumnFilter(false, (RegularAndStaticColumns) null, fetched, subSelections);
+        }
+        else
+        {
+            // optimize the most common case, which is that all columns are included
+            return this;
+        }
     }
 
     /**
@@ -630,7 +663,7 @@ public class ColumnFilter
             if (version == ReadVersion.OSS_30 && isFetchAll && queried != null)
                 queried = new RegularAndStaticColumns(metadata.staticColumns(), queried.regulars);
 
-            return new ColumnFilter(isFetchAll, fetched, queried, subSelections);
+            return new ColumnFilter(isFetchAll, fetched, queried, subSelections).withPartitionColumnsVerified(metadata.regularAndStaticColumns());
         }
 
         public long serializedSize(ColumnFilter selection)
