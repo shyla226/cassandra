@@ -1,6 +1,5 @@
-DSE 5.1.7
- * Do not fetch columns that are not in the filter fetched set (DB-1444)
 DSE 5.1.6
+ * Do not fetch columns that are not in the filter fetched set (DB-1444)
  * Allow selecting static column only when querying static index (DB-1467)
  * Require only MODIFY permission on base when updating table with MV (DB-1089)
  * Force sstableloader exit to prevent hanging due to non-daemon threads running (DB-1560)
