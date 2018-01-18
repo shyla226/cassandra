@@ -26,7 +26,9 @@ package org.apache.cassandra.concurrent;
  *   automatically counted, but others wait to be triggered by an external event (e.g. async read) and need to be
  *   explicitly marked as active.
  * - To identify "pendable" tasks which are delayed if too many tasks are currently in flight on the given core.
- *   Pendable tasks are usually the ones that start the work on a request. This is done to avoid having an operation's
+ *   Pendable tasks are usually the ones that start the work on a request. Also pendable tasks can be
+ *   "backpressured", which means the event loop will further delay their processing if the max pending limit is hit.
+ *   This is done to avoid having an operation's
  *   state in memory while the task has no chance to finish quickly, which causes severe GC problems as temporary
  *   objects get promoted to long-lived.
  * - To display an event name associated with the type of task in the list of active, completed, pending and blocked
@@ -41,6 +43,8 @@ public enum TPCTaskType
 {
     /** Unknown task */
     UNKNOWN,
+    /** Async frame decoding */
+    FRAME_DECODE(Features.PENDABLE),
     /** Single-partition read request */
     READ(Features.PENDABLE),
     /** Single-partition read request that will be first scheduled on an eventloop */
@@ -57,8 +61,14 @@ public enum TPCTaskType
     READ_SECONDARY_INDEX,
     /** Waiting for data from disk */
     READ_DISK_ASYNC(Features.EXTERNAL_QUEUE),
-    /** Write request */
-    WRITE(Features.PENDABLE),
+    /** Write request from local node and directly generated from clients: this can easily overload the node due to
+     * mutation size, so it's currently the only backpressured type */
+    WRITE_LOCAL(Features.BACKPRESSURED),
+    /** Write request from remote replica: this can't be backpressured because remote requests come from a different
+     * "channel" (internode communication) than client requests, and more specifically, client requests can be made async
+     * via frame decoding (see the FRAME_DECODE type), while remote requests are always executed straight away, hence
+     * the latter could starve the former */
+    WRITE_REMOTE(Features.PENDABLE),
     /** Write response, not always counted */
     WRITE_RESPONSE("WRITE_SWITCH_FOR_RESPONSE"),
     /** Write issued to defragment data that required too many sstables to read */
@@ -124,6 +134,7 @@ public enum TPCTaskType
     private static class Features
     {
         static final int PENDABLE = TPCTaskType.PENDABLE | TPCTaskType.ALWAYS_COUNT;
+        static final int BACKPRESSURED = TPCTaskType.BACKPRESSURED | TPCTaskType.PENDABLE | TPCTaskType.ALWAYS_COUNT;
         static final int ALWAYS_COUNT = TPCTaskType.ALWAYS_COUNT;
         static final int EXTERNAL_QUEUE = TPCTaskType.EXTERNAL_QUEUE;
         static final int TIMED = TPCTaskType.EXCLUDE_FROM_TOTALS;
@@ -134,6 +145,7 @@ public enum TPCTaskType
     private static final int EXTERNAL_QUEUE = 2;
     private static final int ALWAYS_COUNT = 4;
     private static final int EXCLUDE_FROM_TOTALS = 8;
+    private static final int BACKPRESSURED = 16;
 
     private final int flags;
 
@@ -146,6 +158,17 @@ public enum TPCTaskType
     public final boolean pendable()
     {
         return (flags & PENDABLE) != 0;
+    }
+
+    /**
+     * Whether the task can be backpressured: all such tasks are counted globally (but still per core). The actual
+     * mechanism depends on the event loop implementation: in the Epoll case, if there are too many pending
+     * (more than the max configured pending limit), their processing will be further delayed by keeping
+     * them as "raw" buffers.
+     */
+    public final boolean backpressured()
+    {
+        return (flags & BACKPRESSURED) != 0;
     }
 
     /**

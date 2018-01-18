@@ -37,6 +37,7 @@ import com.google.common.collect.ImmutableSet;
 
 import io.netty.util.internal.shaded.org.jctools.queues.MpscArrayQueue;
 import io.reactivex.Single;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,7 +50,6 @@ import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.transport.Frame.Header;
 import org.apache.cassandra.transport.Frame.Header.HeaderFlag;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.utils.Flags;
@@ -93,29 +93,30 @@ public abstract class Message
     public enum Type
     {
         // Public messages
-        ERROR          (0,  Direction.RESPONSE, ErrorMessage.codec),
-        STARTUP        (1,  Direction.REQUEST,  StartupMessage.codec),
-        READY          (2,  Direction.RESPONSE, ReadyMessage.codec),
-        AUTHENTICATE   (3,  Direction.RESPONSE, AuthenticateMessage.codec),
-        OPTIONS        (5,  Direction.REQUEST,  OptionsMessage.codec),
-        SUPPORTED      (6,  Direction.RESPONSE, SupportedMessage.codec),
-        QUERY          (7,  Direction.REQUEST,  QueryMessage.codec),
-        RESULT         (8,  Direction.RESPONSE, ResultMessage.codec),
-        PREPARE        (9,  Direction.REQUEST,  PrepareMessage.codec),
-        EXECUTE        (10, Direction.REQUEST,  ExecuteMessage.codec),
-        REGISTER       (11, Direction.REQUEST,  RegisterMessage.codec),
-        EVENT          (12, Direction.RESPONSE, EventMessage.codec),
-        BATCH          (13, Direction.REQUEST,  BatchMessage.codec),
-        AUTH_CHALLENGE (14, Direction.RESPONSE, AuthChallenge.codec),
-        AUTH_RESPONSE  (15, Direction.REQUEST,  AuthResponse.codec),
-        AUTH_SUCCESS   (16, Direction.RESPONSE, AuthSuccess.codec),
+        ERROR          (0,  Direction.RESPONSE, ErrorMessage.codec, false),
+        STARTUP        (1,  Direction.REQUEST,  StartupMessage.codec, false),
+        READY          (2,  Direction.RESPONSE, ReadyMessage.codec, false),
+        AUTHENTICATE   (3,  Direction.RESPONSE, AuthenticateMessage.codec, false),
+        OPTIONS        (5,  Direction.REQUEST,  OptionsMessage.codec, false),
+        SUPPORTED      (6,  Direction.RESPONSE, SupportedMessage.codec, false),
+        QUERY          (7,  Direction.REQUEST,  QueryMessage.codec, true),
+        RESULT         (8,  Direction.RESPONSE, ResultMessage.codec, false),
+        PREPARE        (9,  Direction.REQUEST,  PrepareMessage.codec, false),
+        EXECUTE        (10, Direction.REQUEST,  ExecuteMessage.codec, true),
+        REGISTER       (11, Direction.REQUEST,  RegisterMessage.codec, false),
+        EVENT          (12, Direction.RESPONSE, EventMessage.codec, false),
+        BATCH          (13, Direction.REQUEST,  BatchMessage.codec, true),
+        AUTH_CHALLENGE (14, Direction.RESPONSE, AuthChallenge.codec, false),
+        AUTH_RESPONSE  (15, Direction.REQUEST,  AuthResponse.codec, false),
+        AUTH_SUCCESS   (16, Direction.RESPONSE, AuthSuccess.codec, false),
 
         // Private messages
-        REVISE_REQUEST (255, Direction.REQUEST, ReviseRequestMessage.codec);
+        REVISE_REQUEST (255, Direction.REQUEST, ReviseRequestMessage.codec, false);
 
         public final int opcode;
         public final Direction direction;
         public final Codec<?> codec;
+        public final boolean supportsBackpressure;
 
         private static final Type[] opcodeIdx;
         static
@@ -132,11 +133,12 @@ public abstract class Message
             }
         }
 
-        Type(int opcode, Direction direction, Codec<?> codec)
+        Type(int opcode, Direction direction, Codec<?> codec, boolean supportsBackpressure)
         {
             this.opcode = opcode;
             this.direction = direction;
             this.codec = codec;
+            this.supportsBackpressure = supportsBackpressure;
         }
 
         public static Type fromOpcode(int opcode, Direction direction)
@@ -207,6 +209,11 @@ public abstract class Message
     public void setCustomPayload(Map<String, ByteBuffer> customPayload)
     {
         this.customPayload = customPayload;
+    }
+
+    public long getQueryStartNanoTime()
+    {
+        return sourceFrame.header.queryStartNanoTime;
     }
 
     public static abstract class Request extends Message
@@ -459,7 +466,7 @@ public abstract class Message
                 if (responseVersion.isBeta())
                     flags = Flags.add(flags, HeaderFlag.USE_BETA);
 
-                return Frame.create(message.type, message.getStreamId(), responseVersion, flags, body);
+                return Frame.create(Server.TIME_SOURCE, message.type, message.getStreamId(), responseVersion, flags, body);
             }
             catch (Throwable t)
             {
@@ -609,8 +616,8 @@ public abstract class Message
         public void channelRead0(ChannelHandlerContext ctx, Request request)
         {
             final ServerConnection connection;
-            long queryStartNanoTime = System.nanoTime();
 
+            long queryStartNanoTime = request.getQueryStartNanoTime();
             try
             {
                 assert request.connection() instanceof ServerConnection;
@@ -671,7 +678,8 @@ public abstract class Message
                 );
             }
             catch (Throwable t)
-            { // in case of exception when subscribing
+            {
+                // in case of exception when subscribing
                 handleError(ctx, request, t);
             }
         }

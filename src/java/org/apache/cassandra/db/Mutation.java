@@ -96,17 +96,19 @@ public class Mutation implements IMutation, SchedulableMessage
     private final transient TracingAwareExecutor requestExecutor;
     private final transient TracingAwareExecutor responseExecutor;
 
+    private final TPCTaskType writeType;
+
     public Mutation(String keyspaceName, DecoratedKey key)
     {
-        this(keyspaceName, key, new HashMap<>());
+        this(keyspaceName, key, new HashMap<>(), TPCTaskType.WRITE_LOCAL);
     }
 
     public Mutation(PartitionUpdate update)
     {
-        this(update.metadata().keyspace, update.partitionKey(), Collections.singletonMap(update.metadata().id, update));
+        this(update.metadata().keyspace, update.partitionKey(), Collections.singletonMap(update.metadata().id, update), TPCTaskType.WRITE_LOCAL);
     }
 
-    protected Mutation(String keyspaceName, DecoratedKey key, Map<TableId, PartitionUpdate> modifications)
+    protected Mutation(String keyspaceName, DecoratedKey key, Map<TableId, PartitionUpdate> modifications, TPCTaskType writeType)
     {
         this.keyspaceName = keyspaceName;
         this.key = key;
@@ -115,8 +117,9 @@ public class Mutation implements IMutation, SchedulableMessage
             cdcEnabled |= pu.metadata().params.cdc;
 
         this.scheduler = createScheduler(keyspaceName, key);
-        this.requestExecutor = scheduler == null ? null : scheduler.forTaskType(TPCTaskType.WRITE);
+        this.requestExecutor = scheduler == null ? null : scheduler.forTaskType(writeType);
         this.responseExecutor = scheduler == null ? null : scheduler.forTaskType(TPCTaskType.WRITE_RESPONSE);
+        this.writeType = writeType;
     }
 
     private static TPCScheduler createScheduler(String keyspaceName, DecoratedKey key)
@@ -137,7 +140,7 @@ public class Mutation implements IMutation, SchedulableMessage
 
     public Mutation copy()
     {
-        return new Mutation(keyspaceName, key, new HashMap<>(modifications));
+        return new Mutation(keyspaceName, key, new HashMap<>(modifications), writeType);
     }
 
     public Mutation without(Set<TableId> tableIds)
@@ -267,7 +270,7 @@ public class Mutation implements IMutation, SchedulableMessage
             modifications.put(table, updates.size() == 1 ? updates.get(0) : PartitionUpdate.merge(updates));
             updates.clear();
         }
-        return new Mutation(ks, key, modifications);
+        return new Mutation(ks, key, modifications, TPCTaskType.WRITE_LOCAL);
     }
 
     public StagedScheduler getScheduler()
@@ -504,12 +507,13 @@ public class Mutation implements IMutation, SchedulableMessage
 
         public Mutation deserialize(DataInputPlus in, SerializationHelper.Flag flag) throws IOException
         {
+            TPCTaskType writeType = flag == SerializationHelper.Flag.LOCAL ? TPCTaskType.WRITE_LOCAL : TPCTaskType.WRITE_REMOTE;
             int size = (int)in.readUnsignedVInt();
             assert size > 0;
 
             PartitionUpdate update = serializer.deserialize(in, flag);
             if (size == 1)
-                return new Mutation(update);
+                return new Mutation(update.metadata().keyspace, update.partitionKey(), Collections.singletonMap(update.metadata().id, update), writeType);
 
             Map<TableId, PartitionUpdate> modifications = new HashMap<>(size);
             DecoratedKey dk = update.partitionKey();
@@ -521,7 +525,7 @@ public class Mutation implements IMutation, SchedulableMessage
                 modifications.put(update.metadata().id, update);
             }
 
-            return new Mutation(update.metadata().keyspace, dk, modifications);
+            return new Mutation(update.metadata().keyspace, dk, modifications, writeType);
         }
 
         public Mutation deserialize(DataInputPlus in) throws IOException

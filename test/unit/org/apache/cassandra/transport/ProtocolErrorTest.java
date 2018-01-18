@@ -29,6 +29,8 @@ import org.junit.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.cassandra.utils.TestTimeSource;
+
 import static org.apache.cassandra.transport.Message.Direction.*;
 
 public class ProtocolErrorTest {
@@ -52,7 +54,7 @@ public class ProtocolErrorTest {
 
     public void testInvalidProtocolVersion(int version) throws Exception
     {
-        Frame.Decoder dec = new Frame.Decoder(null);
+        Frame.Decoder dec = new Frame.Decoder(new TestTimeSource(), null);
 
         List<Object> results = new ArrayList<>();
         byte[] frame = new byte[] {
@@ -80,7 +82,7 @@ public class ProtocolErrorTest {
     public void testInvalidProtocolVersionShortFrame() throws Exception
     {
         // test for CASSANDRA-11464
-        Frame.Decoder dec = new Frame.Decoder(null);
+        Frame.Decoder dec = new Frame.Decoder(new TestTimeSource(), null);
 
         List<Object> results = new ArrayList<>();
         byte[] frame = new byte[] {
@@ -102,7 +104,7 @@ public class ProtocolErrorTest {
     @Test
     public void testInvalidDirection() throws Exception
     {
-        Frame.Decoder dec = new Frame.Decoder(null);
+        Frame.Decoder dec = new Frame.Decoder(new TestTimeSource(), null);
 
         List<Object> results = new ArrayList<>();
         // should generate a protocol exception for using a response frame with
@@ -133,7 +135,7 @@ public class ProtocolErrorTest {
     @Test
     public void testBodyLengthOverLimit() throws Exception
     {
-        Frame.Decoder dec = new Frame.Decoder(null);
+        Frame.Decoder dec = new Frame.Decoder(new TestTimeSource(), null);
 
         List<Object> results = new ArrayList<>();
         byte[] frame = new byte[] {
@@ -186,7 +188,7 @@ public class ProtocolErrorTest {
         byte[] body = new byte[0x10];
         ByteBuf buf = Unpooled.wrappedBuffer(incomingFrame, body);
         try {
-            Frame decodedFrame = new Frame.Decoder(null).decodeFrame(buf);
+            Frame decodedFrame = new Frame.Decoder(new TestTimeSource(), null).decodeFrame(buf);
             Assert.fail("Expected protocol error");
         }
         catch (ErrorMessage.WrappedException e)

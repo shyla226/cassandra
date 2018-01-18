@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.SynchronousQueue;
+
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 
@@ -56,12 +57,14 @@ import org.apache.cassandra.transport.messages.PrepareMessage;
 import org.apache.cassandra.transport.messages.QueryMessage;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.transport.messages.StartupMessage;
-import org.apache.cassandra.utils.MD5Digest;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.ssl.SslHandler;
+import org.apache.cassandra.utils.ApproximateTimeSource;
+import org.apache.cassandra.utils.TimeSource;
+
 import static org.apache.cassandra.config.EncryptionOptions.ClientEncryptionOptions;
 
 public class SimpleClient implements Closeable
@@ -72,6 +75,7 @@ public class SimpleClient implements Closeable
     }
 
     private static final Logger logger = LoggerFactory.getLogger(SimpleClient.class);
+    public static final TimeSource TIME_SOURCE = new ApproximateTimeSource();
     public final String host;
     public final int port;
     private final ClientEncryptionOptions encryptionOptions;
@@ -294,7 +298,7 @@ public class SimpleClient implements Closeable
             channel.attr(Connection.attributeKey).set(connection);
 
             ChannelPipeline pipeline = channel.pipeline();
-            pipeline.addLast("frameDecoder", new Frame.Decoder(connectionFactory));
+            pipeline.addLast("frameDecoder", new Frame.Decoder(SimpleClient.TIME_SOURCE, connectionFactory));
             pipeline.addLast("frameEncoder", frameEncoder);
 
             pipeline.addLast("frameDecompressor", frameDecompressor);

@@ -24,6 +24,7 @@ import java.net.UnknownHostException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 
@@ -47,6 +48,7 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCEventLoop;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.cql3.SystemKeyspacesFilteringRestrictions;
@@ -56,7 +58,9 @@ import org.apache.cassandra.schema.SchemaChangeListener;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.transport.messages.EventMessage;
+import org.apache.cassandra.utils.ApproximateTimeSource;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.TimeSource;
 
 public class Server implements CassandraDaemon.Server
 {
@@ -68,6 +72,7 @@ public class Server implements CassandraDaemon.Server
     private static final Logger logger = LoggerFactory.getLogger(Server.class);
 
     public static final AttributeKey<ClientState> ATTR_KEY_CLIENT_STATE = AttributeKey.newInstance("clientState");
+    public static final TimeSource TIME_SOURCE = new ApproximateTimeSource();
 
     private final ConnectionTracker connectionTracker = new ConnectionTracker();
 
@@ -325,16 +330,34 @@ public class Server implements CassandraDaemon.Server
         private static final ConnectionLimitHandler connectionLimitHandler = new ConnectionLimitHandler();
 
         private final Server server;
+        private final Map<EventLoop, Frame.AsyncProcessor> asyncFrameProcessors;
 
         public Initializer(Server server)
         {
             this.server = server;
+            this.asyncFrameProcessors = new HashMap<>();
         }
 
         protected void initChannel(Channel channel) throws Exception
         {
             ChannelPipeline pipeline = channel.pipeline();
+            EventLoop eventLoop = channel.eventLoop();
 
+            // It is better to pay the synchronized cost at channel initialization time (amortized) than using
+            // something like computeIfAbsent() and risking to create several processor instances with a huge queue each.
+            Frame.AsyncProcessor processor;
+            synchronized(this)
+            {
+                processor = asyncFrameProcessors.get(eventLoop);
+                if (processor == null && eventLoop instanceof TPCEventLoop)
+                {
+                    processor = new Frame.AsyncProcessor((TPCEventLoop) eventLoop);
+                    asyncFrameProcessors.put(eventLoop, processor);
+                }
+            }
+            // Async frame processors enable TPC backpressure and are only supported by Epoll, so verify that:
+            if (TPC.USE_EPOLL)
+                assert !asyncFrameProcessors.isEmpty();
 
             // Add the ConnectionLimitHandler to the pipeline if configured to do so.
             if (DatabaseDescriptor.getNativeTransportMaxConcurrentConnections() > 0
@@ -346,7 +369,7 @@ public class Server implements CassandraDaemon.Server
 
             //pipeline.addLast("debug", new LoggingHandler());
 
-            pipeline.addLast("frameDecoder", new Frame.Decoder(server.connectionFactory));
+            pipeline.addLast("frameDecoder", new Frame.Decoder(Server.TIME_SOURCE, server.connectionFactory, processor));
             pipeline.addLast("frameEncoder", frameEncoder);
 
             pipeline.addLast("frameDecompressor", frameDecompressor);

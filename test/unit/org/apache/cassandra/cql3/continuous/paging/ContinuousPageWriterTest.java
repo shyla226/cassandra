@@ -7,6 +7,7 @@ import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Frame;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.TestTimeSource;
 
 public class ContinuousPageWriterTest
 {
@@ -101,6 +102,6 @@ public class ContinuousPageWriterTest
 
     private Frame makeFrame(Message.Type type)
     {
-        return Frame.create(type, 1, ProtocolVersion.DSE_V2, Frame.Header.HeaderFlag.NONE, CBUtil.allocator.buffer());
+        return Frame.create(new TestTimeSource(), type, 1, ProtocolVersion.DSE_V2, Frame.Header.HeaderFlag.NONE, CBUtil.allocator.buffer());
     }
 }
