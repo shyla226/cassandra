@@ -179,6 +179,10 @@ public class ByteOrderedPartitioner implements IPartitioner
             return obj instanceof MaxBytesToken;
         }
 
+        public ByteSource asByteComparableSource()
+        {
+            return ByteSource.max();
+        }
         // size, midpoint and split work correctly due to wraparound handling.
     }
 

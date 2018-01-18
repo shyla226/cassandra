@@ -241,6 +241,28 @@ public interface ByteSource
         return pos;
     }
 
+    static ByteSource MAX = new ByteSource()
+    {
+        public int next()
+        {
+            return 0xFF;
+        }
+
+        public void reset()
+        {
+        }
+
+        public String toString()
+        {
+            return "MAX";
+        }
+    };
+
+    public static ByteSource max()
+    {
+        return MAX;
+    }
+
     abstract class WithToString implements ByteSource
     {
         public String toString()

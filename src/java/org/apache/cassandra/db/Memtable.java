@@ -736,6 +736,8 @@ public class Memtable implements Comparable<Memtable>
         private final PartitionPosition from;
         private final PartitionPosition to;
 
+        private final int keyCount;
+
         private final AtomicReference<FlushRunnableWriterState> state;
 
         private FlushRunnable(List<SortedMap<PartitionPosition, AtomicBTreePartition>> toFlush,
@@ -747,6 +749,7 @@ public class Memtable implements Comparable<Memtable>
             this.from = from;
             this.to = to;
             long keySize = 0;
+            int keyCount = 0;
 
             for (Set<PartitionPosition> keySet : keysToFlush())
             {
@@ -755,10 +758,12 @@ public class Memtable implements Comparable<Memtable>
                     // make sure we don't write nonsensical keys
                     assert key instanceof DecoratedKey;
                     keySize += ((DecoratedKey) key).getKey().remaining();
+                    ++keyCount;
                 }
             }
 
-            estimatedSize = (long) ((keySize // index entries
+            this.keyCount = keyCount;
+            estimatedSize = (long) ((keyCount * 8 // partition index
                                     + keySize // keys in data file
                                     + getLiveDataSize()) // data
                                     * 1.2); // bloom filter and row index overhead
@@ -920,7 +925,7 @@ public class Memtable implements Comparable<Memtable>
                     .commitLogIntervals(new IntervalSet<>(commitLogLowerBound.get(), commitLogUpperBound.get()));
 
             return cfs.createSSTableMultiWriter(descriptor,
-                                                toFlush.size(),
+                                                keyCount,
                                                 ActiveRepairService.UNREPAIRED_SSTABLE,
                                                 ActiveRepairService.NO_PENDING_REPAIR,
                                                 sstableMetadataCollector,
