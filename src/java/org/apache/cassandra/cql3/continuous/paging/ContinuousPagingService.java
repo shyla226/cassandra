@@ -20,12 +20,13 @@ package org.apache.cassandra.cql3.continuous.paging;
 
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.Nullable;
@@ -36,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Single;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.ContinuousPagingConfig;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -60,6 +62,7 @@ import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ErrorMessage;
 import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * A collection of classes that send query results to a client asynchronously, that is as soon as a page
@@ -122,8 +125,9 @@ public class ContinuousPagingService
     /** Any ongoing continuous paging sessions will be stored in this map. */
     private static final ConcurrentHashMap<SessionKey, ContinuousPagingSession> sessions = new ConcurrentHashMap<>();
 
-    /** Atomically keep track of how many sessions are stored in {@link #sessions} */
-    private static final AtomicInteger numSessions = new AtomicInteger(0);
+    /** Atomically keep track of how many sessions each core is processing. */
+    @VisibleForTesting
+    static final AtomicIntegerArray numSessions = new AtomicIntegerArray(TPC.getNumCores());
 
     public static ResultBuilder createSession(Selection.Selectors selectors,
                                               GroupMaker groupMaker,
@@ -137,18 +141,20 @@ public class ContinuousPagingService
 
         SessionKey key = new SessionKey(queryState.getClientState().getRemoteAddress(), queryState.getStreamId());
 
-        if (!canCreateSession(continuousPagingState.config.max_concurrent_sessions))
+        if (!canCreateSession(continuousPagingState))
         {
             metrics.creationFailures.mark();
             metrics.tooManySessions.mark();
+
+            long numSessions = liveSessions();
             if (logger.isDebugEnabled())
-                logger.debug("Too many continuous paging sessions are already running: {}", sessions.size());
-            throw RequestValidations.invalidRequest("Invalid request, too many continuous paging sessions are already running: %d", numSessions.get());
+                logger.debug("Too many continuous paging sessions are already running: {}", numSessions);
+            throw RequestValidations.invalidRequest("Invalid request, too many continuous paging sessions are already running: %d", numSessions);
         }
 
         if (logger.isTraceEnabled())
             logger.trace("Starting continuous paging session {} with paging options {}, local {}, total number of sessions running: {}",
-                         key, options.getPagingOptions(), continuousPagingState.executor.isLocalQuery(), sessions.size());
+                         key, options.getPagingOptions(), continuousPagingState.executor.isLocalQuery(), liveSessions());
 
         ContinuousPagingSession session = new ContinuousPagingSession(selectors,
                                                                       groupMaker,
@@ -158,11 +164,10 @@ public class ContinuousPagingService
                                                                       continuousPagingState,
                                                                       key);
 
-
         if (sessions.putIfAbsent(key, session) != null)
         {
             session.release();
-            numSessions.decrementAndGet();
+            numSessions.decrementAndGet(session.coreId());
 
             metrics.creationFailures.mark();
             logger.error("Continuous paging session {} already exists", key);
@@ -176,20 +181,62 @@ public class ContinuousPagingService
      * Check {@link #numSessions} and see if we can add one more session without exceeding the maximum
      * number of sessions specified by {@code maxSessions}.
      *
-     * @param maxSessions - the maximum number of sessions
+     * @param state - the continuous paging state
      * @return true if the session can be created, false if there are too many sessions
      */
-    private static boolean canCreateSession(int maxSessions)
+    private static boolean canCreateSession(ContinuousPagingState state)
     {
+        int currentCore = TPC.bestTPCCore(); // typically this is the core of the client socket event loop
+
         while(true)
         {
-            int current = numSessions.get();
-            if (current >= maxSessions)
-                return false; // too many sessions
+            Pair<Integer, Integer> preferred = getPreferredCore(currentCore, state);
+            if (preferred.left == -1)
+            {
+                logger.debug("Failed to find a core with fewer sessions than maximum allowed, current distrib: {}. max distrib: {}",
+                             numSessions, state.config.getMaxSessionsCoreDistribution(numSessions.length()));
+                return false; // if the core with the fewest sessions had too many, then we cannot create this session
+            }
 
-            if (numSessions.compareAndSet(current, current+1))
-                return true; // if we succeeded there are at most maxSessions because current < maxSessions
+            if (numSessions.compareAndSet(preferred.left, preferred.right, preferred.right+1))
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Assigning core {} for next session, current distrib: {}, max distrib: {}",
+                                 preferred.left, numSessions, state.config.getMaxSessionsCoreDistribution(numSessions.length()));
+                state.executor.setCoreId(preferred.left);
+                return true;
+            }
         }
+    }
+
+    /**
+        Return a pair containing the preferred core on the left and the current number of sessions this core is
+        executing on the right.
+
+        This method starts by selecting the current core and then scans all other cores to find a core with fewer sessions.
+        It returns Pair(-1, 0) if all cores are executing the maximum number of sessions.
+     */
+    private static Pair<Integer, Integer> getPreferredCore(int currentCore, ContinuousPagingState state)
+    {
+        int currentSessions = numSessions.get(currentCore);
+        Pair<Integer, Integer> ret = currentSessions < state.config.getMaxSessionsPerCore(numSessions.length(), currentCore)
+                                     ? Pair.create(currentCore, currentSessions)
+                                     : Pair.create(-1, 0); // current core is not eligible since it is already executing its share of sessions
+
+        for (int i = 0; i < numSessions.length(); i++)
+        {
+            if (ret.right == 0 && ret.left != -1)
+                break; // we cannot beat this so no need to keep on searching
+
+            int sessions = numSessions.get(i);
+            if (sessions >= state.config.getMaxSessionsPerCore(numSessions.length(), i))
+                continue; // this core is not eligible since it is already executing its share of sessions
+
+            if (sessions < ret.right || ret.left == -1) // this core is less utilized than the sessions core
+                ret = Pair.create(i, sessions);
+        }
+
+        return ret;
     }
 
     private static ContinuousPagingSession getSession(SessionKey key)
@@ -202,9 +249,9 @@ public class ContinuousPagingService
         ContinuousPagingSession ret = sessions.remove(key);
         if (ret != null)
         {
-            numSessions.decrementAndGet();
+            numSessions.decrementAndGet(ret.coreId());
             if (logger.isTraceEnabled())
-                logger.trace("Removed continuous paging session {}, {} sessions still running", key, numSessions.get());
+                logger.trace("Removed continuous paging session {}, {} sessions still running", key, liveSessions());
         }
         return ret;
     }
@@ -213,7 +260,10 @@ public class ContinuousPagingService
      */
     public static long liveSessions()
     {
-        return numSessions.get();
+        long ret = 0;
+        for (int i = 0; i < numSessions.length(); i++)
+            ret += numSessions.get(i);
+        return ret;
     }
 
     /**
@@ -702,6 +752,11 @@ public class ContinuousPagingService
             allocatePage(1);
         }
 
+        int coreId()
+        {
+            return continuousPagingState.executor.coreId();
+        }
+
         /**
          * @return - the number of pending pages, which are ready to be sent on the wire.
          */
@@ -746,7 +801,7 @@ public class ContinuousPagingService
             if (logger.isTraceEnabled())
                 logger.trace("Updated numPagesRequested to {} for continuous paging session {}", numPagesRequested, key);
 
-            continuousPagingState.executor.getScheduler().scheduleDirect(this::maybeResume);
+            continuousPagingState.executor.schedule(this::maybeResume);
             return true;
         }
 
@@ -916,9 +971,9 @@ public class ContinuousPagingService
 
             this.paused = continuousPagingState.timeSource.nanoTime();
             ContinuousPagingService.metrics.serverBlocked.inc();
-            continuousPagingState.executor.getScheduler().scheduleDirect(this::maybeResume,
-                                                                         continuousPagingState.config.paused_check_interval_ms,
-                                                                         TimeUnit.MILLISECONDS);
+            continuousPagingState.executor.schedule(this::maybeResume,
+                                                    continuousPagingState.config.paused_check_interval_ms,
+                                                    TimeUnit.MILLISECONDS);
 
             throw ret;
         }
@@ -947,7 +1002,7 @@ public class ContinuousPagingService
                 }
                 else
                 {
-                    continuousPagingState.executor.getScheduler().scheduleDirect(this::maybeResume, continuousPagingState.config.paused_check_interval_ms, TimeUnit.MILLISECONDS);
+                    continuousPagingState.executor.schedule(this::maybeResume, continuousPagingState.config.paused_check_interval_ms, TimeUnit.MILLISECONDS);
                 }
             }
             else

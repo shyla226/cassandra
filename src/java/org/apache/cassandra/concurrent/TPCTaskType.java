@@ -112,6 +112,8 @@ public enum TPCTaskType
     COUNTER_ACQUIRE_LOCK(Features.ALWAYS_COUNT),
     /** Executing a statement */
     EXECUTE_STATEMENT(Features.ALWAYS_COUNT),
+    /** Continuous paging events */
+    CONTINUOUS_PAGING(Features.ALWAYS_COUNT),
     /** Executing compare-and-set */
     CAS(Features.ALWAYS_COUNT),
     /** Preparation phase of light-weight transaction. */

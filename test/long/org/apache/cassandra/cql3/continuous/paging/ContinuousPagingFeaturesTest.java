@@ -599,6 +599,7 @@ public class ContinuousPagingFeaturesTest extends CQLTester
         // if we have too many max concurrent sessions, by the time we get to the extra sessions
         // the old ones may already have completed now that we have fewer Netty request threads
         config.max_concurrent_sessions = 5;
+        config.max_sessions_per_core.clear();
         try
         {
             final int numSessions = config.max_concurrent_sessions + numExtraSessions;
@@ -612,6 +613,7 @@ public class ContinuousPagingFeaturesTest extends CQLTester
         finally
         {
             config.max_concurrent_sessions = oldMaxConcurrentSessions;
+            config.max_sessions_per_core.clear();
         }
     }
 

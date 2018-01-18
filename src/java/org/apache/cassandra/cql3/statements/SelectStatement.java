@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
@@ -651,7 +652,9 @@ public class SelectStatement implements CQLStatement, TableStatement
         final ReadQuery query;
         final boolean isLocalQuery;
         final long queryStartNanos;
-        final int coreId;
+
+        // the core where all the session events will be scheduled
+        int coreId;
 
         // Not final because it is recreated every time we reschedule
         Pager pager;
@@ -678,9 +681,7 @@ public class SelectStatement implements CQLStatement, TableStatement
             this.query = query;
             this.isLocalQuery = options.getConsistency().isSingleNode() && query.queriesOnlyLocalData();
             this.queryStartNanos = queryStartNanos;
-            // this should be the core of the socket, which can also be found with
-            // ((TPCEventLoop)state.getConnection().channel().eventLoop()).coreId();
-            this.coreId = TPC.bestTPCScheduler().coreId();
+            this.coreId = -1; // The core id is set when the session is created
         }
 
         public PagingState state(boolean inclusive)
@@ -802,9 +803,9 @@ public class SelectStatement implements CQLStatement, TableStatement
             }
         }
 
-        public StagedScheduler getScheduler()
+        public void schedule(Runnable runnable, long delay, TimeUnit unit)
         {
-            return TPC.getForCore(coreId);
+            TPC.getForCore(coreId).schedule(runnable, TPCTaskType.CONTINUOUS_PAGING, delay, unit);
         }
 
         public void schedule(PagingState pagingState, ResultBuilder builder)
@@ -818,7 +819,17 @@ public class SelectStatement implements CQLStatement, TableStatement
             pager = null;
 
             schedulingTimeNanos = System.nanoTime();
-            getScheduler().execute(() -> retrieveMultiplePages(pagingState, builder), TPCTaskType.EXECUTE_STATEMENT);   // TODO: Right type?
+            schedule(() -> retrieveMultiplePages(pagingState, builder));
+        }
+
+        public int coreId()
+        {
+            return coreId;
+        }
+
+        public void setCoreId(int coreId)
+        {
+            this.coreId = coreId;
         }
     }
 

@@ -1,6 +1,7 @@
 package org.apache.cassandra.cql3.continuous.paging;
 
-import io.reactivex.Scheduler;
+import java.util.concurrent.TimeUnit;
+
 import org.apache.cassandra.cql3.selection.ResultBuilder;
 import org.apache.cassandra.service.pager.PagingState;
 
@@ -17,7 +18,15 @@ public interface ContinuousPagingExecutor
 
     PagingState state(boolean inclusive);
 
-    Scheduler getScheduler();
+    default void schedule(Runnable runnable)
+    {
+        schedule(runnable, 0, TimeUnit.NANOSECONDS);
+    }
+
+    void schedule(Runnable runnable, long delay, TimeUnit unit);
 
     void schedule(PagingState pagingState, ResultBuilder builder);
+
+    int coreId();
+    void setCoreId(int coreId);
 }

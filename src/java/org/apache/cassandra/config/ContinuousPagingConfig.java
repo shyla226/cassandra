@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.config;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -75,6 +77,13 @@ public class ContinuousPagingConfig
      */
     public int paused_check_interval_ms;
 
+    /**
+     * The maximum number of sessions for each core. This is {@link ContinuousPagingConfig#max_concurrent_sessions} distributed evenly
+     * across cores. It is derived from the number of TPC cores and {@link ContinuousPagingConfig#max_concurrent_sessions},
+     * so it should not be set directly in the yaml.
+     */
+    public List<Integer> max_sessions_per_core;
+
     public ContinuousPagingConfig()
     {
         this(DEFAULT_MAX_CONCURRENT_SESSIONS,
@@ -101,6 +110,38 @@ public class ContinuousPagingConfig
         this.client_timeout_sec = client_timeout_sec;
         this.cancel_timeout_sec = cancel_timeout_sec;
         this.paused_check_interval_ms = paused_check_interval_ms;
+        this.max_sessions_per_core = new ArrayList<>();
+    }
+
+    private synchronized void setMaxConcurrentSessionsPerCore(int numCores)
+    {
+        assert numCores >= 1 : "invalid number of cores, should be positive";
+        if (max_sessions_per_core.size() >= numCores)
+            return;
+
+        max_sessions_per_core.clear();
+
+        int val = max_concurrent_sessions / numCores;
+        int remainder = max_concurrent_sessions % numCores;
+        for (int i = 0; i < numCores; i++)
+            max_sessions_per_core.add(val + (i < remainder ? 1 : 0));
+    }
+
+    public List<Integer> getMaxSessionsCoreDistribution(int numCores)
+    {
+        if (max_sessions_per_core.size() < numCores)
+            setMaxConcurrentSessionsPerCore(numCores);
+
+        return max_sessions_per_core;
+    }
+
+    public int getMaxSessionsPerCore(int numCores, int coreId)
+    {
+        if (max_sessions_per_core.size() < numCores)
+            setMaxConcurrentSessionsPerCore(numCores);
+
+        assert coreId >= 0 && coreId <= max_sessions_per_core.size() : "invalid core id";
+        return max_sessions_per_core.get(coreId);
     }
 
     @Override

@@ -1,6 +1,9 @@
 package org.apache.cassandra.cql3.continuous.paging;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -12,6 +15,7 @@ import org.junit.Test;
 
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
 
 import org.apache.cassandra.auth.user.UserRolesAndPermissions;
@@ -40,7 +44,7 @@ import static org.junit.Assert.*;
 public class ContinuousPagingServiceTest
 {
     private static final Selection SELECTION = Selection.wildcard(TableMetadata.minimal("ks", "cf"), false);
-    private TestSpecs test;
+    private List<TestSpecs> tests = new ArrayList<>(1);
 
     @BeforeClass
     public static void beforeClass()
@@ -49,18 +53,28 @@ public class ContinuousPagingServiceTest
     }
 
     @After
-    public void removeSession()
+    public void removeSessions()
     {
-        // Always set the direct event loop, so that the cancellation can be processed:
-        test.channel.setEventLoop(new ContinuousPagingTestStubs.DirectEventLoop());
-        TPCUtils.blockingGet(ContinuousPagingService.cancel(Single.just(test.queryState), test.streamId));
+        for (TestSpecs test : tests)
+        {
+            // Always set the direct event loop, so that the cancellation can be processed:
+            test.channel.setEventLoop(new ContinuousPagingTestStubs.DirectEventLoop());
+            TPCUtils.blockingGet(ContinuousPagingService.cancel(Single.just(test.queryState), test.streamId));
+        }
+    }
+
+    private TestSpecs newTest()
+    {
+        TestSpecs test = new TestSpecs();
+        tests.add(test);
+        return test;
     }
 
     @Test(expected = ContinuousBackPressureException.class)
     public void testBackpressureIsTriggeredOnNextPages()
     {
-        test = new TestSpecs()
-               .numNextPages(1);
+        TestSpecs test = newTest()
+                         .numNextPages(1);
 
         ResultBuilder builder = test.build();
         builder.onRowCompleted(Arrays.asList(ByteBufferUtil.bytes("testColumn")), true);
@@ -69,9 +83,9 @@ public class ContinuousPagingServiceTest
     @Test(expected = ContinuousBackPressureException.class)
     public void testBackpressureIsTriggeredOnMaxPages()
     {
-        test = new TestSpecs()
-               .channelEventLoop(new ContinuousPagingTestStubs.BlackholeEventLoop())
-               .maxPagesPerSession(1);
+        TestSpecs test = newTest()
+                         .channelEventLoop(new ContinuousPagingTestStubs.BlackholeEventLoop())
+                         .maxPagesPerSession(1);
 
         ResultBuilder builder = test.build();
 
@@ -82,9 +96,9 @@ public class ContinuousPagingServiceTest
     @Test(expected = ContinuousBackPressureException.class)
     public void testBackpressureIsTriggeredOnMaxLocalRunningTimeForLocalQueries()
     {
-        test = new TestSpecs()
-               .isLocalQuery(true)
-               .maxLocalQueryTimeMs(50);
+        TestSpecs test = newTest()
+                         .isLocalQuery(true)
+                         .maxLocalQueryTimeMs(50);
 
         ResultBuilder builder = test.build();
         builder.onRowCompleted(Arrays.asList(ByteBufferUtil.bytes("testColumn")), true);
@@ -96,9 +110,9 @@ public class ContinuousPagingServiceTest
     @Test
     public void testBackpressureIsNotTriggeredOnMaxLocalRunningTimeForNonLocalQueries()
     {
-        test = new TestSpecs()
-               .isLocalQuery(false)
-               .maxLocalQueryTimeMs(50);
+        TestSpecs test = newTest()
+                         .isLocalQuery(false)
+                         .maxLocalQueryTimeMs(50);
 
         ResultBuilder builder = test.build();
         builder.onRowCompleted(Arrays.asList(ByteBufferUtil.bytes("testColumn")), true);
@@ -110,7 +124,7 @@ public class ContinuousPagingServiceTest
     @Test
     public void testUpdateBackpressureSessionNotFound()
     {
-        test = new TestSpecs();
+        TestSpecs test = newTest();
 
         test.build();
 
@@ -128,7 +142,7 @@ public class ContinuousPagingServiceTest
     @Test(expected = InvalidRequestException.class)
     public void testUpdateBackpressureWithZero()
     {
-        test = new TestSpecs();
+        TestSpecs test = newTest();
 
         test.build();
 
@@ -140,7 +154,7 @@ public class ContinuousPagingServiceTest
     @Test(expected = InvalidRequestException.class)
     public void testUpdateBackpressureWithNeg()
     {
-        test = new TestSpecs();
+        TestSpecs test = newTest();
 
         test.build();
 
@@ -152,7 +166,7 @@ public class ContinuousPagingServiceTest
     @Test
     public void testUpdateBackpressureWithMax()
     {
-        test = new TestSpecs();
+        TestSpecs test = newTest();
 
         test.build();
 
@@ -166,7 +180,7 @@ public class ContinuousPagingServiceTest
     @Test
     public void testUpdateBackpressureFromMax()
     {
-        test = new TestSpecs().numNextPages(Integer.MAX_VALUE);
+        TestSpecs test = newTest().numNextPages(Integer.MAX_VALUE);
 
         test.build();
 
@@ -180,7 +194,7 @@ public class ContinuousPagingServiceTest
     @Test
     public void testUpdateBackpressureFromZero()
     {
-        test = new TestSpecs().numNextPages(0);
+        TestSpecs test = newTest().numNextPages(0);
 
         test.build();
 
@@ -194,9 +208,9 @@ public class ContinuousPagingServiceTest
     @Test
     public void testBackpressureIsResumedAfterPageIsConsumed()
     {
-        test = new TestSpecs()
-               .channelEventLoop(new ContinuousPagingTestStubs.RecordingEventLoop())
-               .maxPagesPerSession(2);
+        TestSpecs test = newTest()
+                         .channelEventLoop(new ContinuousPagingTestStubs.RecordingEventLoop())
+                         .maxPagesPerSession(2);
 
         ResultBuilder builder = test.build();
 
@@ -224,10 +238,10 @@ public class ContinuousPagingServiceTest
     @Test
     public void testBackpressureIsUpdated()
     {
-        test = new TestSpecs()
-               .rowsPerPage(1)
-               .numNextPages(1)
-               .maxPagesPerSession(10);
+        TestSpecs test = newTest()
+                         .rowsPerPage(1)
+                         .numNextPages(1)
+                         .maxPagesPerSession(10);
 
         AtomicReference<ResultBuilder> builder = new AtomicReference<>(test.build());
         ResultBuilder initialBuilder = builder.get();
@@ -277,11 +291,11 @@ public class ContinuousPagingServiceTest
     @Test
     public void testErrorIsSentAfterMaxClientWait()
     {
-        test = new TestSpecs()
-               .rowsPerPage(1)
-               .numNextPages(10)
-               .maxPagesPerSession(10)
-               .maxClientWait(120);
+        TestSpecs test = newTest()
+                         .rowsPerPage(1)
+                         .numNextPages(10)
+                         .maxPagesPerSession(10)
+                         .maxClientWait(120);
 
         ResultBuilder builder = test.build();
 
@@ -319,9 +333,9 @@ public class ContinuousPagingServiceTest
     @Test
     public void testErrorIsSentAfterOverflowOfNumPagesSent()
     {
-        test = new TestSpecs()
-               .rowsPerPage(1)
-               .numNextPages(Integer.MAX_VALUE);
+        TestSpecs test = newTest()
+                         .rowsPerPage(1)
+                         .numNextPages(Integer.MAX_VALUE);
 
         ResultBuilder builder = test.build();
 
@@ -335,6 +349,131 @@ public class ContinuousPagingServiceTest
         Assert.assertEquals(2, test.channel.writeCalls);
         Assert.assertEquals(2, test.channel.flushCalls);
         Assert.assertEquals(Message.Type.ERROR, ((Frame) test.channel.writeObjects.get(1)).header.type);
+    }
+
+    @Test
+    public void testMoreSessionsThanCores() throws InterruptedException
+    {
+        final int numCores = TPC.getNumCores();
+        for (int i = 0; i < numCores; i++)
+            testMoreSessionsThanCores(numCores, i);
+    }
+
+    private void testMoreSessionsThanCores(final int numCores, final int coreId) throws InterruptedException
+    {
+        try
+        {
+            final ResultBuilder[] sessions = new ResultBuilder[numCores];
+            final CountDownLatch done = new CountDownLatch(1);
+            final AtomicReference<Throwable> err = new AtomicReference<>();
+
+            TPC.getForCore(coreId).scheduleDirect(() -> {
+                try
+                {
+                    // distribute one session per core and check that each core has one session
+                    for (int i = 0; i < numCores; i++)
+                        sessions[i] = newTest().maxConcurrentSessions(numCores * 2).streamId(i).build();
+
+                    for (int i = 0; i < numCores; i++)
+                        assertEquals(1, ContinuousPagingService.numSessions.get(i));
+
+                    // distribute one more session per core and check that each core has 2 sessions
+                    for (int i = 0; i < numCores; i++)
+                        sessions[i] = newTest().maxConcurrentSessions(numCores * 2).streamId(numCores + i).build();
+
+                    for (int i = 0; i < numCores; i++)
+                        assertEquals(2, ContinuousPagingService.numSessions.get(i));
+                }
+                catch (Throwable t)
+                {
+                    err.set(t);
+                }
+                finally
+                {
+                    done.countDown();
+                }
+            });
+
+            done.await(10, TimeUnit.SECONDS);
+            assertNull(err.get());
+
+        }
+        finally
+        {
+            removeSessions();
+            tests.clear();
+        }
+    }
+
+    @Test
+    public void testFewerSessionsThanCores() throws InterruptedException
+    {
+        final int numCores = TPC.getNumCores();
+        final ResultBuilder[] sessions = new ResultBuilder[numCores];
+        final CountDownLatch done = new CountDownLatch(1);
+        final AtomicReference<Throwable> err = new AtomicReference<>();
+
+        // distribute twice as amny sessions as allowed
+        TPC.getForCore(0).scheduleDirect(() -> {
+            try
+            {
+                for (int i = 0; i < numCores / 2; i++)
+                    sessions[i] = newTest().maxConcurrentSessions(numCores * 2).streamId(i).build();
+            }
+            catch (Throwable t)
+            {
+                err.set(t);
+            }
+            finally
+            {
+                done.countDown();
+            }
+        });
+
+        done.await(10, TimeUnit.SECONDS);
+        assertNull(err.get());
+
+        for (int i = 0; i < numCores; i++)
+            assertEquals(i < numCores / 2 ? 1 : 0,
+                         ContinuousPagingService.numSessions.get(i));
+    }
+
+    @Test
+    public void testMoreSessionsThanMaxAllowed() throws InterruptedException
+    {
+        final int numCores = TPC.getNumCores();
+        final ResultBuilder[] sessions = new ResultBuilder[numCores];
+
+        // distribute one session more than the max and verify that it gets rejected
+        for (int i = 0; i < numCores; i++)
+            sessions[i] = newTest().maxConcurrentSessions(numCores).streamId(i).build();
+
+        try
+        {
+            newTest().maxConcurrentSessions(numCores).streamId(numCores + 1).build();
+            fail("Expected InvalidRequestException");
+        }
+        catch (InvalidRequestException ex)
+        {
+            //expected
+        }
+    }
+
+    @Test
+    public void testDuplicateSessionsNotAllowed() throws InterruptedException
+    {
+        final int numCores = TPC.getNumCores();
+        newTest().maxConcurrentSessions(numCores).streamId(1).build();
+
+        try
+        {
+            newTest().maxConcurrentSessions(numCores).streamId(1).build();
+            fail("Expected InvalidRequestException");
+        }
+        catch (InvalidRequestException ex)
+        {
+            //expected
+        }
     }
 
     private static class TestSpecs
@@ -358,6 +497,7 @@ public class ContinuousPagingServiceTest
         int maxCancelWait = 5;
         int checkInterval = 1000;
         boolean isLocalQuery = false;
+        int maxConcurrentSessions = 60;
 
         ContinuousPagingTestStubs.TestEventLoop channelEventLoop = new ContinuousPagingTestStubs.DirectEventLoop();
 
@@ -427,6 +567,12 @@ public class ContinuousPagingServiceTest
             return this;
         }
 
+        TestSpecs maxConcurrentSessions(int maxConcurrentSessions)
+        {
+            this.maxConcurrentSessions = maxConcurrentSessions;
+            return this;
+        }
+
         ResultBuilder build()
         {
             this.timeSource = new TestTimeSource();
@@ -445,7 +591,7 @@ public class ContinuousPagingServiceTest
                                                     ProtocolVersion.DSE_V2,
                                                     null);
             this.channel = new ContinuousPagingTestStubs.RecordingChannel(channelEventLoop);
-            this.config = new ContinuousPagingConfig(Integer.MAX_VALUE, maxPagesPerSession, maxPageSizeMb, maxLocalQueryTimeMs, maxClientWait, maxCancelWait, checkInterval);
+            this.config = new ContinuousPagingConfig(maxConcurrentSessions, maxPagesPerSession, maxPageSizeMb, maxLocalQueryTimeMs, maxClientWait, maxCancelWait, checkInterval);
             this.scheduler = new ContinuousPagingTestStubs.RecordingScheduler();
             this.executor = new TestPagingExecutor(scheduler, timeSource, isLocalQuery);
             this.state = new ContinuousPagingState(timeSource,
@@ -472,6 +618,7 @@ public class ContinuousPagingServiceTest
         public long queryStartTimeMillis;
         public boolean isLocal;
         public PagingState state;
+        public int coreId;
 
         public TestPagingExecutor(Scheduler scheduler, TimeSource timeSource, boolean isLocal)
         {
@@ -483,9 +630,9 @@ public class ContinuousPagingServiceTest
         }
 
         @Override
-        public Scheduler getScheduler()
+        public void schedule(Runnable runnable, long delay, TimeUnit unit)
         {
-            return scheduler;
+            scheduler.scheduleDirect(runnable, delay, unit);
         }
 
         @Override
@@ -494,6 +641,16 @@ public class ContinuousPagingServiceTest
             this.queryStartTimeMillis = timeSource.currentTimeMillis();
             if (onSchedule != null)
                 onSchedule.accept(pagingState, builder);
+        }
+
+        public int coreId()
+        {
+            return coreId;
+        }
+
+        public void setCoreId(int coreId)
+        {
+            this.coreId = coreId;
         }
 
         @Override
