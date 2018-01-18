@@ -20,12 +20,16 @@ package org.apache.cassandra.locator;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.net.InetAddress;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.Multimap;
+import com.google.common.collect.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,7 +39,6 @@ import org.apache.cassandra.dht.RingPosition;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.FBUtilities;
-
 import org.jctools.maps.NonBlockingHashMap;
 
 /**
@@ -68,7 +71,7 @@ public abstract class AbstractReplicationStrategy
         // lazy-initialize keyspace itself since we don't create them until after the replication strategies
     }
 
-    private final Map<Token, ArrayList<InetAddress>> cachedEndpoints = new NonBlockingHashMap<Token, ArrayList<InetAddress>>();
+    private final Map<Token, List<InetAddress>> cachedEndpoints = new NonBlockingHashMap<Token, List<InetAddress>>();
 
     private static final class VersionedRanges
     {
@@ -87,7 +90,7 @@ public abstract class AbstractReplicationStrategy
      * that they will be created (minimum valid ring version is zero). */
     private final AtomicReference<VersionedRanges> normalizedLocalRanges = new AtomicReference<>(new VersionedRanges(-1L, Collections.emptyList()));
 
-    public ArrayList<InetAddress> getCachedEndpoints(Token t)
+    public List<InetAddress> getCachedEndpoints(Token t)
     {
         long lastVersion = tokenMetadata.getRingVersion();
 
@@ -110,25 +113,40 @@ public abstract class AbstractReplicationStrategy
     /**
      * get the (possibly cached) endpoints that should store the given Token.
      * Note that while the endpoints are conceptually a Set (no duplicates will be included),
-     * we return a List to avoid an extra allocation when sorting by proximity later
+     * we return a List to avoid an extra allocation when sorting by proximity later.
+     *
      * @param searchPosition the position the natural endpoints are requested for
      * @return a copy of the natural endpoints for the given token
      */
-    public ArrayList<InetAddress> getNaturalEndpoints(RingPosition searchPosition)
+    public final ArrayList<InetAddress> getNaturalEndpoints(RingPosition searchPosition)
+    {
+        return new ArrayList<>(getCachedNaturalEndpoints(searchPosition));
+    }
+
+    /**
+     * get the (possibly cached) endpoints that should store the given Token.
+     * Note that while the endpoints are conceptually a Set (no duplicates will be included),
+     * we return a List to avoid an extra allocation when sorting by proximity later.
+     *
+     * @param searchPosition the position the natural endpoints are requested for
+     * @return the natural endpoints for the given token, for iteration only
+     */
+    public List<InetAddress> getCachedNaturalEndpoints(RingPosition searchPosition)
     {
         Token searchToken = searchPosition.getToken();
         Token keyToken = TokenMetadata.firstToken(tokenMetadata.sortedTokens(), searchToken);
-        ArrayList<InetAddress> endpoints = getCachedEndpoints(keyToken);
+        List<InetAddress> endpoints = getCachedEndpoints(keyToken);
         if (endpoints == null)
         {
             TokenMetadata tm = tokenMetadata.cachedOnlyTokenMap();
             // if our cache got invalidated, it's possible there is a new token to account for too
             keyToken = TokenMetadata.firstToken(tm.sortedTokens(), searchToken);
-            endpoints = new ArrayList<InetAddress>(calculateNaturalEndpoints(searchToken, tm));
+            endpoints = ImmutableList.copyOf(calculateNaturalEndpoints(searchToken, tm));
+
             cachedEndpoints.put(keyToken, endpoints);
         }
 
-        return new ArrayList<InetAddress>(endpoints);
+        return endpoints;
     }
 
     /**

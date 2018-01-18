@@ -18,22 +18,20 @@
 package org.apache.cassandra.locator;
 
 import java.net.InetAddress;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.dht.RingPosition;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class LocalStrategy extends AbstractReplicationStrategy
 {
+    private final List<InetAddress> naturalEndpoints;
     public LocalStrategy(String keyspaceName, TokenMetadata tokenMetadata, IEndpointSnitch snitch, Map<String, String> configOptions)
     {
         super(keyspaceName, tokenMetadata, snitch, configOptions);
+        naturalEndpoints = Collections.singletonList(FBUtilities.getBroadcastAddress());
     }
 
     /**
@@ -42,16 +40,15 @@ public class LocalStrategy extends AbstractReplicationStrategy
      * LocalStrategy may be used before tokens are set up.
      */
     @Override
-    public ArrayList<InetAddress> getNaturalEndpoints(RingPosition searchPosition)
+    public List<InetAddress> getCachedNaturalEndpoints(RingPosition searchPosition)
     {
-        ArrayList<InetAddress> l = new ArrayList<InetAddress>(1);
-        l.add(FBUtilities.getBroadcastAddress());
-        return l;
+        return naturalEndpoints;
     }
 
+    @Override
     public List<InetAddress> calculateNaturalEndpoints(Token token, TokenMetadata metadata)
     {
-        return Collections.singletonList(FBUtilities.getBroadcastAddress());
+        return naturalEndpoints;
     }
 
     public int getReplicationFactor()
