@@ -1027,11 +1027,6 @@ public class NodeProbe implements AutoCloseable
         return ssProxy.getStreamThroughputMbPerSec();
     }
 
-    public int getStreamingConnectionsPerHost()
-    {
-        return ssProxy.getStreamThroughputMbPerSec();
-    }
-
     public int getInterDCStreamThroughput()
     {
         return ssProxy.getInterDCStreamThroughputMbPerSec();
