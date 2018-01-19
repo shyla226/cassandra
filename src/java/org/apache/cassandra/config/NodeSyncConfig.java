@@ -203,7 +203,8 @@ public class NodeSyncConfig
                && this.min_threads == that.min_threads
                && this.max_threads == that.max_threads
                && this.min_inflight_validations == that.min_inflight_validations
-               && this.max_inflight_validations == that.max_inflight_validations;
+               && this.max_inflight_validations == that.max_inflight_validations
+               && this.trace_ttl_sec == that.trace_ttl_sec;
     }
 
     @Override
@@ -215,7 +216,8 @@ public class NodeSyncConfig
                             min_threads,
                             max_threads,
                             min_inflight_validations,
-                            max_inflight_validations);
+                            max_inflight_validations,
+                            trace_ttl_sec);
     }
 
     private Map<String, String> toStringMap()
@@ -228,6 +230,7 @@ public class NodeSyncConfig
         m.put("max_threads", Integer.toString(max_threads));
         m.put("max_inflight_validations", Integer.toString(max_inflight_validations));
         m.put("min_inflight_validations", Integer.toString(min_inflight_validations));
+        m.put("trace_ttl_sec", Integer.toString(trace_ttl_sec));
         return m;
     }
 
