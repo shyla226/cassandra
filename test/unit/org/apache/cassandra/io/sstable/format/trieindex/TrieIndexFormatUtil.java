@@ -33,7 +33,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriter;
-import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FilterFactory;
 
 public class TrieIndexFormatUtil
@@ -61,13 +61,13 @@ public class TrieIndexFormatUtil
 
     public static SSTableReader emptyReader(Descriptor desc,
                                             Set<Component> components,
-                                            TableMetadata metadata,
+                                            TableMetadataRef metadata,
                                             FileHandle ifile,
                                             FileHandle dfile)
     {
-        SerializationHeader header = SerializationHeader.make(metadata, Collections.emptyList());
-        StatsMetadata sstableMetadata = (StatsMetadata) new MetadataCollector(metadata.comparator)
-                                                 .finalizeMetadata(metadata.partitioner.getClass().getCanonicalName(), 0.01f, -1, null, header)
+        SerializationHeader header = SerializationHeader.make(metadata.get(), Collections.emptyList());
+        StatsMetadata sstableMetadata = (StatsMetadata) new MetadataCollector(metadata.get().comparator)
+                                                 .finalizeMetadata(metadata.get().partitioner.getClass().getCanonicalName(), 0.01f, -1, null, header)
                                                  .get(MetadataType.STATS);
         return TrieIndexSSTableReader.internalOpen(desc, components, metadata, ifile, dfile,
                                                  partitionIndex.sharedCopy(), FilterFactory.AlwaysPresent,

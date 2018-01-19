@@ -72,7 +72,7 @@ public class DefaultCompactionWriter extends CompactionAwareWriter
                                                     estimatedTotalKeys,
                                                     minRepairedAt,
                                                     pendingRepair,
-                                                    cfs.metadata.get(),
+                                                    cfs.metadata,
                                                     new MetadataCollector(txn.originals(), cfs.metadata().comparator, sstableLevel),
                                                     SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
                                                     cfs.indexManager.listIndexes(),

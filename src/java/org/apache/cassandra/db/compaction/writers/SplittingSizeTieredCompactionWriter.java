@@ -107,7 +107,7 @@ public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
                                                     currentPartitionsToWrite,
                                                     minRepairedAt,
                                                     pendingRepair,
-                                                    cfs.metadata.get(),
+                                                    cfs.metadata,
                                                     new MetadataCollector(allSSTables, cfs.metadata().comparator, 0),
                                                     SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
                                                     cfs.indexManager.listIndexes(),

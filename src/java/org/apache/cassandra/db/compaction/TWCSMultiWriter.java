@@ -161,7 +161,7 @@ public class TWCSMultiWriter implements SSTableMultiWriter
                                                              keyCount,
                                                              repairedAt,
                                                              pendingRepair,
-                                                             cfs.metadata.get(),
+                                                             cfs.metadata,
                                                              meta.copy(),
                                                              new SerializationHeader(header.isForSSTable(),
                                                                                      cfs.metadata(),

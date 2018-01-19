@@ -29,7 +29,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 
 public class SimpleSSTableMultiWriter implements SSTableMultiWriter
 {
@@ -110,7 +110,7 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
                                             long keyCount,
                                             long repairedAt,
                                             UUID pendingRepair,
-                                            TableMetadata metadata,
+                                            TableMetadataRef metadata,
                                             MetadataCollector metadataCollector,
                                             SerializationHeader header,
                                             Collection<Index> indexes,

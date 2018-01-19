@@ -78,12 +78,12 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                             long keyCount,
                             long repairedAt,
                             UUID pendingRepair,
-                            TableMetadata metadata,
+                            TableMetadataRef metadata,
                             MetadataCollector metadataCollector,
                             SerializationHeader header,
                             Collection<SSTableFlushObserver> observers)
     {
-        super(descriptor, components(metadata), metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
+        super(descriptor, components(metadata.get()), metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
         this.keyCount = keyCount;
         this.repairedAt = repairedAt;
         this.pendingRepair = pendingRepair;
@@ -96,7 +96,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                        Long keyCount,
                                        Long repairedAt,
                                        UUID pendingRepair,
-                                       TableMetadata metadata,
+                                       TableMetadataRef metadata,
                                        MetadataCollector metadataCollector,
                                        SerializationHeader header,
                                        Collection<Index> indexes,
@@ -116,10 +116,10 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                        LifecycleTransaction txn)
     {
         TableMetadataRef metadata = Schema.instance.getTableMetadataRef(descriptor);
-        return create(metadata.get(), descriptor, keyCount, repairedAt, pendingRepair, sstableLevel, header, indexes, txn);
+        return create(metadata, descriptor, keyCount, repairedAt, pendingRepair, sstableLevel, header, indexes, txn);
     }
 
-    public static SSTableWriter create(TableMetadata metadata,
+    public static SSTableWriter create(TableMetadataRef metadata,
                                        Descriptor descriptor,
                                        long keyCount,
                                        long repairedAt,
@@ -129,7 +129,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                        Collection<Index> indexes,
                                        LifecycleTransaction txn)
     {
-        MetadataCollector collector = new MetadataCollector(metadata.comparator).sstableLevel(sstableLevel);
+        MetadataCollector collector = new MetadataCollector(metadata.get().comparator).sstableLevel(sstableLevel);
         return create(descriptor, keyCount, repairedAt, pendingRepair, metadata, collector, header, indexes, txn);
     }
 
@@ -341,7 +341,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                            long keyCount,
                                            long repairedAt,
                                            UUID pendingRepair,
-                                           TableMetadata metadata,
+                                           TableMetadataRef metadata,
                                            MetadataCollector metadataCollector,
                                            SerializationHeader header,
                                            Collection<SSTableFlushObserver> observers,

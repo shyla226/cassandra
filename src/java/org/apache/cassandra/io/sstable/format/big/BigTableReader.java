@@ -63,7 +63,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.CachingParams;
-import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -90,7 +90,7 @@ public class BigTableReader extends SSTableReader
     protected final AtomicLong keyCacheHit = new AtomicLong(0);
     protected final AtomicLong keyCacheRequest = new AtomicLong(0);
 
-    BigTableReader(Descriptor desc, Set<Component> components, TableMetadata metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header)
+    BigTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header)
     {
         super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header);
 
@@ -209,7 +209,7 @@ public class BigTableReader extends SSTableReader
      */
     static BigTableReader internalOpen(Descriptor desc,
                                       Set<Component> components,
-                                      TableMetadata metadata,
+                                      TableMetadataRef metadata,
                                       FileHandle ifile,
                                       FileHandle dfile,
                                       IndexSummary indexSummary,

@@ -65,7 +65,6 @@ dse 6.0.0:
  * Cleanup maven dependencies and download sources on maven ant tasks (DB-302)
 Merged from dse5.1:
  * Switch RMIExporter to dynamic proxy (DB-1591)
- * Use immutable TableMetadata in SSTables (DB-1444)
  * Do not fetch columns that are not in the filter fetched set (DB-1444)
  * Allow selecting static column only when querying static index (DB-1467)
  * Require only MODIFY permission on base when updating table with MV (DB-1089)

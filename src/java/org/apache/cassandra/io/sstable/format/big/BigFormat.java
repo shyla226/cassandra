@@ -40,6 +40,7 @@ import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -95,7 +96,7 @@ public class BigFormat implements SSTableFormat
     static class ReaderFactory extends SSTableReader.Factory
     {
         @Override
-        public BigTableReader open(Descriptor descriptor, Set<Component> components, TableMetadata metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header)
+        public BigTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header)
         {
             return new BigTableReader(descriptor, components, metadata, maxDataAge, sstableMetadata, openReason, header);
         }

@@ -39,6 +39,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.memory.HeapAllocator;
 
@@ -70,9 +71,9 @@ public abstract class SSTable
     public DecoratedKey last;
 
     protected final DiskOptimizationStrategy optimizationStrategy;
-    protected final TableMetadata metadata;
+    protected final TableMetadataRef metadata;
 
-    protected SSTable(Descriptor descriptor, Set<Component> components, TableMetadata metadata, DiskOptimizationStrategy optimizationStrategy)
+    protected SSTable(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, DiskOptimizationStrategy optimizationStrategy)
     {
         // In almost all cases, metadata shouldn't be null, but allowing null allows to create a mostly functional SSTable without
         // full schema definition. SSTableLoader use that ability
@@ -117,7 +118,7 @@ public abstract class SSTable
 
     public TableMetadata metadata()
     {
-        return metadata;
+        return metadata.get();
     }
 
     public IPartitioner getPartitioner()

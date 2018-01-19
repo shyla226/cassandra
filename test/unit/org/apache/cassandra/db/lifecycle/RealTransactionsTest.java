@@ -161,7 +161,7 @@ public class RealTransactionsTest extends SchemaLoader
                 File directory = txn.originals().iterator().next().descriptor.directory;
                 Descriptor desc = cfs.newSSTableDescriptor(directory);
                 TableMetadataRef metadata = Schema.instance.getTableMetadataRef(desc);
-                rewriter.switchWriter(SSTableWriter.create(metadata.get(),
+                rewriter.switchWriter(SSTableWriter.create(metadata,
                                                            desc,
                                                            0,
                                                            0,

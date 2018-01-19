@@ -19,6 +19,7 @@ import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.ReadVerbs;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.ArrayBackedPartition;
+import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;

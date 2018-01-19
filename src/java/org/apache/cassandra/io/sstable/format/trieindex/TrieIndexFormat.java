@@ -101,7 +101,7 @@ public class TrieIndexFormat implements SSTableFormat
                                   long keyCount,
                                   long repairedAt,
                                   UUID pendingRepair,
-                                  TableMetadata metadata,
+                                  TableMetadataRef metadata,
                                   MetadataCollector metadataCollector,
                                   SerializationHeader header,
                                   Collection<SSTableFlushObserver> observers,
@@ -118,7 +118,7 @@ public class TrieIndexFormat implements SSTableFormat
     static class ReaderFactory extends SSTableReader.Factory
     {
         @Override
-        public TrieIndexSSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadata metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header)
+        public TrieIndexSSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header)
         {
             return new TrieIndexSSTableReader(descriptor, components, metadata, maxDataAge, sstableMetadata, openReason, header);
         }

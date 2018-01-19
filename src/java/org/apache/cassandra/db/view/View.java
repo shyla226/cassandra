@@ -88,7 +88,7 @@ public class View
     {
         this.definition = definition;
         List<ColumnMetadata> nonPKDefPartOfViewPK = new ArrayList<>();
-        for (ColumnMetadata baseColumn : baseCfs.metadata().columns())
+        for (ColumnMetadata baseColumn : baseCfs.metadata.get().columns())
         {
             ColumnMetadata viewColumn = getViewColumn(baseColumn);
             if (viewColumn != null && !baseColumn.isPrimaryKeyColumn() && viewColumn.isPrimaryKeyColumn())

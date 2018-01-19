@@ -351,7 +351,7 @@ public class Memtable implements Comparable<Memtable>
             {
                 MemtableAllocator allocator = partitionMap.allocator;
                 final DecoratedKey cloneKey = allocator.clone(key);
-                AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata(), cloneKey, allocator);
+                AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
                 int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
                 allocator.onHeap().allocated(overhead);
                 partitionMap.updateLiveDataSize(8);

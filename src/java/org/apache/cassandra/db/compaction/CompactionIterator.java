@@ -283,7 +283,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         {
             super(nowInSec, controller.gcBefore, controller.compactingRepaired() ? Integer.MAX_VALUE : Integer.MIN_VALUE,
                   controller.cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones(),
-                  controller.cfs.metadata().enforceStrictLiveness());
+                  controller.cfs.metadata.get().enforceStrictLiveness());
             this.controller = controller;
         }
 

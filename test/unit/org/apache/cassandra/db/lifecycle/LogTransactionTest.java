@@ -1192,7 +1192,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
 
         SSTableReader reader = TrieIndexFormatUtil.emptyReader(descriptor,
                                                          components,
-                                                         cfs.metadata.get(),
+                                                         cfs.metadata,
                                                          dFile,
                                                          iFile);
         reader.first = reader.last = MockSchema.readerBounds(generation);

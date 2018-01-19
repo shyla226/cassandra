@@ -39,6 +39,7 @@ import org.apache.cassandra.hadoop.HadoopCompat;
 import org.apache.cassandra.io.sstable.CQLSSTableWriter;
 import org.apache.cassandra.io.sstable.SSTableLoader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.utils.NativeSSTableLoaderClient;
 import org.apache.cassandra.utils.OutputHandler;
@@ -171,7 +172,7 @@ public class CqlBulkRecordWriter extends RecordWriter<Object, List<ByteBuffer>>
         if (loader == null)
         {
             ExternalClient externalClient = new ExternalClient(conf);
-            externalClient.setTableMetadata(CreateTableStatement.parse(schema, keyspace).build());
+            externalClient.setTableMetadata(TableMetadataRef.forOfflineTools(CreateTableStatement.parse(schema, keyspace).build()));
 
             loader = new SSTableLoader(outputDir, externalClient, new NullOutputHandler())
             {

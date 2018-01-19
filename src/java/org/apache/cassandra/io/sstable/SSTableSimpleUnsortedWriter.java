@@ -33,7 +33,6 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
@@ -61,11 +60,11 @@ class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
     private final BlockingQueue<Buffer> writeQueue = new SynchronousQueue<Buffer>();
     private final DiskWriter diskWriter = new DiskWriter();
 
-    SSTableSimpleUnsortedWriter(File directory, TableMetadata metadata, RegularAndStaticColumns columns, long bufferSizeInMB)
+    SSTableSimpleUnsortedWriter(File directory, TableMetadataRef metadata, RegularAndStaticColumns columns, long bufferSizeInMB)
     {
         super(directory, metadata, columns);
         this.bufferSize = bufferSizeInMB * 1024L * 1024L;
-        this.header = new SerializationHeader(true, metadata, columns, EncodingStats.NO_STATS);
+        this.header = new SerializationHeader(true, metadata.get(), columns, EncodingStats.NO_STATS);
         diskWriter.start();
     }
 
@@ -111,7 +110,7 @@ class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
 
     private PartitionUpdate createPartitionUpdate(DecoratedKey key)
     {
-        return new PartitionUpdate(metadata, key, columns, 4)
+        return new PartitionUpdate(metadata.get(), key, columns, 4)
         {
             @Override
             public void add(Row row)
