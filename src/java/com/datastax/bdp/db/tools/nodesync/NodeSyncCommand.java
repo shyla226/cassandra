@@ -66,7 +66,7 @@ public abstract class NodeSyncCommand implements Runnable
     @Option(type = OptionType.COMMAND, name = { "-v", "--verbose" }, description = "Verbose output")
     private boolean verbose = false;
 
-    @Option(type = OptionType.COMMAND, name = { "--quiet" }, description = "Quiet output; don't print warnings")
+    @Option(type = OptionType.COMMAND, name = { "-q", "--quiet" }, description = "Quiet output; don't print warnings")
     private boolean quiet = false;
 
     @Override
