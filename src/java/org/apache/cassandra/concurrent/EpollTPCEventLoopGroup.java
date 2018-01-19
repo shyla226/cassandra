@@ -20,29 +20,24 @@ package org.apache.cassandra.concurrent;
 
 
 import java.util.ArrayList;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Uninterruptibles;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.channel.DefaultSelectStrategyFactory;
-import io.netty.channel.EventLoop;
-import io.netty.channel.MultithreadEventLoopGroup;
-import io.netty.channel.epoll.AIOContext;
-import io.netty.channel.epoll.EpollEventLoop;
-import io.netty.channel.epoll.Native;
+import io.netty.channel.*;
+import io.netty.channel.epoll.*;
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
 import io.netty.util.concurrent.RejectedExecutionHandlers;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.DontInline;
+import org.agrona.collections.ObjectHashSet;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -82,8 +77,15 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
      * Can use special values below to either set a stage as the last or skip it.
      */
     private static final long BUSY_BACKOFF = Long.parseLong(System.getProperty("netty.eventloop.busy_extra_spins", "10")); // x5ns
-    private static final long YIELD_BACKOFF = Long.parseLong(System.getProperty("netty.eventloop.yield_extra_spins", "0")); // x5us
-    private static final long PARK_BACKOFF = Long.parseLong(System.getProperty("netty.eventloop.park_extra_spins", "0")); // x50us
+    private static final long YIELD_BACKOFF = Long.parseLong(System.getProperty("netty.eventloop.yield_extra_spins", "0")); // x5us (or 250ns, depends)
+    private static final long PARK_BACKOFF = Long.parseLong(System.getProperty("netty.eventloop.park_extra_spins", "0")); // x50us (or 500ns, depends)
+
+    private static final boolean UNPARK_PEERS = Boolean.parseBoolean(System.getProperty("dse.tpc.unpark_peers", "true"));
+    private static final boolean USE_HIGH_ALERT = Boolean.parseBoolean(System.getProperty("dse.tpc.use_high_alert", "true"));
+    private static final boolean TPC_ONLY_HIGH_ALERT = Boolean.parseBoolean(System.getProperty("dse.tpc.tpc_only_high_alert", "false"));
+
+    private static final long HIGH_ALERT_EXTRA_SPIN = Long.parseLong(System.getProperty("dse.tpc.high_alert_extra_spins", "100000"));
+    private static final long HIGH_ALERT_LENGTH_NS = Long.parseLong(System.getProperty("dse.tpc.high_alert_length_ns", "750000"));
 
     private static final long SKIP_BACKOFF_STAGE = 0;
     private static final long LAST_BACKOFF_STAGE = -1;
@@ -150,6 +152,15 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
     public static class SingleCoreEventLoop extends EpollEventLoop implements TPCEventLoop, ParkedThreadsMonitor.MonitorableThread
     {
+        private static final boolean DEBUG_TPC_SCHEDULING = Boolean.parseBoolean(System.getProperty("dse.tpc.debug_scheduling", "false"));
+        private static final long DEBUG_TPC_SCHEDULING_DELAY_NS = TimeUnit.SECONDS.toNanos(30);
+        private static final int MAX_HIGH_ALERT = Runtime.getRuntime().availableProcessors() / 2;
+        /**
+         * The max allowed number of pending "backpressured" tasks: no new such tasks will be accepted , to avoid
+         * overloading the heap and leave more CPU power to already pending tasks.
+         */
+        private static final int MAX_PENDING = DatabaseDescriptor.getTPCPendingRequestsLimit();
+
         /**
          * debug purposes only.
          */
@@ -163,6 +174,8 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         private final TPCMetricsAndLimits.TaskStats parkStats;
         private final MpscArrayQueue<Runnable> queue;
         private final MpscArrayQueue<TPCRunnable> pendingQueue;
+
+        private final ObjectHashSet<SingleCoreEventLoop> peersSentTo = UNPARK_PEERS ? new ObjectHashSet<>() : null;
 
         @Contended
         private volatile ThreadState state;
@@ -182,11 +195,12 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         /** for schedule check throttling */
         private long lastScheduledCheckTime = lastEpollCheckTime;
 
-       /**
-        * The max allowed number of pending "backpressured" tasks: no new such tasks will be accepted , to avoid
-        * overloading the heap and leave more CPU power to already pending tasks.
-        */
-        private static final int MAX_PENDING = DatabaseDescriptor.getTPCPendingRequestsLimit();
+        /** always modified by the TPC thread */
+        private boolean isHighAlertPeriod;
+        private long highAlertStart = Long.MAX_VALUE;
+
+        /** global number of threads in high alert should not exceed (core count/2) */
+        private static final AtomicInteger highAlertLimiter = new AtomicInteger();
 
         private SingleCoreEventLoop(EpollTPCEventLoopGroup parent, TPCThread.TPCThreadsCreator executor, AIOContext.Config aio)
         {
@@ -216,6 +230,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             this.busySpinStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_SPIN);
             this.yieldStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_YIELD);
             this.parkStats = metrics.getTaskStats(TPCTaskType.EVENTLOOP_PARK);
+            thread.eventLoop(this);
         }
 
         public void start()
@@ -258,6 +273,12 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         @Override
         public void unpark()
         {
+            if (DEBUG_TPC_SCHEDULING)
+            {
+                long nanoTimeSinceStartup = TPC.nanoTimeSinceStartup();
+                if (nanoTimeSinceStartup > DEBUG_TPC_SCHEDULING_DELAY_NS)
+                    LOGGER.debug(nanoTimeSinceStartup + " : " + Thread.currentThread() + "-unpark->" + this.thread);
+            }
             // Racy wakeups are not a concern since we have a single watcher thread, and single epoll thread both
             // willing to retry. If a Watcher wakes up the selector twice, processReady will drop the events in any
             // case. The selector waking up independantly will result in the next select returning immediately, which
@@ -343,30 +364,102 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         @Override
         protected void addTask(Runnable task)
         {
-            if (task instanceof TPCRunnable)
+            if (DEBUG_TPC_SCHEDULING)
+            {
+                long nanoTimeSinceStartup = TPC.nanoTimeSinceStartup();
+                if (nanoTimeSinceStartup > DEBUG_TPC_SCHEDULING_DELAY_NS)
+                    LOGGER.debug(nanoTimeSinceStartup + " : " + Thread.currentThread() + "-task->" + this.thread + ":" + task);
+            }
+
+            boolean isTpcTask = task instanceof TPCRunnable;
+            if (isTpcTask)
             {
                 TPCRunnable tpc = (TPCRunnable) task;
                 if (tpc.isPendable())
                 {
                     // If we already have something in the pending queue, this task should not jump it.
-                    if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(tpc, metrics.maxQueueSize()))
+                    if (pendingQueue.isEmpty() &&
+                        queue.offerIfBelowThreshold(tpc, metrics.maxQueueSize()))
+                    {
+                        recordSendToPeer(true);
                         return;
-
+                    }
                     if (pendingQueue.relaxedOffer(tpc))
                     {
                         tpc.setPending();
+                        recordSendToPeer(true);
                         return;
                     }
                     else
                     {
                         tpc.blocked();
                         reject(task);
+                        return;
                     }
                 }
             }
 
             if (!queue.relaxedOffer(task))
                 reject(task);
+            else
+                recordSendToPeer(isTpcTask);
+        }
+
+        /**
+         * We record the peer we sent requests to so that we can maybe unpark them later on. We only go through
+         * the unparking logic once per {@link #run()} cycle.
+         */
+        private void recordSendToPeer(boolean isTpcTask)
+        {
+            if (!TPC.isTPCThread())
+                return;
+
+            final SingleCoreEventLoop senderEventLoop = ((TPCThread) Thread.currentThread()).eventLoop();
+
+            if (senderEventLoop == this)
+                return;
+
+            // fields on senderEventLoop are local thread fields and can be accessed safely as single threaded access
+            if (UNPARK_PEERS &&
+                senderEventLoop.peersSentTo.add(this)) // add the sentTo loop to the sender set
+            {
+                if (DEBUG_TPC_SCHEDULING)
+                {
+                    long nanoTimeSinceStartup = TPC.nanoTimeSinceStartup();
+                    if (nanoTimeSinceStartup > DEBUG_TPC_SCHEDULING_DELAY_NS)
+                        LOGGER.debug(nanoTimeSinceStartup + " : " + senderEventLoop.thread + " added to unpark set");
+                }
+            }
+
+
+            if (USE_HIGH_ALERT &&
+                (!TPC_ONLY_HIGH_ALERT || isTpcTask) &&
+                !senderEventLoop.isHighAlertPeriod)
+            {
+                int highAlertIndex = highAlertLimiter.getAndIncrement();
+                if (highAlertIndex < MAX_HIGH_ALERT)
+                {
+                    // start the high alert period
+                    senderEventLoop.isHighAlertPeriod = true;
+                    long nanoTimeSinceStartup = TPC.nanoTimeSinceStartup();
+                    senderEventLoop.highAlertStart = nanoTimeSinceStartup;
+                    if (DEBUG_TPC_SCHEDULING)
+                    {
+                        if (nanoTimeSinceStartup > DEBUG_TPC_SCHEDULING_DELAY_NS)
+                            LOGGER.debug(nanoTimeSinceStartup + " : " + senderEventLoop.thread + " on high alert highAlertIndex=" + highAlertIndex);
+                    }
+                }
+                else
+                {
+                    highAlertIndex = highAlertLimiter.getAndDecrement();
+                    long nanoTimeSinceStartup = TPC.nanoTimeSinceStartup();
+                    if (DEBUG_TPC_SCHEDULING)
+                    {
+                        if (nanoTimeSinceStartup > DEBUG_TPC_SCHEDULING_DELAY_NS)
+                            LOGGER.debug(nanoTimeSinceStartup + " : " + senderEventLoop.thread + " high alert limited highAlertIndex=" + highAlertIndex);
+                    }
+                }
+            }
         }
 
         /**
@@ -388,10 +481,30 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         {
             int idle = 0;
             boolean shouldContinue;
+            long start = DEBUG_TPC_SCHEDULING ? TPC.nanoTimeSinceStartup() : 0;
             do
             {
-                shouldContinue = backoff(++idle);
-            } while (!parent.shutdown && shouldContinue && isIdle());
+                shouldContinue = (USE_HIGH_ALERT && isHighAlertPeriod) ? awaitPeerBackoff(++idle, start) : backoff(++idle);
+            } while (!parent.shutdown &&
+                     shouldContinue &&
+                     isIdle());
+
+            long nanoTimeSinceStartup = TPC.nanoTimeSinceStartup();
+            if (DEBUG_TPC_SCHEDULING)
+            {
+                long alertPeriodLength = isHighAlertPeriod ?  nanoTimeSinceStartup - highAlertStart : 0;
+
+                if (nanoTimeSinceStartup > DEBUG_TPC_SCHEDULING_DELAY_NS)
+                    LOGGER.debug(nanoTimeSinceStartup + " : " + Thread.currentThread() + "- waited for " + (nanoTimeSinceStartup - start) +
+                                       " {isHighAlertPeriod=" + isHighAlertPeriod +
+                                       ", alertPeriodLength=" + alertPeriodLength +
+                                       ", pendingEpollEvents=" + pendingEpollEvents +
+                                       ", hasQueueTasks=" + hasQueueTasks() +
+                                       ", hasScheduledTasks=" + hasScheduledTasks() + "}");
+            }
+
+            if (USE_HIGH_ALERT)
+                checkIfHighAlertEnded(nanoTimeSinceStartup);
         }
 
         private boolean isIdle()
@@ -401,7 +514,24 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
                 return false;
             }
             final long nanoTimeSinceStartup = nanoTimeSinceStartup();
+
             return !(throttledHasScheduledEvents(nanoTimeSinceStartup) || throttledHasEpollEvents(nanoTimeSinceStartup));
+        }
+
+        private void checkIfHighAlertEnded(long nanoTimeSinceStartup)
+        {
+            long alertPeriodLength = isHighAlertPeriod ?  nanoTimeSinceStartup - highAlertStart : 0;
+            if (isHighAlertPeriod && alertPeriodLength > HIGH_ALERT_LENGTH_NS)
+            {
+                this.isHighAlertPeriod = false;
+                highAlertStart = Long.MAX_VALUE;
+                int highAlertIndex = highAlertLimiter.decrementAndGet();
+                if (DEBUG_TPC_SCHEDULING)
+                {
+                    if (nanoTimeSinceStartup > DEBUG_TPC_SCHEDULING_DELAY_NS)
+                        LOGGER.debug(nanoTimeSinceStartup + " : " + Thread.currentThread() + " high alert ended after:" + alertPeriodLength + " highAlertIndex="+highAlertIndex);
+                }
+            }
         }
 
         private boolean throttledHasScheduledEvents(long nanoTimeSinceStartup)
@@ -429,38 +559,91 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
         private boolean backoff(int idle)
         {
-            if (BUSY_BACKOFF != SKIP_BACKOFF_STAGE &&
-                (BUSY_BACKOFF == LAST_BACKOFF_STAGE || idle < BUSY_BACKOFF))
-            {
-                busySpinStats.scheduledTasks.add(1);
-                busySpinStats.completedTasks.add(1);
-            }
-            else if (YIELD_BACKOFF != SKIP_BACKOFF_STAGE &&
-                     (YIELD_BACKOFF == LAST_BACKOFF_STAGE || idle < BUSY_BACKOFF + YIELD_BACKOFF))
-            {
-                yieldStats.scheduledTasks.add(1);
-                yieldStats.completedTasks.add(1);
 
-                Thread.yield();
-                // force a select
-                lastEpollCheckTime = -1;
-            }
-            else if (PARK_BACKOFF != SKIP_BACKOFF_STAGE &&
-                     (PARK_BACKOFF == LAST_BACKOFF_STAGE || idle < BUSY_BACKOFF + YIELD_BACKOFF + PARK_BACKOFF))
+            if (BUSY_BACKOFF == LAST_BACKOFF_STAGE ||
+                (BUSY_BACKOFF != SKIP_BACKOFF_STAGE &&
+                 idle < BUSY_BACKOFF))
             {
-                parkStats.scheduledTasks.add(1);
-                parkStats.completedTasks.add(1);
-
-                LockSupport.parkNanos(1);
-                // force a select
-                lastEpollCheckTime = -1;
+                busy();
+            }
+            else if (YIELD_BACKOFF == LAST_BACKOFF_STAGE ||
+                     (YIELD_BACKOFF != SKIP_BACKOFF_STAGE &&
+                      idle < BUSY_BACKOFF + YIELD_BACKOFF))
+            {
+                yield();
+            }
+            else if (PARK_BACKOFF == LAST_BACKOFF_STAGE ||
+                     (PARK_BACKOFF != SKIP_BACKOFF_STAGE &&
+                      idle < BUSY_BACKOFF + YIELD_BACKOFF + PARK_BACKOFF))
+            {
+                park();
             }
             else
             {
                 parkOnEpollWait();
                 return false;
             }
+
             return true;
+        }
+
+        private boolean awaitPeerBackoff(int idle, long start)
+        {
+            if (BUSY_BACKOFF == LAST_BACKOFF_STAGE ||
+                idle < BUSY_BACKOFF + HIGH_ALERT_EXTRA_SPIN)
+            {
+                busy();
+            }
+            else if (YIELD_BACKOFF == LAST_BACKOFF_STAGE ||
+                     idle < (BUSY_BACKOFF + HIGH_ALERT_EXTRA_SPIN) + (YIELD_BACKOFF + HIGH_ALERT_EXTRA_SPIN / 10))
+            {
+                yield();
+            }
+            else if (PARK_BACKOFF == LAST_BACKOFF_STAGE ||
+                     idle < (BUSY_BACKOFF + HIGH_ALERT_EXTRA_SPIN) + (YIELD_BACKOFF + HIGH_ALERT_EXTRA_SPIN / 10) + (PARK_BACKOFF + HIGH_ALERT_EXTRA_SPIN / 100))
+            {
+                park();
+            }
+            else
+            {
+                if (DEBUG_TPC_SCHEDULING)
+                {
+                    long nanoTimeSinceStartup = nanoTimeSinceStartup();
+                    long backoffLength = nanoTimeSinceStartup - start;
+                    if (nanoTimeSinceStartup > DEBUG_TPC_SCHEDULING_DELAY_NS)
+                        LOGGER.debug(nanoTimeSinceStartup + " : " + Thread.currentThread() + " extended backoff length=" + backoffLength + " ns, ended up parking");
+                }
+                parkOnEpollWait();
+                return false;
+            }
+
+            return true;
+        }
+
+        private void park()
+        {
+            parkStats.scheduledTasks.add(1);
+            parkStats.completedTasks.add(1);
+
+            LockSupport.parkNanos(1);
+            // force a select
+            lastEpollCheckTime = -1;
+        }
+
+        private void yield()
+        {
+            yieldStats.scheduledTasks.add(1);
+            yieldStats.completedTasks.add(1);
+
+            Thread.yield();
+            // force a select
+            lastEpollCheckTime = -1;
+        }
+
+        private void busy()
+        {
+            busySpinStats.scheduledTasks.add(1);
+            busySpinStats.completedTasks.add(1);
         }
 
         private void parkOnEpollWait()
@@ -511,7 +694,23 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             processed += processTasks();
 
             processed += transferFromPendingTasks();
+
+            if (UNPARK_PEERS && processed == 0)
+                maybeUnparkPeers();
+
             return  processed;
+        }
+
+        private void maybeUnparkPeers()
+        {
+            if (!peersSentTo.isEmpty())
+            {
+                for (SingleCoreEventLoop loop : peersSentTo)
+                {
+                    if (loop.state == ThreadState.PARKED) loop.unpark();
+                }
+                peersSentTo.clear();
+            }
         }
 
         private int processEpollEvents()
@@ -544,7 +743,6 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         {
             if (pendingEpollEvents != 0)
                 throw new IllegalStateException("Should not be doing a blocking select with pendingEpollEvents="+pendingEpollEvents);
-
 
             try
             {
@@ -593,9 +791,18 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             {
                 final MpscArrayQueue<Runnable> queue = this.queue;
                 Runnable r;
-                while (processed < Short.MAX_VALUE && (r = queue.relaxedPoll()) != null)
+                while (processed < Short.MAX_VALUE &&
+                       (r = queue.relaxedPoll()) != null)
                 {
-                    r.run();
+                    if (r instanceof TPCRunnable)
+                    {
+                        // avoid itable lookup
+                        ((TPCRunnable)r).run();
+                    }
+                    else
+                    {
+                        r.run();
+                    }
                     ++processed;
                 }
             }
