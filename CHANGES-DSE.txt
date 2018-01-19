@@ -1,4 +1,5 @@
 dse 6.0.0:
+ * Handle race condition on dropping keyspace and opening keyspace (DB-1570)
  * Abort repair when there is only one node (DB-1511)
  * Fix OutOfMemory during view update (DB-1493)
  * Drop response on view lock acquisition timeout and add ViewLockAcquisitionTimeouts metric (DB-1522)

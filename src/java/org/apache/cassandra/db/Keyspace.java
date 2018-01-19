@@ -364,9 +364,12 @@ public class Keyspace
         {
             if (cfm == null) // unsure how this can happen but it did (DB-395)
                 throw new IllegalStateException("Unexpected null metadata for keyspace " + keyspaceName);
+            TableMetadataRef ref = Schema.instance.getTableMetadataRef(cfm.id);
+            if (ref == null)
+                throw new UnknownTableException("Unexpected null metadata for table " + cfm, cfm.id);
 
             logger.trace("Initializing {}.{}", getName(), cfm.name);
-            initCf(Schema.instance.getTableMetadataRef(cfm.id), loadSSTables);
+            initCf(ref, loadSSTables);
         }
         this.viewManager.reload(false);
     }
@@ -801,6 +804,11 @@ public class Keyspace
                           catch (UnknownKeyspaceException ex)
                           {
                               logger.info("Could not open keyspace {}, it was probably dropped.", ex.keyspaceName);
+                              return null;
+                          }
+                          catch (UnknownTableException ex)
+                          {
+                              logger.info("Could not open keyspace {}: {}", ksName, ex.getMessage());
                               return null;
                           }
                           catch (Throwable t)
