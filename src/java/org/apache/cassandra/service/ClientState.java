@@ -38,6 +38,7 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.utils.FBUtilities;
@@ -55,6 +56,7 @@ public class ClientState
     private static final Set<IResource> READABLE_SYSTEM_RESOURCES = new HashSet<>();
     private static final Set<IResource> PROTECTED_AUTH_RESOURCES = new HashSet<>();
     private static final Set<IResource> DROPPABLE_SYSTEM_AUTH_TABLES = new HashSet<>();
+    private static final Set<IResource> ALTERABLE_SYSTEM_DISTRIBUTED_TABLES = new HashSet<>();
     static
     {
         // We want these system cfs to be always readable to authenticated users since many tools rely on them
@@ -78,6 +80,10 @@ public class ClientState
         DROPPABLE_SYSTEM_AUTH_TABLES.add(DataResource.table(AuthKeyspace.NAME, CassandraRoleManager.LEGACY_USERS_TABLE));
         DROPPABLE_SYSTEM_AUTH_TABLES.add(DataResource.table(AuthKeyspace.NAME, CassandraAuthorizer.USER_PERMISSIONS));
         DROPPABLE_SYSTEM_AUTH_TABLES.add(DataResource.table(AuthKeyspace.NAME, "resource_role_permissons_index"));
+
+        // Until a better remedy is found in DB-1605, allow ALTERing system_distributed keyspace tables
+        ALTERABLE_SYSTEM_DISTRIBUTED_TABLES.add(DataResource.table(SystemDistributedKeyspace.NAME, SystemDistributedKeyspace.PARENT_REPAIR_HISTORY));
+        ALTERABLE_SYSTEM_DISTRIBUTED_TABLES.add(DataResource.table(SystemDistributedKeyspace.NAME, SystemDistributedKeyspace.REPAIR_HISTORY));
     }
 
     // Current user for the session
@@ -384,6 +390,10 @@ public class ClientState
         {
             // allow users with sufficient privileges to alter replication params of replicated system keyspaces
             if (perm == Permission.ALTER && resource.isKeyspaceLevel())
+                return;
+
+            // Until a better remedy is found in DB-1605, allow ALTERing system_distributed keyspace tables
+            if (perm == Permission.ALTER && ALTERABLE_SYSTEM_DISTRIBUTED_TABLES.contains(resource))
                 return;
 
             // allow users with sufficient privileges to drop legacy tables in replicated system keyspaces
