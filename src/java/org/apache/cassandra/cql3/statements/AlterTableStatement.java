@@ -253,7 +253,8 @@ public class AlterTableStatement extends SchemaAlteringStatement
                     // underlying reason being that we don't have a good way in general to let user change those
                     // system table settings while still preserving our ability to change these same settings if we
                     // decide on better defaults).
-                    if (attrs.size() != 1 || !attrs.hasOption(TableParams.Option.NODESYNC))
+                    if (!current.keyspace.equals(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME) && // With DB-1604 we have allowed system_distributed to be altered.
+                        (attrs.size() != 1 || !attrs.hasOption(TableParams.Option.NODESYNC)))
                         return error("Only the " + TableParams.Option.NODESYNC + " option is user-modifiable on system table " + current);
                 }
 

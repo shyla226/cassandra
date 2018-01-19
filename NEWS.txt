@@ -68,6 +68,7 @@ DSE 5.1.3
 
 Operations
 ----------
+   - It is now possible to ALTER system_distributed tables
    - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
      The command must be executed on the node where the rebuild operation is running. Streams
      may continue until they finish or timeout.
