@@ -41,7 +41,7 @@ import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.flow.RxThreads;
 
-public class TruncateStatement extends CFStatement implements CQLStatement, TableStatement
+public class TruncateStatement extends CFStatement implements CQLStatement
 {
     public TruncateStatement(CFName name)
     {

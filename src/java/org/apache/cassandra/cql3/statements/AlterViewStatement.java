@@ -37,7 +37,7 @@ import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
-public class AlterViewStatement extends SchemaAlteringStatement implements TableStatement
+public class AlterViewStatement extends SchemaAlteringStatement
 {
     private final TableAttributes attrs;
 

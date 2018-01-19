@@ -177,9 +177,6 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         if (bytes == null)
             return "null";
 
-        if (bytes == ByteBufferUtil.UNSET_BYTE_BUFFER)
-            return "unset";
-
         TypeSerializer<T> serializer = getSerializer();
         serializer.validate(bytes);
 

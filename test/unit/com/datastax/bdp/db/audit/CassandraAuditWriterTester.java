@@ -122,7 +122,7 @@ public abstract class CassandraAuditWriterTester extends CQLTester
 
         prepareInvalidQuery("SELECT * FORM " + KEYSPACE + "." + currentTable(), SyntaxError.class);
 
-        waitForLogging(16);
+        waitForLogging(15);
 
         assertRows(fetchAuditEvents(),
                    row("CREATE_ROLE", null, null, "cassandra", "CREATE USER benjamin WITH PASSWORD '*****'"),
@@ -130,7 +130,6 @@ public abstract class CassandraAuditWriterTester extends CQLTester
                    row("GRANT", null, null, "cassandra", "GRANT EXECUTE ON FUNCTION " + f + "() TO benjamin"),
                    row("CQL_PREPARE_STATEMENT", KEYSPACE, currentTable(), "benjamin", "INSERT INTO " + KEYSPACE + "." + currentTable() + " (pk, value) VALUES (?, ?)"),
                    row("CQL_UPDATE", KEYSPACE, currentTable(), "benjamin", "INSERT INTO " + KEYSPACE + "." + currentTable() + " (pk, value) VALUES (?, ?) [pk=1,value=1]"),
-                   row("CQL_PREPARE_STATEMENT", KEYSPACE, currentTable(), "benjamin", "INSERT INTO " + KEYSPACE + "." + currentTable() + " ( pk , value ) VALUES ( ? , ? ) ;"),
                    row("CQL_PREPARE_STATEMENT", KEYSPACE, currentTable(), "benjamin", "INSERT INTO " + KEYSPACE + "." + currentTable() + " ( pk , value ) VALUES ( ? , ? ) ;"),
                    row("CQL_UPDATE", KEYSPACE, currentTable(), "benjamin", "INSERT INTO " + KEYSPACE + "." + currentTable() + " ( pk , value ) VALUES ( ? , ? ) ; [pk=2,value=2]"),
                    row("CQL_UPDATE", KEYSPACE, currentTable(), "benjamin", "INSERT INTO " + KEYSPACE + "." + currentTable() + " ( pk , value ) VALUES ( ? , ? ) ; [pk=3,value=3]"),

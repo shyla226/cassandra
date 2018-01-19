@@ -44,7 +44,7 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
 /** A {@code CREATE TABLE} parsed from a CQL query statement. */
-public class CreateTableStatement extends SchemaAlteringStatement implements TableStatement
+public class CreateTableStatement extends SchemaAlteringStatement
 {
     private static final Pattern PATTERN_WORD_CHARS = Pattern.compile("\\w+");
 

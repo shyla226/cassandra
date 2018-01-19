@@ -21,6 +21,7 @@ public class SLF4JAuditWriter implements IAuditWriter
 
     public static final String LOGGER_NAME = "SLF4JAuditWriter";
     private static final Logger AUDIT_LOG = LoggerFactory.getLogger( LOGGER_NAME );
+    private final boolean loggingEnabled;
 
     public SLF4JAuditWriter()
     {
@@ -29,6 +30,7 @@ public class SLF4JAuditWriter implements IAuditWriter
         {
             // no explicit logger configured, so disable the plugin this is a a bit paranoid, as it can't really happen,
             // but its a pretty cheap test & only done once
+            loggingEnabled = false;
             logger.debug("Audit logging disabled (should not use root logger)");
             return;
         }
@@ -42,10 +44,13 @@ public class SLF4JAuditWriter implements IAuditWriter
             {
                 // we don't want audit log messages to propagate up the logger
                 // hierarchy, so if additivity is true, disable the plugin
+                loggingEnabled = false;
                 logger.debug(String.format("Audit logging disabled (turn off additivity for audit logger %s)",
                                            SLF4JAuditWriter.LOGGER_NAME));
                 return;
             }
+
+            loggingEnabled = true;
 
             // We get optimal performance from logback with appenders which write to file by turning on buffered IO.
             // This ensures that the buffer is flushed when the server is shutdown.
@@ -79,13 +84,22 @@ public class SLF4JAuditWriter implements IAuditWriter
                     "\nNon-logback loggers are supported through slf4j, but they are not checked for additivity," +
                     "\nand the are not explicitly closed on shutdown.";
             logger.warn(msg);
+            loggingEnabled = true;
         }
     }
 
     @Override
     public Completable recordEvent(AuditableEvent event)
     {
+        // Apparently DSE test rely on the logging coming from line 96
+        // We should change those tests at some point. Such a thing is making me cry
         AUDIT_LOG.info("{}", event);
         return Completable.complete();
+    }
+
+    @Override
+    public boolean isLoggingEnabled()
+    {
+        return loggingEnabled;
     }
 }

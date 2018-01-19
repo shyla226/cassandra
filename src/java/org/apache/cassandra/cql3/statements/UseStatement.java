@@ -30,19 +30,13 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
-public class UseStatement extends ParsedStatement implements CQLStatement, KeyspaceStatement
+public class UseStatement extends ParsedStatement implements CQLStatement
 {
     private final String keyspace;
 
     public UseStatement(String keyspace)
     {
         this.keyspace = keyspace;
-    }
-
-    @Override
-    public String keyspace()
-    {
-        return keyspace;
     }
 
     @Override

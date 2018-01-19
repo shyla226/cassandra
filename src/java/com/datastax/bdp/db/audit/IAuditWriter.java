@@ -11,6 +11,8 @@ public interface IAuditWriter
 {
     Completable recordEvent(AuditableEvent event);
 
+    boolean isLoggingEnabled();
+
     /**
      * Checks if this writer is ready
      * @return {@code true} if this writer is ready, {@code false} otherwise.

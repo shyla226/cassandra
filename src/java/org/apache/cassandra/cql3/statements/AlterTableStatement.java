@@ -48,7 +48,7 @@ import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
-public class AlterTableStatement extends SchemaAlteringStatement implements TableStatement
+public class AlterTableStatement extends SchemaAlteringStatement
 {
     public enum Type
     {
