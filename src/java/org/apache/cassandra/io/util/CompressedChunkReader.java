@@ -133,7 +133,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         public CompletableFuture<ByteBuffer> readChunk(long position, ByteBuffer uncompressed)
         {
             CompletableFuture<ByteBuffer> ret = new CompletableFuture<>();
-            BufferHandle bufferHandle = scratchBuffers.get();
+            BufferHandle bufferHandle = getScratchHandle();
 
             try
             {

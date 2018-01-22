@@ -24,6 +24,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
@@ -131,23 +132,7 @@ public class BufferPoolTest
     @Test
     public void testMaxMemoryExceededDirect()
     {
-        boolean cur = BufferPool.ALLOCATE_ON_HEAP_WHEN_EXAHUSTED;
-        BufferPool.ALLOCATE_ON_HEAP_WHEN_EXAHUSTED = false;
-
         requestDoubleMaxMemory();
-
-        BufferPool.ALLOCATE_ON_HEAP_WHEN_EXAHUSTED = cur;
-    }
-
-    @Test
-    public void testMaxMemoryExceededHeap()
-    {
-        boolean cur = BufferPool.ALLOCATE_ON_HEAP_WHEN_EXAHUSTED;
-        BufferPool.ALLOCATE_ON_HEAP_WHEN_EXAHUSTED = true;
-
-        requestDoubleMaxMemory();
-
-        BufferPool.ALLOCATE_ON_HEAP_WHEN_EXAHUSTED = cur;
     }
 
     @Test
@@ -172,12 +157,17 @@ public class BufferPoolTest
 
     private void requestDoubleMaxMemory()
     {
-        requestUpToSize(RandomAccessReader.DEFAULT_BUFFER_SIZE, (int)(2 * BufferPool.MEMORY_USAGE_THRESHOLD));
+        boolean hitLimit = requestUpToSize(RandomAccessReader.DEFAULT_BUFFER_SIZE, (int)(2 * BufferPool.MEMORY_USAGE_THRESHOLD));
+        Assert.assertTrue(hitLimit);
     }
 
-    private void requestUpToSize(int bufferSize, int totalSize)
+    private boolean requestUpToSize(int bufferSize, int totalSize)
     {
         final int numBuffers = totalSize / bufferSize;
+        boolean hitlimit = false;
+
+        assertEquals(0, BufferPool.usedSizeInBytes());
+        assertEquals(0, BufferPool.sizeInBytesOverLimit());
 
         List<ByteBuffer> buffers = new ArrayList<>(numBuffers);
         for (int i = 0; i < numBuffers; i++)
@@ -186,8 +176,12 @@ public class BufferPoolTest
             assertNotNull(buffer);
             assertEquals(bufferSize, buffer.capacity());
 
-            if (BufferPool.sizeInBytes() > BufferPool.MEMORY_USAGE_THRESHOLD)
-                assertEquals(BufferPool.ALLOCATE_ON_HEAP_WHEN_EXAHUSTED, !buffer.isDirect());
+            if (BufferPool.usedSizeInBytes() > BufferPool.MEMORY_USAGE_THRESHOLD)
+            {
+                assertTrue(BufferPool.sizeInBytesOverLimit() > 0);
+                assertNull(BufferPool.Chunk.getParentChunk(buffer));
+                hitlimit = true;
+            }
 
             buffers.add(buffer);
         }
@@ -195,6 +189,10 @@ public class BufferPoolTest
         for (ByteBuffer buffer : buffers)
             BufferPool.put(buffer);
 
+        assertEquals(0, BufferPool.usedSizeInBytes());
+        assertEquals(0, BufferPool.sizeInBytesOverLimit());
+
+        return hitlimit;
     }
 
     @Test
@@ -587,28 +585,15 @@ public class BufferPoolTest
     public void testBufferPoolDisabled()
     {
         BufferPool.DISABLED = true;
-        BufferPool.ALLOCATE_ON_HEAP_WHEN_EXAHUSTED = true;
         ByteBuffer buffer = BufferPool.get(1024);
-        assertEquals(0, BufferPool.numChunks());
-        assertNotNull(buffer);
-        assertEquals(1024, buffer.capacity());
-        assertFalse(buffer.isDirect());
-        assertNotNull(buffer.array());
-        BufferPool.put(buffer);
-        assertEquals(0, BufferPool.numChunks());
-
-        BufferPool.ALLOCATE_ON_HEAP_WHEN_EXAHUSTED = false;
-        buffer = BufferPool.get(1024);
         assertEquals(0, BufferPool.numChunks());
         assertNotNull(buffer);
         assertEquals(1024, buffer.capacity());
         assertTrue(buffer.isDirect());
         BufferPool.put(buffer);
         assertEquals(0, BufferPool.numChunks());
-
         // clean-up
         BufferPool.DISABLED = false;
-        BufferPool.ALLOCATE_ON_HEAP_WHEN_EXAHUSTED = true;
     }
 
     @Test

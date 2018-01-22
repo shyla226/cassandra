@@ -82,6 +82,8 @@ public enum BufferType
             buffer.limit(pos + capacity);
         }
 
+        // Note: sliced direct buffers have the root buffer set as it's attachment.
+        // see FileUtils.clean()
         return buffer.slice();
     }
 }

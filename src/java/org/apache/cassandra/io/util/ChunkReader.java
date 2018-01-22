@@ -20,11 +20,12 @@ package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import io.netty.util.Recycler;
 import org.apache.cassandra.io.compress.BufferType;
+import org.jctools.queues.MpmcArrayQueue;
 
 /**
  * RandomFileReader component that reads data from a file into a provided buffer and may have requirements over the
@@ -70,41 +71,54 @@ public interface ChunkReader extends RebuffererFactory
     ChunkReader withChannel(AsynchronousChannelProxy channel);
 
     // Scratch buffers for performing unaligned reads of chunks, where buffers need to be larger than 64k and thus
-    // unsuitable for BufferPool.
-    // These buffers may grow until they reach the maximum size in use, and will not shrink.
+    // unsuitable for BufferPool. These buffers may grow until they reach the maximum size in use, and will not shrink.
     // TODO: This should eventually be handled by the BufferPool
-    static final Recycler<BufferHandle> scratchBuffers = new Recycler<BufferHandle>()
+    static final MpmcArrayQueue<BufferHandle> scratchBuffers = new MpmcArrayQueue<>(Short.MAX_VALUE);
+    static final Long memoryLimit = Long.getLong("dse.total_chunk_reader_buffer_limit_mb", 32) * 1024 * 1024;
+    static final AtomicLong bufferSize = new AtomicLong();
+
+    default BufferHandle getScratchHandle()
     {
-        protected BufferHandle newObject(Handle<BufferHandle> handle)
-        {
-            return new BufferHandle(handle);
-        }
-    };
+        BufferHandle handle = scratchBuffers.relaxedPoll();
+        return handle == null ? new BufferHandle() : handle;
+    }
 
     static class BufferHandle
     {
-        private final Recycler.Handle<BufferHandle> handle;
-        private ByteBuffer buffer;
+        private ByteBuffer alignedBuffer;
 
-        BufferHandle(Recycler.Handle<BufferHandle> handle)
+        BufferHandle()
         {
-            this.handle = handle;
-            this.buffer = null;
+            this.alignedBuffer = null;
         }
 
         ByteBuffer get(int size)
         {
-            if (buffer == null || size > buffer.capacity())
+            if (alignedBuffer == null || size > alignedBuffer.capacity())
             {
-                FileUtils.clean(buffer, true);
-                buffer = BufferType.OFF_HEAP_ALIGNED.allocate(size);
+                if (alignedBuffer != null)
+                {
+                    bufferSize.getAndAdd(-alignedBuffer.capacity());
+                    FileUtils.clean(alignedBuffer, true);
+                    alignedBuffer = null;
+                }
+
+                alignedBuffer = BufferType.OFF_HEAP_ALIGNED.allocate(size);
+                bufferSize.getAndAdd(alignedBuffer.capacity());
+                return alignedBuffer;
             }
-            return buffer;
+
+            return alignedBuffer;
         }
 
         void recycle()
         {
-            handle.recycle(this);
+            //If we are over our limit then we can free this buffer
+            if (bufferSize.get() > memoryLimit || !scratchBuffers.relaxedOffer(this))
+            {
+                bufferSize.getAndAdd(-alignedBuffer.capacity());
+                FileUtils.clean(alignedBuffer, true);
+            }
         }
     }
 

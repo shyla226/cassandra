@@ -50,8 +50,8 @@ public class BufferPool
     @VisibleForTesting
     public static long MEMORY_USAGE_THRESHOLD = DatabaseDescriptor.getFileCacheSizeInMB() * 1024L * 1024L;
 
-    @VisibleForTesting
-    public static boolean ALLOCATE_ON_HEAP_WHEN_EXAHUSTED = DatabaseDescriptor.getBufferPoolUseHeapIfExhausted();
+    //TODO: Clean this up since we should never need this flag post TPC
+    private final static boolean ALLOCATE_ON_HEAP_WHEN_EXAHUSTED = false;
 
     @VisibleForTesting
     public static boolean DISABLED = Boolean.parseBoolean(System.getProperty("cassandra.test.disable_buffer_pool", "false"));
@@ -118,7 +118,9 @@ public class BufferPool
         if (logger.isTraceEnabled())
             logger.trace("Requested buffer size {} has been allocated directly due to lack of capacity", FBUtilities.prettyPrintMemory(size));
 
-        return localPool.get().allocate(size, allocateOnHeapWhenExhausted);
+        ByteBuffer buf = localPool.get().allocate(size, allocateOnHeapWhenExhausted);
+        globalPool.activeMemoryUsage.addAndGet(buf.capacity());
+        return buf;
     }
 
     private static ByteBuffer maybeTakeFromPool(int size, boolean allocateOnHeapWhenExhausted)
@@ -129,6 +131,7 @@ public class BufferPool
         if (size == 0)
             return EMPTY_BUFFER;
 
+        ByteBuffer buf;
         if (size > CHUNK_SIZE)
         {
             if (logger.isTraceEnabled())
@@ -136,10 +139,17 @@ public class BufferPool
                              FBUtilities.prettyPrintMemory(size),
                              FBUtilities.prettyPrintMemory(CHUNK_SIZE));
 
-            return localPool.get().allocate(size, allocateOnHeapWhenExhausted);
+            buf = localPool.get().allocate(size, allocateOnHeapWhenExhausted);
+        }
+        else
+        {
+            buf = localPool.get().get(size);
         }
 
-        return localPool.get().get(size);
+        if (buf != null)
+            globalPool.activeMemoryUsage.addAndGet(buf.capacity());
+
+        return buf;
     }
 
     public static void put(ByteBuffer buffer)
@@ -183,6 +193,16 @@ public class BufferPool
     public static long sizeInBytes()
     {
         return globalPool.sizeInBytes();
+    }
+
+    public static long usedSizeInBytes()
+    {
+        return globalPool.usedSizeInBytes();
+    }
+
+    public static long sizeInBytesOverLimit()
+    {
+        return globalPool.sizeInBytesOverLimit();
     }
 
     static final class Debug
@@ -236,6 +256,7 @@ public class BufferPool
         // TODO (future): it would be preferable to use a CLStack to improve cache occupancy; it would also be preferable to use "CoreLocal" storage
         private final Queue<Chunk> chunks = new ConcurrentLinkedQueue<>();
         private final AtomicLong memoryUsage = new AtomicLong();
+        private final AtomicLong activeMemoryUsage = new AtomicLong();
 
         /** Return a chunk, the caller will take owership of the parent chunk. */
         public Chunk get()
@@ -312,6 +333,16 @@ public class BufferPool
             return memoryUsage.get();
         }
 
+        public long usedSizeInBytes()
+        {
+            return activeMemoryUsage.get();
+        }
+
+        public long sizeInBytesOverLimit()
+        {
+            return Math.max(0, activeMemoryUsage.get() - memoryUsage.get());
+        }
+
         /** This is not thread safe and should only be used for unit testing. */
         @VisibleForTesting
         void reset()
@@ -323,6 +354,7 @@ public class BufferPool
                 macroChunks.poll().reset();
 
             memoryUsage.set(0);
+            activeMemoryUsage.set(0);
         }
     }
 
@@ -408,6 +440,7 @@ public class BufferPool
 
         public void put(ByteBuffer buffer)
         {
+            globalPool.activeMemoryUsage.addAndGet(-buffer.capacity());
             Chunk chunk = Chunk.getParentChunk(buffer);
             if (chunk == null)
             {

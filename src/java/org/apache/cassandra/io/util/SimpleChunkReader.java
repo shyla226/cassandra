@@ -91,7 +91,7 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
     public CompletableFuture<ByteBuffer> readChunkWithAlignment(long position, ByteBuffer buffer)
     {
         buffer.clear();
-        BufferHandle scratchHandle = scratchBuffers.get();
+        BufferHandle scratchHandle = getScratchHandle();
         ByteBuffer scratchBuffer = scratchHandle.get((buffer.capacity() + TPC.AIO_BLOCK_SIZE * 2 - 1) & -TPC.AIO_BLOCK_SIZE);
 
         CompletableFuture<ByteBuffer> futureBuffer = new CompletableFuture<>();
