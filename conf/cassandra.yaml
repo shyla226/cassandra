@@ -404,14 +404,22 @@ concurrent_materialized_view_writes: 32
 # https://issues.apache.org/jira/browse/CASSANDRA-11039
 memtable_allocation_type: heap_buffers
 
-# Total space to use for commit logs on disk.
+# Disk usage threshold that will trigger Cassandra to reclaim some space
+# used by the commit log files.
 #
-# If space gets above this value, Cassandra will flush every dirty CF
-# in the oldest segment and remove it.  So a small total commitlog space
-# will tend to cause more flush activity on less-active columnfamilies.
+# If the commit log disk usage gets above this value, Cassandra will flush
+# every dirty table in the oldest segment and remove it. So a small total
+# commitlog space will tend to cause more flush activity on less-active
+# columnfamilies.
 #
 # The default value is the smaller of 8192, and 1/4 of the total space
 # of the commitlog volume.
+#
+# The database will still write commit logs while it reclaims space
+# from previous commit logs. Therefore, the total disk space "reserved"
+# for the commit log should be _at least_ 25% bigger than the value of the
+# commitlog_total_space_in_mb configuration parameter. The actual
+# value depends on the write workload.
 #
 # commitlog_total_space_in_mb: 8192
 
