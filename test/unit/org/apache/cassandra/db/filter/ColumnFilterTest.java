@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.filter;
 
+import com.google.common.collect.Iterables;
 import org.junit.Test;
 
 import org.apache.cassandra.db.ReadVerbs;
@@ -35,15 +36,16 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class ColumnFilterTest
 {
-    final static ColumnFilter.Serializer SERIALIZER_30 = ColumnFilter.serializers.get(ReadVerbs.ReadVersion.OSS_30);
-    final static ColumnFilter.Serializer SERIALIZER_3014 = ColumnFilter.serializers.get(ReadVerbs.ReadVersion.OSS_3014);
-    final static ColumnFilter.Serializer SERIALIZER_40 = ColumnFilter.serializers.get(ReadVerbs.ReadVersion.OSS_40);
-    final static ColumnFilter.Serializer SERIALIZER_DSE60 = ColumnFilter.serializers.get(ReadVerbs.ReadVersion.DSE_60);
+    private final static ColumnFilter.Serializer SERIALIZER_30 = ColumnFilter.serializers.get(ReadVerbs.ReadVersion.OSS_30);
+    private final static ColumnFilter.Serializer SERIALIZER_3014 = ColumnFilter.serializers.get(ReadVerbs.ReadVersion.OSS_3014);
+    private final static ColumnFilter.Serializer SERIALIZER_40 = ColumnFilter.serializers.get(ReadVerbs.ReadVersion.OSS_40);
+    private final static ColumnFilter.Serializer SERIALIZER_DSE60 = ColumnFilter.serializers.get(ReadVerbs.ReadVersion.DSE_60);
 
     @Test
     public void testColumnFilterSerialisationRoundTrip() throws Exception
@@ -137,7 +139,7 @@ public class ColumnFilterTest
                                               .addRegularColumn("v3", Int32Type.instance)
                                               .build();
         ColumnFilter columnFilter = ColumnFilter.all(metadata);
-        assertTrue(columnFilter.fetchAllRegulars);
+        assertTrue(columnFilter.fetchType == ColumnFilter.FetchType.ALL_COLUMNS);
         assertEquals(metadata.regularAndStaticColumns(), columnFilter.fetched);
         assertNull(columnFilter.queried);
         assertEquals("*", columnFilter.toString());
@@ -145,7 +147,7 @@ public class ColumnFilterTest
         RegularAndStaticColumns queried = RegularAndStaticColumns.builder()
                                                                  .add(metadata.getColumn(ByteBufferUtil.bytes("v1"))).build();
         columnFilter = ColumnFilter.selection(queried);
-        assertFalse(columnFilter.fetchAllRegulars);
+        assertFalse(columnFilter.fetchType == ColumnFilter.FetchType.ALL_COLUMNS);
         assertEquals(queried, columnFilter.fetched);
         assertEquals(queried, columnFilter.queried);
         assertEquals("v1", columnFilter.toString());
@@ -161,7 +163,7 @@ public class ColumnFilterTest
                                 .build();
 
         columnFilter = ColumnFilter.all(metadata);
-        assertTrue(columnFilter.fetchAllRegulars);
+        assertTrue(columnFilter.fetchType == ColumnFilter.FetchType.ALL_COLUMNS);
         assertEquals(metadata.regularAndStaticColumns(), columnFilter.fetched);
         assertNull(columnFilter.queried);
         assertEquals("*", columnFilter.toString());
@@ -180,7 +182,7 @@ public class ColumnFilterTest
                                 .build();
 
         columnFilter = ColumnFilter.all(metadata);
-        assertTrue(columnFilter.fetchAllRegulars);
+        assertTrue(columnFilter.fetchType == ColumnFilter.FetchType.ALL_COLUMNS);
         assertEquals(metadata.regularAndStaticColumns(), columnFilter.fetched);
         assertNull(columnFilter.queried);
         assertEquals("*", columnFilter.toString());
@@ -195,7 +197,7 @@ public class ColumnFilterTest
                                 .build();
 
         columnFilter = ColumnFilter.all(metadata);
-        assertTrue(columnFilter.fetchAllRegulars);
+        assertTrue(columnFilter.fetchType == ColumnFilter.FetchType.ALL_COLUMNS);
         assertEquals(metadata.regularAndStaticColumns(), columnFilter.fetched);
         assertNull(columnFilter.queried);
         assertEquals("*", columnFilter.toString());
@@ -206,9 +208,340 @@ public class ColumnFilterTest
         assertEquals("set[1], v1", columnFilter.toString());
     }
 
+    @Test
+    public void testColumnFilterSelectionTypes()
+    {
+        TableMetadata metadata = TableMetadata.builder("ks", "table")
+                                              .partitioner(Murmur3Partitioner.instance)
+                                              .addPartitionKeyColumn("pk", Int32Type.instance)
+                                              .addStaticColumn("s1", Int32Type.instance)
+                                              .addClusteringColumn("c1", Int32Type.instance)
+                                              .addClusteringColumn("c2", Int32Type.instance)
+                                              .addRegularColumn("complex1", SetType.getInstance(Int32Type.instance, true))
+                                              .addRegularColumn("v1", Int32Type.instance)
+                                              .addRegularColumn("v2", Int32Type.instance)
+                                              .addRegularColumn("v3", Int32Type.instance)
+                                              .build();
+
+        ColumnMetadata v1 = metadata.getColumn(ByteBufferUtil.bytes("v1"));
+        ColumnMetadata s1 = metadata.getColumn(ByteBufferUtil.bytes("s1"));
+        ColumnMetadata complex1 = metadata.getColumn(ByteBufferUtil.bytes("complex1"));
+
+        // filter fetches all
+        ColumnFilter filter = ColumnFilter.all(metadata);
+        assertEquals(metadata.regularAndStaticColumns(), filter.fetchedColumns());
+        assertEquals(metadata.regularAndStaticColumns(), filter.queriedColumns());
+        assertEquals("*", filter.toString());
+        assertTrue(filter.allFetchedColumnsAreQueried());
+        assertTrue(filter.fetchesAllColumns(false));
+        assertTrue(filter.fetchesAllColumns(true));
+        assertTrue(filter.fetchedCellIsQueried(complex1, CellPath.create(ByteBufferUtil.bytes("val1"))));
+        for (ColumnMetadata c : Iterables.concat(metadata.regularAndStaticColumns().regulars,
+                                                 metadata.regularAndStaticColumns().statics))
+        {
+            assertTrue(filter.fetches(c));
+            assertTrue(filter.fetchedColumnIsQueried(c));
+        }
+
+        // filter fetches a selection only
+        RegularAndStaticColumns selectedColumns = RegularAndStaticColumns.of(v1);
+        filter = ColumnFilter.selection(selectedColumns);
+        assertEquals(selectedColumns, filter.fetchedColumns());
+        assertEquals(selectedColumns, filter.queriedColumns());
+        assertEquals("v1", filter.toString());
+        assertTrue(filter.allFetchedColumnsAreQueried());
+        assertFalse(filter.fetchesAllColumns(false));
+        assertFalse(filter.fetchesAllColumns(true));
+        for (ColumnMetadata c : Iterables.concat(metadata.regularAndStaticColumns().regulars,
+                                                 metadata.regularAndStaticColumns().statics))
+        {
+            if (c.equals(v1))
+            {
+                assertTrue(filter.fetches(c));
+                assertTrue(filter.fetchedColumnIsQueried(c));
+            }
+            else
+            {
+                assertFalse(filter.fetches(c));
+            }
+        }
+
+        // filter fetches all but queries a selection only
+        filter = ColumnFilter.selection(metadata, selectedColumns);
+        assertEquals(metadata.regularAndStaticColumns().without(s1), filter.fetchedColumns());
+        assertEquals(selectedColumns, filter.queriedColumns());
+        assertEquals("v1", filter.toString());
+        assertFalse(filter.allFetchedColumnsAreQueried());
+        assertTrue(filter.fetchesAllColumns(false));
+        assertFalse(filter.fetchesAllColumns(true)); // queried != null
+        assertFalse(filter.fetches(s1));
+        for (ColumnMetadata c : metadata.regularAndStaticColumns().regulars)
+        {
+            assertTrue(filter.fetches(c));
+            if (c.equals(v1))
+            {
+                assertTrue(filter.fetchedColumnIsQueried(c));
+            }
+            else
+            {
+                assertFalse(filter.fetchedColumnIsQueried(c));
+            }
+        }
+
+        // filter queries static columns
+        selectedColumns = RegularAndStaticColumns.of(s1);
+        filter = ColumnFilter.selection(selectedColumns);
+        assertEquals(selectedColumns, filter.fetchedColumns());
+        assertEquals(selectedColumns, filter.queriedColumns());
+        assertEquals("s1", filter.toString());
+        assertTrue(filter.allFetchedColumnsAreQueried());
+        assertFalse(filter.fetchesAllColumns(false));
+        assertFalse(filter.fetchesAllColumns(true));
+        for (ColumnMetadata c : Iterables.concat(metadata.regularAndStaticColumns().regulars,
+                                                 metadata.regularAndStaticColumns().statics))
+        {
+            if (c.equals(s1))
+            {
+                assertTrue(filter.fetches(c));
+                assertTrue(filter.fetchedColumnIsQueried(c));
+            }
+            else
+            {
+                assertFalse(filter.fetches(c));
+            }
+        }
+
+        // filter queries complex columns
+        selectedColumns = RegularAndStaticColumns.of(complex1);
+        filter = ColumnFilter.selection(selectedColumns);
+        assertEquals(selectedColumns, filter.fetchedColumns());
+        assertEquals(selectedColumns, filter.queriedColumns());
+        assertEquals("complex1", filter.toString());
+        assertTrue(filter.allFetchedColumnsAreQueried());
+        assertFalse(filter.fetchesAllColumns(false));
+        assertFalse(filter.fetchesAllColumns(true));
+        for (ColumnMetadata c : Iterables.concat(metadata.regularAndStaticColumns().regulars,
+                                                 metadata.regularAndStaticColumns().statics))
+        {
+            if (c.equals(complex1))
+            {
+                assertTrue(filter.fetches(c));
+                assertTrue(filter.fetchedColumnIsQueried(c));
+                assertTrue(filter.fetchedCellIsQueried(c, CellPath.create(ByteBufferUtil.bytes("val1"))));
+                assertNull(filter.newTester(c));
+            }
+            else
+            {
+                assertFalse(filter.fetches(c));
+            }
+        }
+
+        // filter queries only a regular column and a sub-selection of a complex column
+        selectedColumns = RegularAndStaticColumns.of(v1).mergeTo(RegularAndStaticColumns.of(complex1));
+        filter = ColumnFilter.selectionBuilder()
+                             .add(metadata.getColumn(ByteBufferUtil.bytes("v1")))
+                             .select(metadata.getColumn(ByteBufferUtil.bytes("complex1")), CellPath.create(ByteBufferUtil.bytes(1)))
+                             .build();
+        assertEquals(selectedColumns, filter.fetchedColumns());
+        assertEquals(selectedColumns, filter.queriedColumns());
+        assertEquals("complex1[1], v1", filter.toString());
+        assertTrue(filter.allFetchedColumnsAreQueried());
+        assertFalse(filter.fetchesAllColumns(false));
+        assertFalse(filter.fetchesAllColumns(true));
+        for (ColumnMetadata c : Iterables.concat(metadata.regularAndStaticColumns().regulars,
+                                                 metadata.regularAndStaticColumns().statics))
+        {
+            if (c.equals(v1))
+            {
+                assertTrue(filter.fetches(c));
+                assertTrue(filter.fetchedColumnIsQueried(c));
+            }
+            else if (c.equals(complex1))
+            {
+                CellPath b1 = CellPath.create(ByteBufferUtil.bytes(1)); // fetched and queried
+                CellPath b2 = CellPath.create(ByteBufferUtil.bytes(2)); // not fetched, not queried
+
+                assertTrue(filter.fetches(c));
+                assertTrue(filter.fetchedColumnIsQueried(c));
+                assertTrue(filter.fetchedCellIsQueried(c, b1));
+                ColumnFilter.Tester tester = filter.newTester(c);
+                assertNotNull(tester);
+                assertTrue(tester.fetches(b1));
+                assertTrue(tester.fetchedCellIsQueried(b1));
+                assertFalse(tester.fetches(b2));
+            }
+            else
+            {
+                assertFalse(filter.fetches(c));
+            }
+        }
+
+        // filter fetches all columns but queries only a regular column and a sub-selection of a complex column
+        selectedColumns = RegularAndStaticColumns.of(v1).mergeTo(RegularAndStaticColumns.of(complex1));
+        filter = ColumnFilter.allRegularColumnsBuilder(metadata)
+                             .add(metadata.getColumn(ByteBufferUtil.bytes("v1")))
+                             .select(metadata.getColumn(ByteBufferUtil.bytes("complex1")), CellPath.create(ByteBufferUtil.bytes(1)))
+                             .build();
+        assertEquals(metadata.regularAndStaticColumns().without(s1), filter.fetchedColumns());
+        assertEquals(selectedColumns, filter.queriedColumns());
+        assertEquals("complex1[1], v1", filter.toString());
+        assertFalse(filter.allFetchedColumnsAreQueried());
+        assertTrue(filter.fetchesAllColumns(false));
+        assertFalse(filter.fetchesAllColumns(true));
+        for (ColumnMetadata c : Iterables.concat(metadata.regularAndStaticColumns().regulars,
+                                                 metadata.regularAndStaticColumns().statics))
+        {
+            if (c.equals(v1))
+            {
+                assertTrue(filter.fetches(c));
+                assertTrue(filter.fetchedColumnIsQueried(c));
+            }
+            else if (c.equals(complex1))
+            {
+                CellPath b1 = CellPath.create(ByteBufferUtil.bytes(1)); // fetched and queried
+                CellPath b2 = CellPath.create(ByteBufferUtil.bytes(2)); // fetched but not queried
+
+                assertTrue(filter.fetches(c));
+                assertTrue(filter.fetchedColumnIsQueried(c));
+                assertTrue(filter.fetchedCellIsQueried(c, b1));
+                assertFalse(filter.fetchedCellIsQueried(c, b2));
+
+                ColumnFilter.Tester tester = filter.newTester(c);
+                assertNotNull(tester);
+                assertTrue(tester.fetches(b1));
+                assertTrue(tester.fetchedCellIsQueried(b1));
+                assertTrue(tester.fetches(b2));
+                assertFalse(tester.fetchedCellIsQueried(b2));
+            }
+            else if (c.equals(s1))
+            {
+                assertFalse(filter.fetches(c));
+            }
+            else
+            {
+                assertTrue(filter.fetches(c));
+                assertFalse(filter.fetchedColumnIsQueried(c));
+            }
+        }
+    }
+
+    @Test
+    public void testColumnFilterWithColumnsAdded()
+    {
+        TableMetadata metadata = TableMetadata.builder("ks", "table")
+                                              .partitioner(Murmur3Partitioner.instance)
+                                              .addPartitionKeyColumn("pk", Int32Type.instance)
+                                              .addStaticColumn("s1", Int32Type.instance)
+                                              .addClusteringColumn("c1", Int32Type.instance)
+                                              .addClusteringColumn("c2", Int32Type.instance)
+                                              .addRegularColumn("complex1", SetType.getInstance(Int32Type.instance, true))
+                                              .addRegularColumn("v1", Int32Type.instance)
+                                              .build();
+
+        ColumnMetadata v1 = metadata.getColumn(ByteBufferUtil.bytes("v1"));
+        ColumnMetadata s1 = metadata.getColumn(ByteBufferUtil.bytes("s1"));
+        ColumnMetadata complex1 = metadata.getColumn(ByteBufferUtil.bytes("complex1"));
+
+        TableMetadata augmentedMetadata = metadata.unbuild()
+                                                  .addStaticColumn("s2", Int32Type.instance)
+                                                  .addRegularColumn("v2", Int32Type.instance)
+                                                  .addRegularColumn("complex2", SetType.getInstance(Int32Type.instance, true))
+                                                  .build();
+
+        ColumnMetadata v2 = augmentedMetadata.getColumn(ByteBufferUtil.bytes("v2"));
+        ColumnMetadata s2 = augmentedMetadata.getColumn(ByteBufferUtil.bytes("s2"));
+        ColumnMetadata complex2 = augmentedMetadata.getColumn(ByteBufferUtil.bytes("complex2"));
+
+        // filter fetches all
+        ColumnFilter filter = ColumnFilter.all(metadata);
+        assertTrue(filter.fetchesAllColumns(true));
+        assertTrue(filter.fetchesAllColumns(false));
+        assertTrue(filter.fetches(v1));
+        assertTrue(filter.fetches(s1));
+        assertTrue(filter.fetches(complex1));
+        assertTrue(filter.fetches(v2)); // poor filter doesn't know any better
+        assertTrue(filter.fetches(s2));
+        assertTrue(filter.fetches(complex2));
+
+        // verify columns but using the same set of columns, shouldn't change anything
+        filter = filter.withPartitionColumnsVerified(metadata.regularAndStaticColumns());
+        assertTrue(filter.fetchesAllColumns(true));
+        assertTrue(filter.fetchesAllColumns(false));
+        assertTrue(filter.fetches(v1));
+        assertTrue(filter.fetches(s1));
+        assertTrue(filter.fetches(complex1));
+        assertTrue(filter.fetches(v2)); // poor filter doesn't know any better
+        assertTrue(filter.fetches(s2));
+        assertTrue(filter.fetches(complex2));
+
+        // not verify with the augmented columns, filter should conclude that it must check the fetched set in order to exclude v3
+        filter = filter.withPartitionColumnsVerified(augmentedMetadata.regularAndStaticColumns());
+        assertFalse(filter.fetchesAllColumns(true));
+        assertFalse(filter.fetchesAllColumns(false)); // the filter cannot any longer be sure that all columns are fetched
+        assertTrue(filter.fetches(v1));
+        assertTrue(filter.fetches(s1));
+        assertTrue(filter.fetches(complex1));
+        assertFalse(filter.fetches(v2)); // the filter now gets it that these new columns should be excluded
+        assertFalse(filter.fetches(s2));
+        assertFalse(filter.fetches(complex2));
+    }
+
+    @Test
+    public void testColumnFilterWithColumnsRemoved()
+    {
+        TableMetadata metadata = TableMetadata.builder("ks", "table")
+                                              .partitioner(Murmur3Partitioner.instance)
+                                              .addPartitionKeyColumn("pk", Int32Type.instance)
+                                              .addStaticColumn("s1", Int32Type.instance)
+                                              .addStaticColumn("s2", Int32Type.instance)
+                                              .addClusteringColumn("c1", Int32Type.instance)
+                                              .addClusteringColumn("c2", Int32Type.instance)
+                                              .addRegularColumn("complex1", SetType.getInstance(Int32Type.instance, true))
+                                              .addRegularColumn("complex2", SetType.getInstance(Int32Type.instance, true))
+                                              .addRegularColumn("v1", Int32Type.instance)
+                                              .addRegularColumn("v2", Int32Type.instance)
+                                              .build();
+
+        ColumnMetadata v1 = metadata.getColumn(ByteBufferUtil.bytes("v1"));
+        ColumnMetadata s1 = metadata.getColumn(ByteBufferUtil.bytes("s1"));
+        ColumnMetadata complex1 = metadata.getColumn(ByteBufferUtil.bytes("complex1"));
+
+        ColumnMetadata v2 = metadata.getColumn(ByteBufferUtil.bytes("v2"));
+        ColumnMetadata s2 = metadata.getColumn(ByteBufferUtil.bytes("s2"));
+        ColumnMetadata complex2 = metadata.getColumn(ByteBufferUtil.bytes("complex2"));
+
+        RegularAndStaticColumns reducedColumns = metadata.regularAndStaticColumns()
+                                                         .without(v2)
+                                                         .without(s2)
+                                                         .without(complex2);
+
+        // filter fetches all
+        ColumnFilter filter = ColumnFilter.all(metadata);
+        assertTrue(filter.fetchesAllColumns(true));
+        assertTrue(filter.fetchesAllColumns(false));
+        assertTrue(filter.fetches(v1));
+        assertTrue(filter.fetches(s1));
+        assertTrue(filter.fetches(complex1));
+        assertTrue(filter.fetches(v2));
+        assertTrue(filter.fetches(s2));
+        assertTrue(filter.fetches(complex2));
+
+        // verify with the reduced columns, filter should conclude that it can still safely fetch all columns because
+        // reducing columns simply means that the iterators will not ask the filter for some columns that were dropped
+        filter = filter.withPartitionColumnsVerified(reducedColumns);
+        assertTrue(filter.fetchesAllColumns(true));
+        assertTrue(filter.fetchesAllColumns(false)); // the filter cannot any longer be sure that all columns are fetched
+        assertTrue(filter.fetches(v1));
+        assertTrue(filter.fetches(s1));
+        assertTrue(filter.fetches(complex1));
+        assertTrue(filter.fetches(v2)); // the filter should not fetch the columns that were removed
+        assertTrue(filter.fetches(s2));
+        assertTrue(filter.fetches(complex2));
+    }
+
     static void testRoundTrip(ColumnFilter columnFilter, TableMetadata metadata, ColumnFilter.Serializer serializer) throws Exception
     {
-        testRoundTrip(columnFilter, columnFilter, metadata, serializer);
+        testRoundTrip(columnFilter, columnFilter.withPartitionColumnsVerified(metadata.regularAndStaticColumns()), metadata, serializer);
     }
 
     @SuppressWarnings("resource")

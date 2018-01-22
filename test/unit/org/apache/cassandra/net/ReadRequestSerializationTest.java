@@ -19,7 +19,6 @@ import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.ReadVerbs;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.ArrayBackedPartition;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -119,6 +118,57 @@ public class ReadRequestSerializationTest extends CQLTester
         alterTable("ALTER TABLE %s ADD d int");
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?);", 3, 4, 5, 6);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?);", 4, 5, 6, 7);
+        flush(secondFlush);
+
+        cmd = PartitionRangeReadCommand.allDataRead(currentTableMetadata(), allColumnsFilter, FBUtilities.nowInSeconds());
+        partitions = serDeser(cmd);
+        assertEquals(4, partitions.size());
+        assertColumns(partitions, allColumnsFilter);
+
+        cmd = PartitionRangeReadCommand.allDataRead(currentTableMetadata(), selectionFilter, FBUtilities.nowInSeconds());
+        partitions = serDeser(cmd);
+        assertEquals(4, partitions.size());
+        assertColumns(partitions, selectionFilter);
+    }
+
+    @Test
+    public void testSerializeStaleColumnFilterDropMemtable() throws Throwable
+    {
+        testSerializeStaleColumnFilterDrop(false, false);
+    }
+
+    @Test
+    public void testSerializeStaleColumnFilterDropMixed() throws Throwable
+    {
+        testSerializeStaleColumnFilterDrop(true, false);
+    }
+
+    private void testSerializeStaleColumnFilterDrop(boolean firstFlush, boolean secondFlush) throws Throwable
+    {
+        createTable("CREATE TABLE %s (a int PRIMARY KEY, b int, c int, d int)");
+
+        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?);", 1, 2, 3, 4);
+        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?);", 2, 3, 4, 5);
+        flush(firstFlush);
+
+        ColumnFilter allColumnsFilter = ColumnFilter.all(currentTableMetadata());
+        ColumnMetadata column = currentTableMetadata().getColumn(ByteBufferUtil.bytes("b"));
+        ColumnFilter selectionFilter = ColumnFilter.selection(currentTableMetadata().regularAndStaticColumns().without(column));
+
+        ReadCommand cmd = PartitionRangeReadCommand.allDataRead(currentTableMetadata(), allColumnsFilter, FBUtilities.nowInSeconds());
+        List<Partition> partitions = serDeser(cmd);
+        assertEquals(2, partitions.size());
+        assertColumns(partitions, allColumnsFilter);
+
+        cmd = PartitionRangeReadCommand.allDataRead(currentTableMetadata(), selectionFilter, FBUtilities.nowInSeconds());
+        partitions = serDeser(cmd);
+        assertEquals(2, partitions.size());
+        assertColumns(partitions, selectionFilter);
+
+        alterTable("ALTER TABLE %s DROP d");
+
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?);", 3, 4, 5);
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?);", 4, 5, 6);
         flush(secondFlush);
 
         cmd = PartitionRangeReadCommand.allDataRead(currentTableMetadata(), allColumnsFilter, FBUtilities.nowInSeconds());
