@@ -44,7 +44,8 @@ public interface StartupCheck
      *
      * @param logger The logger to use to report problems
      * @throws org.apache.cassandra.exceptions.StartupException if the test determines
-     * that the environement or system is not in a safe state to startup
+     * that the environement or system is not in a safe state to startup.
+     * Throwing any other exception indicates an error/bug in the test itself.
      */
     void execute(Logger logger) throws StartupException;
 }

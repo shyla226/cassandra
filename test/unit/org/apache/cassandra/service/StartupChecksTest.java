@@ -76,7 +76,7 @@ public class StartupChecksTest
     }
 
     @After
-    public void tearDown() throws IOException
+    public void tearDown()
     {
         if (sstableDir != null)
             FileUtils.deleteRecursive(sstableDir.toFile());
@@ -188,21 +188,36 @@ public class StartupChecksTest
     public void testCheckCpu()
     {
         ForwardingLogger.MockLogger logger = new ForwardingLogger.MockLogger();
-        StartupChecks.verifyCpu(logger, () -> wrapForTest(FBUtilities.CpuInfo.loadFrom(generateProcCpuInfo(1, 8, 2)),
+        FBUtilities.CpuInfo cpuInfo1 = FBUtilities.CpuInfo.loadFrom(Arrays.asList(cpuInfoCentOS.split("\n")));
+        assertEquals(2, cpuInfo1.cpuCount());
+        StartupChecks.verifyCpu(logger, () -> wrapForTest(cpuInfo1,
+                                                          "performance"));
+        logger.assertWarnings();
+        logger.assertInfos("CPU information: 2 physical processors: Intel(R) Core(TM) i7-4770HQ CPU @ 2.20GHz (1 cores, 1 threads-per-core, 6144 KB cache), Intel(R) Core(TM) i7-4770HQ CPU @ 2.20GHz (1 cores, 1 threads-per-core, 6144 KB cache)",
+                           "CPU scaling governors: CPUs 0-1: performance");
+
+        logger = new ForwardingLogger.MockLogger();
+        FBUtilities.CpuInfo cpuInfo2 = FBUtilities.CpuInfo.loadFrom(generateProcCpuInfo(1, 8, 2));
+        assertEquals(16, cpuInfo2.cpuCount());
+        StartupChecks.verifyCpu(logger, () -> wrapForTest(cpuInfo2,
                                                           "performance"));
         logger.assertWarnings();
         logger.assertInfos("CPU information: 1 physical processors: Intel(R) Core(TM) i7-6900K CPU @ 3.20GHz (8 cores, 2 threads-per-core, 20480 KB cache)",
                            "CPU scaling governors: CPUs 0-15: performance");
 
         logger = new ForwardingLogger.MockLogger();
-        StartupChecks.verifyCpu(logger, () -> wrapForTest(FBUtilities.CpuInfo.loadFrom(generateProcCpuInfo(2, 24, 2)),
+        FBUtilities.CpuInfo cpuInfo3 = FBUtilities.CpuInfo.loadFrom(generateProcCpuInfo(2, 24, 2));
+        assertEquals(96, cpuInfo3.cpuCount());
+        StartupChecks.verifyCpu(logger, () -> wrapForTest(cpuInfo3,
                                                           "performance", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave"));
         logger.assertWarnings("CPU scaling governors not set go 'performance' (see above)");
         logger.assertInfos("CPU information: 2 physical processors: Intel(R) Core(TM) i7-6900K CPU @ 3.20GHz (24 cores, 2 threads-per-core, 20480 KB cache), Intel(R) Core(TM) i7-6900K CPU @ 3.20GHz (24 cores, 2 threads-per-core, 20480 KB cache)",
                            "CPU scaling governors: CPUs 0,7-95: performance, CPUs 1-6: powersave");
 
         logger = new ForwardingLogger.MockLogger();
-        StartupChecks.verifyCpu(logger, () -> wrapForTest(FBUtilities.CpuInfo.loadFrom(generateProcCpuInfo(4, 10, 1)),
+        FBUtilities.CpuInfo cpuInfo4 = FBUtilities.CpuInfo.loadFrom(generateProcCpuInfo(4, 10, 1));
+        assertEquals(40, cpuInfo4.cpuCount());
+        StartupChecks.verifyCpu(logger, () -> wrapForTest(cpuInfo4,
                                                           "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave",
                                                           "performance", "performance", "performance", "performance", "performance", "performance", "performance", "performance", "performance", "performance",
                                                           "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave",
@@ -393,4 +408,56 @@ public class StartupChecksTest
                                            as, asHard
         ).split("\n"));
     }
+
+    private static final String cpuInfoCentOS = "processor : 0\n" +
+                                          "vendor_id : GenuineIntel\n" +
+                                          "cpu family : 6\n" +
+                                          "model : 70\n" +
+                                          "model name : Intel(R) Core(TM) i7-4770HQ CPU @ 2.20GHz\n" +
+                                          "stepping : 1\n" +
+                                          "microcode : 0x13\n" +
+                                          "cpu MHz : 2194.322\n" +
+                                          "cache size : 6144 KB\n" +
+                                          "physical id : 0\n" +
+                                          "siblings : 1\n" +
+                                          "core id : 0\n" +
+                                          "cpu cores : 1\n" +
+                                          "apicid : 0\n" +
+                                          "initial apicid : 0\n" +
+                                          "fpu : yes\n" +
+                                          "fpu_exception : yes\n" +
+                                          "cpuid level : 13\n" +
+                                          "wp : yes\n" +
+                                          "flags : fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts nopl xtopology tsc_reliable nonstop_tsc aperfmperf pni pclmulqdq vmx ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm ida arat epb pln pts dtherm tpr_shadow vnmi ept vpid fsgsbase smep\n" +
+                                          "bogomips : 4389.82\n" +
+                                          "clflush size : 64\n" +
+                                          "cache_alignment : 64\n" +
+                                          "address sizes : 40 bits physical, 48 bits virtual\n" +
+                                          "power management:\n" +
+                                          "\n" +
+                                          "processor : 1\n" +
+                                          "vendor_id : GenuineIntel\n" +
+                                          "cpu family : 6\n" +
+                                          "model : 70\n" +
+                                          "model name : Intel(R) Core(TM) i7-4770HQ CPU @ 2.20GHz\n" +
+                                          "stepping : 1\n" +
+                                          "microcode : 0x13\n" +
+                                          "cpu MHz : 2194.322\n" +
+                                          "cache size : 6144 KB\n" +
+                                          "physical id : 2\n" +
+                                          "siblings : 1\n" +
+                                          "core id : 0\n" +
+                                          "cpu cores : 1\n" +
+                                          "apicid : 2\n" +
+                                          "initial apicid : 2\n" +
+                                          "fpu : yes\n" +
+                                          "fpu_exception : yes\n" +
+                                          "cpuid level : 13\n" +
+                                          "wp : yes\n" +
+                                          "flags : fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts nopl xtopology tsc_reliable nonstop_tsc aperfmperf pni pclmulqdq vmx ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm ida arat epb pln pts dtherm tpr_shadow vnmi ept vpid fsgsbase smep\n" +
+                                          "bogomips : 4389.82\n" +
+                                          "clflush size : 64\n" +
+                                          "cache_alignment : 64\n" +
+                                          "address sizes : 40 bits physical, 48 bits virtual\n" +
+                                          "power management: \n";
 }

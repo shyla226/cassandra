@@ -136,8 +136,22 @@ public class StartupChecks
      */
     public void verify() throws StartupException
     {
+        Logger logger = LoggerFactory.getLogger(StartupChecks.class);
         for (StartupCheck test : preFlightChecks)
-            test.execute(LoggerFactory.getLogger(StartupChecks.class));
+        {
+            try
+            {
+                test.execute(logger);
+            }
+            catch (StartupException e)
+            {
+                throw e;
+            }
+            catch (Exception e)
+            {
+                logger.warn("Failed to execute a startup check", e);
+            }
+        }
     }
 
     public static final StartupCheck checkJemalloc = new StartupCheck()
@@ -766,6 +780,7 @@ public class StartupChecks
         }
         catch (Exception e)
         {
+            logger.debug("Could not read /proc/cpuinfo", e);
             logger.warn("Could not read /proc/cpuinfo");
         }
     };
@@ -803,8 +818,9 @@ public class StartupChecks
             String reclaimMode = FileUtils.readLine(new File("/proc/sys/vm/zone_reclaim_mode"));
             verifyZoneReclaimMode(logger, reclaimMode);
         }
-        catch (RuntimeException e)
+        catch (Exception e)
         {
+            logger.debug("Unable to read /sys/kernel/mm/transparent_hugepage/defrag", e);
             logger.warn("Unable to read /sys/kernel/mm/transparent_hugepage/defrag");
         }
     };
@@ -846,8 +862,9 @@ public class StartupChecks
             List<String> limits = FileUtils.readLines(new File("/proc/self/limits"));
             verifyLimits(logger, limits);
         }
-        catch (RuntimeException e)
+        catch (Exception e)
         {
+            logger.debug("Unable to read /proc/self/limits", e);
             logger.warn("Unable to read /proc/self/limits");
         }
     };
@@ -906,8 +923,9 @@ public class StartupChecks
             String defrag = FileUtils.readLine(new File("/sys/kernel/mm/transparent_hugepage/defrag"));
             verifyThpDefrag(logger, defrag);
         }
-        catch (RuntimeException e)
+        catch (Exception e)
         {
+            logger.debug("Unable to read /sys/kernel/mm/transparent_hugepage/defrag", e);
             logger.warn("Unable to read /sys/kernel/mm/transparent_hugepage/defrag");
         }
     };
@@ -950,6 +968,7 @@ public class StartupChecks
         }
         catch (Exception e)
         {
+            logger.debug("Unable to inspect mounted partitions", e);
             logger.warn("Unable to inspect mounted partitions");
         }
     };

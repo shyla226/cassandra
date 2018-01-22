@@ -1007,7 +1007,7 @@ public class FBUtilities
         {
             CpuInfo cpuInfo = new CpuInfo();
 
-            Pattern linePattern = Pattern.compile("^([A-Za-z _-]+)\\t*[:] (.*)$");
+            Pattern linePattern = Pattern.compile("^([A-Za-z _-]+[A-Za-z_-])\\s*[:] (.*)$");
             Map<String, String> info = new HashMap<>();
             for (String cpuinfoLine : lines)
             {
@@ -1044,13 +1044,11 @@ public class FBUtilities
                 String cacheSize = info.get("cache size");
                 Set<String> flags = new HashSet<>(Arrays.asList(info.get("flags").split(" ")));
 
-                while (processors.size() < physicalId + 1)
-                    processors.add(null);
-                PhysicalProcessor processor = processors.get(physicalId);
+                PhysicalProcessor processor = getProcessor(physicalId);
                 if (processor == null)
                 {
-                    processor = new PhysicalProcessor(modelName, mhz, cacheSize, flags, cores);
-                    processors.set(physicalId, processor);
+                    processor = new PhysicalProcessor(modelName, physicalId, mhz, cacheSize, flags, cores);
+                    processors.add(processor);
                 }
                 processor.addCpu(coreId, cpuId);
             }
@@ -1058,6 +1056,14 @@ public class FBUtilities
             {
                 // ignore - parsing errors for /proc/cpuinfo are not that relevant...
             }
+        }
+
+        private PhysicalProcessor getProcessor(int physicalId)
+        {
+            return processors.stream()
+                             .filter(p -> p.physicalId == physicalId)
+                             .findFirst()
+                             .orElse(null);
         }
 
         public String fetchCpuScalingGovernor(int cpuId)
@@ -1068,12 +1074,13 @@ public class FBUtilities
         public int cpuCount()
         {
             return processors.stream()
-                      .mapToInt(p -> p.cpuCount())
+                      .mapToInt(PhysicalProcessor::cpuCount)
                       .sum();
         }
 
         public static class PhysicalProcessor
         {
+            private final int physicalId;
             private final String name;
             private final String mhz;
             private final String cacheSize;
@@ -1082,9 +1089,10 @@ public class FBUtilities
             private final BitSet cpuIds = new BitSet();
             private final BitSet coreIds = new BitSet();
 
-            PhysicalProcessor(String name, String mhz, String cacheSize, Set<String> flags, int cores)
+            PhysicalProcessor(String name, int physicalId, String mhz, String cacheSize, Set<String> flags, int cores)
             {
                 this.name = name;
+                this.physicalId = physicalId;
                 this.mhz = mhz;
                 this.cacheSize = cacheSize;
                 this.flags = flags;
@@ -1094,6 +1102,11 @@ public class FBUtilities
             public String getName()
             {
                 return name;
+            }
+
+            public int getPhysicalId()
+            {
+                return physicalId;
             }
 
             public String getMhz()
