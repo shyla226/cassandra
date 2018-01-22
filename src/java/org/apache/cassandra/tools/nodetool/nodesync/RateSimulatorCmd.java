@@ -366,7 +366,7 @@ public class RateSimulatorCmd extends NodeTool.NodeToolCmd
         print("The simulator supports the following sub-commands:");
         print("");
         print("  help: display this help message.");
-        print("  simulate: simulates the rate corresponding to he parameters provided as");
+        print("  simulate: simulates the rate corresponding to the parameters provided as");
         print("    options (see below for details).");
         print("  recommended: simulates a recommended 'default' rate, one that considers data");
         print("    growing up to double the current size, and has healthy margin to account");
