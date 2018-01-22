@@ -238,15 +238,21 @@ public abstract class AbstractReader implements SSTableReader.PartitionReader
         assert end != null;
         while (true)
         {
-            // We use a same reasoning as in handlePreSliceData regarding the strictness of the inequality below.
-            // We want to exclude deserialized unfiltered equal to end, because 1) we won't miss any rows since those
-            // woudn't be equal to a slice bound and 2) a end bound can be equal to a start bound
-            // (EXCL_END(x) == INCL_START(x) for instance) and in that case we don't want to return start bound because
-            // it's fundamentally excluded. And if the bound is a  end (for a range tombstone), it means it's exactly
-            // our slice end, but in that  case we will properly close the range tombstone anyway as part of our "close
-            // an open marker" code in hasNextInterna
-            if (!deserializer.hasNext() || deserializer.compareNextTo(end) >= 0)
+            if (!deserializer.hasNext())
                 return null;
+            // We use the same reasoning as in handlePreSliceData regarding the strictness of the inequality below.
+            // We want to exclude deserialized unfiltered equal to end, because 1) we won't miss any rows since those
+            // wouldn't be equal to a slice bound and 2) an end bound can be equal to a start bound
+            // (EXCL_END(x) == INCL_START(x) for instance) and in that case we don't want to return start bound because
+            // it's fundamentally excluded. And if the bound is an end (for a range tombstone), it means it's exactly
+            // our slice end, but in that case we will properly close the range tombstone anyway as part of our "close
+            // an open marker" code
+            if (deserializer.compareNextTo(end) >= 0)
+            {   // make sure we are not in the middle of an unfiltered when returning null because leaving
+                // the file pointer in the middle is not allowed as it would break a retry
+                deserializer.rewind();
+                return null;
+            }
 
             Unfiltered next = deserializer.readNext();
             // We may get empty row for the same reason expressed on UnfilteredSerializer.deserializeOne.
@@ -347,5 +353,12 @@ public abstract class AbstractReader implements SSTableReader.PartitionReader
     protected boolean blockPrepStep() throws IOException
     {
         throw new IllegalStateException("Should be overridden if advanceBlock is.");
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("SSTable reader class: %s, position: %d, direction: %d, slice: %d, stage: %s",
+                             this.getClass().getName(), filePos, direction, currentSlice, stage);
     }
 }

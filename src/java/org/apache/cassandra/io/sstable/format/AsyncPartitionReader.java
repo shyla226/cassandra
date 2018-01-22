@@ -213,8 +213,9 @@ class AsyncPartitionReader
         }
     }
 
-    private static void readWithRetry(Reader reader, boolean isRetry, TPCScheduler onReadyExecutor)
+    private static void readWithRetry(Reader reader, NotInCacheException retryException, TPCScheduler onReadyExecutor)
     {
+        boolean isRetry = retryException != null;
         try
         {
             reader.performRead(isRetry);
@@ -222,7 +223,7 @@ class AsyncPartitionReader
         catch (NotInCacheException e)
         {
             // Retry the request once data is in the cache
-            e.accept(() -> readWithRetry(reader, true, onReadyExecutor),
+            e.accept(() -> readWithRetry(reader, e, onReadyExecutor),
                      (t) ->
                      {
                          // Calling completeExceptionally() wraps the original exception into a CompletionException even
@@ -237,6 +238,9 @@ class AsyncPartitionReader
         }
         catch (IOException | IndexOutOfBoundsException e)
         {
+            if (NotInCacheException.DEBUG && retryException != null)
+                logger.error("Failed to read on retry, reader was: {}, last NotInCacheException was: ", reader, retryException);
+
             reader.table().markSuspect();
             reader.onError(new CorruptSSTableException(e, reader.table().getFilename()));
         }
@@ -367,7 +371,7 @@ class AsyncPartitionReader
 
         public void requestNext()
         {
-            readWithRetry(this, false, onReadyExecutor);
+            readWithRetry(this, null, onReadyExecutor);
         }
 
         public void close() throws Exception
@@ -473,7 +477,7 @@ class AsyncPartitionReader
         @Override
         public void requestNext()
         {
-            readWithRetry(this, false, onReadyExecutor);
+            readWithRetry(this, null, onReadyExecutor);
         }
 
         public void close() throws Exception
@@ -492,7 +496,7 @@ class AsyncPartitionReader
 
         public String toString()
         {
-            return Flow.formatTrace("PartitionSubscription:" + table);
+            return Flow.formatTrace(String.format("PartitionSubscription: %s, sstable reader: [%s]", table, sstableReader));
         }
 
         @Override
