@@ -25,6 +25,7 @@ import java.security.MessageDigest;
 import java.util.*;
 
 import org.apache.cassandra.cql3.SuperColumnCompatibility;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
@@ -1047,9 +1048,27 @@ public abstract class LegacyLayout
         try
         {
             int b = in.readUnsignedByte();
-            return (b & RANGE_TOMBSTONE_MASK) != 0
-                   ? readLegacyRangeTombstoneBody(metadata, in, cellname)
-                   : readLegacyCellBody(metadata, in, cellname, b, SerializationHelper.Flag.LOCAL, readAllAsDynamic);
+
+            if ((b & RANGE_TOMBSTONE_MASK) == 0)
+                return readLegacyCellBody(metadata, in, cellname, b, SerializationHelper.Flag.LOCAL, readAllAsDynamic);
+
+            LegacyRangeTombstone rangeTombstone = readLegacyRangeTombstoneBody(metadata, in, cellname);
+
+            // Legacy range tombstones are sometimes written in a corrupted way: name component is written
+            // as a first part of the key and not the second, which makes it impossible to deserialize it.
+            // Since this does not result into data loss as it can not be reasonably read on 4.8 as well,
+            // we skip it.
+            // See DB-1579 for details.
+            try
+            {
+                metadata.comparator.validate(rangeTombstone.clustering());
+            }
+            catch (MarshalException e)
+            {
+                logger.warn("Skipping invalid legacy range tombstone: " + rangeTombstone, e);
+                return null;
+            }
+            return rangeTombstone;
         }
         catch (UnknownColumnException e)
         {
