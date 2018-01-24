@@ -256,7 +256,11 @@ public class StorageProxy implements StorageProxyMBean
                 // continue to retry
             }
 
-            throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(keyspaceName)));
+            throw new WriteTimeoutException(WriteType.CAS,
+                                            String.format("CAS timed out due to contention - tried %d times", contentions),
+                                            consistencyForPaxos,
+                                            0,
+                                            consistencyForPaxos.blockFor(Keyspace.open(metadata.keyspace)));
         }
         catch (WriteTimeoutException | ReadTimeoutException e)
         {
@@ -412,7 +416,11 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         recordCasContention(contentions);
-        throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(metadata.keyspace)));
+        throw new WriteTimeoutException(WriteType.CAS,
+                                        String.format("CAS timed out due to contention - tried %d times", contentions),
+                                        consistencyForPaxos,
+                                        0,
+                                        consistencyForPaxos.blockFor(Keyspace.open(metadata.keyspace)));
     }
 
     private static PrepareCallback preparePaxos(Commit toPrepare, List<InetAddress> endpoints, int requiredParticipants, ConsistencyLevel consistencyForPaxos, long queryStartNanoTime)
@@ -436,7 +444,11 @@ public class StorageProxy implements StorageProxyMBean
             return true;
 
         if (timeoutIfPartial && !callback.isFullyRefused())
-            throw new WriteTimeoutException(WriteType.CAS, consistencyLevel, callback.getAcceptCount(), requiredParticipants);
+            throw new WriteTimeoutException(WriteType.CAS,
+                                            String.format("CAS propose partially refused - received only %d accepts out of %d required", callback.getAcceptCount(), requiredParticipants),
+                                            consistencyLevel,
+                                            callback.getAcceptCount(),
+                                            requiredParticipants);
 
         return false;
     }
