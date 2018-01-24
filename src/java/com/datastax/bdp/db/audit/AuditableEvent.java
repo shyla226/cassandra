@@ -78,6 +78,11 @@ public class AuditableEvent
         this(state, type, null, null, null, operation, null);
     }
 
+    public AuditableEvent(UserRolesAndPermissions user, AuditableEventType type, String source, String operation)
+    {
+        this(user, type, source, UUIDGen.getTimeUUID(), null, null, null, operation, null);
+    }
+
     public AuditableEvent(QueryState queryState,
                           AuditableEventType type,
                           UUID batchId,
