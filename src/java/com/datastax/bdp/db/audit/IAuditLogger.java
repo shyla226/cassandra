@@ -32,6 +32,12 @@ public interface IAuditLogger
     }
 
     /**
+     * Checks if this logger is enabled.
+     * @return {@code true} if this logger is enabled {@code false} otherwise.
+     */
+    boolean isEnabled();
+
+    /**
      * Creates the auditable events associated to the CQL statement.
      *
      * @param statement the statement

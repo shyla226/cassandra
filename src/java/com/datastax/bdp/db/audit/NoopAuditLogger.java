@@ -34,6 +34,12 @@ final class NoopAuditLogger implements IAuditLogger
     }
 
     @Override
+    public boolean isEnabled()
+    {
+        return false;
+    }
+
+    @Override
     public List<AuditableEvent> getEvents(BatchStatement batch, QueryState queryState, BatchQueryOptions queryOptions)
     {
         return Collections.emptyList();
