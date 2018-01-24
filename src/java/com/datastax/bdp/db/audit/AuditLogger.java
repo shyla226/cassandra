@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.google.common.collect.Lists;
@@ -92,15 +91,13 @@ final class AuditLogger implements IAuditLogger
         return writer.recordEvent(event);
     }
 
-    /**
-     * Checks if this logger is enabled.
-     * @return {@code true} if this logger
-     */
+    @Override
     public boolean isEnabled()
     {
         return writer.isSetUpComplete();
     }
 
+    @Override
     public void setup()
     {
         writer.setUp();
