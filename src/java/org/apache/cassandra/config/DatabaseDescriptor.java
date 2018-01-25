@@ -2672,6 +2672,11 @@ public class DatabaseDescriptor
         return conf.cdc_enabled;
     }
 
+    public static void setCDCEnabled(boolean cdc_enabled)
+    {
+        conf.cdc_enabled = cdc_enabled;
+    }
+
     public static String getCDCLogLocation()
     {
         return conf.cdc_raw_directory;

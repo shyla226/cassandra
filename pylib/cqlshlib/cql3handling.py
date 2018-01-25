@@ -34,6 +34,7 @@ class UnexpectedTableStructure(UserWarning):
     def __str__(self):
         return 'Unexpected table structure; may not translate correctly to CQL. ' + self.msg
 
+
 SYSTEM_KEYSPACES = ('system', 'system_schema', 'system_traces', 'system_auth', 'system_distributed')
 NONALTERBALE_KEYSPACES = ('system', 'system_schema')
 
@@ -144,6 +145,7 @@ class Cql3ParsingRuleSet(CqlParsingRuleSet):
         if cqlword[0] == "'" and cqlword[-1] == "'":
             cqlword = cqlword[1:-1].replace("''", "'")
         return cqlword
+
 
 CqlRuleSet = Cql3ParsingRuleSet()
 
@@ -379,6 +381,7 @@ def prop_equals_completer(ctxt, cass):
             return ()
     return ['=']
 
+
 completer_for('property', 'propeq')(prop_equals_completer)
 
 
@@ -604,6 +607,7 @@ def alterable_ks_name_completer(ctxt, cass):
 def cf_ks_name_completer(ctxt, cass):
     return [maybe_escape_name(ks) + '.' for ks in cass.get_keyspace_names()]
 
+
 completer_for('columnFamilyName', 'ksname')(cf_ks_name_completer)
 completer_for('materializedViewName', 'ksname')(cf_ks_name_completer)
 
@@ -613,6 +617,7 @@ def cf_ks_dot_completer(ctxt, cass):
     if name in cass.get_keyspace_names():
         return ['.']
     return []
+
 
 completer_for('columnFamilyName', 'dot')(cf_ks_dot_completer)
 completer_for('materializedViewName', 'dot')(cf_ks_dot_completer)
@@ -644,6 +649,7 @@ def mv_name_completer(ctxt, cass):
             return ()
         raise
     return map(maybe_escape_name, mvnames)
+
 
 completer_for('userTypeName', 'ksname')(cf_ks_name_completer)
 
@@ -696,6 +702,7 @@ def working_on_keyspace(ctxt):
     if wat in ('KEYSPACE', 'SCHEMA'):
         return True
     return False
+
 
 syntax_rules += r'''
 <useStatement> ::= "USE" <keyspaceName>
@@ -863,6 +870,7 @@ def select_relation_lhs_completer(ctxt, cass):
         filterable.add(idx.index_options["target"])
     return map(maybe_escape_name, filterable)
 
+
 explain_completion('selector', 'colname')
 
 syntax_rules += r'''
@@ -936,6 +944,7 @@ def insert_option_completer(ctxt, cass):
     for opt in ctxt.get_binding('insertopt', ()):
         opts.discard(opt.split()[0])
     return opts
+
 
 syntax_rules += r'''
 <updateStatement> ::= "UPDATE" cf=<columnFamilyName>
@@ -1143,6 +1152,7 @@ def batch_opt_completer(ctxt, cass):
         opts.discard(opt.split()[0])
     return opts
 
+
 syntax_rules += r'''
 <truncateStatement> ::= "TRUNCATE" ("COLUMNFAMILY" | "TABLE")? cf=<columnFamilyName>
                       ;
@@ -1161,6 +1171,7 @@ def create_ks_wat_completer(ctxt, cass):
     if ctxt.get_binding('partial', '') == '':
         return ['KEYSPACE']
     return ['KEYSPACE', 'SCHEMA']
+
 
 syntax_rules += r'''
 <createColumnFamilyStatement> ::= "CREATE" wat=( "COLUMNFAMILY" | "TABLE" ) ("IF" "NOT" "EXISTS")?
@@ -1209,6 +1220,7 @@ def create_cf_wat_completer(ctxt, cass):
     if ctxt.get_binding('partial', '') == '':
         return ['TABLE']
     return ['TABLE', 'COLUMNFAMILY']
+
 
 explain_completion('createColumnFamilyStatement', 'cf', '<new_table_name>')
 explain_completion('compositeKeyCfSpec', 'newcolname', '<new_column_name>')
@@ -1263,6 +1275,7 @@ def create_cf_composite_primary_key_comma_completer(ctxt, cass):
     if len(pieces_already) >= len(cols_declared) - 1:
         return ()
     return [',']
+
 
 syntax_rules += r'''
 
@@ -1330,6 +1343,7 @@ def create_index_col_completer(ctxt, cass):
     colnames = [cd.name for cd in layout.columns.values() if cd.name not in idx_targets]
     return map(maybe_escape_name, colnames)
 
+
 syntax_rules += r'''
 <dropKeyspaceStatement> ::= "DROP" "KEYSPACE" ("IF" "EXISTS")? ksname=<nonSystemKeyspaceName>
                           ;
@@ -1387,6 +1401,7 @@ def idx_ks_idx_name_completer(ctxt, cass):
         raise
     return map(maybe_escape_name, idxnames)
 
+
 syntax_rules += r'''
 <alterTableStatement> ::= "ALTER" wat=( "COLUMNFAMILY" | "TABLE" ) cf=<columnFamilyName>
                                <alterInstructions>
@@ -1420,6 +1435,7 @@ def alter_type_field_completer(ctxt, cass):
     layout = get_ut_layout(ctxt, cass)
     fields = [tuple[0] for tuple in layout]
     return map(maybe_escape_name, fields)
+
 
 explain_completion('alterInstructions', 'newcol', '<new_column_name>')
 explain_completion('alterTypeInstructions', 'newcol', '<new_field_name>')
@@ -1587,6 +1603,7 @@ def rolename_completer(ctxt, cass):
     session = cass.session
     return [maybe_quote(row[0].replace("'", "''")) for row in session.execute("LIST ROLES")]
 
+
 syntax_rules += r'''
 <createTriggerStatement> ::= "CREATE" "TRIGGER" ( "IF" "NOT" "EXISTS" )? <cident>
                                "ON" cf=<columnFamilyName> "USING" class=<stringLiteral>
@@ -1609,6 +1626,7 @@ def get_trigger_names(ctxt, cass):
 def drop_trigger_completer(ctxt, cass):
     names = get_trigger_names(ctxt, cass)
     return map(maybe_escape_name, names)
+
 
 # END SYNTAX/COMPLETION RULE DEFINITIONS
 
