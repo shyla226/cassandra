@@ -20,10 +20,7 @@ package org.apache.cassandra.config;
 import java.io.File;
 import java.io.IOException;
 import java.net.*;
-import java.nio.file.FileStore;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -538,6 +535,7 @@ public class DatabaseDescriptor
                 throw new ConfigurationException("commitlog_directory is missing and -Dcassandra.storagedir is not set", false);
             conf.commitlog_directory += File.separator + "commitlog";
         }
+        conf.commitlog_directory = resolveAndCheckDirectory("commitlog", conf.commitlog_directory);
 
         if (conf.hints_directory == null)
         {
@@ -546,6 +544,7 @@ public class DatabaseDescriptor
                 throw new ConfigurationException("hints_directory is missing and -Dcassandra.storagedir is not set", false);
             conf.hints_directory += File.separator + "hints";
         }
+        conf.hints_directory = resolveAndCheckDirectory("hints", conf.hints_directory);
 
         if (conf.commitlog_total_space_in_mb == null)
         {
@@ -581,12 +580,18 @@ public class DatabaseDescriptor
                 throw new ConfigurationException("saved_caches_directory is missing and -Dcassandra.storagedir is not set", false);
             conf.saved_caches_directory += File.separator + "saved_caches";
         }
+        conf.saved_caches_directory = resolveAndCheckDirectory("saved-caches", conf.saved_caches_directory);
+
         if (conf.data_file_directories == null || conf.data_file_directories.length == 0)
         {
             String defaultDataDir = System.getProperty("cassandra.storagedir", null);
             if (defaultDataDir == null)
                 throw new ConfigurationException("data_file_directories is not missing and -Dcassandra.storagedir is not set", false);
             conf.data_file_directories = new String[]{ defaultDataDir + File.separator + "data" };
+        }
+        for (int i = 0; i < conf.data_file_directories.length; i++)
+        {
+            conf.data_file_directories[i] = resolveAndCheckDirectory("data", conf.data_file_directories[i]);
         }
 
         long dataFreeBytes = 0;
@@ -774,6 +779,43 @@ public class DatabaseDescriptor
     }
 
     /**
+     * Resolves a possibly relative path specification, warns on relative paths and throws a
+     * {@link ConfigurationException}, if the path (or the nearest existing directory) is not readable and writeable.
+     */
+    public static String resolveAndCheckDirectory(String type, String path)
+    {
+        try
+        {
+            File dir = new File(path);
+            if (!dir.isAbsolute())
+            {
+                dir = dir.getAbsoluteFile();
+                logger.warn("{} directory '{}' is a relative path that has been resolved to '{}'. Specify absolute path names in the configuration to prevent this warning.", type, path, dir.getPath());
+                path = dir.getPath();
+            }
+            for (File checkDir = dir; checkDir != null; checkDir = checkDir.getParentFile())
+            {
+                if (checkDir.exists())
+                {
+                    if (!checkDir.canWrite() || !checkDir.canRead())
+                        throw new ConfigurationException(String.format("%s directory '%s' or, if it does not already exist, an existing parent directory of it, " +
+                                                                       "is not readable and writable for the DSE. Check file system and configuration.", type, path));
+                    break;
+                }
+            }
+            return path;
+        }
+        catch (ConfigurationException e)
+        {
+            throw e;
+        }
+        catch (Exception e)
+        {
+            throw new ConfigurationException(String.format("Path for %s directory '%s' cannot be resolved (%s). Check configuration.", type, path, e.toString()));
+        }
+    }
+
+    /**
      * Computes the sum of the 2 specified positive values returning {@code Long.MAX_VALUE} if the sum overflow.
      *
      * @param left the left operand
@@ -787,7 +829,7 @@ public class DatabaseDescriptor
         return sum < 0 ? Long.MAX_VALUE : sum;
     }
 
-    private static FileStore guessFileStore(String dir) throws IOException
+    static FileStore guessFileStore(String dir) throws IOException
     {
         Path path = Paths.get(dir);
         while (true)
@@ -799,7 +841,12 @@ public class DatabaseDescriptor
             catch (IOException e)
             {
                 if (e instanceof NoSuchFileException)
-                    path = path.getParent();
+                {
+                    Path parent = path.getParent();
+                    if (parent == null)
+                        throw new ConfigurationException(String.format("Cannot resolve probably relative directory '%s' as it does not exist.", dir));
+                    path = parent;
+                }
                 else
                     throw e;
             }
