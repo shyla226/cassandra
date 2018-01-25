@@ -1,3 +1,8 @@
+DSE 5.1.7
+Merged from dse5.0:
+ * Fix AssertionError in ReadResponse$Serializer.serializedSize (DB-1471)
+
+
 DSE 5.1.6
  * Switch RMIExporter to dynamic proxy (DB-1591)
  * Do not fetch columns that are not in the filter fetched set (DB-1444)
