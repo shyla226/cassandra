@@ -18,6 +18,7 @@
 */
 package org.apache.cassandra.config;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -44,8 +45,8 @@ import org.apache.cassandra.thrift.ThriftConversion;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
-
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
 public class DatabaseDescriptorTest
@@ -275,15 +276,49 @@ public class DatabaseDescriptorTest
         DatabaseDescriptor.applyAddressConfig(testConfig);
 
     }
-    
+
     @Test
     public void testTokensFromString()
     {
         assertTrue(DatabaseDescriptor.tokensFromString(null).isEmpty());
         Collection<String> tokens = DatabaseDescriptor.tokensFromString(" a,b ,c , d, f,g,h");
         assertEquals(7, tokens.size());
-        assertTrue(tokens.containsAll(Arrays.asList(new String[]{"a", "b", "c", "d", "f", "g", "h"})));
-
+        assertTrue(tokens.containsAll(Arrays.asList(new String[]{ "a", "b", "c", "d", "f", "g", "h" })));
+    }
         
+    private void assertConfigException(Runnable runnable, String exceptionPattern)
+    {
+        try
+        {
+            runnable.run();
+            fail("Expected ConfigurationException to be thrown");
+        }
+        catch (ConfigurationException e)
+        {
+            assertTrue("Expected '" + exceptionPattern + "', but got '" + e.getMessage() + "'", e.getMessage().matches(exceptionPattern));
+        }
+    }
+
+    @Test
+    public void testDirectories()
+    {
+        assertConfigException(() -> {
+                                  try
+                                  {
+                                      DatabaseDescriptor.guessFileStore("foo/bar/baz");
+                                  }
+                                  catch (IOException e)
+                                  {
+                                      throw new RuntimeException(e);
+                                  }
+                              },
+                              "Cannot resolve probably relative directory 'foo/bar/baz' as it does not exist.");
+
+        assertConfigException(() ->  DatabaseDescriptor.resolveAndCheckDirectory("foo", "/dev/baz/bar/foo"),
+                              "foo directory '/dev/baz/bar/foo' or, if it does not already exist, an existing parent directory of it, " +
+                              "is not readable and writable for the DSE. Check file system and configuration.");
+
+        String res = DatabaseDescriptor.resolveAndCheckDirectory("foo", "etc/data/data1");
+        assertEquals(new File("etc/data/data1").getAbsolutePath(), res);
     }
 }
