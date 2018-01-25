@@ -2814,11 +2814,6 @@ public class DatabaseDescriptor
         return conf.repair_command_pool_full_strategy;
     }
 
-    public static void setCDCEnabled(boolean cdcEnabled)
-    {
-        conf.cdc_enabled = cdcEnabled;
-    }
-
     public static Optional<Integer> getJMXPort()
     {
         return Optional.ofNullable(jmxPort);

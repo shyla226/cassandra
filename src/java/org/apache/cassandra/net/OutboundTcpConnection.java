@@ -549,17 +549,20 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
             catch (SSLHandshakeException e)
             {
                 logger.error("SSL handshake error for outbound connection to " + socket, e);
+                disconnect();
                 // SSL errors won't be recoverable within timeout period so we'll just abort
                 return false;
             }
             catch (ConnectException e)
             {
+                disconnect();
                 nospamLogger.debug(String.format("Unable to connect to %s (%s)", poolReference.endPoint(), e.toString()));
                 Uninterruptibles.sleepUninterruptibly(OPEN_RETRY_DELAY, TimeUnit.MILLISECONDS);
             }
             catch (IOException e)
             {
-                logger.debug("Unable to connect to {}", endpoint, e);
+                disconnect();
+                logger.debug("unable to connect to " + poolReference.endPoint(), e);
                 Uninterruptibles.sleepUninterruptibly(OPEN_RETRY_DELAY, TimeUnit.MILLISECONDS);
             }
             finally
