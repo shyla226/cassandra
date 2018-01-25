@@ -127,6 +127,7 @@ public class CommitLogUpgradeTest
         testRestore(DATA_DIR + "2.2-snappy");
     }
 
+    @Test
     public void test22_truncated() throws Exception
     {
         testRestore(DATA_DIR + "2.2-lz4-truncated");
