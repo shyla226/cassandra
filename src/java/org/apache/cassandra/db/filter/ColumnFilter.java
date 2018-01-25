@@ -132,14 +132,14 @@ public class ColumnFilter
      */
     public ColumnFilter withPartitionColumnsVerified(PartitionColumns partitionColumns)
     {
-        if (isFetchAll && !fetched.includes(partitionColumns))
+        if (queried == null && !fetched.includes(partitionColumns))
         {
             logger.info("Columns mismatch: `{}` does not include `{}`, falling back to the original set of columns.", fetched, partitionColumns);
 
             // if fetched doesn't contain all the columns that we may be asked to filter, then we cannot
             // optimize based on fetchAllRegulars == true but we need to disable some optimizations and
             // fall back to checking if the column is a part of fetched set
-            return new ColumnFilter(false, (PartitionColumns) null, fetched, subSelections);
+            return new ColumnFilter(false, null, fetched, subSelections);
         }
         else
         {
