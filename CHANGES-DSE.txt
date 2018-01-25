@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Backport ColumnFilters unit tests and reduce scope of DB-1444 to the case where queried == null (DB-1607)
  * Allow ALTER of system_distributed keyspace tables (DB-1604)
  * Do not fetch columns that are not in the filter fetched set (DB-1444)
  * Fix infinite loop on index query paging in tables with clustering (DB-1467)
