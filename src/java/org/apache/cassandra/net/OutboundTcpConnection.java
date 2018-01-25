@@ -569,7 +569,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
             }
             catch (IOException e)
             {
-
+                disconnect();
                 logger.debug("unable to connect to " + poolReference.endPoint(), e);
                 Uninterruptibles.sleepUninterruptibly(OPEN_RETRY_DELAY, TimeUnit.MILLISECONDS);
             }
