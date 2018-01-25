@@ -464,12 +464,15 @@ public class DatabaseDescriptor
         // saved_caches/ and system_key/
         if (conf.commitlog_directory == null)
             conf.commitlog_directory = storagedirFor("commitlog");
+        conf.commitlog_directory = resolveAndCheckDirectory("commitlog", conf.commitlog_directory);
 
         if (conf.hints_directory == null)
             conf.hints_directory = storagedirFor("hints");
+        conf.hints_directory = resolveAndCheckDirectory("hints", conf.hints_directory);
 
         if (conf.cdc_raw_directory == null)
             conf.cdc_raw_directory = storagedirFor("cdc_raw");
+        conf.cdc_raw_directory = resolveAndCheckDirectory("cdc-raw", conf.cdc_raw_directory);
 
         if (conf.commitlog_total_space_in_mb == null)
         {
@@ -532,9 +535,15 @@ public class DatabaseDescriptor
 
         if (conf.saved_caches_directory == null)
             conf.saved_caches_directory = storagedirFor("saved_caches");
+        conf.saved_caches_directory = resolveAndCheckDirectory("saved-caches", conf.saved_caches_directory);
 
         if (conf.data_file_directories == null || conf.data_file_directories.length == 0)
             conf.data_file_directories = new String[]{ storagedir("data_file_directories") + File.separator + "data" };
+
+        for (int i = 0; i < conf.data_file_directories.length; i++)
+        {
+            conf.data_file_directories[i] = resolveAndCheckDirectory("data", conf.data_file_directories[i]);
+        }
 
         long dataFreeBytes = 0;
         /* data file and commit log directories. they get created later, when they're needed. */
@@ -756,6 +765,43 @@ public class DatabaseDescriptor
 
         if (conf.otc_coalescing_enough_coalesced_messages <= 0)
             throw new ConfigurationException("otc_coalescing_enough_coalesced_messages must be positive", false);
+    }
+
+    /**
+     * Resolves a possibly relative path specification, warns on relative paths and throws a
+     * {@link ConfigurationException}, if the path (or the nearest existing directory) is not readable and writeable.
+     */
+    public static String resolveAndCheckDirectory(String type, String path)
+    {
+        try
+        {
+            File dir = new File(path);
+            if (!dir.isAbsolute())
+            {
+                dir = dir.getAbsoluteFile();
+                logger.warn("{} directory '{}' is a relative path that has been resolved to '{}'. Specify absolute path names in the configuration to prevent this warning.", type, path, dir.getPath());
+                path = dir.getPath();
+            }
+            for (File checkDir = dir; checkDir != null; checkDir = checkDir.getParentFile())
+            {
+                if (checkDir.exists())
+                {
+                    if (!checkDir.canWrite() || !checkDir.canRead())
+                        throw new ConfigurationException(String.format("%s directory '%s' or, if it does not already exist, an existing parent directory of it, " +
+                                                                       "is not readable and writable for the DSE. Check file system and configuration.", type, path));
+                    break;
+                }
+            }
+            return path;
+        }
+        catch (ConfigurationException e)
+        {
+            throw e;
+        }
+        catch (Exception e)
+        {
+            throw new ConfigurationException(String.format("Path for %s directory '%s' cannot be resolved (%s). Check configuration.", type, path, e.toString()));
+        }
     }
 
     private static String storagedirFor(String type)
@@ -1199,7 +1245,7 @@ public class DatabaseDescriptor
         return sum < 0 ? Long.MAX_VALUE : sum;
     }
 
-    private static FileStore guessFileStore(String dir) throws IOException
+    static FileStore guessFileStore(String dir) throws IOException
     {
         Path path = Paths.get(dir);
         while (true)
@@ -1211,7 +1257,12 @@ public class DatabaseDescriptor
             catch (IOException e)
             {
                 if (e instanceof NoSuchFileException)
-                    path = path.getParent();
+                {
+                    Path parent = path.getParent();
+                    if (parent == null)
+                        throw new ConfigurationException(String.format("Cannot resolve probably relative directory '%s' as it does not exist.", dir));
+                    path = parent;
+                }
                 else
                     throw e;
             }

@@ -19,6 +19,7 @@
 package org.apache.cassandra.config;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -396,5 +397,28 @@ public class DatabaseDescriptorTest
         assertTrue(testConfig.cas_contention_timeout_in_ms == DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
         assertTrue(testConfig.counter_write_request_timeout_in_ms == DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
         assertTrue(testConfig.request_timeout_in_ms == DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
+    }
+
+    @Test
+    public void testDirectories()
+    {
+        assertConfigException(() -> {
+                                  try
+                                  {
+                                      DatabaseDescriptor.guessFileStore("foo/bar/baz");
+                                  }
+                                  catch (IOException e)
+                                  {
+                                      throw new RuntimeException(e);
+                                  }
+                              },
+                              "Cannot resolve probably relative directory 'foo/bar/baz' as it does not exist.");
+
+        assertConfigException(() ->  DatabaseDescriptor.resolveAndCheckDirectory("foo", "/dev/baz/bar/foo"),
+                              "foo directory '/dev/baz/bar/foo' or, if it does not already exist, an existing parent directory of it, " +
+                              "is not readable and writable for the DSE. Check file system and configuration.");
+
+        String res = DatabaseDescriptor.resolveAndCheckDirectory("foo", "etc/data/data1");
+        assertEquals(new File("etc/data/data1").getAbsolutePath(), res);
     }
 }
