@@ -22,6 +22,9 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.ExecutorLocals;
@@ -87,7 +90,19 @@ public interface Rebufferer extends ReaderFileProxy
 
     public static class NotInCacheException extends RuntimeException
     {
+        private static final Logger logger = LoggerFactory.getLogger(NotInCacheException.class);
         private static final long serialVersionUID = 1L;
+
+        // this boolean allows debugging bugs that may be caused by cache misses, which generate NotInCacheExceptions
+        // it is always a mistake to set this to true unless debugging a specific problem since setting this to true will
+        // impact performance significantly
+        public static final boolean DEBUG = Boolean.parseBoolean(System.getProperty("dse.debug_cache_misses", "false"));
+
+        static
+        {
+            if (DEBUG)
+                logger.warn("NotInCacheException DEBUG is ON, performance will be impacted!!!");
+        }
 
         private final CompletableFuture<Void> cacheReady;
 
@@ -102,6 +117,9 @@ public interface Rebufferer extends ReaderFileProxy
         @Override
         public synchronized Throwable fillInStackTrace()
         {
+            if (DEBUG)
+                return super.fillInStackTrace();
+
             //Avoids generating a stack trace for every instance
             return this;
         }

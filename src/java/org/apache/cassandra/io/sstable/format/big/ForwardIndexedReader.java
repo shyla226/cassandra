@@ -126,7 +126,6 @@ class ForwardIndexedReader extends ForwardReader
     @Override
     protected Unfiltered nextInSlice() throws IOException
     {
-
         while (true)
         {
             // Our previous read might have made us cross an index block boundary. If so, update our informations.
