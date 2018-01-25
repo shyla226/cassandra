@@ -65,6 +65,7 @@ dse 6.0.0:
  * For TWCS, flush to separate sstables based on write time (DB-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (DB-302)
 Merged from dse5.1:
+ * Fix infinite loop when replaying a truncated commit log file and truncation is tolerated (DB-1557)
  * Switch RMIExporter to dynamic proxy (DB-1591)
  * Do not fetch columns that are not in the filter fetched set (DB-1444)
  * Allow selecting static column only when querying static index (DB-1467)

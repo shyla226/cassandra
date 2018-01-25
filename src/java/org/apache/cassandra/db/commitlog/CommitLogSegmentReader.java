@@ -87,9 +87,10 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
         {
             while (true)
             {
+                int currentStart = end;
+
                 try
                 {
-                    final int currentStart = end;
                     end = readSyncMarker(descriptor, currentStart, reader);
                     if (end == -1)
                     {
@@ -116,6 +117,13 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
                     handler.handleUnrecoverableError(new CommitLogReadException(e.getMessage(),
                                                                                 CommitLogReadErrorReason.UNRECOVERABLE_DESCRIPTOR_ERROR,
                                                                                 tolerateErrorsInSection));
+                }
+
+                // if we've not been able to read the sync marker, or the file is truncated,
+                // then return end of data, otherwise continue the loop
+                if (currentStart == end)
+                {
+                    return endOfData();
                 }
             }
         }
