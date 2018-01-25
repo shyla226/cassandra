@@ -220,6 +220,7 @@ public class StreamReceiveTask extends StreamTask
                         ActiveRepairService.instance.receiveStreamedSSTables(readers);
                         task.finishTransaction();
 
+                        logger.debug("[Stream #{}] Received {} sstables from {} ({})", task.session.planId(), readers.size(), task.session.peer, readers);
                         // add sstables and build secondary indexes
                         cfs.addSSTablesFromStreaming(readers);
                         cfs.indexManager.buildAllIndexesBlocking(readers);

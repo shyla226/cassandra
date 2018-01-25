@@ -553,6 +553,7 @@ public class OutboundTcpConnection extends Thread
             catch (SSLHandshakeException e)
             {
                 logger.error("SSL handshake error for outbound connection to " + socket, e);
+                disconnect();
                 // SSL errors won't be recoverable within timeout period so we'll just abort
                 return false;
             }
@@ -563,6 +564,7 @@ public class OutboundTcpConnection extends Thread
             }
             catch (IOException e)
             {
+                disconnect();
                 if (logger.isTraceEnabled())
                     logger.trace("unable to connect to " + poolReference.endPoint(), e);
                 Uninterruptibles.sleepUninterruptibly(OPEN_RETRY_DELAY, TimeUnit.MILLISECONDS);
