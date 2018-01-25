@@ -382,7 +382,7 @@ abstract class ElementsSelector extends Selector
 
         protected ByteBuffer extractSelection(ByteBuffer collection)
         {
-            return type.getSerializer().getSliceFromSerialized(collection, from, to, type.nameComparator());
+            return type.getSerializer().getSliceFromSerialized(collection, from, to, type.nameComparator(), type.isFrozenCollection());
         }
 
         public AbstractType<?> getType()

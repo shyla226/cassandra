@@ -1,4 +1,5 @@
 4.0
+ * Make sub-range selection for non-frozen collections return null instead of empty (CASSANDRA-14182)
  * Fix cassandra-stress startup failure (CASSANDRA-14106)
  * Fix trivial log format error (CASSANDRA-14015)
  * Allow sstabledump to do a json object per partition (CASSANDRA-13848)
@@ -200,6 +201,7 @@ Merged from 2.2:
  * Rely on the JVM to handle OutOfMemoryErrors (CASSANDRA-13006)
  * Grab refs during scrub/index redistribution/cleanup (CASSANDRA-13873)
 Merged from 2.1:
+ * RPM package spec: fix permissions for installed jars and config files (CASSANDRA-14181)
  * More PEP8 compliance for cqlsh
 
 
