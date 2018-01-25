@@ -356,16 +356,10 @@ public abstract class ReadResponse
                         }
                         else
                         {
-                            if (response.command instanceof SinglePartitionReadCommand)
-                            {
-                                SinglePartitionReadCommand singleRead = (SinglePartitionReadCommand) response.command;
-                                ByteBufferUtil.writeWithShortLength(singleRead.partitionKey().getKey(), out);
-                                out.writeBoolean(false);
-                            }
-                            else
-                            {
-                                throw new AssertionError();
-                            }
+                            assert response.command instanceof SinglePartitionReadCommand;
+                            SinglePartitionReadCommand singleRead = (SinglePartitionReadCommand) response.command;
+                            ByteBufferUtil.writeWithShortLength(singleRead.partitionKey().getKey(), out);
+                            out.writeBoolean(false);
                         }
                     }
                 }
@@ -445,16 +439,10 @@ public abstract class ReadResponse
                         }
                         else
                         {
-                            if (response.command instanceof SinglePartitionReadCommand)
-                            {
-                                SinglePartitionReadCommand singleRead = (SinglePartitionReadCommand) response.command;
-                                size += ByteBufferUtil.serializedSizeWithShortLength(singleRead.partitionKey().getKey());
-                                size += TypeSizes.sizeof(false);
-                            }
-                            else
-                            {
-                                throw new AssertionError();
-                            }
+                            assert response.command instanceof SinglePartitionReadCommand;
+                            SinglePartitionReadCommand singleRead = (SinglePartitionReadCommand) response.command;
+                            size += ByteBufferUtil.serializedSizeWithShortLength(singleRead.partitionKey().getKey());
+                            size += TypeSizes.sizeof(false);
                         }
                     }
                 }
