@@ -416,7 +416,6 @@ public class CassandraAuthorizer implements IAuthorizer
     private static UntypedResultSet process(String query, Object... arguments) throws RequestExecutionException
     {
         String cql = String.format(query, arguments);
-        logger.info("EXECUTING {}", cql);
         return QueryProcessor.processBlocking(cql, ConsistencyLevel.LOCAL_ONE);
     }
 }
