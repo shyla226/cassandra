@@ -414,7 +414,7 @@ public class DatabaseDescriptor
                         throw new ConfigurationException("Can't parse direct memory param: '" + arg + "'");
                     int memSize = Integer.parseInt(arg.replaceAll("\\D+",""));
 
-                    conf.file_cache_size_in_mb = (int) (0.33 * memSize * multiplier / 1024 / 1024);
+                    conf.file_cache_size_in_mb = (int) (0.5 * memSize * multiplier / 1024 / 1024);
                     logger.info("Using file cache of {}MB", conf.file_cache_size_in_mb);
                     break;
                 }

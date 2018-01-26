@@ -56,6 +56,12 @@ calculate_system_memory_sizes()
     # cap here to 32765M because the JVM switches to 64 bit references at 32767M
     # details are described in http://java-performance.info/over-32g-heap-java/
     capped_heap_size="32765"
+
+    # set max heap size based on the following
+    # max(min(1/2 ram, 1024MB), min(1/4 ram, 8GB))
+    # calculate 1/2 ram and cap to 1024MB
+    # calculate 1/4 ram and cap to capped_heap_size
+    # pick the max
     half_system_memory_in_mb=`expr $system_memory_in_mb / 2`
     quarter_system_memory_in_mb=`expr $half_system_memory_in_mb / 2`
     if [ "$half_system_memory_in_mb" -gt "1024" ]
@@ -186,21 +192,20 @@ elif [ "x$MAX_HEAP_SIZE" = "x" ] ||  [ "x$HEAP_NEWSIZE" = "x" -a $USING_G1 -ne 0
 fi
 
 heap_size_in_mb=0
-if [[ ("$MAX_HEAP_SIZE" == *g) || ("$MAX_HEAP_SIZE" == *G) ]]
+if echo "$MAX_HEAP_SIZE" | grep -qi "G$" ;
 then
     heap_size_in_mb="$((${MAX_HEAP_SIZE%?} * 1024))"
-elif [[ ("$MAX_HEAP_SIZE" == *m) || ("$MAX_HEAP_SIZE" == *M) ]]
+elif  echo "$MAX_HEAP_SIZE" | grep -qi "M$" ;
 then
     heap_size_in_mb="${MAX_HEAP_SIZE%?}"
-elif [[ ("$MAX_HEAP_SIZE" == *k) || ("$MAX_HEAP_SIZE" == *K) ]]
+elif  echo "$MAX_HEAP_SIZE" | grep -qi "K$" ;
 then
     heap_size_in_mb="$((${MAX_HEAP_SIZE%?} / 1024))"
 fi
-
 memory_remaining_in_mb="$((${system_memory_in_mb} - ${heap_size_in_mb}))"
 
-# Calculate direct memory as 1/3 of memory available after heap:
-MAX_DIRECT_MEMORY="$((memory_remaining_in_mb / 3))M"
+# Calculate direct memory as 1/2 of memory available after heap:
+MAX_DIRECT_MEMORY="$((memory_remaining_in_mb / 2))M"
 
 JVM_OPTS="$JVM_OPTS -XX:MaxDirectMemorySize=$MAX_DIRECT_MEMORY"
 
