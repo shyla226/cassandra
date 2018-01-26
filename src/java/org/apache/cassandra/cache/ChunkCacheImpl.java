@@ -383,7 +383,7 @@ implements AsyncCacheLoader<ChunkCacheImpl.Key, ChunkCacheImpl.Buffer>, RemovalL
         @SuppressWarnings("resource") // channel closed by the PrefetchingRebufferer
         public Rebufferer instantiateRebufferer(FileAccessType accessType)
         {
-            if (accessType == FileAccessType.RANDOM || source.isMmap())
+            if (accessType == FileAccessType.RANDOM || source.isMmap() || PrefetchingRebufferer.READ_AHEAD_SIZE_KB <= 0)
                 return this;
 
             AsynchronousChannelProxy channel = this.source.channel().maybeBatched(PrefetchingRebufferer.READ_AHEAD_VECTORED);

@@ -37,6 +37,8 @@ import com.datastax.bdp.db.audit.CoreAuditableEventType;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCRunnable;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
@@ -805,7 +807,11 @@ public class SelectStatement implements CQLStatement, TableStatement
 
         public void schedule(Runnable runnable, long delay, TimeUnit unit)
         {
-            TPC.getForCore(coreId).schedule(runnable, TPCTaskType.CONTINUOUS_PAGING, delay, unit);
+            TPCScheduler scheduler = TPC.getForCore(coreId);
+            if (delay == 0)
+                scheduler.enqueue(TPCRunnable.wrap(runnable, TPCTaskType.CONTINUOUS_PAGING, coreId));
+            else
+                scheduler.schedule(runnable, TPCTaskType.CONTINUOUS_PAGING, delay, unit);
         }
 
         public void schedule(PagingState pagingState, ResultBuilder builder)

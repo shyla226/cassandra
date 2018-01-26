@@ -160,7 +160,7 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
     @SuppressWarnings("resource") // channel closed by the PrefetchingRebufferer
     public Rebufferer instantiateRebufferer(FileAccessType accessType)
     {
-        if (accessType == FileAccessType.RANDOM || Integer.bitCount(bufferSize) != 1)
+        if (accessType == FileAccessType.RANDOM || Integer.bitCount(bufferSize) != 1 || PrefetchingRebufferer.READ_AHEAD_SIZE_KB <= 0)
             return instantiateRebufferer(this);
 
         AsynchronousChannelProxy channel = this.channel.maybeBatched(PrefetchingRebufferer.READ_AHEAD_VECTORED);

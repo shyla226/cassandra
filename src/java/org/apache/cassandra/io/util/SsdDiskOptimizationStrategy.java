@@ -56,6 +56,9 @@ class SsdDiskOptimizationStrategy extends DiskOptimizationStrategy
     @Override
     public int readAheadSizeKb()
     {
-        return 64;
+        // LZ4 compression is the default for DSE, which means that we normally prefetch 1 buffer of 64kb even
+        // if we set a lower value here. If compression is OFF, read-ahead becomes more significant and we should
+        // at least prefetch 32 kb to avoid cache misses
+        return 32;
     }
 }

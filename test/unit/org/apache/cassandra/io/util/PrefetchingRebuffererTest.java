@@ -20,13 +20,16 @@ package org.apache.cassandra.io.util;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -72,6 +75,12 @@ public class PrefetchingRebuffererTest
         buffers.clear();
     }
 
+    @After
+    public void tearDown()
+    {
+        PrefetchingRebufferer.metrics.reset();
+    }
+
     Rebufferer.BufferHolder makeBuffer(long offset)
     {
         TestBufferHolder ret = buffers.computeIfAbsent(offset, o -> new TestBufferHolder(ByteBuffer.allocate(PAGE_SIZE), o));
@@ -97,6 +106,7 @@ public class PrefetchingRebuffererTest
             buf.release();
         }
 
+        rebufferer.closeReader();
         rebufferer.close();
 
         assertEquals(3, buffers.size()); // 1 requested and 2 prefetched
@@ -110,7 +120,7 @@ public class PrefetchingRebuffererTest
         assertEquals(1, buffers.get((long)PAGE_SIZE * 2).numRequested); // prefetched only once
 
         for (TestBufferHolder buffer : buffers.values())
-            assertTrue(buffer.released); // make sure close is effective in releasing prefetched buffers
+            assertTrue(buffer.released); // make sure closeReader is effective in releasing prefetched buffers
 
         verify(source, times(1)).close();
     }
@@ -118,8 +128,6 @@ public class PrefetchingRebuffererTest
     @Test
     public void testPrefetchAtPageBoundaries()
     {
-        PrefetchingRebufferer.metrics.reset();
-
         final int prefetchSize = 8;
         final int windowSize = 4;
         final int numPages = 10;
@@ -146,6 +154,7 @@ public class PrefetchingRebuffererTest
             }
         }
 
+        rebufferer.closeReader();
         rebufferer.close();
 
         assertTrue(numPages + windowSize <= PrefetchingRebufferer.metrics.prefetched.getCount(),
@@ -194,31 +203,45 @@ public class PrefetchingRebuffererTest
         assertNotNull(buf);
         buf.release();
 
+        rebufferer.closeReader();
         rebufferer.close();
     }
 
     @Test
-    public void testNonSequentialAccess()
+    public void testNonSequentialAccess() throws Exception
     {
-        PrefetchingRebufferer.metrics.reset();
-
         PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, channel, READ_AHEAD_KB, READ_AHEAD_WINDOW);
         assertNotNull(rebufferer);
 
-        when(source.rebufferAsync(anyLong())).thenAnswer(mock -> CompletableFuture.completedFuture(makeBuffer((long)mock.getArguments()[0])));
+        List<Runnable> makeBufferTasks = new ArrayList<>();
+
+        when(source.rebufferAsync(anyLong())).thenAnswer(mock -> {
+            final long offset = (long)mock.getArguments()[0];
+            final CompletableFuture<Rebufferer.BufferHolder> ret = new CompletableFuture<>();
+            makeBufferTasks.add(() -> ret.complete(makeBuffer(offset)));
+            return ret;
+        });
 
         long[] offsets = new long[] { 0, PAGE_SIZE * 2, PAGE_SIZE };
 
         for (long offset : offsets)
         {
-            Rebufferer.BufferHolder buf = rebufferer.rebuffer(offset);
+            CompletableFuture<Rebufferer.BufferHolder> fut = rebufferer.rebufferAsync(offset);
+            assertNotNull(fut);
+
+            makeBufferTasks.stream().forEach(Runnable::run);
+            makeBufferTasks.clear();
+
+            Rebufferer.BufferHolder buf = fut.get();
             assertNotNull(buf);
             assertEquals(offset, buf.offset());
             assertEquals(PAGE_SIZE, buf.buffer().capacity());
             buf.release();
         }
 
+        rebufferer.closeReader();
         rebufferer.close();
+
         assertEquals(5, buffers.size());
 
         // requesting PAGE_SIZE after PAGE_SIZE * 2 will not trigger any PF
@@ -237,8 +260,6 @@ public class PrefetchingRebuffererTest
     @Test
     public void testSkippingBuffers()
     {
-        PrefetchingRebufferer.metrics.reset();
-
         final int prefetchSize = 8;
         final int windowSize = 4;
         final int numPages = 24;
@@ -265,6 +286,7 @@ public class PrefetchingRebuffererTest
             }
         }
 
+        rebufferer.closeReader();
         rebufferer.close();
 
         // we skip every other page so we requested this many buffers
@@ -283,8 +305,6 @@ public class PrefetchingRebuffererTest
     @Test
     public void testBatchesAreSubmitted()
     {
-        PrefetchingRebufferer.metrics.reset();
-
         PrefetchingRebufferer rebufferer = new PrefetchingRebufferer(source, channel, READ_AHEAD_KB, READ_AHEAD_WINDOW);
         assertNotNull(rebufferer);
 
@@ -334,6 +354,7 @@ public class PrefetchingRebuffererTest
         }
         finally
         {
+            rebufferer.closeReader();
             rebufferer.close();
         }
     }

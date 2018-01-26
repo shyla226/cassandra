@@ -196,9 +196,6 @@ public final class AggregationQueryPager implements QueryPager
 
         private FlowablePartition applyToPartition(FlowablePartition partition)
         {
-            if (logger.isTraceEnabled())
-                logger.trace("{} applyToPartition {}", hashCode(), ByteBufferUtil.bytesToHex(partition.header().partitionKey.getKey()));
-
             checkTimeout();
 
             lastPartitionKey = partition.partitionKey().getKey();
@@ -208,9 +205,6 @@ public final class AggregationQueryPager implements QueryPager
 
         private Row applyToRow(Row row)
         {
-            if (logger.isTraceEnabled())
-                logger.trace("{} - applyToRow {}", hashCode(), row.clustering() == null ? "null" : row.clustering().toBinaryString());
-
             checkTimeout();
 
             lastClustering = row.clustering();

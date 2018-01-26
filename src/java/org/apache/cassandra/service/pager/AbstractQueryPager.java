@@ -221,11 +221,6 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         private FlowablePartition applyToPartition(FlowablePartition partition)
         {
-            if (logger.isTraceEnabled())
-                logger.trace("{} - applyToPartition {}",
-                             AbstractQueryPager.this.hashCode(),
-                             ByteBufferUtil.bytesToHex(partition.partitionKey().getKey()));
-
             currentKey = partition.partitionKey();
             applyToStatic(partition.staticRow());
 
@@ -300,9 +295,6 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         protected Row applyToStatic(Row row)
         {
-            if (logger.isTraceEnabled())
-                logger.trace("{} - applyToStaticRow {}", AbstractQueryPager.this.hashCode(), !row.isEmpty());
-
             if (!row.isEmpty())
             {
                 if (!currentKey.equals(lastKey))
@@ -316,11 +308,6 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         protected Row applyToRow(Row row)
         {
-            if (logger.isTraceEnabled())
-                logger.trace("{} - applyToRow {}",
-                             AbstractQueryPager.this.hashCode(),
-                             row.clustering() == null ? "null" : row.clustering().toBinaryString());
-
             if (!currentKey.equals(lastKey))
             {
                 remainingInPartition = pageLimits.perPartitionCount();

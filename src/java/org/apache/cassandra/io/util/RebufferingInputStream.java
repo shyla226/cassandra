@@ -27,6 +27,7 @@ import java.nio.ByteOrder;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.utils.FastByteOperations;
+import org.apache.cassandra.utils.UnsafeByteBufferAccess;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import com.google.common.base.Preconditions;
@@ -221,7 +222,8 @@ public abstract class RebufferingInputStream extends InputStream implements Data
         int position = buffer.position();
         int extraBits = extraBytes * 8;
 
-        long retval = buffer.getLong(position);
+        long retval = UnsafeByteBufferAccess.getLong(buffer);
+
         if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
             retval = Long.reverseBytes(retval);
         buffer.position(position + extraBytes);

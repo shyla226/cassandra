@@ -46,10 +46,10 @@ public class PrefetchingRebufferer extends WrappingRebufferer
      * How much to read-ahead for sequential scans, in kilobytes. The read-ahead algorithm ensures that at least
      * window * read-ahead-size have already been requested, if that's not the case, it reads up to read-ahead-size-kb.
      */
-    static final String READ_AHEAD_SIZE_KB_FROM_OPERATOR = System.getProperty("dse.read_ahead_size_kb", "");
+    private static final String READ_AHEAD_SIZE_KB_FROM_OPERATOR = System.getProperty("dse.read_ahead_size_kb", "");
     public static final int READ_AHEAD_SIZE_KB;
 
-    public static final double READ_AHEAD_WINDOW = Double.parseDouble(System.getProperty("dse.read_ahead_window", "0.5"));
+    private static final double READ_AHEAD_WINDOW = Double.parseDouble(System.getProperty("dse.read_ahead_window", "0.5"));
     public static final boolean READ_AHEAD_VECTORED = Boolean.parseBoolean(System.getProperty("dse.read_ahead_vectored", "true"));
 
     static
@@ -65,7 +65,7 @@ public class PrefetchingRebufferer extends WrappingRebufferer
     }
 
     /** A dedicated channel, optionally capable of batching requests */
-    private AsynchronousChannelProxy channel;
+    private final AsynchronousChannelProxy channel;
 
     /** The buffers that have been prefetched but not yet requested. */
     private final Deque<PrefetchedEntry> queue;
@@ -126,7 +126,7 @@ public class PrefetchingRebufferer extends WrappingRebufferer
             }
         }
 
-        throw new NotInCacheException(fut.thenAccept(bufferHolder -> bufferHolder.release()), channel().filePath, position);
+        throw new NotInCacheException(fut.thenAccept(BufferHolder::release), channel().filePath, position);
     }
 
     @Override
@@ -142,37 +142,45 @@ public class PrefetchingRebufferer extends WrappingRebufferer
             entry = queue.poll();
         }
 
-        CompletableFuture<BufferHolder> ret;
-        if (entry != null && entry.position == pageAlignedPos)
-        { // if the position match use this entry
-            ret = entry.future;
+        if (entry == null)
+        { // no entry, request it to the cache and prefetch
+            CompletableFuture<BufferHolder> ret = super.rebufferAsync(pageAlignedPos);
+
+            prefetch(pageAlignedPos + source.rebufferSize());
+            return ret;
+        }
+
+        if (entry.position == pageAlignedPos)
+        { // if the position match use this entry and prefetch
+            CompletableFuture<BufferHolder> ret = entry.future;
             if (!entry.future.isDone())
                 metrics.notReady.mark();
-        }
-        else
-        {  // otherwise, if the position is later in the file, put it back in the queue and
-           // request this buffer to the cache, it's a jump back for which we should have already prefetched probably
-            if (entry != null)
-                queue.addFirst(entry); // add it back, it may be required in future
 
-            ret = super.rebufferAsync(pageAlignedPos);
-        }
-
-        // do no prefetch if the queue has entries later in the file as this is a jump-back for which we
-        // assume buffers were already prefetched. If we did prefetch in this case, we'd have to scan the queue
-        // to avoid gaps or duplicate entries caused by multiple jumps, which is not efficient and at the moment
-        // we only prefetch data files that are only read forward
-        if (entry == null || entry.position == pageAlignedPos)
             prefetch(pageAlignedPos + source.rebufferSize());
-        else
+            return ret;
+        }
+
+        // if the position of the entry is later in the file, put it back in the queue and request it to the cache
+        // this typically happens during a retry, we are asked to rebuffer further back in the file, normally the
+        // buffer should still be in the cache
+        assert entry.position > pageAlignedPos;
+
+        queue.addFirst(entry);
+        CompletableFuture<BufferHolder> ret = super.rebufferAsync(pageAlignedPos);
+
+        if (!ret.isDone())
+        {
+            // we are not able to prefetch this buffer because we already have other buffers further in the file
+            // report it to the metrics
             metrics.skipped.mark();
+        }
 
         return ret;
     }
 
     /**
      * Prefetch the next N buffers unless they are already in the queue
-     * @param pageAlignedPosition
+     * @param pageAlignedPosition the position in the file, already aligned to a page
      */
     private void prefetch(long pageAlignedPosition)
     {
@@ -187,9 +195,9 @@ public class PrefetchingRebufferer extends WrappingRebufferer
         if (toPrefetch < windowSize)
             return;
 
+        channel.startBatch();
         try
         {
-            channel.startBatch();
             for (int i = 0; i < toPrefetch; i++)
             {
                 long prefetchPosition = firstPositionToPrefetch + i * source.rebufferSize();
@@ -208,7 +216,7 @@ public class PrefetchingRebufferer extends WrappingRebufferer
     @Override
     public void close()
     {
-        releaseBuffers();
+        assert queue.isEmpty() : "Prefetched buffers should have been released";
 
         try
         {
@@ -241,6 +249,8 @@ public class PrefetchingRebufferer extends WrappingRebufferer
     private void releaseBuffers()
     {
         queue.forEach(PrefetchedEntry::release);
+        queue.clear();
+
     }
 
     /**
@@ -272,16 +282,19 @@ public class PrefetchingRebufferer extends WrappingRebufferer
                 {
                     if (buffer != null)
                     {
-                        metrics.unused.mark();
                         buffer.release();
+
+                        // TODO - this is not accurate, even if this PF rebufferer didn't use this buffer, as long as it
+                        // is still in the cache another PF may still use it, this typically happens because of paging
+                        metrics.unused.mark();
                     }
 
                     if (error != null)
-                        logger.debug("Failed to prefetch buffer due to {}", error);
+                        logger.debug("Failed to prefetch buffer due to {}", error.getMessage());
                 }
                 catch (Throwable t)
                 {
-                    logger.debug("Failed to release prefetched buffer due to {}", t);
+                    logger.debug("Failed to release prefetched buffer due to {}", t.getMessage());
                 }
             });
         }
@@ -306,7 +319,7 @@ public class PrefetchingRebufferer extends WrappingRebufferer
     @VisibleForTesting
     public static class PrefetchingMetrics
     {
-        private final MetricNameFactory factory = new DefaultNameFactory("Prefetching");
+        private final MetricNameFactory factory = new DefaultNameFactory("Prefetching", "");
 
         /** Total number of buffers that were prefetched */
         final Meter prefetched;

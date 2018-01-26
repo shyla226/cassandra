@@ -96,7 +96,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     @SuppressWarnings("resource") // channel closed by the PrefetchingRebufferer
     public Rebufferer instantiateRebufferer(FileAccessType accessType)
     {
-        if (accessType == FileAccessType.RANDOM)
+        if (accessType == FileAccessType.RANDOM || PrefetchingRebufferer.READ_AHEAD_SIZE_KB <= 0)
             return new BufferManagingRebufferer.Aligned(this);
 
         AsynchronousChannelProxy channel = this.channel.maybeBatched(PrefetchingRebufferer.READ_AHEAD_VECTORED);

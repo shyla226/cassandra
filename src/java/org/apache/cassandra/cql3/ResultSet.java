@@ -70,7 +70,8 @@ public class ResultSet
 
     public void addRow(List<ByteBuffer> row)
     {
-        assert row.size() == metadata.valueCount();
+        // this assertion is expensive when we are pulling lots of data, e.g. for spark
+        //assert row.size() == metadata.valueCount();
         rows.add(row);
     }
 

@@ -56,6 +56,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
@@ -2006,7 +2007,7 @@ public class StorageProxy implements StorageProxyMBean
             logger.trace("Querying local ranges {} for continuous paging", command);
 
         // Same reasoning as in readLocalContinuous, see there for details.
-        return command.withLimitsAndPostReconciliation(command.executeInternal())
+        return command.withLimitsAndPostReconciliation(FlowablePartitions.filter(command.executeLocally(), command.nowInSec()))
                       .doOnError(e -> rangeMetrics.failures.mark());
     }
 
