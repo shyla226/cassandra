@@ -883,39 +883,9 @@ public final class FileUtils
                 String cpuidOutput = cpuid.get();
                 String[] cpuidLines = cpuidOutput.split("\n");
                 String vendorId = cpuIdVendorId(cpuidLine(cpuidLines, "0x00000000", "0x00"));
-                switch (vendorId)
-                {
-                    case "AuthenticAMD":
-                    case "GenuineIntel":
-                    case "CentaurHauls":
-                    case "AMDisbetter!":
-                    case "CyrixInstead":
-                    case "TransmetaCPU":
-                    case "GenuineTMx86":
-                    case "Geode by NSC":
-                    case "NexGenDriven":
-                    case "RiseRiseRise":
-                    case "SiS SiS SiS ":
-                    case "UMC UMC UMC ":
-                    case "VIA VIA VIA ":
-                    case "Vortex86 SoC":
-                        // these are known vendor-IDs of "bare metal" CPUs
-                        break;
-                    case "bhyve bhyve ":
-                        return "bhyve";
-                    case "KVMKVMKVMKVM":
-                        return "KVM";
-                    case "Microsoft Hv":
-                        return "MS Hyper-V";
-                    case " lrpepyh vr":
-                        return "Parallels";
-                    case "VMwareVMware":
-                        return "VMWare";
-                    case "XenVMMXenVMM":
-                        return "Xen HVM";
-                    default:
-                        return vendorId + " (unknown vendor in CPUID)";
-                }
+                String virtByVendorId = virtualizationFromVendorId(vendorId);
+                if (virtByVendorId != null)
+                    return virtByVendorId;
 
                 int[] cpuidLeaf1 = cpuIdParse(cpuidLine(cpuidLines, "0x00000001", "0x00"));
                 boolean hypervisorFlag = (cpuidLeaf1[2] & 0x80000000) != 0;
@@ -970,6 +940,27 @@ public final class FileUtils
             if (disks != null && disks.length > 0)
                 return "VirtualBox";
 
+            // Uses the 'vendor_id' field and 'hypervisor' CPU flags from /proc/cpuinfo to identify
+            // whether the system is a virtual machine. This is similar to the check that is using
+            // the 'cpuid' binary - however, the check above is probably more reliable.
+            try
+            {
+                FBUtilities.CpuInfo cpuInfo = FBUtilities.CpuInfo.load();
+                if (!cpuInfo.getProcessors().isEmpty())
+                {
+                    FBUtilities.CpuInfo.PhysicalProcessor processor = cpuInfo.getProcessors().get(0);
+                    String virtByVendorId = virtualizationFromVendorId(processor.getVendorId());
+                    if (virtByVendorId != null)
+                        return virtByVendorId;
+
+                    if (processor.hasFlag("hypervisor"))
+                        return "unknown (hypervisor CPU flag present)";
+                }
+            }
+            catch (Exception e)
+            {
+                // ignore
+            }
         }
         catch (Exception e)
         {
@@ -979,6 +970,44 @@ public final class FileUtils
                 logger.warn("Unable to detect virtualization/hypervisor");
         }
 
+        return null;
+    }
+
+    private static String virtualizationFromVendorId(String vendorId)
+    {
+        switch (vendorId)
+        {
+            case "AuthenticAMD":
+            case "GenuineIntel":
+            case "CentaurHauls":
+            case "AMDisbetter!":
+            case "CyrixInstead":
+            case "TransmetaCPU":
+            case "GenuineTMx86":
+            case "Geode by NSC":
+            case "NexGenDriven":
+            case "RiseRiseRise":
+            case "SiS SiS SiS ":
+            case "UMC UMC UMC ":
+            case "VIA VIA VIA ":
+            case "Vortex86 SoC":
+                // these are known vendor-IDs of "bare metal" CPUs
+                break;
+            case "bhyve bhyve ":
+                return "bhyve";
+            case "KVMKVMKVMKVM":
+                return "KVM";
+            case "Microsoft Hv":
+                return "MS Hyper-V";
+            case " lrpepyh vr":
+                return "Parallels";
+            case "VMwareVMware":
+                return "VMWare";
+            case "XenVMMXenVMM":
+                return "Xen HVM";
+            default:
+                return vendorId + " (unknown vendor in CPUID)";
+        }
         return null;
     }
 

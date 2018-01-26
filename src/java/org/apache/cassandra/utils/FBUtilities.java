@@ -1042,12 +1042,13 @@ public class FBUtilities
                 String modelName = info.get("model name");
                 String mhz = info.get("cpu MHz");
                 String cacheSize = info.get("cache size");
+                String vendorId = info.get("vendor_id");
                 Set<String> flags = new HashSet<>(Arrays.asList(info.get("flags").split(" ")));
 
                 PhysicalProcessor processor = getProcessor(physicalId);
                 if (processor == null)
                 {
-                    processor = new PhysicalProcessor(modelName, physicalId, mhz, cacheSize, flags, cores);
+                    processor = new PhysicalProcessor(modelName, physicalId, mhz, cacheSize, vendorId, flags, cores);
                     processors.add(processor);
                 }
                 processor.addCpu(coreId, cpuId);
@@ -1068,7 +1069,14 @@ public class FBUtilities
 
         public String fetchCpuScalingGovernor(int cpuId)
         {
-            return FileUtils.readLine(new File(String.format("/sys/devices/system/cpu/cpu%d/cpufreq/scaling_governor", cpuId)));
+            File cpuDir = new File(String.format("/sys/devices/system/cpu/cpu%d/cpufreq", cpuId));
+            if (!cpuDir.canRead())
+                return "no_cpufreq";
+            File file = new File(cpuDir, "scaling_governor");
+            if (!file.canRead())
+                return "no_scaling_governor";
+            String governor = FileUtils.readLine(file);
+            return governor != null ? governor : "unknown";
         }
 
         public int cpuCount()
@@ -1084,17 +1092,19 @@ public class FBUtilities
             private final String name;
             private final String mhz;
             private final String cacheSize;
+            private final String vendorId;
             private final Set<String> flags;
             private final int cores;
             private final BitSet cpuIds = new BitSet();
             private final BitSet coreIds = new BitSet();
 
-            PhysicalProcessor(String name, int physicalId, String mhz, String cacheSize, Set<String> flags, int cores)
+            PhysicalProcessor(String name, int physicalId, String mhz, String cacheSize, String vendorId, Set<String> flags, int cores)
             {
                 this.name = name;
                 this.physicalId = physicalId;
                 this.mhz = mhz;
                 this.cacheSize = cacheSize;
+                this.vendorId = vendorId;
                 this.flags = flags;
                 this.cores = cores;
             }
@@ -1122,6 +1132,11 @@ public class FBUtilities
             public String getCacheSize()
             {
                 return cacheSize;
+            }
+
+            public String getVendorId()
+            {
+                return vendorId;
             }
 
             public Set<String> getFlags()

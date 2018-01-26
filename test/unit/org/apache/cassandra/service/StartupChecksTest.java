@@ -210,19 +210,28 @@ public class StartupChecksTest
         assertEquals(96, cpuInfo3.cpuCount());
         StartupChecks.verifyCpu(logger, () -> wrapForTest(cpuInfo3,
                                                           "performance", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave"));
-        logger.assertWarnings("CPU scaling governors not set go 'performance' (see above)");
+        logger.assertWarnings("Not all CPU scaling governors not set to 'performance' (see above)");
         logger.assertInfos("CPU information: 2 physical processors: Intel(R) Core(TM) i7-6900K CPU @ 3.20GHz (24 cores, 2 threads-per-core, 20480 KB cache), Intel(R) Core(TM) i7-6900K CPU @ 3.20GHz (24 cores, 2 threads-per-core, 20480 KB cache)",
                            "CPU scaling governors: CPUs 0,7-95: performance, CPUs 1-6: powersave");
 
         logger = new ForwardingLogger.MockLogger();
-        FBUtilities.CpuInfo cpuInfo4 = FBUtilities.CpuInfo.loadFrom(generateProcCpuInfo(4, 10, 1));
-        assertEquals(40, cpuInfo4.cpuCount());
+        FBUtilities.CpuInfo cpuInfo4 = FBUtilities.CpuInfo.loadFrom(generateProcCpuInfo(1, 4, 1));
+        assertEquals(4, cpuInfo4.cpuCount());
         StartupChecks.verifyCpu(logger, () -> wrapForTest(cpuInfo4,
+                                                          "melting", "perf", "with", "spectre"));
+        logger.assertWarnings("None of the CPU scaling governors are set to 'performance' (see above)");
+        logger.assertInfos("CPU information: 1 physical processors: Intel(R) Core(TM) i7-6900K CPU @ 3.20GHz (4 cores, 1 threads-per-core, 20480 KB cache)",
+                           "CPU scaling governors: CPUs 0: melting, CPUs 1: perf, CPUs 3: spectre, CPUs 2: with");
+
+        logger = new ForwardingLogger.MockLogger();
+        FBUtilities.CpuInfo cpuInfo5 = FBUtilities.CpuInfo.loadFrom(generateProcCpuInfo(4, 10, 1));
+        assertEquals(40, cpuInfo5.cpuCount());
+        StartupChecks.verifyCpu(logger, () -> wrapForTest(cpuInfo5,
                                                           "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave",
                                                           "performance", "performance", "performance", "performance", "performance", "performance", "performance", "performance", "performance", "performance",
                                                           "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave", "powersave",
                                                           "performance", "performance", "performance", "performance", "performance", "performance", "performance", "performance", "performance", "performance"));
-        logger.assertWarnings("CPU scaling governors not set go 'performance' (see above)");
+        logger.assertWarnings("Not all CPU scaling governors not set to 'performance' (see above)");
         logger.assertInfos("CPU information: 4 physical processors: Intel(R) Core(TM) i7-6900K CPU @ 3.20GHz (10 cores, 1 threads-per-core, 20480 KB cache), Intel(R) Core(TM) i7-6900K CPU @ 3.20GHz (10 cores, 1 threads-per-core, 20480 KB cache), Intel(R) Core(TM) i7-6900K CPU @ 3.20GHz (10 cores, 1 threads-per-core, 20480 KB cache), Intel(R) Core(TM) i7-6900K CPU @ 3.20GHz (10 cores, 1 threads-per-core, 20480 KB cache)",
                            "CPU scaling governors: CPUs 10-19,30-39: performance, CPUs 0-9,20-29: powersave");
     }

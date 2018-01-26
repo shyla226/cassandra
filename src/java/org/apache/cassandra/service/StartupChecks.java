@@ -789,6 +789,12 @@ public class StartupChecks
     {
         FBUtilities.CpuInfo cpuInfo = cpuInfoSupplier.get();
 
+        if (cpuInfo == null || cpuInfo.getProcessors().isEmpty())
+        {
+            logger.warn("Could not get any CPU information from /proc/cpuinfo");
+            return;
+        }
+
         logger.info("CPU information: {} physical processors: {}",
                     cpuInfo.getProcessors().size(),
                     cpuInfo.getProcessors().stream()
@@ -801,11 +807,38 @@ public class StartupChecks
         Map<String, List<Integer>> governors = cpuInfo.getProcessors().stream()
                                                       .flatMap(p -> p.cpuIds().boxed())
                                                       .collect(Collectors.groupingBy(cpuInfo::fetchCpuScalingGovernor));
+        governors = new TreeMap<>(governors); // need to make it deterministic - at least for unit tests
         logger.info("CPU scaling governors: {}", governors.entrySet().stream()
                                                           .map(e -> "CPUs " + FBUtilities.CpuInfo.niceCpuIdList(e.getValue()) + ": " + e.getKey())
                                                           .collect(Collectors.joining(", ")));
-        if (governors.size() != 1 || !governors.containsKey("performance"))
-            logger.warn("CPU scaling governors not set go 'performance' (see above)");
+        if (governors.size() == 1)
+        {
+            String governor = governors.keySet().iterator().next();
+            switch (governor)
+            {
+                case "performance":
+                    // fine, that's what we want to see
+                    break;
+
+                // Virtual machines usually have no scaling governor support, so we cannot verify these.
+                case "no_cpufreq": // if directory containing scaling-governor file in sysfs cannot be read
+                case "no_scaling_governor": // if scaling-governor file in sysfs cannot be read
+                    // do not log anything in this case - probably KVM or some other virtualization
+                    logger.warn("CPU scaling governors could not be inquired, as /sys/devices/system/cpu/cpu*/cpufreq is not readable.");
+                    break;
+
+                case "unknown": // if scaling-governor file in sysfs cannot be read (empty file for example)
+                default:
+                    logger.warn("CPU scaling governors are all set to {}, but 'performance' is recommended (see above)",
+                                governor);
+            }
+        }
+        else
+        {
+            logger.warn(governors.containsKey("performance")
+                        ? "Not all CPU scaling governors not set to 'performance' (see above)"
+                        : "None of the CPU scaling governors are set to 'performance' (see above)");
+        }
     }
 
     public static final StartupCheck checkZoneReclaimMode = (logger) ->
