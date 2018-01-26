@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Avoid hibernate on startup for boostrap node to avoid WTE due to not being marked alive (DB-1544)
  * Prevent received SSTables with tombstones during repair from being compacted (DB-1333)
  * Wait RING_DELAY for schema to settle before starting view builder (DB-1328)
  * Make `ReservedKeywords` mutable (DB-1637)
