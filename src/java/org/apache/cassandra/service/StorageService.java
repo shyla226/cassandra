@@ -952,6 +952,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         joined = true;
 
+        // Timestamp that we use to check whether a node status' has been updated via Gossip for node-replacement.
+        // I.e. if the updated endpoint state timestamp is greater than this value, we consider the node to be
+        // replaced as still alive.
+        long nanoTimeNodeUpdatedOffset = System.nanoTime();
+
         // We bootstrap if we haven't successfully bootstrapped before, as long as we are not a seed.
         // If we are a seed, or if the user manually sets auto_bootstrap to false,
         // we'll skip streaming data from other nodes and jump directly into the ring.
@@ -1020,44 +1025,59 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             {
                 if (!isReplacingSameAddress())
                 {
-                    try
-                    {
-                        // Sleep additionally to make sure that the server actually is not alive
-                        // and giving it more time to gossip if alive.
-                        Thread.sleep(LoadBroadcaster.BROADCAST_INTERVAL);
-                    }
-                    catch (InterruptedException e)
-                    {
-                        throw new AssertionError(e);
-                    }
-
-                    // check for operator errors...
+                    // collect all (previous) endpoints for the bootstrap tokens
+                    Set<InetAddress> previousAddresses = new HashSet<>();
                     for (Token token : bootstrapTokens)
                     {
                         InetAddress existing = tokenMetadata.getEndpoint(token);
-                        if (existing != null)
-                        {
-                            long nanoDelay = delay * 1000000L;
-                            if (Gossiper.instance.getEndpointStateForEndpoint(existing).getUpdateTimestamp() > (System.nanoTime() - nanoDelay))
-                                throw new UnsupportedOperationException("Cannot replace a live node... ");
-                            current.add(existing);
-                        }
-                        else
-                        {
+                        if (existing == null)
                             throw new UnsupportedOperationException("Cannot replace token " + token + " which does not exist!");
-                        }
+                        previousAddresses.add(existing);
                     }
+
+                    // check for operator errors... (also see DB-1327)
+                    // If we're looking for active gossip participants, it seems more appropriate to sleep RING_DELAY
+                    // (which people use as a proxy for "time things should have propagated by") plus the minimum of
+                    // the gossiper interval and load broadcaster times (which will each trigger new gossip info),
+                    // and then check if any change has been made.
+                    //
+                    // Before DB-1327, we have slept for LoadBroadcaster.BROADCAST_INTERVAL (60s by default),
+                    // but checked endpoint states updated withing 'delay' (= ring-delay, 30s by default). So there
+                    // was a mismatch between these values.
+                    // Since DB-1327, we check for updates to the endpoint state since the beginning of this
+                    // joinTokenRing() method. Additionally, we sleep for 'relay' (= ring-delay, 30s by default) plus
+                    // min(broadcase-interval, gossiper-interval), which should sum up to 31s by default. Since we
+                    // already capture gossip-endpoint-changes during the execution of the code above, e.g. waiting
+                    // for the schema, time for network roundtrips should implicitly be included.
+
+                    long timeSleepOffset = System.currentTimeMillis();
+                    long timeEnd = timeSleepOffset
+                                   + delay
+                                   + Math.min(LoadBroadcaster.BROADCAST_INTERVAL, Gossiper.intervalInMillis);
+                    do
+                    {
+                        Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
+                        for (InetAddress existing : previousAddresses)
+                        {
+                            long updateTimestamp = Gossiper.instance.getEndpointStateForEndpoint(existing).getUpdateTimestamp();
+                            // We are looking for a node that should have been dead when we get here.
+                            // So use the earliest timestamp we have here (entering joinTokenRing()).
+                            if (nanoTimeNodeUpdatedOffset - updateTimestamp < 0)
+                            {
+                                // Use a separate log message to (hopefully) not screw up existing dtests
+                                logger.error("Cannot replace a live node {}. Endpoint state changed since {} (nanotime={})",
+                                             existing, new Date(timeSleepOffset), updateTimestamp);
+                                throw new UnsupportedOperationException("Cannot replace a live node... ");
+                            }
+                        }
+                    } while (System.currentTimeMillis() < timeEnd);
+
+                    current.addAll(previousAddresses);
                 }
                 else
                 {
-                    try
-                    {
-                        Thread.sleep(RING_DELAY);
-                    }
-                    catch (InterruptedException e)
-                    {
-                        throw new AssertionError(e);
-                    }
+                    // TODO: should this use "delay" instead of RING_DELAY? Probably doesn't make a difference in prod code though.
+                    Uninterruptibles.sleepUninterruptibly(RING_DELAY, TimeUnit.MILLISECONDS);
                 }
                 setMode(Mode.JOINING, "Replacing a node with token(s): " + bootstrapTokens, true);
             }

@@ -200,7 +200,8 @@ Merged from dse5.0:
  * Backport CASSANDRA-12461: (Add pre- and post-shutdown hooks to Storage Service) (DB-48)
  * Wait for remaining tasks to finish on RepairJob after task failure (DB-87)
  * Exponential backoff when hint delivery fails (DB-17)
-Merged from DSE 4.8.14:
+Merged from DSE 4.8:
+ * Improve live-node-replacement (DB-1327)
  * Allow aggressive expiration of fully expired sstables without timestamp/key overlap checks (DB-902)
  * Integrate top threads command in nodetool (DB-652)
 
