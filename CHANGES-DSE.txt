@@ -37,6 +37,8 @@ DSE 5.0.12
  * Backport CASSANDRA-13299, Throttle base partitions during MV repair streaming to prevent OOM (DB-878)
  * Backport CASSANDRA-13079: Warn user to run full repair when increasing replication factor (DB-602)
  * Add anticompaction metrics and warn users when incremental repair is inefficient (DB-689)
+Merged from DSE 4.8:
+  * Improve live-node-replacement (DB-1327)
 
 
 DSE 5.0.10
