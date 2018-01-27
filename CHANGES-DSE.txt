@@ -1,4 +1,5 @@
 DSE 4.8.14
+  * Improve live-node-replacement (DB-1327)
   * Backport CASSANDRA-11708: Enable client encryption in sstableloader with cli options (APOLLO-1033)
   * Allow aggressive expiration of fully expired sstables without timestamp/key overlap checks (APOLLO-902)
   * Integrate top threads command in nodetool (APOLLO-652)
