@@ -2,6 +2,8 @@ DSE 5.1.7
  * Fix infinite loop when replaying a truncated commit log file and truncation is tolerated (DB-1557)
 Merged from dse5.0:
  * Fix AssertionError in ReadResponse$Serializer.serializedSize (DB-1471)
+Merged from dse4.8:
+  * Improve live-node-replacement (DB-1327)
 
 
 DSE 5.1.6
