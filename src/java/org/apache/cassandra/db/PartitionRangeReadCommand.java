@@ -93,13 +93,14 @@ public class PartitionRangeReadCommand extends ReadCommand
                                         DataLimits limits,
                                         DataRange dataRange,
                                         IndexMetadata index,
-                                        StagedScheduler scheduler)
+                                        StagedScheduler scheduler,
+                                        TPCTaskType readType)
     {
-        super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
+        super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index, readType);
         this.dataRange = dataRange;
 
         this.scheduler = scheduler == null ? TPC.getNextTPCScheduler() : scheduler;
-        this.requestExecutor = this.scheduler.forTaskType(TPCTaskType.READ_RANGE);
+        this.requestExecutor = this.scheduler.forTaskType(readType);
         this.responseExecutor = this.scheduler.forTaskType(TPCTaskType.READ_RANGE_RESPONSE);
     }
 
@@ -120,7 +121,7 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              IndexMetadata index,
                                              StagedScheduler scheduler)
     {
-        return new PartitionRangeReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index, scheduler);
+        return new PartitionRangeReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index, scheduler, TPCTaskType.READ_RANGE_LOCAL);
     }
 
     public static PartitionRangeReadCommand create(TableMetadata metadata,
@@ -138,7 +139,8 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              limits,
                                              dataRange,
                                              findIndex(metadata, rowFilter),
-                                             null);
+                                             null,
+                                             TPCTaskType.READ_RANGE_LOCAL);
     }
 
     /**
@@ -164,7 +166,8 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              DataLimits.NONE,
                                              DataRange.allData(metadata.partitioner),
                                              null,
-                                             null);
+                                             null,
+                                             TPCTaskType.READ_RANGE_LOCAL);
     }
 
     public static PartitionRangeReadCommand fullRangeRead(TableMetadata metadata, DataRange range, int nowInSec)
@@ -177,7 +180,8 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              DataLimits.NONE,
                                              range,
                                              null,
-                                             null);
+                                             null,
+                                             TPCTaskType.READ_RANGE_LOCAL);
     }
 
     public Request.Dispatcher<? extends PartitionRangeReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints)
@@ -510,7 +514,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         throws IOException
         {
             DataRange range = DataRange.serializers.get(version).deserialize(in, metadata);
-            return new PartitionRangeReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, range, index, null);
+            return new PartitionRangeReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, range, index, null, TPCTaskType.READ_RANGE_REMOTE);
         }
     }
 }
