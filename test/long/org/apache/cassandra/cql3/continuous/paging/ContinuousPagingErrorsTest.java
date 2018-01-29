@@ -26,6 +26,7 @@ import com.datastax.driver.core.ContinuousPagingOptions;
 import com.datastax.driver.core.exceptions.OperationTimedOutException;
 import com.datastax.driver.core.exceptions.ServerError;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.utils.BytemanUtil;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
 //import org.jboss.byteman.contrib.bmunit.BMUnitConfig;
@@ -39,6 +40,11 @@ import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 //@BMUnitConfig(bmunitVerbose=true, debug=true, verbose=true, dumpGeneratedClasses=true)
 public class ContinuousPagingErrorsTest extends CQLTester
 {
+    static
+    {
+        BytemanUtil.randomizeBytemanPort();
+    }
+
     @BeforeClass
     public static void startup()
     {

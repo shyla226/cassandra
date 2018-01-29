@@ -32,17 +32,16 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.BytemanUtil;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-
 
 /**
  * Test for "Gossip blocks on startup when another node is bootstrapping" (CASSANDRA-12281).
@@ -50,6 +49,11 @@ import static org.junit.Assert.assertFalse;
 @RunWith(BMUnitRunner.class)
 public class PendingRangeCalculatorServiceTest
 {
+    static
+    {
+        BytemanUtil.randomizeBytemanPort();
+    }
+
     static ReentrantLock calculationLock = new ReentrantLock();
 
     @BeforeClass

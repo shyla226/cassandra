@@ -7,6 +7,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
 
+import org.apache.cassandra.utils.BytemanUtil;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 import org.junit.BeforeClass;
@@ -34,6 +35,10 @@ import static org.junit.Assert.assertTrue;
         action = "org.apache.cassandra.dht.RangeStreamerBootstrapTest.hasInsufficientSources()")
 public class RangeStreamerBootstrapTest
 {
+    static
+    {
+        BytemanUtil.randomizeBytemanPort();
+    }
 
     @Test
     public void testConsistentRangeMovementTruewithReplicaDownShouldFailNovnode()

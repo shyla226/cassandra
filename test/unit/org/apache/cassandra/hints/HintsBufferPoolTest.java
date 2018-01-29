@@ -18,6 +18,7 @@
 package org.apache.cassandra.hints;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.utils.BytemanUtil;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 import org.junit.BeforeClass;
@@ -35,6 +36,10 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 @RunWith(BMUnitRunner.class)
 public class HintsBufferPoolTest
 {
+    static
+    {
+        BytemanUtil.randomizeBytemanPort();
+    }
 
     @BeforeClass
     public static void defineSchema()

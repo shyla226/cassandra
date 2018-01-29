@@ -40,6 +40,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.utils.BytemanUtil;
 import org.apache.cassandra.schema.TableId;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
@@ -50,6 +51,11 @@ import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 @RunWith(BMUnitRunner.class)
 public class CommitlogShutdownTest
 {
+    static
+    {
+        BytemanUtil.randomizeBytemanPort();
+    }
+
     private static final String KEYSPACE1 = "CommitLogTest";
     private static final String STANDARD1 = "Standard1";
 

@@ -26,6 +26,7 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.utils.BytemanUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.schema.Schema;
@@ -38,6 +39,11 @@ import static org.junit.Assert.assertEquals;
 @RunWith(BMUnitRunner.class)
 public class CompactionsBytemanTest extends CQLTester
 {
+    static
+    {
+        BytemanUtil.randomizeBytemanPort();
+    }
+
     @Before
     public void setUp()
     {
