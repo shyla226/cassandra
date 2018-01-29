@@ -44,6 +44,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.utils.BytemanUtil;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
@@ -54,6 +55,11 @@ import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 @RunWith(BMUnitRunner.class)
 public class CommitLogSegmentBackpressureTest
 {
+    static
+    {
+        BytemanUtil.randomizeBytemanPort();
+    }
+
     //Block commit log service from syncing
     private static final Semaphore allowSync = new Semaphore(1);
 
