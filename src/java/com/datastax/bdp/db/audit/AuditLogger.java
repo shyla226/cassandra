@@ -32,6 +32,8 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MD5Digest;
 
+import static org.apache.cassandra.cql3.CQLStatementUtils.*;
+
 final class AuditLogger implements IAuditLogger
 {
     private static final Logger logger = LoggerFactory.getLogger(AuditLogger.class);
@@ -403,15 +405,5 @@ final class AuditLogger implements IAuditLogger
                    .append(spec.type.getString(var));
         }
         return builder.append(']');
-    }
-
-    private static String getKeyspace(CQLStatement stmt)
-    {
-        return stmt instanceof KeyspaceStatement ? ((KeyspaceStatement) stmt).keyspace() : null;
-    }
-
-    private static String getTable(CQLStatement stmt)
-    {
-        return stmt instanceof TableStatement ? ((TableStatement) stmt).columnFamily() : null;
     }
 }
