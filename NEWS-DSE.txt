@@ -1,0 +1,149 @@
+MAXIMUM TTL EXPIRATION DATE NOTICE
+-----------------------------------
+
+The maximum expiration timestamp that can be represented by the storage engine is 2038-01-19T03:14:06+00:00,
+which means that inserts with TTL that expire after this date are not currently supported.
+
+Prior to 5.0.12 in the 5.0.X series and 5.1.7 in the 5.1.X series, there was no protection against INSERTS
+with TTL expiring after the maximum supported date, causing the expiration time field to overflow and the
+records to expire immediately. Expired records due to overflow may have been removed permanently after a
+compaction. The 4.8.X series are not subject to data loss due to this issue if assertions are enabled,
+since an AssertionError is thrown during INSERT when the expiration time field overflows on these versions.
+
+In practice this issue will affect only users that use very large TTLs, close to the maximum allowed value of
+630720000 seconds (20 years), starting from 2018-01-19T03:14:06+00:00. As time progresses, the maximum supported
+TTL will be gradually reduced as the the maximum expiration date approaches. For instance, a user on an affected
+version on 2028-01-19T03:14:06 with a TTL of 10 years will be affected by this bug, so we urge users of very
+large TTLs to upgrade to a version where this issue is addressed as soon as possible.
+
+Potentially affected users should inspect their SSTables and search for negative min local deletion times to
+detect this issue. SSTables in this state must be backed up immediately, as they are subject to data loss
+during auto-compactions, and may be recovered by running the sstablescrub tool from versions 5.0.12+ and/or 5.1.7+.
+
+We plan to fix this limitation in newer versions, but while the fix is not available, operators
+can decide which policy to apply when dealing with inserts with TTL exceeding the maximum supported expiration date:
+  - REJECT: this is the default policy and will reject any requests with expiration date timestamp after 2038-01-19T03:14:06+00:00.
+  - CAP: any insert with TTL expiring after 2038-01-19T03:14:06+00:00 will expire on 2038-01-19T03:14:06+00:00 and the client will receive a warning.
+  - CAP_NOWARN: same as previous, except that the client warning will not be emitted.
+
+These policies may be specified via the -Dcassandra.expiration_date_overflow_policy=POLICY startup option which can be set in the
+jvm.options file.
+
+See CASSANDRA-14092 for more details.
+
+DSE 6.0
+=======
+
+New features
+------------
+   - Core storage engine functions have been moved to a new Thread Per Core (TPC) architecture, enabling many
+     performance gains. Several yaml settings have been removed as a result. See the deprecation section for more
+     information. The file cache default size has been increased to facilitate async disk reads as a result. TPC also
+     requires several new system configurations for optimal performance. The meaning of threadpool metrics has changed,
+     and are now reported per core if the "--core" option is provided to tpstats. See the upgrading and metrics sections
+     for more information.
+   - An integrated continuous background repair service called NodeSync has been added. NodeSync can be enabled as a
+     service on individual nodes. NodeSync is disabled on tables by default. NodeSync can be enabled on a table with a
+     configurable deadline deadline_target_sec by altering the NodeSync options on an existing table or providing
+     NodeSync options when creating a table. Traditional anti-entropy repairs will be rejected on tables with NodeSync
+     enabled. NodeSync's target repair rate can be set through the rate_in_kb parameter in the NodeSync section of
+     cassandra.yaml. A new command line tool for cluster-wide management of NodeSync called "nodesync" has been added.
+     It can be used to enable/disable NodeSync on tables, configure NodeSync, manage one-off user validations, or trace
+     NodeSync operation. See "nodesync help" for more information. The NodeSync service on an
+     individual node can be managed through "nodetool nodesyncservice". A simulator accessible through
+     "nodetool nodesyncservice ratesimulator" can help configure NodeSync for your workload.
+   - Functions may now be used in the GROUP BY clause of CQL queries, provided the function is 1) applied
+     to a single clustering column, 2) monotonic on the clustering column argument, 3) applied to the last clustering
+     column of the GROUP BY clause, and 4) excepting the function call, the columns appear in primary key order.
+     User-defined functions are allowed in the GROUP BY clause if marked monotonic. See the CQL spec for how to mark a
+     user-defined function monotonic on one or all arguments. User-defined functions in the GROUP BY clause also
+     require setting enable_user_defined_functions_threads to false in cassandra.yaml, with the security risks described
+     in the yaml file.
+   - SSTables now use trie-based indices for both partitions and rows. These indices are stored on disk as new sstable
+     components *-Partitions.db and *-Rows.db. Old format sstables will continue to use the key cache and legacy indexes
+     until upgraded. Any custom types implemented by extending AbstractType will need to implement
+     asByteComparableSource for compatibility with trie-based indices.
+   - Multiple privileges can be granted to or revoked from a role in one CQL statement. The syntax of the GRANT and
+     REVOKE statements has been extended to accept a comma-separated list of privileges rather than a single privilege.
+   - DSE protocol v2 now allows sending the keyspace of a query independent of the query string. See the DSE protocol v2
+     specification for more information.
+   - DSE protocol v2 includes client-side backpressure for continuous paging queries. See the DSE protocol v2 spec for
+     more information.
+   - The ability to RESTRICT and UNRESTRICT privileges has been added to CQL. RESTRICTed privileges always take
+     precedence over granted privileges. Only superusers may use RESTRICT and UNRESTRICT.
+   - CQL now allows GRANTing the ability to AUTHORIZE privileges. This enables separation of duties by allowing roles
+     to grant specific privileges to other roles.
+   - Access to schema tables can be limited by setting system_keyspaces_filtering to true in cassnadra.yaml. With this
+     option enabled, non-superusers cannot read the system/system_schema keyspaces without being granted the DESCRIBE
+     permission on those keyspaces.
+
+Operations
+----------
+   - A new metric is exposed to track timeouts on view lock acquisition when updating materialized views. This
+     metric can be accessed at org.apache.cassandra.metrics.Table.ViewLockAcquisitionTimeouts.<Keyspace>.<Table>.
+   - Rebuild functionality now requires to specify the streaming source endpoints and/or DC/racks
+     and no longer implicitly prefers the local data center. Specifying no sources or DC/racks is
+     now considered an error. See `nodetool help rebuild` about which combinations of DCs/racks or endpoints to include
+     or exclude are possible.
+   - Added batchlog_endpoint_strategy option and 2 new strategies to cassandra.yaml. The default is
+     "random_remote", which works as in previous versions. Two new strategies help to choose better
+     endpoints and improve batchlog write latency. See cassandra.yaml for details.
+   - Nodetool repair will now run full repairs by default, use "-inc" option to run incremental repair.
+   - Incremental repairs are disallowed on tables with Materialized Views or CDC. Run full repairs on these
+     tables.
+   - A new BACKGROUND_IO stage was created to handle blocking background IO operations like cache loading,
+     commit log segment allocation and replay. The maximum size of this thread pool is governed by the system
+     property cassandra.io.background.max_pool_size.
+   - TimeWindowCompactionStrategy can now split sstables on flush to better align with TWCS windows. This behavior
+     can be configured by setting the "split_during_flush" parameter in TWCS options for a table. "split_during_flush"
+     defaults to false.
+   - The contents of the DroppedMessage map have been changed to better reflect the type of operations
+     being tracked. The tracked messages now include COUNTER_MUTATION, MUTATION, VIEW_MUTATION,
+     RANGE_SLICE, READ, READ_REPAIR, LWT, HINTS, TRUNCATE, SNAPSHOT, SCHEMA, REPAIR, and OTHER.
+   - Because TPC fundamentally changes the architecture of internal processing, the output of metrics related to
+     task execution or thread pool statistics has changed significantly. In particular, tpstats and statuslogger
+     output will be affected, as TPC task types are now reported rather than threadpool statistics. See the
+     documentation for more information on how to interpret these metrics. To see metrics per core, provide the
+     "--cores" option to tpstats.
+
+Upgrading
+---------
+   - The ITrigger interface has been modified from "augment" to "augmentNonBlocking" for non-blocking
+     internal architecture. Updated trigger implementations will need to be provided on upgraded nodes.
+   - Removed support for directly setting JMX remote port via the com.sun.management.jmxremote.port
+     system property, deprecated since 3.6.
+   - The table system_auth.resource_role_permissons_index is no longer used and should be dropped
+     after all nodes are on 6.0.
+   - Changes to permissions (CassandraAuthorizer, DseAuthorizer), roles (CassandraRoleManager,
+     DseRoleManager) and credentials (PasswordAuthenticator) are broadcasted throughout the cluster.
+     This eliminates the need to have short-ish validity (permissions_validity_in_ms,
+     roles_validity_in_ms, credentials_validity_in_ms) and update-interval
+     (permissions_update_interval_in_ms, roles_update_interval_in_ms,
+     credentials_update_interval_in_ms) settings in cassandra.yaml. Consider raising the values
+     for *_validity_in_ms and *_update_interval_in_ms, if configured.
+     Please note, that only "reachable" nodes will receive the invalidation messages and
+     unreachable nodes may still hold outdated information after DCL command.
+   - REVOKE (and the new UNRESTRICT statement) now error out when the statement would not change
+     anything. This means, an error is raised when the statement targets permissions which are
+     not present for that resource.
+   - The caches for JMX permissions and credentials no longer exist and therefore the JMX beans
+     for these caches have been removed, too. Also the configuration options for the credentials
+     cache need to be removed from the cassandra.yaml file.
+   - Removed org.apache.cassandra.metrics.Table.{AntiCompactedBytes|NonAntiCompactedBytes} metrics.
+   - Due to the TPC rearchitecture, the following properties have been removed from cassandra.yaml: concurrent_reads,
+     concurrent_writes, concurrent_counter_writes, concurrent_materialized_view_writes, streaming_socket_timeout_in_ms.
+   - The file cache size default has been increased. See file_cache_size_in_mb in cassandra.yaml for more information.
+   - Due to the TPC rearchitecture, several system tunables have become more important. These include the Linux clock
+     source, the presence of epoll and libaio, the CPU scaling governor, and DIRECT_IO support on data directories.
+     Check the system log after startup to see if suboptimal configurations are present.
+   - Since client connections are tied to a TPC thread, single process applications issuing a large
+     number of concurrent requests may benefit from increasing the number of connections per host.
+
+Deprecation
+-----------
+    - The following properties were renamed and are now deprecated before they are removed in the next major release:
+      - rpc_address -> native_transport_address
+      - rpc_interface -> native_transport_interface
+      - rpc_interface_prefer_ipv6 -> native_transport_interface_prefer_ipv6
+      - broadcast_rpc_address -> native_transport_broadcast_address
+      - rpc_keepalive -> native_transport_keepalive
