@@ -35,6 +35,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import static com.datastax.bdp.db.audit.CoreAuditableEventType.*;
@@ -826,6 +827,8 @@ public class AuditLoggerTest extends CQLTester
         executeNet(new SimpleStatement("CREATE TABLE test.test (pk int PRIMARY KEY, v int)")
                    .setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.ONE));
 
+        InProcTestAuditWriter.reset();
+
         try
         {
             executeNet(new SimpleStatement("SELECT * FROM test.test").setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.QUORUM));
@@ -836,8 +839,7 @@ public class AuditLoggerTest extends CQLTester
             Stack<AuditableEvent> events = getEvents();
             assertEventProperties(events.pop(), REQUEST_FAILURE, "test", "test",
                                   "Cannot achieve consistency level QUORUM SELECT * FROM test.test", ConsistencyLevel.QUORUM);
-            assertEventProperties(events.pop(), CQL_SELECT, "test", "test",
-                                  "SELECT * FROM test.test", ConsistencyLevel.QUORUM);
+            assertTrue(events.isEmpty());
         }
         finally
         {
@@ -855,6 +857,8 @@ public class AuditLoggerTest extends CQLTester
         executeNet(new SimpleStatement("CREATE TABLE test.test (pk int PRIMARY KEY, v int)")
                    .setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.ONE));
 
+        InProcTestAuditWriter.reset();
+
         try
         {
             PreparedStatement stmt = prepareNet("SELECT * FROM test.test");
@@ -866,8 +870,9 @@ public class AuditLoggerTest extends CQLTester
             Stack<AuditableEvent> events = getEvents();
             assertEventProperties(events.pop(), REQUEST_FAILURE, "test", "test",
                                   "Cannot achieve consistency level QUORUM SELECT * FROM test.test", ConsistencyLevel.QUORUM);
-            assertEventProperties(events.pop(), CQL_SELECT, "test", "test",
-                                  "SELECT * FROM test.test", ConsistencyLevel.QUORUM);
+            assertEventProperties(events.pop(), CQL_PREPARE_STATEMENT, "test", "test",
+                                  "SELECT * FROM test.test", null);
+            assertTrue(events.isEmpty());
         }
         finally
         {

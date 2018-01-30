@@ -195,7 +195,6 @@ public class AuditLoggerFilteringTest extends CQLTester
 
             triggerConsistencyFailure();
 
-            assertEventProperties(getEvents().pop(), CQL_SELECT, "test", "test", "SELECT * FROM test.test", ConsistencyLevel.QUORUM);
             assertTrue(getEvents().isEmpty());
 
             useUser("user2", "user2");
