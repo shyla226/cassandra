@@ -64,6 +64,8 @@ dse 6.0.0:
  * Fix build due to "ow2" repository issues (DB-master follow-up of CASSANDRA-13278) (DB-494)
  * For TWCS, flush to separate sstables based on write time (DB-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (DB-302)
+
+
 Merged from dse5.1:
  * Fix infinite loop when replaying a truncated commit log file and truncation is tolerated (DB-1557)
  * Switch RMIExporter to dynamic proxy (DB-1591)
@@ -132,7 +134,10 @@ Merged from dse5.1:
  * Backport CASSANDRA-12969: Conditionally update index built status to avoid unnecessary flushes (no internal DB ticket)
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no internal DB ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no internal DB ticket)
+
+
 Merged from dse5.0:
+ * Non-disruptive seed node list reload (DB-1626)
  * Separate commit log replay and commit throwable inspection and policy handling (DB-673)
  * Fix for Local DC connections are compressed despite internode_compression: dc (DB-734)
  * Expanded hinted handoff instrumentation (DB-853)
@@ -200,6 +205,8 @@ Merged from dse5.0:
  * Backport CASSANDRA-12461: (Add pre- and post-shutdown hooks to Storage Service) (DB-48)
  * Wait for remaining tasks to finish on RepairJob after task failure (DB-87)
  * Exponential backoff when hint delivery fails (DB-17)
+
+
 Merged from DSE 4.8:
  * Improve live-node-replacement (DB-1327)
  * Allow aggressive expiration of fully expired sstables without timestamp/key overlap checks (DB-902)
