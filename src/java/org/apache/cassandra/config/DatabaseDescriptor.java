@@ -1753,6 +1753,16 @@ public class DatabaseDescriptor
         return ImmutableSet.<InetAddress>builder().addAll(seedProvider.getSeeds()).build();
     }
 
+    public static SeedProvider getSeedProvider()
+    {
+        return seedProvider;
+    }
+
+    public static void setSeedProvider(SeedProvider newSeedProvider)
+    {
+        seedProvider = newSeedProvider;
+    }
+
     public static InetAddress getListenAddress()
     {
         return listenAddress;
