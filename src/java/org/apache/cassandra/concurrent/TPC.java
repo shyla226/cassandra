@@ -29,7 +29,6 @@ import io.netty.channel.epoll.Aio;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
-import io.netty.util.concurrent.FastThreadLocal;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
@@ -90,14 +89,7 @@ public class TPC
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
     private final static AtomicLong schedulerRoundRobinIndex = new AtomicLong(0);
-    private final static FastThreadLocal<AtomicLong> timerRoundRobinIndex = new FastThreadLocal<AtomicLong>()
-    {
-        @Override
-        protected AtomicLong initialValue()
-        {
-            return new AtomicLong();
-        }
-    };
+    private final static AtomicLong[] timerRoundRobinIndex = new AtomicLong[NUM_CORES + 1];
 
     // The core event loops as a Netty EventLoopGroup. The group is created to contain exactly NUM_CORES loops.
     private static final TPCEventLoopGroup eventLoopGroup;
@@ -131,7 +123,10 @@ public class TPC
     static
     {
         for (int i = 0; i <= NUM_CORES; ++i)
+        {
             perCoreMetrics[i] = new TPCMetricsAndLimits();
+            timerRoundRobinIndex[i] = new AtomicLong();
+        }
 
         // Creates the event loops
         if (USE_EPOLL)
@@ -262,7 +257,7 @@ public class TPC
      */
     public static TPCTimer bestTPCTimer()
     {
-        return timers.get((int) (timerRoundRobinIndex.get().incrementAndGet() % getNumTimers()));
+        return timers.get((int) (timerRoundRobinIndex[getCoreId()].incrementAndGet() % getNumTimers()));
     }
 
     /**

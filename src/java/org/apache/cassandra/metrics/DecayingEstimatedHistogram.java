@@ -37,7 +37,6 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 
 import org.agrona.concurrent.AtomicBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.utils.EstimatedHistogram;
 
@@ -411,13 +410,13 @@ final class DecayingEstimatedHistogram extends Histogram
                 return;
 
             if (scheduled.compareAndSet(false, true))
-                TPC.bestTPCScheduler().schedule(this::aggregate, TPCTaskType.TIMED_HISTOGRAM_AGGREGATE, updateIntervalMillis, TimeUnit.MILLISECONDS);
+                TPC.bestTPCTimer().onTimeout(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
         }
 
         void scheduleIfComposite()
         {
             if (updateIntervalMillis > 0 && isComposite)
-                TPC.bestTPCScheduler().schedule(this::aggregate, TPCTaskType.TIMED_HISTOGRAM_AGGREGATE, updateIntervalMillis, TimeUnit.MILLISECONDS);
+                TPC.bestTPCTimer().onTimeout(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
         }
 
         @Override

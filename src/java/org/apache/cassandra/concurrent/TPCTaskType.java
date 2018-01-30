@@ -111,16 +111,12 @@ public enum TPCTaskType
     AUTHENTICATION(Features.ALWAYS_COUNT),
     /** Authorization request */
     AUTHORIZATION(Features.ALWAYS_COUNT),
-    /** Unknown timed task */
-    TIMED_UNKNOWN(Features.TIMED),
-    /** Periodic histogram aggregation */
-    TIMED_HISTOGRAM_AGGREGATE(Features.TIMED),
-    /** Meter clock tick */
-    TIMED_METER_TICK(Features.TIMED),
     /** Scheduled speculative read */
-    TIMED_SPECULATE(Features.TIMED),
+    READ_SPECULATE(Features.TIMED),
     /** Scheduled timeout task */
     TIMED_TIMEOUT(Features.TIMED),
+    /** Unknown timed task */
+    TIMED_UNKNOWN(Features.TIMED),
     /** Number of busy spin cycles done by this TPC thread when it has no tasks to perform */
     EVENTLOOP_SPIN(Features.EXCLUDE_FROM_TOTALS),
     /** Number of Thread.yield() calls done by this TPC thread when it has no tasks to perform */

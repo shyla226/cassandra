@@ -276,7 +276,7 @@ public abstract class AbstractReadExecutor
                                                                    cfs.metric.speculativeInsufficientReplicas.inc();
 
                                                            },
-                                                TPCTaskType.TIMED_SPECULATE,
+                                                TPCTaskType.READ_SPECULATE,
                                                 cfs.sampleLatencyNanos,
                                                 TimeUnit.NANOSECONDS);
 
@@ -347,7 +347,7 @@ public abstract class AbstractReadExecutor
                            logger.trace("Speculating read retry on {}", extraReplica);
                            MessagingService.instance().send(retryCommand.requestTo(extraReplica), handler);
                        }
-                   }, TPCTaskType.TIMED_SPECULATE, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+                   }, TPCTaskType.READ_SPECULATE, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
 
                 return CompletableObserver::onComplete;
             });
