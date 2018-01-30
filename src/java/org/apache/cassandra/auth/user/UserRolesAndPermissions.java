@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.IAuthorizer.TransitionalMode;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.functions.Function;
@@ -76,21 +77,15 @@ public abstract class UserRolesAndPermissions
         public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
         {
         }
-
-        public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
-                                       Supplier<R> initialState,
-                                       RoleResourcePermissionFilter<R> aggregate)
-        {
-            R state = initialState.get();
-            state = applicablePermissions.apply(state);
-            return state;
-        }
     };
 
     /**
      * The roles and permissions of an anonymous user.
-     * <p>Anonymous users only exists in transitional mode (when the permission are being set up).
-     * An anonymous user can access any table data but is blocked from performing any role or permissions operations.
+     * <p>
+     * Anonymous users only exists in transitional mode (when the permission are being set up).
+     * Whether an anonymous user can access any table data, depends on the transitional mode being configured.
+     * But anonymous users are generally blocked from performing any role or permissions operations
+     * (via {@link #checkNotAnonymous()}).
      * </p>
      */
     public static final UserRolesAndPermissions ANONYMOUS = new UserRolesAndPermissions(AuthenticatedUser.ANONYMOUS_USERNAME, Collections.emptySet())
@@ -110,33 +105,105 @@ public abstract class UserRolesAndPermissions
         @Override
         protected boolean hasPermissionOnResourceChain(IResource resource, Permission perm)
         {
-            return CorePermission.AUTHORIZE != perm;
+            return checkPermission(perm);
         }
 
         @Override
         public boolean hasJMXPermission(MBeanServer mbs, ObjectName object, Permission permission)
         {
-            return true;
+            return checkPermission(permission);
         }
 
         @Override
         protected void checkPermissionOnResourceChain(IResource resource, Permission perm)
         {
-            if (CorePermission.AUTHORIZE == perm)
+            if (!checkPermission(perm))
                 throw new UnauthorizedException("Anonymous users are not authorized to perform this request");
+        }
+
+        private boolean checkPermission(Permission perm)
+        {
+            IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+            TransitionalMode mode = authorizer.getTransitionalMode();
+
+            // Anonymous can never have AUTHORIZE permission.
+            if (perm == CorePermission.AUTHORIZE || !mode.supportPermission(perm))
+                return false;
+
+            if (!authorizer.requireAuthorization())
+                // Authentication is not enabled - go ahead.
+                return true;
+
+            // Transitional mode defines, that anonymous can do "everything" - go ahead.
+            return !mode.enforcePermissionsAgainstAnonymous();
         }
 
         public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
         {
         }
+    };
 
-        public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
-                                       Supplier<R> initialState,
-                                       RoleResourcePermissionFilter<R> aggregate)
+    /**
+     * The roles and permissions of an in-inprocess user.
+     * <p>
+     *
+     * </p>
+     */
+    public static final UserRolesAndPermissions INPROC = new UserRolesAndPermissions(AuthenticatedUser.INPROC_USERNAME, Collections.emptySet())
+    {
+        @Override
+        public boolean isSuper()
         {
-            R state = initialState.get();
-            state = applicablePermissions.apply(state);
-            return state;
+            return true;
+        }
+
+        @Override
+        public boolean isSystem()
+        {
+            return true;
+        }
+
+        @Override
+        public void checkNotAnonymous()
+        {
+            throw new UnauthorizedException("In-proc users are not authorized to perform this request");
+        }
+
+        @Override
+        public boolean hasGrantPermission(IResource resource, Permission perm)
+        {
+            return false;
+        }
+
+        @Override
+        protected boolean hasPermissionOnResourceChain(IResource resource, Permission perm)
+        {
+            return checkPermission(perm);
+        }
+
+        @Override
+        public boolean hasJMXPermission(MBeanServer mbs, ObjectName object, Permission permission)
+        {
+            return checkPermission(permission);
+        }
+
+        @Override
+        protected void checkPermissionOnResourceChain(IResource resource, Permission perm)
+        {
+            if (!checkPermission(perm))
+                throw new UnauthorizedException("In-proc users are not authorized to perform this request");
+        }
+
+        private boolean checkPermission(Permission perm)
+        {
+            if (perm == CorePermission.AUTHORIZE)
+                // In proc can never have AUTHORIZE permission.
+                return false;
+            return true;
+        }
+
+        public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
+        {
         }
     };
 
@@ -547,9 +614,14 @@ public abstract class UserRolesAndPermissions
      *                              is not required, a permission set with granted and grantables set to the
      *                              permissions provided by this supplier will be used
      */
-    public abstract <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
-                                            Supplier<R> initialState,
-                                            RoleResourcePermissionFilter<R> aggregate);
+    public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
+                                   Supplier<R> initialState,
+                                   RoleResourcePermissionFilter<R> aggregate)
+    {
+        R state = initialState.get();
+        state = applicablePermissions.apply(state);
+        return state;
+    }
 
     @FunctionalInterface
     public interface RoleResourcePermissionFilter<R>
@@ -599,15 +671,6 @@ public abstract class UserRolesAndPermissions
         public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
         {
         }
-
-        public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
-                                       Supplier<R> initialState,
-                                       RoleResourcePermissionFilter<R> aggregate)
-        {
-            R state = initialState.get();
-            state = applicablePermissions.apply(state);
-            return state;
-        }
     }
 
     /**
@@ -643,6 +706,17 @@ public abstract class UserRolesAndPermissions
         @Override
         protected void checkPermissionOnResourceChain(IResource resource, Permission perm)
         {
+            TransitionalMode mode = DatabaseDescriptor.getAuthorizer().getTransitionalMode();
+
+            if (!mode.supportPermission(perm))
+                throw new UnauthorizedException(String.format("User %s has no %s permission on %s or any of its parents",
+                                                              getName(),
+                                                              perm,
+                                                              resource));
+
+            if (!mode.enforcePermissionsOnAuthenticatedUser())
+                return;
+
             boolean granted = false;
             for (PermissionSets permissions : getAllPermissionSetsFor(resource))
             {
@@ -693,6 +767,14 @@ public abstract class UserRolesAndPermissions
         @Override
         protected boolean hasPermissionOnResourceChain(IResource resource, Permission perm)
         {
+            TransitionalMode mode = DatabaseDescriptor.getAuthorizer().getTransitionalMode();
+
+            if (!mode.supportPermission(perm))
+                return false;
+
+            if (!mode.enforcePermissionsOnAuthenticatedUser())
+                return true;
+
             boolean granted = false;
             for (PermissionSets permissions : getAllPermissionSetsFor(resource))
             {
@@ -702,7 +784,6 @@ public abstract class UserRolesAndPermissions
             }
             return granted;
         }
-
         private PermissionSets getPermissions(RoleResource roleResource, IResource res)
         {
             Map<IResource, PermissionSets> map = this.permissions.get(roleResource);
@@ -712,6 +793,15 @@ public abstract class UserRolesAndPermissions
         @Override
         public boolean hasJMXPermission(MBeanServer mbs, ObjectName object, Permission permission)
         {
+
+            TransitionalMode mode = DatabaseDescriptor.getAuthorizer().getTransitionalMode();
+
+            if (!mode.supportPermission(permission))
+                return false;
+
+            if (!mode.enforcePermissionsOnAuthenticatedUser())
+                return true;
+
             for (Map<IResource, PermissionSets> permissionsPerResource : permissions.values())
             {
                 PermissionSets rootPerms = permissionsPerResource.get(JMXResource.root());
@@ -850,6 +940,7 @@ public abstract class UserRolesAndPermissions
             assert previous == null;
         }
 
+        @Override
         public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
                                        Supplier<R> initialState,
                                        RoleResourcePermissionFilter<R> aggregate)
@@ -906,15 +997,6 @@ public abstract class UserRolesAndPermissions
         public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
         {
             throw new UnsupportedOperationException();
-        }
-
-        public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
-                                       Supplier<R> initialState,
-                                       RoleResourcePermissionFilter<R> aggregate)
-        {
-            R state = initialState.get();
-            state = applicablePermissions.apply(state);
-            return state;
         }
     }
 }

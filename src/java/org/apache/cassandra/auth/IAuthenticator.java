@@ -20,13 +20,112 @@ package org.apache.cassandra.auth;
 import java.net.InetAddress;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 public interface IAuthenticator
 {
+    public enum TransitionalMode
+    {
+        /**
+         * Transitional mode is disabled. Default.
+         */
+        DISABLED
+        {
+            public boolean mapAllNonSuperuserToAnonymous()
+            {
+                return false;
+            }
+
+            public boolean failedAuthenticationMapsToAnonymous()
+            {
+                return false;
+            }
+
+            public boolean missingCredentialsMapsToAnonymous()
+            {
+                return false;
+            }
+        },
+        /**
+         * Only a superuser is authenticated and logged in.
+         * All other authentication attempts are logged in as the anonymous user.
+         */
+        PERMISSIVE
+        {
+            public boolean mapAllNonSuperuserToAnonymous()
+            {
+                return true;
+            }
+
+            public boolean failedAuthenticationMapsToAnonymous()
+            {
+                return true;
+            }
+
+            public boolean missingCredentialsMapsToAnonymous()
+            {
+                return true;
+            }
+        },
+        /**
+         * Only users that provide valid credentials are logged in.
+         * If the authentication is successful, the user is logged in.
+         * If the authentication fails, the user is logged in as anonymous.
+         * If no credentials are passed, the user is logged in as anonymous.
+         */
+        NORMAL
+        {
+            public boolean mapAllNonSuperuserToAnonymous()
+            {
+                return false;
+            }
+
+            public boolean failedAuthenticationMapsToAnonymous()
+            {
+                return true;
+            }
+
+            public boolean missingCredentialsMapsToAnonymous()
+            {
+                return true;
+            }
+        },
+        /**
+         * If credentials are passed, they are authenticated.
+         * If the authentication is successful, the user is logged in.
+         * If the authentication fails, then an authentication error is returned.
+         * If no credentials are passed, the user is logged in as anonymous.
+         */
+        STRICT
+        {
+            public boolean mapAllNonSuperuserToAnonymous()
+            {
+                return false;
+            }
+
+            public boolean failedAuthenticationMapsToAnonymous()
+            {
+                return false;
+            }
+
+            public boolean missingCredentialsMapsToAnonymous()
+            {
+                return true;
+            }
+        };
+
+        public abstract boolean mapAllNonSuperuserToAnonymous();
+        public abstract boolean failedAuthenticationMapsToAnonymous();
+        public abstract boolean missingCredentialsMapsToAnonymous();
+    }
+
+    default TransitionalMode getTransitionalMode()
+    {
+        return TransitionalMode.DISABLED;
+    }
+
     default <T extends IAuthenticator> T implementation()
     {
         return (T) this;
