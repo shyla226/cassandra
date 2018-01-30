@@ -129,6 +129,12 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
 
         timeoutTask = new TimeoutTask<>(this, timeoutSupplier, schedulerSupplier);
         timeoutTask.submit(timeoutNanos, TimeUnit.NANOSECONDS);
+
+        // If the source has been just set, we can dispose the timeout early: this also resolves a race causing such
+        // timeout task to be kept in memory due to disposeTimeoutTask() being called between/before the task creation
+        // and submit.
+        if (hasSource())
+            timeoutTask.dispose();
     }
 
     /**
@@ -139,8 +145,6 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
         TimeoutTask<T> timeoutTask = this.timeoutTask;
         if (timeoutTask != null)
             timeoutTask.dispose();
-
-        this.timeoutTask = null;
     }
 
     @Override
@@ -192,18 +196,12 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
         @Override
         public void run()
         {
-            try
-            {
-                DeferredFlow<T> flow = flowRef.get();
-                // Might have been disposed (nulled) or set (the source) in the meantime: important to check because it
-                // is expensive to create an exception, due to the callstack.
-                if (flow != null && !flow.hasSource())
-                    flow.onSource(timeoutSupplier.get().lift(Threads.requestOn(schedulerSupplier.get(), TPCTaskType.READ_TIMEOUT)));
-            }
-            finally
-            {
-                flowRef.set(null);
-            }
+            DeferredFlow<T> flow = flowRef.getAndSet(null);
+
+            // Might have been disposed (nulled) or set (the source) in the meantime: important to check because it
+            // is expensive to create an exception, due to the callstack.
+            if (flow != null && !flow.hasSource())
+                flow.onSource(timeoutSupplier.get().lift(Threads.requestOn(schedulerSupplier.get(), TPCTaskType.READ_TIMEOUT)));
         }
 
         public void submit(long timeoutNanos, TimeUnit timeUnit)
