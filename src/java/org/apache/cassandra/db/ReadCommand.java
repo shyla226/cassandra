@@ -27,6 +27,7 @@ import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +39,7 @@ import io.reactivex.Single;
 import org.apache.cassandra.concurrent.SchedulableMessage;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.selection.ResultBuilder;
@@ -87,6 +89,8 @@ public abstract class ReadCommand implements ReadQuery, SchedulableMessage
     @Nullable
     private final DigestVersion digestVersion;
 
+    protected final TPCTaskType readType;
+
     protected static abstract class SelectionDeserializer<T extends ReadCommand>
     {
         public abstract T deserialize(DataInputPlus in,
@@ -106,7 +110,8 @@ public abstract class ReadCommand implements ReadQuery, SchedulableMessage
                           ColumnFilter columnFilter,
                           RowFilter rowFilter,
                           DataLimits limits,
-                          IndexMetadata index)
+                          IndexMetadata index,
+                          TPCTaskType readType)
     {
         this.digestVersion = digestVersion;
         this.metadata = metadata;
@@ -115,6 +120,7 @@ public abstract class ReadCommand implements ReadQuery, SchedulableMessage
         this.rowFilter = rowFilter;
         this.limits = limits;
         this.index = index;
+        this.readType = readType;
     }
 
     protected abstract void serializeSelection(DataOutputPlus out, ReadVersion version) throws IOException;

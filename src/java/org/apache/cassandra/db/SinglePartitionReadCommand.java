@@ -110,15 +110,16 @@ public class SinglePartitionReadCommand extends ReadCommand
                                        DataLimits limits,
                                        DecoratedKey partitionKey,
                                        ClusteringIndexFilter clusteringIndexFilter,
-                                       IndexMetadata index)
+                                       IndexMetadata index,
+                                       TPCTaskType readType)
     {
-        super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
+        super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index, readType);
         assert partitionKey.getPartitioner() == metadata.partitioner;
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
 
         this.scheduler = TPC.bestTPCScheduler();
-        this.requestExecutor = scheduler.forTaskType(TPCTaskType.READ);
+        this.requestExecutor = scheduler.forTaskType(readType);
         this.responseExecutor = scheduler.forTaskType(TPCTaskType.READ_RESPONSE);
     }
 
@@ -163,7 +164,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                                               limits,
                                               partitionKey,
                                               clusteringIndexFilter,
-                                              indexMetadata);
+                                              indexMetadata,
+                                              TPCTaskType.READ_LOCAL);
     }
 
     /**
@@ -337,7 +339,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                                               limits(),
                                               partitionKey(),
                                               clusteringIndexFilter(),
-                                              indexMetadata());
+                                              indexMetadata(),
+                                              TPCTaskType.READ_LOCAL);
     }
 
     public DecoratedKey partitionKey()
@@ -418,7 +421,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                                               newLimits,
                                               partitionKey(),
                                               clusteringIndexFilter(),
-                                              indexMetadata());
+                                              indexMetadata(),
+                                              TPCTaskType.READ_LOCAL);
     }
 
     public Flow<FlowablePartition> execute(ReadContext ctx) throws RequestExecutionException
@@ -1309,7 +1313,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         {
             DecoratedKey key = metadata.partitioner.decorateKey(metadata.partitionKeyType.readValue(in, DatabaseDescriptor.getMaxValueSize()));
             ClusteringIndexFilter filter = ClusteringIndexFilter.serializers.get(version).deserialize(in, metadata);
-            return new SinglePartitionReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, key, filter, index);
+            return new SinglePartitionReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, key, filter, index, TPCTaskType.READ_REMOTE);
         }
     }
 
