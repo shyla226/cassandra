@@ -23,8 +23,7 @@ public class InProcTestAuditWriter implements IAuditWriter
     {
         logger.debug("Record event: {}", event);
 
-        events.add(event);
-        return Completable.complete();
+        return Completable.fromAction(() -> events.add(event));
     }
 
     public static Stack<AuditableEvent> getEvents()
