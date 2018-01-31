@@ -27,7 +27,6 @@ import com.codahale.metrics.Metered;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.ScheduledReporter;
 
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 
 /**
@@ -53,7 +52,6 @@ public class Meter extends com.codahale.metrics.Meter implements Metered, Compos
     private final EWMA m15Rate = EWMA.fifteenMinuteEWMA(false);
 
     private final Clock clock;
-    private final int coreId;
 
     private final AtomicLong lastCounted = new AtomicLong();
     private final Counter count;
@@ -91,7 +89,6 @@ public class Meter extends com.codahale.metrics.Meter implements Metered, Compos
         this.count = count;
         this.startTime = this.clock.getTick();
         this.lastTick = new AtomicLong(startTime);
-        this.coreId = TPC.getNextCore();
 
         scheduleIfComposite();
     }
@@ -102,7 +99,7 @@ public class Meter extends com.codahale.metrics.Meter implements Metered, Compos
     private void scheduleIfComposite()
     {
         if (count.getType() == Type.COMPOSITE)
-            TPC.getForCore(this.coreId).schedule(this::scheduledTick, TPCTaskType.TIMED_METER_TICK, TICK_INTERVAL, TimeUnit.NANOSECONDS);
+            TPC.bestTPCTimer().onTimeout(this::scheduledTick, TICK_INTERVAL, TimeUnit.NANOSECONDS);
     }
 
     private void maybeScheduleTick()
@@ -111,7 +108,7 @@ public class Meter extends com.codahale.metrics.Meter implements Metered, Compos
             return;
 
         if (scheduled.compareAndSet(false, true))
-            TPC.getForCore(this.coreId).schedule(this::scheduledTick, TPCTaskType.TIMED_METER_TICK, TICK_INTERVAL, TimeUnit.NANOSECONDS);
+            TPC.bestTPCTimer().onTimeout(this::scheduledTick, TICK_INTERVAL, TimeUnit.NANOSECONDS);
     }
 
     /**
