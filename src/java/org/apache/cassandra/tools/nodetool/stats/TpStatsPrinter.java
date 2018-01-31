@@ -50,8 +50,8 @@ public class TpStatsPrinter
         {
             Map<String, Object> convertData = data.convert2Map();
 
-            String headerFormat = "%-" + longestTPCStatNameLength() + "s%10s%10s%15s%10s%18s%n";
-            out.printf(headerFormat, "Pool Name", "Active", "Pending", "Completed", "Blocked", "All time blocked");
+            String headerFormat = "%-" + longestTPCStatNameLength() + "s%12s%30s%10s%15s%10s%18s%n";
+            out.printf(headerFormat, "Pool Name", "Active", "Pending (w/Backpressure)", "Delayed", "Completed", "Blocked", "All time blocked");
 
             Map<Object, Object> threadPools = convertData.get("ThreadPools") instanceof Map<?, ?> ? (Map)convertData.get("ThreadPools") : Collections.emptyMap();
             for (Map.Entry<Object, Object> entry : threadPools.entrySet())
@@ -61,6 +61,7 @@ public class TpStatsPrinter
                            entry.getKey(),
                            values.get("ActiveTasks"),
                            values.get("PendingTasks"),
+                           values.get("DelayedTasks"),
                            values.get("CompletedTasks"),
                            values.get("CurrentlyBlockedTasks"),
                            values.get("TotalBlockedTasks"));

@@ -131,6 +131,8 @@ public class ThreadPoolMetrics
                 case "ActiveTasks":
                 case "PendingTasks":
                 case "CompletedTasks":
+                case "TotalBackpressureCountedTasksGauge":
+                case "TotalBackpressureDelayedTasksGauge":
                 case "TotalBlockedTasksGauge":
                     return JMX.newMBeanProxy(mbeanServerConn, oName, JmxReporter.JmxGaugeMBean.class).getValue();
                 case "TotalBlockedTasks":
