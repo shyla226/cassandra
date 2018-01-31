@@ -862,6 +862,7 @@ public final class FileUtils
                                         return null;
                                     },
                                     () -> new File("/sys/bus/xen/devices/").listFiles(),
+                                    FBUtilities.CpuInfo::load,
                                     (filter) -> new File("/dev/disk/by-id").listFiles(n -> n.getName().contains(filter)));
     }
 
@@ -869,6 +870,7 @@ public final class FileUtils
     static String detectVirtualization(Supplier<String> cpuid,
                                        Supplier<List<String>> hypervisorCaps,
                                        Supplier<File[]> xenDevices,
+                                       Supplier<FBUtilities.CpuInfo> cpuInfoSupplier,
                                        Function<String, File[]> disksByIdFilter)
     {
         try
@@ -945,7 +947,7 @@ public final class FileUtils
             // the 'cpuid' binary - however, the check above is probably more reliable.
             try
             {
-                FBUtilities.CpuInfo cpuInfo = FBUtilities.CpuInfo.load();
+                FBUtilities.CpuInfo cpuInfo = cpuInfoSupplier.get();
                 if (!cpuInfo.getProcessors().isEmpty())
                 {
                     FBUtilities.CpuInfo.PhysicalProcessor processor = cpuInfo.getProcessors().get(0);

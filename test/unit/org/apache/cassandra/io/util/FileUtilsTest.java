@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,10 +18,7 @@
  */
 package org.apache.cassandra.io.util;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.io.StringReader;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,6 +33,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -77,15 +75,20 @@ public class FileUtilsTest
     @Test
     public void testDetectVirtualization()
     {
+        FBUtilities.CpuInfo cpuInfoVirtual = FBUtilities.CpuInfo.loadFrom(Arrays.asList(cpuInfoHyperv.split("\n")));
+        FBUtilities.CpuInfo cpuInfoBareMetal = FBUtilities.CpuInfo.loadFrom(Arrays.asList(cpuInfoNoVirt.split("\n")));
+
         // bare metal - all good
         String result = FileUtils.detectVirtualization(() -> baremetalCpuid,
                                                        Collections::emptyList,
                                                        () -> null,
+                                                       () -> cpuInfoBareMetal,
                                                        filter -> null);
         assertNull(result);
         result = FileUtils.detectVirtualization(() -> baremetalCpuid,
                                                 Collections::emptyList,
                                                 () -> new File[0],
+                                                () -> cpuInfoBareMetal,
                                                 filter -> new File[0]);
         assertNull(result);
 
@@ -98,6 +101,7 @@ public class FileUtilsTest
                                                                              "ebx=0x61774d56 ecx=0x65726177 edx=0x4d566572"), // VMwareVMware
                                                 Collections::emptyList,
                                                 () -> null,
+                                                () -> cpuInfoBareMetal,
                                                 filter -> null);
         assertEquals("VMWare", result);
 
@@ -106,6 +110,7 @@ public class FileUtilsTest
         result = FileUtils.detectVirtualization(() -> virtualboxCpuid,
                                                 Collections::emptyList,
                                                 () -> null,
+                                                () -> cpuInfoBareMetal,
                                                 filter -> null);
         assertEquals("unknown (CPUID leaf 1 ECX bit 31 set)", result);
 
@@ -116,13 +121,23 @@ public class FileUtilsTest
                                                                               "0x00000001 0x00: eax=0x00040661 ebx=0x02040800 ecx=0x5ef82203 edx=0x178bfbff"),
                                                 Collections::emptyList,
                                                 () -> null,
+                                                () -> cpuInfoBareMetal,
                                                 filter -> null);
         assertEquals("unknown (CPUID hypervisor leafs)", result);
+
+        // In case the 'cpuid' binary is not available, the 'hypervisor' flag _might_ be present in /proc/cpuinfo
+        result = FileUtils.detectVirtualization(() -> { throw new RuntimeException("foo bar baz"); },
+                                                Collections::emptyList,
+                                                () -> null,
+                                                () -> cpuInfoVirtual,
+                                                filter -> null);
+        assertEquals("unknown (hypervisor CPU flag present)", result);
 
         // detection via /sys/hypervisor/properties/capabilities
         result = FileUtils.detectVirtualization(() -> baremetalCpuid,
                                                 () -> Collections.singletonList("xen-3.0-x86_64 xen-3.0-x86_32p hvm-3.0-x86_32 hvm-3.0-x86_32p hvm-3.0-x86_64"),
                                                 () -> null,
+                                                () -> cpuInfoBareMetal,
                                                 filter -> null);
         assertEquals("Xen HVM", result);
 
@@ -130,6 +145,7 @@ public class FileUtilsTest
         result = FileUtils.detectVirtualization(() -> baremetalCpuid,
                                                 () -> Collections.singletonList("xen-3.0-x86_64 xen-3.0-x86_32p"),
                                                 () -> null,
+                                                () -> cpuInfoBareMetal,
                                                 filter -> null);
         assertEquals("Xen", result);
 
@@ -137,6 +153,7 @@ public class FileUtilsTest
         result = FileUtils.detectVirtualization(() -> baremetalCpuid,
                                                 Collections::emptyList,
                                                 () -> new File[]{ new File("/foobarbaz") },
+                                                () -> cpuInfoBareMetal,
                                                 filter -> null);
         assertEquals("Xen", result);
 
@@ -144,6 +161,7 @@ public class FileUtilsTest
         result = FileUtils.detectVirtualization(() -> baremetalCpuid,
                                                 Collections::emptyList,
                                                 () -> null,
+                                                () -> cpuInfoBareMetal,
                                                 filter -> {
                                                     switch (filter)
                                                     {
@@ -161,6 +179,7 @@ public class FileUtilsTest
         result = FileUtils.detectVirtualization(() -> baremetalCpuid,
                                                 Collections::emptyList,
                                                 () -> null,
+                                                () -> cpuInfoBareMetal,
                                                 filter -> {
                                                     switch (filter)
                                                     {
@@ -359,4 +378,108 @@ public class FileUtilsTest
                                          "   0x80000008 0x00: eax=0x0000302e ebx=0x00000000 ecx=0x00000000 edx=0x00000000\n" +
                                          "   0x80860000 0x00: eax=0x00000000 ebx=0x00000001 ecx=0x00000001 edx=0x00000000\n" +
                                          "   0xc0000000 0x00: eax=0x00000000 ebx=0x00000001 ecx=0x00000001 edx=0x00000000\n";
+
+    private static final String cpuInfoHyperv = "processor : 0\n" +
+                                                "vendor_id : GenuineIntel\n" +
+                                                "cpu family : 6\n" +
+                                                "model : 70\n" +
+                                                "model name : Intel(R) Core(TM) i7-4770HQ CPU @ 2.20GHz\n" +
+                                                "stepping : 1\n" +
+                                                "microcode : 0x13\n" +
+                                                "cpu MHz : 2194.322\n" +
+                                                "cache size : 6144 KB\n" +
+                                                "physical id : 0\n" +
+                                                "siblings : 1\n" +
+                                                "core id : 0\n" +
+                                                "cpu cores : 1\n" +
+                                                "apicid : 0\n" +
+                                                "initial apicid : 0\n" +
+                                                "fpu : yes\n" +
+                                                "fpu_exception : yes\n" +
+                                                "cpuid level : 13\n" +
+                                                "wp : yes\n" +
+                                                "flags : fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts nopl xtopology tsc_reliable nonstop_tsc aperfmperf pni pclmulqdq vmx ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm ida arat epb pln pts dtherm tpr_shadow vnmi ept vpid fsgsbase smep\n" +
+                                                "bogomips : 4389.82\n" +
+                                                "clflush size : 64\n" +
+                                                "cache_alignment : 64\n" +
+                                                "address sizes : 40 bits physical, 48 bits virtual\n" +
+                                                "power management:\n" +
+                                                "\n" +
+                                                "processor : 1\n" +
+                                                "vendor_id : GenuineIntel\n" +
+                                                "cpu family : 6\n" +
+                                                "model : 70\n" +
+                                                "model name : Intel(R) Core(TM) i7-4770HQ CPU @ 2.20GHz\n" +
+                                                "stepping : 1\n" +
+                                                "microcode : 0x13\n" +
+                                                "cpu MHz : 2194.322\n" +
+                                                "cache size : 6144 KB\n" +
+                                                "physical id : 2\n" +
+                                                "siblings : 1\n" +
+                                                "core id : 0\n" +
+                                                "cpu cores : 1\n" +
+                                                "apicid : 2\n" +
+                                                "initial apicid : 2\n" +
+                                                "fpu : yes\n" +
+                                                "fpu_exception : yes\n" +
+                                                "cpuid level : 13\n" +
+                                                "wp : yes\n" +
+                                                "flags : fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts nopl xtopology tsc_reliable nonstop_tsc aperfmperf pni pclmulqdq vmx ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm ida arat epb pln pts dtherm tpr_shadow vnmi ept vpid fsgsbase smep\n" +
+                                                "bogomips : 4389.82\n" +
+                                                "clflush size : 64\n" +
+                                                "cache_alignment : 64\n" +
+                                                "address sizes : 40 bits physical, 48 bits virtual\n" +
+                                                "power management: \n";
+
+    private static final String cpuInfoNoVirt = "processor : 0\n" +
+                                                "vendor_id : GenuineIntel\n" +
+                                                "cpu family : 6\n" +
+                                                "model : 70\n" +
+                                                "model name : Intel(R) Core(TM) i7-4770HQ CPU @ 2.20GHz\n" +
+                                                "stepping : 1\n" +
+                                                "microcode : 0x13\n" +
+                                                "cpu MHz : 2194.322\n" +
+                                                "cache size : 6144 KB\n" +
+                                                "physical id : 0\n" +
+                                                "siblings : 1\n" +
+                                                "core id : 0\n" +
+                                                "cpu cores : 1\n" +
+                                                "apicid : 0\n" +
+                                                "initial apicid : 0\n" +
+                                                "fpu : yes\n" +
+                                                "fpu_exception : yes\n" +
+                                                "cpuid level : 13\n" +
+                                                "wp : yes\n" +
+                                                "flags : fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts nopl xtopology tsc_reliable nonstop_tsc aperfmperf pni pclmulqdq vmx ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand lahf_lm ida arat epb pln pts dtherm tpr_shadow vnmi ept vpid fsgsbase smep\n" +
+                                                "bogomips : 4389.82\n" +
+                                                "clflush size : 64\n" +
+                                                "cache_alignment : 64\n" +
+                                                "address sizes : 40 bits physical, 48 bits virtual\n" +
+                                                "power management:\n" +
+                                                "\n" +
+                                                "processor : 1\n" +
+                                                "vendor_id : GenuineIntel\n" +
+                                                "cpu family : 6\n" +
+                                                "model : 70\n" +
+                                                "model name : Intel(R) Core(TM) i7-4770HQ CPU @ 2.20GHz\n" +
+                                                "stepping : 1\n" +
+                                                "microcode : 0x13\n" +
+                                                "cpu MHz : 2194.322\n" +
+                                                "cache size : 6144 KB\n" +
+                                                "physical id : 2\n" +
+                                                "siblings : 1\n" +
+                                                "core id : 0\n" +
+                                                "cpu cores : 1\n" +
+                                                "apicid : 2\n" +
+                                                "initial apicid : 2\n" +
+                                                "fpu : yes\n" +
+                                                "fpu_exception : yes\n" +
+                                                "cpuid level : 13\n" +
+                                                "wp : yes\n" +
+                                                "flags : fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts nopl xtopology tsc_reliable nonstop_tsc aperfmperf pni pclmulqdq vmx ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand lahf_lm ida arat epb pln pts dtherm tpr_shadow vnmi ept vpid fsgsbase smep\n" +
+                                                "bogomips : 4389.82\n" +
+                                                "clflush size : 64\n" +
+                                                "cache_alignment : 64\n" +
+                                                "address sizes : 40 bits physical, 48 bits virtual\n" +
+                                                "power management: \n";
 }
