@@ -164,7 +164,9 @@ public class PropertyFileSnitch extends AbstractNetworkTopologySnitch
                 if (newDefault.length < 2)
                     reloadedDefaultDCRack = new String[] { "default", "default" };
                 else
-                    reloadedDefaultDCRack = new String[] { newDefault[0].trim(), newDefault[1].trim() };
+                    // intern() the DC to get the same object reference for the DC name, which is
+                    // important for the isDefaultDC() implementation
+                    reloadedDefaultDCRack = new String[] { newDefault[0].trim().intern(), newDefault[1].trim() };
             }
             else
             {
