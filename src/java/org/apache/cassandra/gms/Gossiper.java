@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.gms;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -35,13 +38,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.exceptions.RequestExecutionException;
-import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.repair.SystemDistributedKeyspace;
-import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,12 +47,14 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.net.*;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.net.*;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -585,14 +583,6 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         assassinateEndpoint(address);
     }
 
-    /**
-     * Do not call this method unless you know what you are doing.
-     * It will try extremely hard to obliterate any endpoint from the ring,
-     * even if it does not know about it.
-     *
-     * @param address
-     * @throws UnknownHostException
-     */
     public void assassinateEndpoint(String address) throws UnknownHostException
     {
         InetAddress endpoint = InetAddress.getByName(address);
@@ -643,9 +633,132 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         logger.warn("Finished assassinating {}", endpoint);
     }
 
+    public void reviveEndpoint(String address) throws UnknownHostException
+    {
+        InetAddress endpoint = InetAddress.getByName(address);
+        EndpointState epState = endpointStateMap.get(endpoint);
+        logger.warn("Reviving {} via gossip", endpoint);
+
+        if (epState == null)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": no endpoint-state");
+
+        int generation = epState.getHeartBeatState().getGeneration();
+        int heartbeat = epState.getHeartBeatState().getHeartBeatVersion();
+
+        logger.info("Have endpoint-state for {}: status={}, generation={}, heartbeat={}",
+                    endpoint, epState.getStatus(), generation, heartbeat);
+
+        if (!isSilentShutdownState(epState))
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": not in a (silent) shutdown state: " + epState.getStatus());
+
+        if (FailureDetector.instance.isAlive(endpoint))
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive (failure-detector)");
+
+        logger.info("Sleeping for {}ms to ensure {} does not change", StorageService.RING_DELAY, endpoint);
+        Uninterruptibles.sleepUninterruptibly(StorageService.RING_DELAY, TimeUnit.MILLISECONDS);
+        // make sure the endpoint state did not change
+        EndpointState newState = endpointStateMap.get(endpoint);
+        if (newState == null)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": endpoint-state disappeared");
+        if (newState.getHeartBeatState().getGeneration() != generation)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive, generation changed while trying to reviving it");
+        if (newState.getHeartBeatState().getHeartBeatVersion() != heartbeat)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive, heartbeat changed while trying to reviving it");
+
+        epState.updateTimestamp(); // make sure we don't evict it too soon
+        epState.getHeartBeatState().forceNewerGenerationUnsafe();
+
+        // using the tokens from the endpoint-state as that is the real source of truth
+        Collection<Token> tokens = getTokensFromEndpointState(epState, DatabaseDescriptor.getPartitioner());
+        if (tokens == null || tokens.isEmpty())
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": no tokens from TokenMetadata");
+
+        // 3, 2, 1, GO!
+        epState.addApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.normal(tokens));
+        handleMajorStateChange(endpoint, epState);
+        Uninterruptibles.sleepUninterruptibly(intervalInMillis * 4, TimeUnit.MILLISECONDS);
+        logger.warn("Finished reviving {}, status={}, generation={}, heartbeat={}",
+                    endpoint, epState.getStatus(), generation, heartbeat);
+    }
+
+    public void unsafeSetEndpointState(String address, String status) throws UnknownHostException
+    {
+        logger.warn("Forcibly changing gossip status of " + address + " to " + status);
+
+        InetAddress endpoint = InetAddress.getByName(address);
+        EndpointState epState = endpointStateMap.get(endpoint);
+
+        if (epState == null)
+            throw new RuntimeException("No state for endpoint " + endpoint);
+
+        int generation = epState.getHeartBeatState().getGeneration();
+        int heartbeat = epState.getHeartBeatState().getHeartBeatVersion();
+
+        logger.info("Have endpoint-state for {}: status={}, generation={}, heartbeat={}",
+                    endpoint, epState.getStatus(), generation, heartbeat);
+
+        if (FailureDetector.instance.isAlive(endpoint))
+            throw new RuntimeException("Cannot update status for endpoint " + endpoint + ": still alive (failure-detector)");
+
+        Collection<Token> tokens = getTokensFromEndpointState(epState, DatabaseDescriptor.getPartitioner());
+
+        VersionedValue newStatus;
+        switch (status.toLowerCase())
+        {
+            case "hibernate":
+                newStatus = StorageService.instance.valueFactory.hibernate(true);
+                break;
+            case "normal":
+                newStatus = StorageService.instance.valueFactory.normal(tokens);
+                break;
+            case "left":
+                newStatus = StorageService.instance.valueFactory.left(tokens, computeExpireTime());
+                break;
+            case "shutdown":
+                newStatus = StorageService.instance.valueFactory.shutdown(true);
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown status '" + status + '\'');
+        }
+
+        epState.updateTimestamp(); // make sure we don't evict it too soon
+        epState.getHeartBeatState().forceNewerGenerationUnsafe();
+
+        epState.addApplicationState(ApplicationState.STATUS, newStatus);
+
+        handleMajorStateChange(endpoint, epState);
+
+        logger.warn("Forcibly changed gossip status of " + endpoint + " to " + newStatus);
+    }
+
     public boolean isKnownEndpoint(InetAddress endpoint)
     {
         return endpointStateMap.containsKey(endpoint);
+    }
+
+    public Collection<Token> getTokensFor(InetAddress endpoint, IPartitioner partitioner)
+    {
+        EndpointState state = getEndpointStateForEndpoint(endpoint);
+        if (state == null)
+            return Collections.emptyList();
+
+        return getTokensFromEndpointState(state, partitioner);
+    }
+
+    public Collection<Token> getTokensFromEndpointState(EndpointState state, IPartitioner partitioner)
+    {
+        try
+        {
+            VersionedValue versionedValue = state.getApplicationState(ApplicationState.TOKENS);
+            if (versionedValue == null)
+                return Collections.emptyList();
+
+            return TokenSerializer.deserialize(partitioner, new DataInputStream(new ByteArrayInputStream(versionedValue.toBytes())));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     public int getCurrentGenerationNumber(InetAddress endpoint)
