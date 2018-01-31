@@ -32,7 +32,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.IPartitioner;
@@ -40,10 +39,9 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.OutboundTcpConnectionPool;
+import org.apache.cassandra.net.OutboundTcpConnection;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.BiMultiValMap;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SortedBiMultiValMap;
 
@@ -1410,17 +1408,36 @@ public class TokenMetadata
             Pair<String, String> current = currentLocations.get(ep);
             String dc = snitch.getDatacenter(ep);
             String rack = snitch.getRack(ep);
-            if (dc.equals(current.left) && rack.equals(current.right) && !snitch.isDefaultDC(current.left))
+
+            // Note: the check isDefaultDC compares object references
+            boolean currentDcIsDefault = snitch.isDefaultDC(current.left);
+            boolean dcIsDefault = snitch.isDefaultDC(dc);
+            boolean dcChanged = !dc.equals(current.left);
+            boolean rackChanged = !rack.equals(current.right);
+
+            // Nothing to do, if neither DC nor rack changed.
+            // Except, if _either_ the current or new DC are the snitch's default DC.
+            if (!dcChanged && !rackChanged && currentDcIsDefault == dcIsDefault)
                 return;
 
+            // Unconditionally update the references in TMD to get any default-DC reference
+            // removed from the location stored in TMD.
             doRemoveEndpoint(ep, current);
             doAddEndpoint(ep, dc, rack);
 
-            // We reset the connection is the Dc has changed or if the DC is no longer default
-            if (DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.dc &&
-                (!dc.equals(current.left) || snitch.isDefaultDC(current.left)))
+            // If the internode-compression would change, force a soft-reset.
+            boolean currCompr = OutboundTcpConnection.shouldCompressConnection(current.left);
+            boolean newCompr = OutboundTcpConnection.shouldCompressConnection(dc);
+            if (currCompr != newCompr)
             {
-                logger.debug("Resetting connection to {} due to dc compression", ep);
+                logger.debug("Resetting connection to {} due to DC compression, " +
+                             "switching from {} to {}, " +
+                             "changed DC from '{}'{} to '{}'{}, " +
+                             "rack from '{}' to '{}'",
+                             ep,
+                             currCompr ? "compressed" : "uncompressed", newCompr ? "compressed" : "uncompressed",
+                             current.left, currentDcIsDefault ? "(default)" : "", dc, dcIsDefault ? "(default)" : "",
+                             current.right, rack);
                 MessagingService.instance().getConnectionPool(ep).softReset();
             }
         }
