@@ -176,8 +176,12 @@ public class OutboundTcpConnection extends Thread
 
     private static boolean isLocalDC(InetAddress targetHost)
     {
-        String remoteDC = DatabaseDescriptor.getEndpointSnitch().getDatacenter(targetHost);
-        String localDC = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
+        return isLocalDC(DatabaseDescriptor.getEndpointSnitch().getDatacenter(targetHost));
+    }
+
+    private static boolean isLocalDC(String remoteDC)
+    {
+        String localDC = DatabaseDescriptor.getLocalDataCenter();
 
         // When we don't know the DC default to local
         return remoteDC.equals(localDC) || DatabaseDescriptor.getEndpointSnitch().isDefaultDC(remoteDC);
@@ -260,6 +264,8 @@ public class OutboundTcpConnection extends Thread
                     if (m == CLOSE_SENTINEL)
                     {
                         logger.trace("Disconnecting because CLOSE_SENTINEL detected");
+                        if (out != null)
+                            out.flush();
                         disconnect();
                         if (isStopped)
                             break outer;
@@ -310,11 +316,32 @@ public class OutboundTcpConnection extends Thread
         return dropped.get();
     }
 
-    private boolean shouldCompressConnection()
+    private static boolean shouldCompressConnection(InetAddress endpoint)
     {
-        // assumes version >= 1.2
-        return DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.all
-               || (DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.dc && !isLocalDC(poolReference.endPoint()));
+        switch (DatabaseDescriptor.internodeCompression())
+        {
+            case none:
+                return false;
+            case all:
+                return true;
+            case dc:
+                return !isLocalDC(endpoint);
+        }
+        throw new AssertionError("internode-compression " + DatabaseDescriptor.internodeCompression());
+    }
+
+    public static boolean shouldCompressConnection(String dc)
+    {
+        switch (DatabaseDescriptor.internodeCompression())
+        {
+            case none:
+                return false;
+            case all:
+                return true;
+            case dc:
+                return !isLocalDC(dc);
+        }
+        throw new AssertionError("internode-compression " + DatabaseDescriptor.internodeCompression());
     }
 
     private void writeConnected(QueuedMessage qm, boolean flush)
@@ -477,8 +504,10 @@ public class OutboundTcpConnection extends Thread
                 WritableByteChannel ch = socket.getChannel();
                 out = new BufferedDataOutputStreamPlus(ch != null ? ch : Channels.newChannel(socket.getOutputStream()), BUFFER_SIZE);
 
+                boolean compress = shouldCompressConnection(poolReference.endPoint());
+
                 out.writeInt(MessagingService.PROTOCOL_MAGIC);
-                writeHeader(out, targetVersion, shouldCompressConnection());
+                writeHeader(out, targetVersion, compress);
                 out.flush();
 
                 DataInputStream in = new DataInputStream(socket.getInputStream());
@@ -525,7 +554,7 @@ public class OutboundTcpConnection extends Thread
 
                 out.writeInt(MessagingService.current_version);
                 CompactEndpointSerializationHelper.serialize(FBUtilities.getBroadcastAddress(), out);
-                if (shouldCompressConnection())
+                if (compress)
                 {
                     out.flush();
                     logger.trace("Upgrading OutputStream to be compressed");

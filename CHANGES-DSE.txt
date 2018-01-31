@@ -1,5 +1,6 @@
 DSE 5.0.12
  * Non-disruptive seed node list reload (DB-1626)
+ * Fix tpc connection being reset due to dc compression and flush socket before reset (DB-1636)
  * Skip legacy range tombstones if only their clustering is corrupted (DB-1579)
  * Fix AssertionError in ReadResponse$Serializer.serializedSize (DB-1471)
  * Backport ColumnFilters unit tests and reduce scope of DB-1444 to the case where queried == null (DB-1607)
