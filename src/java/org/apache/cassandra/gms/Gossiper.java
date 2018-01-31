@@ -51,7 +51,6 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
