@@ -90,6 +90,12 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
     private static final long SKIP_BACKOFF_STAGE = 0;
     private static final long LAST_BACKOFF_STAGE = -1;
 
+    /**
+     * We limit the amount of processing carried out from each stream of events feeding a TPC loop to prevent one source
+     * from starving another.
+     */
+    private static final int EVENT_SOURCE_LIMIT = Integer.parseInt(System.getProperty("dse.tpc.event_source_limit", "1024"));
+
     @Contended
     private final ImmutableList<SingleCoreEventLoop> eventLoops;
 
@@ -720,17 +726,18 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             {
                 return 0;
             }
-            this.pendingEpollEvents = 0;
+            final int eventsToProcess =  Math.min(currPendingEpollEvents, EVENT_SOURCE_LIMIT);
+            this.pendingEpollEvents = currPendingEpollEvents - eventsToProcess;
             try
             {
-                processReady(events, currPendingEpollEvents);
+                processReady(events, eventsToProcess);
 
                 if (allowGrowing && currPendingEpollEvents == events.length())
                 {
                     events.increase();
                 }
 
-                return currPendingEpollEvents;
+                return eventsToProcess;
             }
             catch (Exception e)
             {
@@ -791,8 +798,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             {
                 final MpscArrayQueue<Runnable> queue = this.queue;
                 Runnable r;
-                while (processed < Short.MAX_VALUE &&
-                       (r = queue.relaxedPoll()) != null)
+                while (processed < EVENT_SOURCE_LIMIT && (r = queue.relaxedPoll()) != null)
                 {
                     if (r instanceof TPCRunnable)
                     {
@@ -859,7 +865,8 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             lastScheduledCheckTime = nanoTimeSinceStartup;
             int processed = 0;
             Runnable scheduledTask;
-            while ((scheduledTask = pollScheduledTask(nanoTimeSinceStartup)) != null)
+            while (processed < EVENT_SOURCE_LIMIT &&
+                   (scheduledTask = pollScheduledTask(nanoTimeSinceStartup)) != null)
             {
                 try
                 {
