@@ -25,7 +25,6 @@ import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.concurrent.StagedScheduler;
-import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -40,6 +39,7 @@ import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.versioning.Versioned;
 
 import com.datastax.bdp.db.nodesync.Segment;
+import org.apache.cassandra.concurrent.TPCTaskType;
 
 /**
  * A read command use by NodeSync.
@@ -66,7 +66,8 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
                                 DataLimits limits,
                                 DataRange range,
                                 IndexMetadata index,
-                                StagedScheduler nodeSyncScheduler)
+                                StagedScheduler nodeSyncScheduler,
+                                TPCTaskType readType)
     {
         super(digestVersion,
               table,
@@ -76,7 +77,8 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
               limits,
               range,
               index,
-              nodeSyncScheduler);
+              nodeSyncScheduler,
+              readType);
         this.nodeSyncScheduler = nodeSyncScheduler;
     }
 
@@ -92,7 +94,8 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
              DataLimits.NONE,
              DataRange.forTokenRange(segment.range),
              null,
-             nodeSyncScheduler);
+             nodeSyncScheduler,
+             TPCTaskType.READ_RANGE_NODESYNC);
     }
 
     @Override
@@ -120,7 +123,8 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
                                        limits,
                                        dataRange,
                                        index,
-                                       nodeSyncScheduler == null ? scheduler : nodeSyncScheduler);
+                                       nodeSyncScheduler == null ? scheduler : nodeSyncScheduler,
+                                       TPCTaskType.READ_RANGE_NODESYNC);
     }
 
     @Override
@@ -156,7 +160,8 @@ public class NodeSyncReadCommand extends PartitionRangeReadCommand
                                            limits,
                                            range,
                                            null,
-                                           null);
+                                           null,
+                                           TPCTaskType.READ_RANGE_NODESYNC);
         }
     }
 }

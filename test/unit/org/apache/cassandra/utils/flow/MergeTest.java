@@ -529,7 +529,7 @@ public class MergeTest
         if (rand.nextInt(DELAY_CHANCE) == 0)
             return flow.delayOnNext(rand.nextInt(15), TimeUnit.MICROSECONDS, TPCTaskType.TIMED_UNKNOWN);
         else if (rand.nextInt(SCHEDULE_CHANCE) == 0)
-            return flow.lift(Threads.requestOnIo(TPCTaskType.READ));
+            return flow.lift(Threads.requestOnIo(TPCTaskType.READ_LOCAL));
         else
             return flow;
     }

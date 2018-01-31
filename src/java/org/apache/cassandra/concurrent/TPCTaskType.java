@@ -45,16 +45,28 @@ public enum TPCTaskType
     UNKNOWN,
     /** Async frame decoding */
     FRAME_DECODE(Features.PENDABLE),
-    /** Single-partition read request */
-    READ(Features.PENDABLE),
+    /** Single-partition read request from local node and directly generated from clients */
+    READ_LOCAL(Features.BACKPRESSURED),
+    /** Single-partition read request from remote replica: this can't be backpressured because remote requests come from a different
+     * "channel" (internode communication) than client requests, and more specifically, client requests can be made async
+     * via frame decoding (see the FRAME_DECODE type), while remote requests are always executed straight away, hence
+     * the latter could starve the former */
+    READ_REMOTE(Features.PENDABLE),
     /** Read timeout, used to signal read timeout errors */
     READ_TIMEOUT(Features.EXCLUDE_FROM_TOTALS),
     /** Single-partition read request that will be first scheduled on an eventloop */
     READ_DEFERRED(Features.PENDABLE),
-    /** Single-partition read scheduled on local node */
+    /** Single-partition read response, not always counted */
     READ_RESPONSE("READ_SWITCH_FOR_RESPONSE"),
-    /** Partition range read request */
-    READ_RANGE(Features.PENDABLE),
+    /** Partition range read request from local node and directly generated from clients */
+    READ_RANGE_LOCAL(Features.BACKPRESSURED),
+    /** Partition range read request from remote replica: this can't be backpressured because remote requests come from a different
+     * "channel" (internode communication) than client requests, and more specifically, client requests can be made async
+     * via frame decoding (see the FRAME_DECODE type), while remote requests are always executed straight away, hence
+     * the latter could starve the former */
+    READ_RANGE_REMOTE(Features.PENDABLE),
+    /** Partition range read originating from NodeSync**/
+    READ_RANGE_NODESYNC(Features.PENDABLE),
     /** Partition range read response, not always counted */
     READ_RANGE_RESPONSE("READ_RANGE_SWITCH_FOR_RESPONSE"),
     /** Switching thread to read from an iterator */
@@ -63,8 +75,7 @@ public enum TPCTaskType
     READ_SECONDARY_INDEX,
     /** Waiting for data from disk */
     READ_DISK_ASYNC(Features.EXTERNAL_QUEUE),
-    /** Write request from local node and directly generated from clients: this can easily overload the node due to
-     * mutation size, so it's currently the only backpressured type */
+    /** Write request from local node and directly generated from clients */
     WRITE_LOCAL(Features.BACKPRESSURED),
     /** Write request from remote replica: this can't be backpressured because remote requests come from a different
      * "channel" (internode communication) than client requests, and more specifically, client requests can be made async
@@ -111,16 +122,12 @@ public enum TPCTaskType
     AUTHENTICATION(Features.ALWAYS_COUNT),
     /** Authorization request */
     AUTHORIZATION(Features.ALWAYS_COUNT),
-    /** Unknown timed task */
-    TIMED_UNKNOWN(Features.TIMED),
-    /** Periodic histogram aggregation */
-    TIMED_HISTOGRAM_AGGREGATE(Features.TIMED),
-    /** Meter clock tick */
-    TIMED_METER_TICK(Features.TIMED),
     /** Scheduled speculative read */
-    TIMED_SPECULATE(Features.TIMED),
+    READ_SPECULATE(Features.TIMED),
     /** Scheduled timeout task */
     TIMED_TIMEOUT(Features.TIMED),
+    /** Unknown timed task */
+    TIMED_UNKNOWN(Features.TIMED),
     /** Number of busy spin cycles done by this TPC thread when it has no tasks to perform */
     EVENTLOOP_SPIN(Features.EXCLUDE_FROM_TOTALS),
     /** Number of Thread.yield() calls done by this TPC thread when it has no tasks to perform */

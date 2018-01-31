@@ -159,7 +159,7 @@ public class ReadExecutorTest
             executor.handler.onFailure(request0.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
             Request<SinglePartitionReadCommand, ReadResponse> request1 = Request.fakeTestRequest(targets.get(1), -1, Verbs.READS.SINGLE_READ, command);
             executor.handler.onFailure(request1.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
-        }, TPCTaskType.TIMED_SPECULATE, cfs.sampleLatencyNanos + 10, TimeUnit.NANOSECONDS); // see comment above
+        }, TPCTaskType.READ_SPECULATE, cfs.sampleLatencyNanos + 10, TimeUnit.NANOSECONDS); // see comment above
 
         try
         {

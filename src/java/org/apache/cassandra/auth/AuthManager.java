@@ -14,9 +14,8 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.auth.user.UserRolesAndPermissions;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.exceptions.RequestExecutionException;
-import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verbs;
@@ -75,6 +74,11 @@ public final class AuthManager
      */
     public Single<UserRolesAndPermissions> getUserRolesAndPermissions(AuthenticatedUser user)
     {
+        // note: order is important
+
+        if (user.isInProc())
+            return Single.just(UserRolesAndPermissions.INPROC);
+
         if (user.isSystem())
             return Single.just(UserRolesAndPermissions.SYSTEM);
 
@@ -292,6 +296,12 @@ public final class AuthManager
      */
     public Single<Boolean> canLogin(RoleResource role)
     {
+        if (DatabaseDescriptor.getAuthenticator().getTransitionalMode().failedAuthenticationMapsToAnonymous())
+            // Special case for transitional authentication. If authentication fails, which is also the
+            // case when 'canLogin' is not set, the user is mapped to anonymous. This means, that every
+            // user actually can login.
+            return Single.just(true);
+
         if (!roleManager.transitiveRoleLogin())
         {
             if (!TPC.isTPCThread())
@@ -591,6 +601,12 @@ public final class AuthManager
         {
             this.roleManager = roleManager;
             this.authorizer = authorizer;
+        }
+
+        @Override
+        public TransitionalMode getTransitionalMode()
+        {
+            return authorizer.getTransitionalMode();
         }
 
         @Override

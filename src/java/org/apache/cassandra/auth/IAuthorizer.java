@@ -19,6 +19,7 @@ package org.apache.cassandra.auth;
 
 import java.util.*;
 
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.exceptions.*;
 
 /**
@@ -26,6 +27,91 @@ import org.apache.cassandra.exceptions.*;
  */
 public interface IAuthorizer
 {
+    public enum TransitionalMode
+    {
+        /**
+         * Transitional mode is disabled. Default.
+         */
+        DISABLED
+        {
+            @Override
+            public boolean enforcePermissionsOnAuthenticatedUser()
+            {
+                return true;
+            }
+
+            @Override
+            public boolean enforcePermissionsAgainstAnonymous()
+            {
+                return true;
+            }
+
+            @Override
+            public boolean supportPermission(Permission perm)
+            {
+                return true;
+            }
+        },
+        /**
+         * Permissions can be passed to resources, but are not enforced.
+         */
+        NORMAL,
+        /**
+         * Permissions can be passed to resources, and are enforced on authenticated users.
+         * Permissions are not enforced against anonymous users.
+         */
+        STRICT
+        {
+            @Override
+            public boolean enforcePermissionsOnAuthenticatedUser()
+            {
+                return true;
+            }
+        };
+
+        /**
+         * Whether to enforce permissions against authenticated users.
+         */
+        public boolean enforcePermissionsOnAuthenticatedUser()
+        {
+            return false;
+        }
+
+        /**
+         * Whether to enforce permissions against anonymous (if authentication is required).
+         */
+        public boolean enforcePermissionsAgainstAnonymous()
+        {
+            return false;
+        }
+
+        /**
+         * Checks if the permission is supported by this transitional mode (e.g. AUTHORIZE).
+         * @param perm the permission to check
+         * @return {@code true} if the permission is supported, {@code false} otherwise.
+         */
+        public boolean supportPermission(Permission perm)
+        {
+            // For all transitional modes, the effective permissions do not include these permissions.
+            // Since these permissions are nonetheless persisted, we have to filter those here.
+            // NOTE: CorePermission.DESCRIBE was orignally always denied. However, DESCRIBE was not
+            // used in the apollo+bdp code base, but is now used for system-keyspace-filtering, which
+            // requires the DESCRIBE permission to work. But the scenario of transitional authorization
+            // in combination with system-keyspace-filtering is untested.
+            return perm != CorePermission.AUTHORIZE // AUTHORIZE _must_ be denied
+                    // NOTE: READ+WRITE are neither used in DSE-DB nor bdp code base. While transitioning
+                    // to authentication/authorization, such permissions should not have been granted.
+                    && perm != CorePermission.READ
+                    && perm != CorePermission.WRITE;
+        }
+
+    }
+
+    default TransitionalMode getTransitionalMode()
+    {
+        return TransitionalMode.DISABLED;
+    }
+
     default <T extends IAuthorizer> T implementation()
     {
         return (T) this;

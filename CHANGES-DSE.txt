@@ -138,6 +138,7 @@ Merged from dse5.1:
 
 Merged from dse5.0:
  * Non-disruptive seed node list reload (DB-1626)
+ * Fix tpc connection being reset due to dc compression and flush socket before reset (DB-1636)
  * Separate commit log replay and commit throwable inspection and policy handling (DB-673)
  * Fix for Local DC connections are compressed despite internode_compression: dc (DB-734)
  * Expanded hinted handoff instrumentation (DB-853)

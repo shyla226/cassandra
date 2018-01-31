@@ -17,11 +17,8 @@
  */
 package org.apache.cassandra.auth;
 
-import java.util.Collections;
-import java.util.IdentityHashMap;
-import java.util.Map;
+import java.util.*;
 
-import java.util.Objects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
@@ -39,33 +36,35 @@ public class AuthenticatedUser
     public static final String ANONYMOUS_USERNAME = "anonymous";
     public static final AuthenticatedUser ANONYMOUS_USER = new AuthenticatedUser(ANONYMOUS_USERNAME);
 
+    public static final String INPROC_USERNAME = "dse_inproc_user";
+    public static final AuthenticatedUser INPROC_USER = new AuthenticatedUser(INPROC_USERNAME);
+
     /**
      * We need a global map of artificial, internal users, since DSE creates its own internal users, too.
      * For example in {@code DseAuthenticator.InProcAuthenticatedUser} ({@code InProcessSaslNegotiator})
      */
-    private static Map<RoleResource, Role> internalUserRoles = Collections.emptyMap();
+    private static Map<RoleResource, Role> internalUserRoles;
     static
     {
-        registerInternalUserRole(SYSTEM_USER, new Role(SYSTEM_USERNAME,
-                                                       ImmutableSet.of(),
-                                                       true,
-                                                       false,
-                                                       ImmutableMap.of(),
-                                                       ""));
-        registerInternalUserRole(ANONYMOUS_USER, new Role(ANONYMOUS_USERNAME,
-                                                          ImmutableSet.of(),
-                                                          false,
-                                                          false,
-                                                          ImmutableMap.of(),
-                                                          ""));
-    }
-
-    protected static synchronized void registerInternalUserRole(AuthenticatedUser internalUser, Role internalRole)
-    {
-        IdentityHashMap<RoleResource, Role> newMap = new IdentityHashMap<>(internalUserRoles);
-        if (newMap.putIfAbsent(internalUser.getPrimaryRole(), internalRole) != null)
-            throw new IllegalArgumentException("Duplicate internal user assignment for " + internalUser);
-        internalUserRoles = newMap;
+        internalUserRoles = new IdentityHashMap<>();
+        internalUserRoles.put(SYSTEM_USER.getPrimaryRole(), new Role(SYSTEM_USERNAME,
+                                                                     ImmutableSet.of(),
+                                                                     true,
+                                                                     false,
+                                                                     ImmutableMap.of(),
+                                                                     ""));
+        internalUserRoles.put(ANONYMOUS_USER.getPrimaryRole(), new Role(ANONYMOUS_USERNAME,
+                                                                        ImmutableSet.of(),
+                                                                        false,
+                                                                        false,
+                                                                        ImmutableMap.of(),
+                                                                        ""));
+        internalUserRoles.put(INPROC_USER.getPrimaryRole(), new Role(INPROC_USERNAME,
+                                                                     ImmutableSet.of(),
+                                                                     false,
+                                                                     false,
+                                                                     ImmutableMap.of(),
+                                                                     ""));
     }
 
     public static Role maybeGetInternalUserRole(RoleResource role)
@@ -125,12 +124,17 @@ public class AuthenticatedUser
         return role;
     }
 
-    /**
-     * If IAuthenticator doesn't require authentication, this method may return true.
-     */
     public boolean isAnonymous()
     {
-        return this == ANONYMOUS_USER;
+        return this == ANONYMOUS_USER || this == INPROC_USER;
+    }
+
+    /**
+     * In-process authenticated user.
+     */
+    public boolean isInProc()
+    {
+        return this == INPROC_USER;
     }
 
     /**

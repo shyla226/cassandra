@@ -93,6 +93,9 @@ public final class AuthConfig
 
         DatabaseDescriptor.setAuthManager(new AuthManager(roleManager, authorizer));
 
+        IAuthenticator.TransitionalMode authenticatorTransitionalMode = DatabaseDescriptor.getAuthenticator().getTransitionalMode();
+        IAuthorizer.TransitionalMode authorizerTransitionalMode = DatabaseDescriptor.getAuthorizer().getTransitionalMode();
+
         if (DatabaseDescriptor.isSystemKeyspaceFilteringEnabled())
         {
             if (!DatabaseDescriptor.getAuthorizer().requireAuthorization())
@@ -105,6 +108,15 @@ public final class AuthConfig
                 logger.error("In order to use system keyspace filtering, an authenticator that requires authentication must be configured.");
                 throw new ConfigurationException("In order to use system keyspace filtering, an authenticator that requires authentication must be configured.");
             }
+            if (authorizerTransitionalMode != IAuthorizer.TransitionalMode.DISABLED ||
+                authenticatorTransitionalMode != IAuthenticator.TransitionalMode.DISABLED)
+            {
+                // NOTE: CorePermission.DESCRIBE was orignally never denied. However, DESCRIBE was not
+                // used in the apollo+bdp code base, but is now used for system-keyspace-filtering, which
+                // requires the DESCRIBE permission to work. But the scenario of transitional authorization
+                // in combination with system-keyspace-filtering is untested.
+                logger.warn("It is not recommended to enable system-keyspace-filtering in combination with transitional authentication or authorization.");
+            }
 
             logger.info("System keyspaces filtering enabled.");
         }
@@ -112,5 +124,14 @@ public final class AuthConfig
         {
             logger.info("System keyspaces filtering not enabled.");
         }
+
+        if (authenticatorTransitionalMode != IAuthenticator.TransitionalMode.DISABLED && authorizerTransitionalMode == IAuthorizer.TransitionalMode.DISABLED)
+            logger.warn("Authorizer {} transitional-mode set to ‘disabled’ in combination with Authenticator {}" +
+                        "transitional-mode not set to ‘disabled’.  This is probably not intended. Consider configuring " +
+                        "authorizer transitional mode ‘normal’ or ’strict, as ‘disabled’ will reject all " +
+                        "privileges for anonymous and all users mapped to anonymous by the Authenticator. Refer to the documentation " +
+                        "about transitional authentication and authorization.",
+                        DatabaseDescriptor.getAuthorizer().implementation().getClass().getSimpleName(),
+                        DatabaseDescriptor.getAuthenticator().implementation().getClass().getSimpleName());
     }
 }
