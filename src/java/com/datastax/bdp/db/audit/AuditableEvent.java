@@ -48,7 +48,11 @@ public class AuditableEvent
     private final ConsistencyLevel consistencyLevel;
 
     public static final ConsistencyLevel NO_CL = null;
-    private static String UNKNOWN_SOURCE = "0.0.0.0";
+
+    /**
+     * The string used for unknown sources
+     */
+    public static String UNKNOWN_SOURCE = "/0.0.0.0";
 
     public AuditableEvent(UserRolesAndPermissions user,
                           AuditableEventType type,
