@@ -264,8 +264,6 @@ public class OutboundTcpConnection extends Thread
                     if (m == CLOSE_SENTINEL)
                     {
                         logger.trace("Disconnecting because CLOSE_SENTINEL detected");
-                        if (out != null)
-                            out.flush();
                         disconnect();
                         if (isStopped)
                             break outer;
@@ -448,6 +446,8 @@ public class OutboundTcpConnection extends Thread
         {
             try
             {
+                if (out != null)
+		    out.flush();
                 socket.close();
                 if (logger.isTraceEnabled())
                     logger.trace("Socket to {} closed", poolReference.endPoint());
