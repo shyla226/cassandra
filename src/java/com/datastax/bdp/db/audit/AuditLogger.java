@@ -128,6 +128,20 @@ final class AuditLogger implements IAuditLogger
         return result.observeOn(TPC.ioScheduler());
     }
 
+    public Completable logEvent(AuditableEvent event)
+    {
+        Completable result = recordEvent(event);
+
+        // The Completable returned by the AuditLogger might not be scheduled on the expected scheduler.
+        // By consequence, we might need to set back the scheduler for the rest of the pipeline.
+
+        // We only need to change the scheduler if we are on an IO thread while building the pipeline.
+        if (TPC.isTPCThread())
+            return result;
+
+        return result.observeOn(TPC.ioScheduler());
+    }
+
     private Completable chain(Completable completable, Completable nextCompletable)
     {
         return completable == null ? nextCompletable : completable.andThen(nextCompletable);
