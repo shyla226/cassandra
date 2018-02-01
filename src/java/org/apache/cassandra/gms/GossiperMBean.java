@@ -18,6 +18,7 @@
 package org.apache.cassandra.gms;
 
 import java.net.UnknownHostException;
+import java.util.List;
 
 public interface GossiperMBean
 {
@@ -62,4 +63,8 @@ public interface GossiperMBean
     public double getSeedGossipProbability();
 
     public void setSeedGossipProbability(double probability);
+
+    public List<String> reloadSeeds();
+
+    public List<String> getSeeds();
 }

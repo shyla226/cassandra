@@ -25,6 +25,10 @@ import java.util.List;
 import java.util.UUID;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.net.InetAddresses;
+
+import org.junit.Assert;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -36,6 +40,7 @@ import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.locator.SeedProvider;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -65,10 +70,19 @@ public class GossiperTest
     List<InetAddress> hosts = new ArrayList<>();
     List<UUID> hostIds = new ArrayList<>();
 
+    private SeedProvider originalSeedProvider;
+
     @Before
     public void setup()
     {
         tmd.clearUnsafe();
+        originalSeedProvider = DatabaseDescriptor.getSeedProvider();
+    }
+
+    @After
+    public void tearDown()
+    {
+        DatabaseDescriptor.setSeedProvider(originalSeedProvider);
     }
 
     @Test
@@ -152,5 +166,128 @@ public class GossiperTest
         // schema is changed and equals to real version
         assertFalse(schema.value.equals(newSchema.value));
         assertEquals(newSchema.value, Schema.instance.getRealVersion().toString());
+    }
+
+    // Note: This test might fail if for some reason the node broadcast address is in 127.99.0.0/16
+    @Test
+    public void testReloadSeeds() throws UnknownHostException
+    {
+        Gossiper gossiper = new Gossiper(false);
+        List<String> loadedList;
+
+        // Initialize the seed list directly to a known set to start with
+        gossiper.seeds.clear();
+        InetAddress addr = InetAddress.getByName("127.99.1.1");
+        int nextSize = 4;
+        List<InetAddress> nextSeeds = new ArrayList<>(nextSize);
+        for (int i = 0; i < nextSize; i ++)
+        {
+            gossiper.seeds.add(addr);
+            nextSeeds.add(addr);
+            addr = InetAddresses.increment(addr);
+        }
+        Assert.assertEquals(nextSize, gossiper.seeds.size());
+
+        // Add another unique address to the list
+        addr = InetAddresses.increment(addr);
+        nextSeeds.add(addr);
+        nextSize++;
+        DatabaseDescriptor.setSeedProvider(new TestSeedProvider(nextSeeds));
+        loadedList = gossiper.reloadSeeds();
+
+        // Check that the new entry was added
+        Assert.assertEquals(nextSize, loadedList.size());
+        for (InetAddress a : nextSeeds)
+            Assert.assertTrue(loadedList.contains(a.toString()));
+
+        // Check that the return value of the reloadSeeds matches the content of the getSeeds call
+        // and that they both match the internal contents of the Gossiper seeds list
+        Assert.assertEquals(loadedList.size(), gossiper.getSeeds().size());
+        for (InetAddress a : gossiper.seeds)
+        {
+            Assert.assertTrue(loadedList.contains(a.toString()));
+            Assert.assertTrue(gossiper.getSeeds().contains(a.toString()));
+        }
+
+        // Add a duplicate of the last address to the seed provider list
+        int uniqueSize = nextSize;
+        nextSeeds.add(addr);
+        nextSize++;
+        DatabaseDescriptor.setSeedProvider(new TestSeedProvider(nextSeeds));
+        loadedList = gossiper.reloadSeeds();
+
+        // Check that the number of seed nodes reported hasn't increased
+        Assert.assertEquals(uniqueSize, loadedList.size());
+        for (InetAddress a : nextSeeds)
+            Assert.assertTrue(loadedList.contains(a.toString()));
+
+        // Create a new list that has no overlaps with the previous list
+        addr = InetAddress.getByName("127.99.2.1");
+        int disjointSize = 3;
+        List<InetAddress> disjointSeeds = new ArrayList<>(disjointSize);
+        for (int i = 0; i < disjointSize; i ++)
+        {
+            disjointSeeds.add(addr);
+            addr = InetAddresses.increment(addr);
+        }
+        DatabaseDescriptor.setSeedProvider(new TestSeedProvider(disjointSeeds));
+        loadedList = gossiper.reloadSeeds();
+
+        // Check that the list now contains exactly the new other list.
+        Assert.assertEquals(disjointSize, gossiper.getSeeds().size());
+        Assert.assertEquals(disjointSize, loadedList.size());
+        for (InetAddress a : disjointSeeds)
+        {
+            Assert.assertTrue(gossiper.getSeeds().contains(a.toString()));
+            Assert.assertTrue(loadedList.contains(a.toString()));
+        }
+
+        // Set the seed node provider to return an empty list
+        DatabaseDescriptor.setSeedProvider(new TestSeedProvider(new ArrayList<InetAddress>()));
+        loadedList = gossiper.reloadSeeds();
+
+        // Check that the in memory seed node list was not modified
+        Assert.assertEquals(disjointSize, loadedList.size());
+        for (InetAddress a : disjointSeeds)
+            Assert.assertTrue(loadedList.contains(a.toString()));
+
+        // Change the seed provider to one that throws an unchecked exception
+        DatabaseDescriptor.setSeedProvider(new ErrorSeedProvider());
+        loadedList = gossiper.reloadSeeds();
+
+        // Check for the expected null response from a reload error
+        Assert.assertNull(loadedList);
+
+        // Check that the in memory seed node list was not modified and the exception was caught
+        Assert.assertEquals(disjointSize, gossiper.getSeeds().size());
+        for (InetAddress a : disjointSeeds)
+            Assert.assertTrue(gossiper.getSeeds().contains(a.toString()));
+    }
+
+    static class TestSeedProvider implements SeedProvider
+    {
+        private List<InetAddress> seeds;
+
+        TestSeedProvider(List<InetAddress> seeds)
+        {
+            this.seeds = seeds;
+        }
+
+        @Override
+        public List<InetAddress> getSeeds()
+        {
+            return seeds;
+        }
+    }
+
+    // A seed provider for testing which throws assertion errors when queried
+    static class ErrorSeedProvider implements SeedProvider
+    {
+        @Override
+        public List<InetAddress> getSeeds()
+        {
+            assert(false);
+            return new ArrayList<InetAddress>();
+        }
     }
 }
