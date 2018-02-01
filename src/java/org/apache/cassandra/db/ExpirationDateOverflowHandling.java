@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.MessageFormatter;
 
 import org.apache.cassandra.cql3.Attributes;
+import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.TableMetadata;
@@ -71,7 +72,7 @@ public class ExpirationDateOverflowHandling
 
     public static void maybeApplyExpirationDateOverflowPolicy(TableMetadata metadata, int ttl, boolean isDefaultTTL) throws InvalidRequestException
     {
-        if (ttl == 0)
+        if (ttl == BufferCell.NO_TTL)
             return;
 
         // Check for localExpirationTime overflow (CASSANDRA-14092)
