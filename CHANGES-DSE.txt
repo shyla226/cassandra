@@ -133,6 +133,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no internal DB ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no internal DB ticket)
 Merged from dse5.0:
+ * Make `ReservedKeywords` mutable (DB-1637)
  * Fix tpc connection being reset due to dc compression and flush socket before reset (DB-1636)
  * Separate commit log replay and commit throwable inspection and policy handling (DB-673)
  * Fix for Local DC connections are compressed despite internode_compression: dc (DB-734)
