@@ -1,6 +1,7 @@
 DSE 5.1.7
  * Fix infinite loop when replaying a truncated commit log file and truncation is tolerated (DB-1557)
 Merged from dse5.0:
+ * Non-disruptive seed node list reload (DB-1626)
  * Make `ReservedKeywords` mutable (DB-1637)
  * Fix tpc connection being reset due to dc compression and flush socket before reset (DB-1636)
  * Skip legacy range tombstones if only their clustering is corrupted (DB-1579)
@@ -149,10 +150,7 @@ DSE 5.1.0
  * Backport CASSANDRA-12969: Conditionally update index built status to avoid unnecessary flushes (no DB ticket)
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no DB ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no DB ticket)
-
-
 Merged from dse5.0:
- * Non-disruptive seed node list reload (DB-1626)
  * Bounded range splitting token allocation for first RF nodes (DB-121)
  * Backport CASSANDRA-12858: Add the range limit for the split ratio in PartitionerTestCase (DB-121)
  * Partial backport of token splitting from CASSANDRA-12777: Implement the NoReplicationTokenAllocator (DB-121)
