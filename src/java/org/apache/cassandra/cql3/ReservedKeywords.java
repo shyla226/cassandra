@@ -18,12 +18,13 @@
 
 package org.apache.cassandra.cql3;
 
+import java.util.Arrays;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableSet;
 
-class ReservedKeywords
+public final class ReservedKeywords
 {
     @VisibleForTesting
     static final String[] reservedKeywords = new String[]
@@ -87,10 +88,27 @@ class ReservedKeywords
                                                      "OR",
                                                      "REPLACE" };
 
-    private static final Set<String> reservedSet = ImmutableSet.copyOf(reservedKeywords);
+    private static final Set<String> reservedSet = new CopyOnWriteArraySet<>(Arrays.asList(reservedKeywords));
 
-    static boolean isReserved(String text)
+    /**
+     * This class must not be instantiated as it only contains static methods.
+     */
+    private ReservedKeywords()
+    {
+    }
+
+    public static boolean isReserved(String text)
     {
         return reservedSet.contains(text.toUpperCase());
+    }
+
+    /**
+     * Adds the specified reserved keyword.
+     *
+     * Used by DSE, see DB-1637.
+     */
+    public static boolean addReserved(String text)
+    {
+        return reservedSet.add(text.toUpperCase());
     }
 }

@@ -20,8 +20,10 @@ package org.apache.cassandra.cql3;
 
 import org.junit.Test;
 
-import junit.framework.Assert;
 import org.apache.cassandra.exceptions.SyntaxException;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
 
 public class ReservedKeywordsTest
 {
@@ -33,11 +35,32 @@ public class ReservedKeywordsTest
             try
             {
                 QueryProcessor.parseStatement(String.format("ALTER TABLE ks.t ADD %s TEXT", reservedWord));
-                Assert.fail(String.format("Reserved keyword %s should not have parsed", reservedWord));
+                fail(String.format("Reserved keyword %s should not have parsed", reservedWord));
             }
             catch (SyntaxException ignore)
             {
             }
         }
+    }
+
+    @Test
+    public void testReservedWordsForQuoting() throws Exception
+    {
+        // CQL reserved keywords
+        for (String reservedWord : ReservedKeywords.reservedKeywords)
+        {
+            assertEquals('"' + reservedWord + '"', ColumnIdentifier.maybeQuote(reservedWord));
+        }
+
+        // Unreserved keyword
+        assertEquals("any", ColumnIdentifier.maybeQuote("any"));
+        assertEquals("\"ANY\"", ColumnIdentifier.maybeQuote("ANY"));
+        assertEquals("\"Any\"", ColumnIdentifier.maybeQuote("Any"));
+
+        // Manually reserved keyword
+        ReservedKeywords.addReserved("any");
+        assertEquals("\"any\"", ColumnIdentifier.maybeQuote("any"));
+        assertEquals("\"ANY\"", ColumnIdentifier.maybeQuote("ANY"));
+        assertEquals("\"Any\"", ColumnIdentifier.maybeQuote("Any"));
     }
 }
