@@ -35,6 +35,50 @@ public abstract class UserRolesAndPermissions
     private static final Logger logger = LoggerFactory.getLogger(UserRolesAndPermissions.class);
 
     /**
+     * The roles and permissions of an user that has not been authentified yet.
+     * <p>This implementation only exist to allow to create auditable events for a non-authentified user.</p>
+     */
+    public static final UserRolesAndPermissions UNKNOWN = new UserRolesAndPermissions("unkown", Collections.emptySet())
+    {
+        @Override
+        public boolean hasJMXPermission(MBeanServer mbs, ObjectName object, Permission permission)
+        {
+            return false;
+        }
+
+        @Override
+        public boolean hasGrantPermission(IResource resource, Permission perm)
+        {
+            return false;
+        }
+
+        @Override
+        protected void checkPermissionOnResourceChain(IResource resource, Permission perm)
+        {
+            throw new UnauthorizedException("Unknown users are not authorized to perform this request");
+        }
+
+        @Override
+        protected boolean hasPermissionOnResourceChain(IResource resource, Permission perm)
+        {
+            return false;
+        }
+
+        @Override
+        public void additionalQueryPermission(IResource resource, PermissionSets permissionSets)
+        {
+        }
+
+        @Override
+        public <R> R filterPermissions(java.util.function.Function<R, R> applicablePermissions,
+                                       Supplier<R> initialState,
+                                       RoleResourcePermissionFilter<R> aggregate)
+        {
+            return null;
+        }
+    };
+
+    /**
      * The roles and permissions of the system.
      */
     public static final UserRolesAndPermissions SYSTEM = new UserRolesAndPermissions(AuthenticatedUser.SYSTEM_USERNAME, Collections.emptySet())
