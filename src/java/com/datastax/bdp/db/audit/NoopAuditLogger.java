@@ -58,6 +58,12 @@ final class NoopAuditLogger implements IAuditLogger
     }
 
     @Override
+    public Completable logEvent(AuditableEvent event)
+    {
+        return Completable.complete();
+    }
+
+    @Override
     public Completable logFailedQuery(String queryString, QueryState state, Throwable e)
     {
         return Completable.complete();
