@@ -31,12 +31,17 @@ import org.apache.cassandra.utils.memory.MemtableAllocator;
 
 public class BufferExpiringCell extends BufferCell implements ExpiringCell
 {
+    public static final int MAX_DELETION_TIME = Integer.MAX_VALUE - 1;
+
     private final int localExpirationTime;
     private final int timeToLive;
 
     public BufferExpiringCell(CellName name, ByteBuffer value, long timestamp, int timeToLive)
     {
-        this(name, value, timestamp, timeToLive, (int) (System.currentTimeMillis() / 1000) + timeToLive);
+        super(name, value, timestamp);
+        assert timeToLive > 0 : timeToLive;
+        this.timeToLive = timeToLive;
+        this.localExpirationTime = computeLocalExpirationTime(timeToLive);
     }
 
     public BufferExpiringCell(CellName name, ByteBuffer value, long timestamp, int timeToLive, int localExpirationTime)
@@ -183,5 +188,21 @@ public class BufferExpiringCell extends BufferCell implements ExpiringCell
         // we'll fulfil our responsibility to repair.  See discussion at
         // http://cassandra-user-incubator-apache-org.3065146.n2.nabble.com/repair-compaction-and-tombstone-rows-td7583481.html
         return new BufferDeletedCell(name, localExpirationTime - timeToLive, timestamp);
+    }
+
+    /**
+     * This method computes the {@link #localExpirationTime}, maybe capping to the maximum representable value
+     * which is {@link #MAX_DELETION_TIME}.
+     *
+     * Please note that the {@link org.apache.cassandra.cql3.Attributes.ExpirationDateOverflowPolicy} is applied
+     * during {@link org.apache.cassandra.cql3.Attributes#maybeApplyExpirationDateOverflowPolicy(CFMetaData, int, boolean)},
+     * so if the request was not denied it means it's expiration date should be capped.
+     *
+     * See CASSANDRA-14092
+     */
+    private int computeLocalExpirationTime(int timeToLive)
+    {
+        int localExpirationTime =  (int) (System.currentTimeMillis() / 1000) + timeToLive;
+        return localExpirationTime >= 0? localExpirationTime : MAX_DELETION_TIME;
     }
 }
