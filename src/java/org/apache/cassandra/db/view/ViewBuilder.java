@@ -71,6 +71,7 @@ class ViewBuilder
     private final Map<Range<Token>, Pair<Token, Long>> pendingRanges = Maps.newConcurrentMap();
     private final Set<ViewBuilderTask> tasks = Sets.newConcurrentHashSet();
     private volatile long keysBuilt = 0;
+    private volatile boolean isStarted = false;
     private volatile boolean isStopped = false;
     private volatile Future<?> future = Futures.immediateFuture(null);
 
@@ -91,8 +92,6 @@ class ViewBuilder
         }
         else
         {
-            SystemDistributedKeyspace.startViewBuild(ksName, view.name, localHostId);
-
             logger.debug("Starting build of view({}.{}). Flushing base table {}.{}",
                          ksName, view.name, ksName, baseCfs.name);
             baseCfs.forceBlockingFlush();
@@ -200,6 +199,8 @@ class ViewBuilder
             }
         }, MoreExecutors.directExecutor());
         this.future = future;
+        isStarted = true;
+        SystemDistributedKeyspace.startViewBuild(ksName, view.name, localHostId);
     }
 
     private void finish()
@@ -230,7 +231,7 @@ class ViewBuilder
     {
         boolean wasStopped = isStopped;
         internalStop(false);
-        if (!wasStopped)
+        if (isStarted && !wasStopped)
             FBUtilities.waitOnFuture(future);
     }
 

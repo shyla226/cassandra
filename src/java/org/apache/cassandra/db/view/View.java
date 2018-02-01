@@ -18,12 +18,14 @@
 package org.apache.cassandra.db.view;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
@@ -37,6 +39,7 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import org.slf4j.Logger;
@@ -49,6 +52,8 @@ import org.slf4j.LoggerFactory;
  */
 public class View
 {
+    private static final int GOSSIP_SETTLE_WAIT_IN_MS = Integer.getInteger("cassandra.mv.builder.gossip_settle_wait_in_ms", StorageService.RING_DELAY);
+
     private static final Logger logger = LoggerFactory.getLogger(View.class);
 
     public final String name;
@@ -196,8 +201,27 @@ public class View
     public synchronized void build()
     {
         stopBuild();
-        builder = new ViewBuilder(baseCfs, this);
-        builder.start();
+
+        final ViewBuilder builder = new ViewBuilder(baseCfs, this);
+        this.builder = builder;
+
+        long delay = 0;
+        if (!TPCUtils.blockingGet(SystemKeyspace.isViewBuilt(keyspace(), name)) && TPCUtils.blockingGet(SystemKeyspace.getViewBuildStatus(keyspace(), name)).isEmpty())
+        {
+            logger.debug("Will wait {} milliseconds for schema to be propagated to all nodes " +
+                         "before building view {}.{} for the first time.", GOSSIP_SETTLE_WAIT_IN_MS,
+                         keyspace(), baseCfs.name);
+            delay = GOSSIP_SETTLE_WAIT_IN_MS;
+        }
+
+        ScheduledExecutors.nonPeriodicTasks.schedule(() -> builder.start(),
+                                                     delay,
+                                                     TimeUnit.MILLISECONDS);
+    }
+
+    private String keyspace()
+    {
+        return baseCfs.metadata.keyspace;
     }
 
     /**

@@ -45,13 +45,16 @@ public class ViewFilteringTest extends CQLTester
     @BeforeClass
     public static void startup()
     {
+        //one node, so no need for gossip to settle
+        System.setProperty("cassandra.mv.builder.gossip_settle_wait_in_ms", "0");
         requireNetwork();
         System.setProperty("cassandra.mv.allow_filtering_nonkey_columns_unsafe", "true");
     }
 
     @AfterClass
-    public static void TearDown()
+    public static void afterClass()
     {
+        System.clearProperty("cassandra.mv.builder.gossip_settle_wait_in_ms");
         System.setProperty("cassandra.mv.allow_filtering_nonkey_columns_unsafe", "false");
     }
 

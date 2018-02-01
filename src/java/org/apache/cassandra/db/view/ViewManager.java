@@ -182,6 +182,7 @@ public class ViewManager
         if (view == null)
             return;
 
+        view.stopBuild();
         forTable(view.getDefinition().baseTableId).removeByName(name);
         TPCUtils.blockingAwait(SystemKeyspace.setViewRemoved(keyspace.getName(), view.name));
         TPCUtils.blockingAwait(SystemDistributedKeyspace.setViewRemoved(keyspace.getName(), view.name));
@@ -206,6 +207,12 @@ public class ViewManager
     {
         for (View view : allViews())
             view.build();
+    }
+
+    public void stopAllViewBuilds()
+    {
+        for (View view : allViews())
+            view.stopBuild();
     }
 
     public TableViews forTable(TableId id)
