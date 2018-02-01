@@ -56,7 +56,7 @@ public final class TableMetadata
 
     public static final String COMPACT_STORAGE_HALT_MESSAGE =
              "Compact Tables are not allowed in Cassandra starting with 4.0 version. " +
-             "Use `ALTER {}.{} DROP COMPACT STORAGE` command supplied in 3.x/3.11 Cassandra " +
+             "Use `ALTER %s.%s DROP COMPACT STORAGE` command supplied in 3.x/3.11 Cassandra " +
              "in order to migrate off Compact Storage.";
 
     private static final String COMPACT_STORAGE_DEPRECATION_MESSAGE =
