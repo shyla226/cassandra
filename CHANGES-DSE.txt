@@ -1,6 +1,7 @@
 DSE 5.1.7
  * Fix infinite loop when replaying a truncated commit log file and truncation is tolerated (DB-1557)
 Merged from dse5.0:
+ * Prevent received SSTables with tombstones during repair from being compacted (DB-1333)
  * Wait RING_DELAY for schema to settle before starting view builder (DB-1328)
  * Non-disruptive seed node list reload (DB-1626)
  * Make `ReservedKeywords` mutable (DB-1637)

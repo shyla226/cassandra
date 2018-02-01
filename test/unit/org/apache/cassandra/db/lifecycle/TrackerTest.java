@@ -47,15 +47,18 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static com.google.common.collect.ImmutableSet.copyOf;
 import static java.util.Collections.singleton;
+import static org.junit.Assert.assertEquals;
 
 public class TrackerTest
 {
+    public static int counter = 0;
 
     private static final class MockListener implements INotificationConsumer
     {
         final boolean throwException;
         final List<INotification> received = new ArrayList<>();
         final List<Object> senders = new ArrayList<>();
+        public int receivedOrder = 0;
 
         private MockListener(boolean throwException)
         {
@@ -64,6 +67,7 @@ public class TrackerTest
 
         public void handleNotification(INotification notification, Object sender)
         {
+            receivedOrder = counter++;
             if (throwException)
                 throw new RuntimeException();
             received.add(notification);
@@ -183,6 +187,33 @@ public class TrackerTest
         Assert.assertEquals(1, listener.senders.size());
         Assert.assertEquals(tracker, listener.senders.get(0));
         Assert.assertTrue(listener.received.get(0) instanceof SSTableAddedNotification);
+        DatabaseDescriptor.setIncrementalBackupsEnabled(backups);
+    }
+
+    @Test
+    public void testNotificationsAreLifoOrder()
+    {
+        boolean backups = DatabaseDescriptor.isIncrementalBackupsEnabled();
+        DatabaseDescriptor.setIncrementalBackupsEnabled(false);
+        ColumnFamilyStore cfs = MockSchema.newCFS();
+        Tracker tracker = cfs.getTracker();
+        MockListener listener1 = new MockListener(false);
+        MockListener listener2 = new MockListener(false);
+        MockListener listener3 = new MockListener(false);
+        tracker.subscribe(listener1);
+        tracker.subscribe(listener2);
+        tracker.subscribe(listener3);
+        List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, 17, cfs),
+                                                       MockSchema.sstable(1, 121, cfs),
+                                                       MockSchema.sstable(2, 9, cfs));
+
+        counter = 0;
+
+        tracker.addSSTables(copyOf(readers));
+
+        assertEquals(0, listener3.receivedOrder);
+        assertEquals(1, listener2.receivedOrder);
+        assertEquals(2, listener1.receivedOrder);
         DatabaseDescriptor.setIncrementalBackupsEnabled(backups);
     }
 
