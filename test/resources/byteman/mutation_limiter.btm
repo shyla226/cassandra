@@ -1,8 +1,8 @@
 RULE mutation_limiter
-CLASS org.apache.cassandra.db.WriteVerbs.WRITE_HANDLER
-METHOD handle2
+CLASS org.apache.cassandra.db.Mutation
+METHOD applyFuture
 HELPER org.apache.cassandra.utils.TestRateLimiter
 AT ENTRY
 IF TRUE
-DO acquire(1000.0)
+DO acquire(100.0)
 ENDRULE

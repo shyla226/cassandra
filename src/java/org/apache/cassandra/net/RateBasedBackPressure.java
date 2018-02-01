@@ -20,11 +20,10 @@ package org.apache.cassandra.net;
 import java.net.InetAddress;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BiFunction;
+import java.util.function.BiConsumer;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -33,15 +32,17 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCRunnable;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.utils.ApproximateTimeSource;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.TimeSource;
 import org.apache.cassandra.utils.concurrent.IntervalLock;
@@ -75,8 +76,6 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
                     .executor(MoreExecutors.directExecutor())
                     .build();
 
-    private final ExecutorService executor;
-
     enum Flow
     {
         FAST,
@@ -94,15 +93,12 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
     public RateBasedBackPressure(Map<String, Object> args)
     {
         this(args,
-             Executors.newFixedThreadPool(
-                 Math.min(FBUtilities.getAvailableProcessors(), 32), 
-                 new ThreadFactoryBuilder().setDaemon(true).setNameFormat("BackPressure-thread-%d").build()),
-             new ApproximateTimeSource(), 
+             new ApproximateTimeSource(),
              DatabaseDescriptor.getWriteRpcTimeout());
     }
 
     @VisibleForTesting
-    public RateBasedBackPressure(Map<String, Object> args, ExecutorService executor, TimeSource timeSource, long windowSize)
+    public RateBasedBackPressure(Map<String, Object> args, TimeSource timeSource, long windowSize)
     {
         if (args.size() != 3)
         {
@@ -134,7 +130,6 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
             throw new IllegalArgumentException("Back-pressure window size must be >= 10");
         }
 
-        this.executor = executor;
         this.timeSource = timeSource;
         this.windowSize = windowSize;
 
@@ -263,10 +258,10 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
             // response time computed from the incoming rate, to reduce the number of client timeouts by taking into
             // account how long it could take to process responses after back-pressure:
             long responseTimeInNanos = (long) (TimeUnit.NANOSECONDS.convert(1, TimeUnit.SECONDS) / minIncomingRate);
-            return doRateLimit((p, t) -> rateLimiter.limiter.tryAcquire(p, t, TimeUnit.NANOSECONDS),
+            return doRateLimit(() -> rateLimiter.limiter.tryAcquire(1),
+                               (r, t) -> TPC.bestTPCTimer().onTimeout(r, t, TimeUnit.NANOSECONDS),
                                rateLimiter.limiter.getRate(),
-                               Math.max(0, TimeUnit.NANOSECONDS.convert(timeout, unit) - responseTimeInNanos))
-                .thenAccept(u -> {});
+                               Math.max(0, TimeUnit.NANOSECONDS.convert(timeout, unit) - responseTimeInNanos)).thenAccept(u -> {});
         }
 
         return CompletableFuture.completedFuture(null);
@@ -286,33 +281,37 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
     }
 
     @VisibleForTesting
-    CompletableFuture<Boolean> doRateLimit(BiFunction<Integer, Long, Boolean> rateLimiter, double limitedRate, long timeoutInNanos)
+    CompletableFuture<Boolean> doRateLimit(Callable<Boolean> rateLimiter,
+                                           BiConsumer<Runnable, Long> timer,
+                                           double limitedRate, long timeoutInNanos)
     {
-        // If we can acquire without waiting, execute synchronously:
-        if (rateLimiter.apply(1, 0L))
-            return CompletableFuture.completedFuture(true);
-
-        // If we have to wait (that is, actually apply backpressure), execute on a backpressure thread:
-        long queueTime = timeSource.nanoTime();
-        return CompletableFuture.supplyAsync(() -> 
+        try
         {
-            // Account for items queued past timeout:
-            long elapsedTime = timeSource.nanoTime() - queueTime;
-            
-            if (elapsedTime >= timeoutInNanos)
-                return false;
-            
-            if (!rateLimiter.apply(1, timeoutInNanos - elapsedTime))
-            {
-                timeSource.sleepUninterruptibly(timeoutInNanos - elapsedTime, TimeUnit.NANOSECONDS);
-                oneMinNoSpamLogger.info("Cannot apply limited rate of {} due to exceeding write timeout, pausing {} nanoseconds instead.",
-                                        limitedRate, timeoutInNanos);
+            // If we can acquire without waiting, execute synchronously:
+            if (rateLimiter.call())
+                return CompletableFuture.completedFuture(true);
+        }
+        catch (Exception ex)
+        {
+            throw new IllegalStateException(ex);
+        }
 
-                return false;
-            }
-
-            return true;
-        }, executor);
+        // If we have to wait (that is, actually apply backpressure), schedule the completion on the TPC timer: given
+        // the backpressure task is not running on a normal TPC scheduler, we have to set/unset it pending manually; this
+        // allows to eventually trigger the TPC backpressure if too many netwek backpressure tasks are created, so
+        // reducing the influx of client requests in case of a slow network/replica.
+        CompletableFuture<Boolean> completion = new CompletableFuture<>();
+        TPCRunnable backpressureTask = new TPCRunnable(() ->
+        {
+            completion.complete(false);
+        }, ExecutorLocals.create(), TPCTaskType.NETWORK_BACKPRESSURE, TPC.getCoreId());
+        backpressureTask.setPending();
+        timer.accept(() ->
+        {
+            backpressureTask.unsetPending();
+            backpressureTask.run();
+        }, timeoutInNanos);
+        return completion;
     }
 
     private static class IntervalRateLimiter extends IntervalLock
