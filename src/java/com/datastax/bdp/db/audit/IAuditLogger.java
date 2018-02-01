@@ -86,6 +86,14 @@ public interface IAuditLogger
     Completable logEvents(List<AuditableEvent> events);
 
     /**
+     * Logs the specified event if needed.
+     *
+     * @param event the event to log
+     * @return a completable
+     */
+    Completable logEvent(AuditableEvent event);
+
+    /**
      * Logs a failed query for the specified query if needed.
      *
      * @param queryString the failed query
