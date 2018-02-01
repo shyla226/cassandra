@@ -1,4 +1,5 @@
 DSE 5.1.7
+ * Remove invalid path from compaction-stress script, populate data base on initial size (DB-1652)
  * Fix infinite loop when replaying a truncated commit log file and truncation is tolerated (DB-1557)
 Merged from dse5.0:
  * Fix connections per host in Nodetool GetStreamThroughput (DB-1602)

@@ -51,6 +51,7 @@ import org.apache.cassandra.stress.generate.SeedManager;
 import org.apache.cassandra.stress.operations.userdefined.SchemaInsert;
 import org.apache.cassandra.stress.settings.StressSettings;
 import org.apache.cassandra.tools.nodetool.CompactionStats;
+import org.apache.cassandra.tools.nodetool.stats.TableStatsHolder;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
@@ -86,8 +87,7 @@ public abstract class CompactionStress implements Runnable
 
             if (!outputDir.exists())
             {
-                System.err.println("Invalid output dir (missing): " + outputDir);
-                System.exit(1);
+                outputDir.mkdirs();
             }
 
             if (!outputDir.isDirectory())
@@ -197,7 +197,7 @@ public abstract class CompactionStress implements Runnable
     public static class Compaction extends CompactionStress
     {
 
-        @Option(name = {"-m", "--maximal"}, description = "Force maximal compaction (default true)")
+        @Option(name = { "-m", "--maximal" }, description = "Force maximal compaction (default false)")
         Boolean maximal = false;
 
         @Option(name = {"-t", "--threads"}, description = "Number of compactor threads to use for bg compactions (default 4)")
@@ -240,10 +240,9 @@ public abstract class CompactionStress implements Runnable
                         futures.addAll(CompactionManager.instance.submitBackground(cfs));
                 }
 
-                reportCompactionStats();
+                reportCompactionStats(cfs);
                 Uninterruptibles.sleepUninterruptibly(10, TimeUnit.SECONDS);
             }
-
             System.out.println("Finished! Shutting down...");
             CompactionManager.instance.forceShutdown();
 
@@ -253,11 +252,18 @@ public abstract class CompactionStress implements Runnable
         }
     }
 
-    void reportCompactionStats()
+    void reportCompactionStats(ColumnFamilyStore cfs)
     {
         System.out.println("========");
         System.out.println(String.format("Pending compactions: %d\n", CompactionManager.instance.getPendingTasks()));
         CompactionStats.reportCompactionTable(CompactionManager.instance.getCompactions(), 0, true);
+        if (cfs.getSSTableCountPerLevel() != null) // is LCS
+        {
+            List<String> sstablePerLevel = new ArrayList<>();
+            TableStatsHolder.fillSStablesPerLevel(cfs.getSSTableCountPerLevel(), cfs.getLevelFanoutSize(), sstablePerLevel);
+            System.out.println("SSTables in each level: [" + String.join(", ", sstablePerLevel) + "]");
+        }
+
     }
 
 
@@ -295,6 +301,7 @@ public abstract class CompactionStress implements Runnable
             ExecutorService executorService = Executors.newFixedThreadPool(threads);
             CountDownLatch finished = new CountDownLatch(threads);
 
+            long initialSize = directories.getRawDiretoriesSize();
             for (int i = 0; i < threads; i++)
             {
                 //Every thread needs it's own writer
@@ -318,7 +325,8 @@ public abstract class CompactionStress implements Runnable
             }
 
             double currentSizeGB;
-            while ((currentSizeGB = directories.getRawDiretoriesSize() / BYTES_IN_GB) < totalSizeGb)
+            System.out.println(String.format("Initial size %.2fGB", initialSize / BYTES_IN_GB));
+            while ((currentSizeGB = (directories.getRawDiretoriesSize() - initialSize) / BYTES_IN_GB) < totalSizeGb)
             {
                 if (finished.getCount() == 0)
                     break;
