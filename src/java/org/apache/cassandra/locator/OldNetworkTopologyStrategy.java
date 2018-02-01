@@ -45,7 +45,7 @@ public class OldNetworkTopologyStrategy extends AbstractReplicationStrategy
     public List<InetAddress> calculateNaturalEndpoints(Token token, TokenMetadata metadata)
     {
         int replicas = getReplicationFactor();
-        List<InetAddress> endpoints = new ArrayList<InetAddress>(replicas);
+        ArrayList<InetAddress> endpoints = new ArrayList<InetAddress>(replicas);
         ArrayList<Token> tokens = metadata.sortedTokens();
 
         if (tokens.isEmpty())

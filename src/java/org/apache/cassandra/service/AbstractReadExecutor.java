@@ -18,6 +18,7 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -25,6 +26,7 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.util.concurrent.FastThreadLocal;
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import org.apache.cassandra.concurrent.TPCTaskType;
@@ -157,6 +159,16 @@ public abstract class AbstractReadExecutor
 
     }
 
+    private static final FastThreadLocal<ArrayList<InetAddress>[]> REUSABLE_REPLICA_LISTS = new FastThreadLocal<ArrayList<InetAddress>[]>(){
+        protected ArrayList[] initialValue() throws Exception
+        {
+            final ArrayList[] arrayLists = new ArrayList[2];
+            arrayLists[0] = new ArrayList();
+            arrayLists[1] = new ArrayList();
+            return arrayLists;
+        }
+    };
+
     /**
      * @return an executor appropriate for the configured speculative read policy
      */
@@ -164,17 +176,38 @@ public abstract class AbstractReadExecutor
     {
         Keyspace keyspace = ctx.keyspace;
         ConsistencyLevel consistencyLevel = ctx.consistencyLevel;
-        List<InetAddress> allReplicas = StorageProxy.getLiveSortedEndpoints(keyspace, command.partitionKey());
-        List<InetAddress> targetReplicas = ctx.filterForQuery(allReplicas);
+        final ArrayList<InetAddress>[] reusableLists = REUSABLE_REPLICA_LISTS.get();
+        ArrayList<InetAddress> scratchAllReplicas = reusableLists[0];
+        ArrayList<InetAddress> scratchTargetReplicas = reusableLists[1];
+        try
+        {
+            StorageProxy.addLiveSortedEndpointsToList(keyspace, command.partitionKey(), scratchAllReplicas);
+            ctx.populateForQuery(scratchAllReplicas, scratchTargetReplicas);
+            return getReadExecutor(command, ctx, keyspace, consistencyLevel, scratchAllReplicas, scratchTargetReplicas);
+        }
+        finally
+        {
+            scratchAllReplicas.clear();
+            scratchTargetReplicas.clear();
+        }
+    }
 
+    private static AbstractReadExecutor getReadExecutor(
+        SinglePartitionReadCommand command,
+        ReadContext ctx,
+        Keyspace keyspace,
+        ConsistencyLevel consistencyLevel,
+        List<InetAddress> scratchAllReplicas,
+        List<InetAddress> scratchTargetReplicas)
+    {
         // See APOLLO-637
-        if (!allReplicas.contains(FBUtilities.getBroadcastAddress()))
+        if (!scratchAllReplicas.contains(FBUtilities.getBroadcastAddress()))
             ReadCoordinationMetrics.nonreplicaRequests.inc();
-        else if (!targetReplicas.contains(FBUtilities.getBroadcastAddress()))
+        else if (!scratchTargetReplicas.contains(FBUtilities.getBroadcastAddress()))
             ReadCoordinationMetrics.preferredOtherReplicas.inc();
 
         // Throw UAE early if we don't have enough replicas.
-        consistencyLevel.assureSufficientLiveNodes(keyspace, targetReplicas);
+        consistencyLevel.assureSufficientLiveNodes(keyspace, scratchTargetReplicas);
 
         if (ctx.readRepairDecision != ReadRepairDecision.NONE)
         {
@@ -189,42 +222,43 @@ public abstract class AbstractReadExecutor
         // 11980: Disable speculative retry if using EACH_QUORUM in order to prevent miscounting DC responses
         if (retry.equals(SpeculativeRetryParam.NONE)
             | consistencyLevel == ConsistencyLevel.EACH_QUORUM)
-            return new NeverSpeculatingReadExecutor(cfs, command, targetReplicas, ctx, false);
+            return new NeverSpeculatingReadExecutor(cfs, command, new ArrayList<>(scratchTargetReplicas), ctx, false);
 
         // There are simply no extra replicas to speculate.
         // Handle this separately so it can log failed attempts to speculate due to lack of replicas
-        if (consistencyLevel.blockFor(keyspace) == allReplicas.size())
-            return new NeverSpeculatingReadExecutor(cfs, command, targetReplicas, ctx, true);
+        if (consistencyLevel.blockFor(keyspace) == scratchAllReplicas.size())
+            return new NeverSpeculatingReadExecutor(cfs, command, new ArrayList<>(scratchTargetReplicas), ctx, true);
 
-        if (targetReplicas.size() == allReplicas.size())
+        if (scratchTargetReplicas.size() == scratchAllReplicas.size())
         {
             // CL.ALL, RRD.GLOBAL or RRD.DC_LOCAL and a single-DC.
             // We are going to contact every node anyway, so ask for 2 full data requests instead of 1, for redundancy
             // (same amount of requests in total, but we turn 1 digest request into a full blown data request).
-            return new AlwaysSpeculatingReadExecutor(cfs, command, targetReplicas, ctx);
+            return new AlwaysSpeculatingReadExecutor(cfs, command, new ArrayList<>(scratchTargetReplicas), ctx);
         }
 
         // RRD.NONE or RRD.DC_LOCAL w/ multiple DCs.
-        InetAddress extraReplica = allReplicas.get(targetReplicas.size());
+        InetAddress extraReplica = scratchAllReplicas.get(scratchTargetReplicas.size());
         // With repair decision DC_LOCAL all replicas/target replicas may be in different order, so
-        // we might have to find a replacement that's not already in targetReplicas.
-        if (ctx.readRepairDecision == ReadRepairDecision.DC_LOCAL && targetReplicas.contains(extraReplica))
+        // we might have to find a replacement that's not already in scratchTargetReplicas.
+        if (ctx.readRepairDecision == ReadRepairDecision.DC_LOCAL && scratchTargetReplicas.contains(extraReplica))
         {
-            for (InetAddress address : allReplicas)
+            for (int i = 0; i < scratchAllReplicas.size(); i++)
             {
-                if (!targetReplicas.contains(address))
+                InetAddress address = scratchAllReplicas.get(i);
+                if (!scratchTargetReplicas.contains(address))
                 {
                     extraReplica = address;
                     break;
                 }
             }
         }
-        targetReplicas.add(extraReplica);
+        scratchTargetReplicas.add(extraReplica);
 
         if (retry.equals(SpeculativeRetryParam.ALWAYS))
-            return new AlwaysSpeculatingReadExecutor(cfs, command, targetReplicas, ctx);
+            return new AlwaysSpeculatingReadExecutor(cfs, command, new ArrayList<>(scratchTargetReplicas), ctx);
         else // PERCENTILE or CUSTOM.
-            return new SpeculatingReadExecutor(cfs, command, targetReplicas, ctx);
+            return new SpeculatingReadExecutor(cfs, command, new ArrayList<>(scratchTargetReplicas), ctx);
     }
 
     /**

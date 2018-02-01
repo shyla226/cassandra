@@ -28,13 +28,13 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.service.ReadRepairDecision;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ReadRepairDecision;
 import org.apache.cassandra.transport.ProtocolException;
 
 public enum ConsistencyLevel
@@ -89,12 +89,12 @@ public enum ConsistencyLevel
         return codeIdx[code];
     }
 
-    private int quorumFor(Keyspace keyspace)
+    private static int quorumFor(Keyspace keyspace)
     {
         return (keyspace.getReplicationStrategy().getReplicationFactor() / 2) + 1;
     }
 
-    private int localQuorumFor(Keyspace keyspace, String dc)
+    private static int localQuorumFor(Keyspace keyspace, String dc)
     {
         return (keyspace.getReplicationStrategy() instanceof NetworkTopologyStrategy)
              ? (((NetworkTopologyStrategy) keyspace.getReplicationStrategy()).getReplicationFactor(dc) / 2) + 1
@@ -185,15 +185,57 @@ public enum ConsistencyLevel
         return dcEndpoints;
     }
 
-    public List<InetAddress> filterForQuery(Keyspace keyspace, List<InetAddress> liveEndpoints, ReadRepairDecision readRepair)
+
+    /**
+     * Filters the given live endpoints and returns a list of target endpoints.
+     * @param scratchLiveEndpoints effectively stack allocated list for manipulation, MUST be copied if callees want to keep it.
+     */
+    public ArrayList<InetAddress> filterForQuery(
+        Keyspace keyspace,
+        ArrayList<InetAddress> scratchLiveEndpoints,
+        ReadRepairDecision readRepair)
     {
+        return internalFilterForQuery(keyspace, scratchLiveEndpoints, readRepair, null);
+    }
+
+    /**
+     * Filters the given live endpoints and populates a list of target endpoints.
+     * @param scratchLiveEndpoints effectively stack allocated list for manipulation, MUST be copied if callees want to keep it.
+     * @param scratchTargetEndpoints effectively stack allocated list to populate with target endpoints, MUST be copied if callees want to keep it.
+     */
+    public void populateForQuery(
+        Keyspace keyspace,
+        ArrayList<InetAddress> scratchLiveEndpoints,
+        ReadRepairDecision readRepair,
+        ArrayList<InetAddress> scratchTargetEndpoints)
+    {
+        internalFilterForQuery(keyspace, scratchLiveEndpoints, readRepair, scratchTargetEndpoints);
+    }
+
+    /**
+     * @param scratchLiveEndpoints effectively stack allocated list for manipulation, but must be copied if callees want to keep it
+     * @param scratchTargetEndpoints effectively stack allocated list for manipulation, but must be copied if callees want to keep it
+     * @return the target endpoints for the query, might be scratchTargetEndpoints itself, otherwise a new list
+     */
+    private ArrayList<InetAddress> internalFilterForQuery(
+        Keyspace keyspace,
+        ArrayList<InetAddress> scratchLiveEndpoints,
+        ReadRepairDecision readRepair,
+        ArrayList<InetAddress> scratchTargetEndpoints)
+    {
+        int liveEndpointsCount = scratchLiveEndpoints.size();
+        ArrayList<InetAddress> targetEndpoints = (scratchTargetEndpoints == null) ? new ArrayList<>(liveEndpointsCount) : scratchTargetEndpoints;
+
         // 11980: Excluding EACH_QUORUM reads from potential RR, so that we do not miscount DC responses
         if (this == EACH_QUORUM)
             readRepair = ReadRepairDecision.NONE;
 
         // Quickly drop out if read repair is GLOBAL, since we just use all of the live endpoints
         if (readRepair == ReadRepairDecision.GLOBAL)
-            return liveEndpoints;
+        {
+            targetEndpoints.addAll(scratchLiveEndpoints);
+            return targetEndpoints;
+        }
 
         /*
          * If we are doing an each quorum query, we have to make sure that the endpoints we select
@@ -201,7 +243,10 @@ public enum ConsistencyLevel
          * we should fall through and grab a quorum in the replication strategy.
          */
         if (this == EACH_QUORUM && keyspace.getReplicationStrategy() instanceof NetworkTopologyStrategy)
-            return filterForEachQuorum(keyspace, liveEndpoints);
+        {
+            filterForEachQuorum(keyspace, scratchLiveEndpoints, targetEndpoints);
+            return targetEndpoints;
+        }
 
         /*
          * Endpoints are expected to be restricted to live replicas, sorted by snitch preference.
@@ -210,54 +255,60 @@ public enum ConsistencyLevel
          * the blockFor first ones).
          */
         if (isDCLocal)
-            Collections.sort(liveEndpoints, DatabaseDescriptor.getLocalComparator());
+            Collections.sort(scratchLiveEndpoints, DatabaseDescriptor.getLocalComparator());
 
         switch (readRepair)
         {
             case NONE:
-                return liveEndpoints.subList(0, Math.min(liveEndpoints.size(), blockFor(keyspace)));
+            {
+                for (int i = 0; i < Math.min(liveEndpointsCount, blockFor(keyspace)); i++)
+                    targetEndpoints.add(scratchLiveEndpoints.get(i));
+
+                return targetEndpoints;
+            }
             case DC_LOCAL:
-                List<InetAddress> local = new ArrayList<InetAddress>();
-                List<InetAddress> other = new ArrayList<InetAddress>();
-                for (InetAddress add : liveEndpoints)
+                for (int i = 0; i < liveEndpointsCount; i++)
                 {
+                    InetAddress add = scratchLiveEndpoints.get(i);
                     if (isLocal(add))
-                        local.add(add);
-                    else
-                        other.add(add);
+                        targetEndpoints.add(add);
                 }
                 // check if blockfor more than we have localep's
                 int blockFor = blockFor(keyspace);
-                if (local.size() < blockFor)
-                    local.addAll(other.subList(0, Math.min(blockFor - local.size(), other.size())));
-                return local;
+                for (int i = 0; i < liveEndpointsCount && blockFor > targetEndpoints.size(); i++)
+                {
+                    InetAddress add = scratchLiveEndpoints.get(i);
+                    if (!isLocal(add))
+                        targetEndpoints.add(add);
+                }
+                return targetEndpoints;
             default:
                 throw new AssertionError();
         }
     }
 
-    private List<InetAddress> filterForEachQuorum(Keyspace keyspace, List<InetAddress> liveEndpoints)
+    private static void filterForEachQuorum(Keyspace keyspace,
+        List<InetAddress> scratchLiveEndpoints,
+        List<InetAddress> scratchTargetEndpoints)
     {
         NetworkTopologyStrategy strategy = (NetworkTopologyStrategy) keyspace.getReplicationStrategy();
 
-        Map<String, List<InetAddress>> dcsEndpoints = new HashMap<>();
+        Map<String, ArrayList<InetAddress>> dcsEndpoints = new HashMap<>();
         for (String dc: strategy.getDatacenters())
             dcsEndpoints.put(dc, new ArrayList<>());
 
-        for (InetAddress add : liveEndpoints)
+        for (int i = 0; i < scratchLiveEndpoints.size(); i++)
         {
+            InetAddress add = scratchLiveEndpoints.get(i);
             String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(add);
             dcsEndpoints.get(dc).add(add);
         }
 
-        List<InetAddress> waitSet = new ArrayList<>();
-        for (Map.Entry<String, List<InetAddress>> dcEndpoints : dcsEndpoints.entrySet())
+        for (Map.Entry<String, ArrayList<InetAddress>> dcEndpoints : dcsEndpoints.entrySet())
         {
-            List<InetAddress> dcEndpoint = dcEndpoints.getValue();
-            waitSet.addAll(dcEndpoint.subList(0, Math.min(localQuorumFor(keyspace, dcEndpoints.getKey()), dcEndpoint.size())));
+            ArrayList<InetAddress> dcEndpoint = dcEndpoints.getValue();
+            scratchTargetEndpoints.addAll(dcEndpoint.subList(0, Math.min(localQuorumFor(keyspace, dcEndpoints.getKey()), dcEndpoint.size())));
         }
-
-        return waitSet;
     }
 
     public boolean isSufficientLiveNodes(Keyspace keyspace, Iterable<InetAddress> liveEndpoints)
