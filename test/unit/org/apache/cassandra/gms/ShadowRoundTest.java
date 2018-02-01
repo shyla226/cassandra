@@ -68,7 +68,7 @@ public class ShadowRoundTest
     @Test
     public void testDelayedResponse()
     {
-        Gossiper.instance.buildSeedsList();
+        Gossiper.instance.buildSeedsList(Gossiper.instance.seeds);
         int noOfSeeds = Gossiper.instance.seeds.size();
 
         final AtomicBoolean ackSend = new AtomicBoolean(false);
