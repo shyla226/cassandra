@@ -2010,6 +2010,9 @@ public class SelectGroupByTest extends CQLTester
         assertInvalidMessage("Functions are only supported on the last element of the GROUP BY clause",
                              "SELECT pk, floor(date, 1w), time, min(v), max(v), count(v) FROM %s GROUP BY pk, floor(date, 1w), time");
 
+        assertInvalidMessage("Functions are only supported on the last element of the GROUP BY clause",
+                             "SELECT pk, floor(date, 1w), time, min(v), max(v), count(v) FROM %s GROUP BY pk, floor(date, 1w), toTimestamp(time)");
+
         assertRows(execute("SELECT pk, date, floor(time, 5m), min(v), max(v), count(v) FROM %s GROUP BY pk, date, floor(time, 5m)"),
                    row(1, toDate("2016-09-27"), toTime("16:10:00"), 1, 3, 3L),
                    row(1, toDate("2016-09-27"), toTime("16:15:00"), 4, 4, 1L),

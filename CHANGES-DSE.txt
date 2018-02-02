@@ -1,4 +1,5 @@
 dse 6.0.0:
+ * Multiple functions in GROUP BY clause should be rejected (DB-1660)
  * Introduce fetch type in ColumnFilter, fix and improve ColumnFilterTest (DB-1607)
  * Add trace_ttl_sec to NodeSyncConfig hashing, equality, and string map (DB-1600)
  * Handle race condition on dropping keyspace and opening keyspace (DB-1570)

@@ -1547,10 +1547,10 @@ public class SelectStatement implements CQLStatement
          * @return the {@code AggregationSpecification.Factory} used to make the aggregates
          */
         private AggregationSpecification.Factory getAggregationSpecFactory(TableMetadata metadata,
-                                                                             VariableSpecifications boundNames,
-                                                                             Selection selection,
-                                                                             StatementRestrictions restrictions,
-                                                                             boolean isDistinct)
+                                                                           VariableSpecifications boundNames,
+                                                                           Selection selection,
+                                                                           StatementRestrictions restrictions,
+                                                                           boolean isDistinct)
         {
             if (parameters.groups.isEmpty())
                 return selection.isAggregate() ? AggregationSpecification.AGGREGATE_EVERYTHING_FACTORY
@@ -1562,6 +1562,8 @@ public class SelectStatement implements CQLStatement
             Selector.Factory selectorFactory = null;
             for (Selectable.Raw raw : parameters.groups)
             {
+                checkNull(selectorFactory, "Functions are only supported on the last element of the GROUP BY clause");
+
                 Selectable selectable = raw.prepare(metadata);
                 ColumnMetadata def = null;
 
@@ -1586,7 +1588,6 @@ public class SelectStatement implements CQLStatement
                     def = (ColumnMetadata) selectable;
                     checkTrue(def.isPartitionKey() || def.isClusteringColumn(),
                               "Group by is currently only supported on the columns of the PRIMARY KEY, got %s", def.name);
-                    checkNull(selectorFactory, "Functions are only supported on the last element of the GROUP BY clause");
                 }
 
                 while (true)
