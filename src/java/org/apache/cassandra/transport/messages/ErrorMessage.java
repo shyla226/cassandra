@@ -24,8 +24,10 @@ import java.util.HashMap;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.CodecException;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -368,7 +370,7 @@ public class ErrorMessage extends Message.Response
             e = e.getCause();
         }
 
-        if (e instanceof TransportException)
+        if (e instanceof TransportException || (e instanceof RuntimeException && e.getCause() instanceof TransportException))
         {
             ErrorMessage message = new ErrorMessage((TransportException) e, streamId);
             if (e instanceof ProtocolException)
