@@ -61,6 +61,13 @@ Upgrading
       options are used. See CASSANDRA-13006 for more details
     - DSE is logging by default a heap histogram on OutOfMemoryError. To disable that behavior
       set the 'cassandra.printHeapHistogramOnOutOfMemoryError' System property to 'false'.
+    - Authentication and authorization caches have been optimized and the credentials cache no longer
+      exists. Remove the configuration entries credentials_validity_in_ms, credentials_cache_max_entries
+      and credentials_update_interval_in_ms from the configuration. Further, the defaults for
+      roles_validity_in_ms and permissions_validity_in_ms have been raised from 2 seconds to 2 minutes
+      as DCL changes (role and privilege changes) cause an invalidation of the relevant cache entries on
+      all nodes. Consider checking the values of roles_validity_in_ms and permissions_validity_in_ms for
+      your environment and use case.
 
 
 DSE 5.1.3
