@@ -46,6 +46,8 @@ Operations
 
 Upgrading
 ---------
+    - FOR, RESTRICT and UNRESTRICT are now reserved keywords. In the unlikely case you were using one of them as an
+      identifier (for a keyspace, a table or a column), you will now have to double-quote them.
     - Upgrades from DSE 5.0 might have produced unnecessary schema migrations while
       there was at least one DSE 5.0 node in the cluster. It is therefore highly
       recommended to upgrade from DSE 5.0 to at least DSE 5.1.6. The root cause of
