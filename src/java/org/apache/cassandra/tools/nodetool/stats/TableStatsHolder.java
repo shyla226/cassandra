@@ -171,16 +171,7 @@ public class TableStatsHolder implements StatsHolder
                 if (leveledSStables != null)
                 {
                     statsTable.isLeveledSstable = true;
-
-                    for (int level = 0; level < leveledSStables.length; level++)
-                    {
-                        int count = leveledSStables[level];
-                        long maxCount = 4L; // for L0
-                        if (level > 0)
-                            maxCount = (long) Math.pow(table.getLevelFanoutSize(), level);
-                        // show max threshold for level when exceeded
-                        statsTable.sstablesInEachLevel.add(count + ((count > maxCount) ? "/" + maxCount : ""));
-                    }
+                    fillSStablesPerLevel(leveledSStables, table.getLevelFanoutSize(), statsTable.sstablesInEachLevel);
                 }
 
                 Long memtableOffHeapSize = null;
@@ -293,6 +284,19 @@ public class TableStatsHolder implements StatsHolder
                 statsKeyspace.tables.add(statsTable);
             }
             keyspaces.add(statsKeyspace);
+        }
+    }
+
+    public static void fillSStablesPerLevel(int[] leveledSStables, int levelFanoutSize, List<String> sstablesInEachLevel)
+    {
+        for (int level = 0; level < leveledSStables.length; level++)
+        {
+            int count = leveledSStables[level];
+            long maxCount = 4L; // for L0
+            if (level > 0)
+                maxCount = (long) Math.pow(levelFanoutSize, level);
+            // show max threshold for level when exceeded
+            sstablesInEachLevel.add(count + ((count > maxCount) ? "/" + maxCount : ""));
         }
     }
 
