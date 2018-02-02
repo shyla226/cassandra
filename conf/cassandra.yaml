@@ -763,7 +763,7 @@ column_index_cache_size_in_kb: 2
 # concurrent_validations: 0
 
 # Number of simultaneous materialized view builder tasks to allow.
-concurrent_materialized_view_builders: 1
+concurrent_materialized_view_builders: 2
 
 # Throttles compaction to the given total throughput across the entire
 # system. The faster you insert data, the faster you need to compact in
