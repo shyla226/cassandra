@@ -18,18 +18,18 @@
 
 package org.apache.cassandra.concurrent;
 
-/**
- * Created by blambov on 11.08.17.
- */
 public interface TPCLimitsMBean
 {
     /**
-     * Maximum size of the pending queue.
-     *
-     * "Pendable" task types (ones that start an operation, e.g. READ and WRITE) are moved to this queue if the
-     * queue size above is reached. When this is full we will start rejecting pendable tasks.
+     * Returns the max number of permitted pending requests before potentially enabling backpressure (depending on the
+     * type of event loop and tasks).
      */
-    int maxPendingQueueSize();
+    int getMaxPendingRequests();
+
+    /**
+     * Adjusts the number of permitted pending requests.
+     */
+    void setMaxPendingRequests(int maxPendingRequests);
 
     /**
      * Returns the number of permitted concurrent requests.

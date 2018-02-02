@@ -54,7 +54,11 @@ public class TpStatsHolder implements StatsHolder
 
             HashMap<String, Object> threadPool = new HashMap<>();
             threadPool.put("ActiveTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "ActiveTasks"));
-            threadPool.put("PendingTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "PendingTasks"));
+            threadPool.put("PendingTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "PendingTasks")
+                            + " ("
+                            + probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "TotalBackpressureCountedTasks")
+                            + ")");
+            threadPool.put("DelayedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "TotalBackpressureDelayedTasks"));
             threadPool.put("CompletedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "CompletedTasks"));
             threadPool.put("CurrentlyBlockedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "CurrentlyBlockedTasks"));
             threadPool.put("TotalBlockedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "TotalBlockedTasks"));

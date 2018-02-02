@@ -42,7 +42,12 @@ public interface TPCMetrics extends TPCLimitsMBean
     public long activeTaskCount(TPCTaskType stage);
     public long pendingTaskCount(TPCTaskType stage);
     public long blockedTaskCount(TPCTaskType stage);
-    public long backpressuredTaskCount();
+
+    // Backpressure related counters/metrics: track how many pending tasks are counted for backpressure, and how many
+    // are delayed due to backpressure being active.
+    public long backpressureCountedTaskCount();
+    public void backpressureDelayedTaskCount(int adjustment);
+    public long backpressureDelayedTaskCount();
 
     /**
      * The maximum size of the TPC queue, which is calculated by subtracting the number of async read outstanding

@@ -74,8 +74,8 @@ public class StatusLogger
         MBeanServer server = ManagementFactory.getPlatformMBeanServer();
 
         // everything from o.a.c.concurrent
-        String headerFormat = "%-" + TpStatsPrinter.longestTPCStatNameLength() + "s%10s%10s%15s%10s%18s%n";
-        logger.info(String.format(headerFormat, "Pool Name", "Active", "Pending", "Completed", "Blocked", "All Time Blocked"));
+        String headerFormat = "%-" + TpStatsPrinter.longestTPCStatNameLength() + "s%12s%30s%10s%15s%10s%18s%n";
+        logger.info(String.format(headerFormat, "Pool Name", "Active", "Pending (w/Backpressure)", "Delayed", "Completed", "Blocked", "All Time Blocked"));
 
         Multimap<String, String> jmxThreadPools = ThreadPoolMetrics.getJmxThreadPools(server);
         for (String poolKey : jmxThreadPools.keySet())
@@ -86,7 +86,11 @@ public class StatusLogger
                 logger.info(String.format(headerFormat,
                                           poolValue,
                                           ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "ActiveTasks"),
-                                          ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "PendingTasks"),
+                                          ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "PendingTasks")
+                                              + " ("
+                                              + ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "TotalBackpressureCountedTasks")
+                                              + ")",
+                                          ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "TotalBackpressureDelayedTasks"),
                                           ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "CompletedTasks"),
                                           ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "CurrentlyBlockedTasks"),
                                           ThreadPoolMetrics.getJmxMetric(server, poolKey, poolValue, "TotalBlockedTasks")));

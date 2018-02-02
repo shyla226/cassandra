@@ -247,7 +247,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         @Override
         public boolean shouldBackpressure()
         {
-            return metrics.backpressuredTaskCount() >= MAX_PENDING;
+            return metrics.backpressureCountedTaskCount() >= MAX_PENDING;
         }
 
         @Override

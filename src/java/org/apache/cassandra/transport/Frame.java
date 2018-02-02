@@ -30,7 +30,9 @@ import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.MessageToMessageEncoder;
 import io.netty.util.Attribute;
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCEventLoop;
+import org.apache.cassandra.concurrent.TPCMetrics;
 import org.apache.cassandra.concurrent.TPCRunnable;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -369,17 +371,19 @@ public class Frame
      * The async frame processor schedules frames for async decoding if the event loop asks to backpressure, in order
      * to give more CPU power to inflight requests and in particular reduce heap usage (and related GC activity).
      * <p>
-     * Please note actual async processing only works with Epoll event loops ans tasks supporting
+     * Please note actual async processing only works with Epoll event loops and tasks supporting
      * {@link TPCTaskType#backpressured()}, otherwise decoding will be always processed synchronously.
      */
     public static class AsyncProcessor implements Runnable
     {
         private final TPCEventLoop eventLoop;
+        private final TPCMetrics metrics;
         private final SpscArrayQueue<Pair<ChannelHandlerContext, Frame>> frames;
 
         public AsyncProcessor(TPCEventLoop eventLoop)
         {
             this.eventLoop = eventLoop;
+            this.metrics = TPC.metrics(eventLoop.coreId());
             this.frames = new SpscArrayQueue<>(1 << 16);
         }
 
@@ -399,6 +403,8 @@ public class Frame
                 // Otherwise try offering and fail if unable to:
                 if (!frames.offer(Pair.create(context, frame)))
                     throw new OverloadedException("Too many pending client requests, dropping the current request.");
+
+                metrics.backpressureDelayedTaskCount(1);
             }
         }
 
@@ -406,6 +412,7 @@ public class Frame
         public void run()
         {
             // Consume frames and pass them to the next handler in the channel pipeline:
+            int processed = 0;
             while (!frames.isEmpty() && !eventLoop.shouldBackpressure())
             {
                 Pair<ChannelHandlerContext, Frame> contextAndFrame = frames.poll();
@@ -413,7 +420,9 @@ public class Frame
                     contextAndFrame.left.fireChannelRead(contextAndFrame.right);
                 else
                     contextAndFrame.right.release();
+                processed++;
             }
+            metrics.backpressureDelayedTaskCount(-processed);
             // If we didn't drain the whole queue, reschedule:
             if (!frames.isEmpty())
                 schedule();

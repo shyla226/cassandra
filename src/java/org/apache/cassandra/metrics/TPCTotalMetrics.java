@@ -40,6 +40,10 @@ public class TPCTotalMetrics
     public final Gauge<Integer> pendingTasks;
     /** Number of blocked tasks. */
     public final Gauge<Long> blockedTasks;
+    /** Number of backpressure-enabled tasks. */
+    public final Gauge<Long> backpressureCountedTasks;
+    /** Number of backpressure-delayed tasks. */
+    public final Gauge<Long> backpressureDelayedTasks;
 
     public final TPCMetrics metrics;
 
@@ -87,6 +91,20 @@ public class TPCTotalMetrics
                 return getBlockedTotal();
             }
         });
+        backpressureCountedTasks = Metrics.register(factory.createMetricName("TotalBackpressureCountedTasksGauge"), new Gauge<Long>()
+        {
+            public Long getValue()
+            {
+                return getBackpressureCountedTotal();
+            }
+        });
+        backpressureDelayedTasks = Metrics.register(factory.createMetricName("TotalBackpressureDelayedTasksGauge"), new Gauge<Long>()
+        {
+            public Long getValue()
+            {
+                return getBackpressureDelayedTotal();
+            }
+        });
 
         stages = new EnumMap<>(TPCTaskType.class);
         for (TPCTaskType s : TPCTaskType.values())
@@ -127,6 +145,16 @@ public class TPCTotalMetrics
             if (s.includedInTotals())
                 blocked += metrics.blockedTaskCount(s);
         return blocked;
+    }
+
+    private long getBackpressureCountedTotal()
+    {
+        return metrics.backpressureCountedTaskCount();
+    }
+
+    private long getBackpressureDelayedTotal()
+    {
+        return metrics.backpressureDelayedTaskCount();
     }
 
     public void release()

@@ -40,10 +40,15 @@ public class TPCMetricsAndLimits implements TPCMetrics
     private final TaskStats[] stats;
 
     AtomicLong externallyCountedTasks = new AtomicLong();
-    AtomicLong backpressuredTasks = new AtomicLong();
+    AtomicLong backpressureCountedTasks = new AtomicLong();
+    LongAdder backpressureDelayedTasks = new LongAdder();
 
+    // This max value is based on queues size in EpollTPCEventLoopGroup: this kind of hidden dependency is not great
+    // design-wise and we can refactor later, let's not shoot ourselves in the feet for now.
+    private final static int MAX_REQUESTS_SIZE = 1 << 16;
+    //
     int maxConcurrentRequests = DatabaseDescriptor.getTPCConcurrentRequestsLimit();
-    int maxPendingQueueSize = DatabaseDescriptor.getTPCPendingRequestsLimit();
+    int maxPendingRequests = DatabaseDescriptor.getTPCPendingRequestsLimit();
 
     public TPCMetricsAndLimits()
     {
@@ -97,7 +102,7 @@ public class TPCMetricsAndLimits implements TPCMetrics
         TaskStats stat = getTaskStats(stage);
         stat.pendingTasks.add(adjustment);
         if (stage.backpressured())
-            backpressuredTasks.addAndGet(adjustment);
+            backpressureCountedTasks.addAndGet(adjustment);
     }
 
     public void blocked(TPCTaskType stage)
@@ -137,9 +142,21 @@ public class TPCMetricsAndLimits implements TPCMetrics
     }
 
     @Override
-    public long backpressuredTaskCount()
+    public long backpressureCountedTaskCount()
     {
-        return backpressuredTasks.get();
+        return backpressureCountedTasks.get();
+    }
+
+    @Override
+    public void backpressureDelayedTaskCount(int adjustment)
+    {
+        backpressureDelayedTasks.add(adjustment);
+    }
+
+    @Override
+    public long backpressureDelayedTaskCount()
+    {
+        return backpressureDelayedTasks.longValue();
     }
 
     public int maxQueueSize()
@@ -148,9 +165,17 @@ public class TPCMetricsAndLimits implements TPCMetrics
         return (int) Math.max(maxConcurrentRequests - activeReads, 0);
     }
 
-    public int maxPendingQueueSize()
+    public int getMaxPendingRequests()
     {
-        return maxPendingQueueSize;
+        return maxPendingRequests;
+    }
+
+    public void setMaxPendingRequests(int maxPendingRequests)
+    {
+        if (maxPendingRequests > MAX_REQUESTS_SIZE)
+            throw new IllegalArgumentException("Max pending requests must be <= " + MAX_REQUESTS_SIZE);
+
+        this.maxPendingRequests = maxPendingRequests;
     }
 
     public int getMaxConcurrentRequests()
@@ -160,6 +185,9 @@ public class TPCMetricsAndLimits implements TPCMetrics
 
     public void setMaxConcurrentRequests(int maxConcurrentRequests)
     {
+        if (maxConcurrentRequests > MAX_REQUESTS_SIZE)
+            throw new IllegalArgumentException("Max concurrent requests must be <= " + MAX_REQUESTS_SIZE);
+
         this.maxConcurrentRequests = maxConcurrentRequests;
     }
 }
