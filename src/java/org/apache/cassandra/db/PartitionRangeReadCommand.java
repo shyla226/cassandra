@@ -49,6 +49,7 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Request;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.pager.*;
@@ -98,6 +99,9 @@ public class PartitionRangeReadCommand extends ReadCommand
     {
         super(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index, readType);
         this.dataRange = dataRange;
+
+        if (SchemaConstants.isInternalKeyspace(metadata.keyspace))
+            readType = TPCTaskType.READ_RANGE_INTERNAL;
 
         this.scheduler = scheduler == null ? TPC.getNextTPCScheduler() : scheduler;
         this.requestExecutor = this.scheduler.forTaskType(readType);

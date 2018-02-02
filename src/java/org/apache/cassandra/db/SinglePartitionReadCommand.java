@@ -58,6 +58,7 @@ import org.apache.cassandra.net.Request;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.ReadRepairDecision;
@@ -91,6 +92,7 @@ public class SinglePartitionReadCommand extends ReadCommand
     private final transient TPCScheduler scheduler;
     private final transient TracingAwareExecutor requestExecutor;
     private final transient TracingAwareExecutor responseExecutor;
+    private final transient TPCTaskType readType;
 
     /**
      * Race condition when ReadCommand is re-used.
@@ -118,9 +120,13 @@ public class SinglePartitionReadCommand extends ReadCommand
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
 
+        if (SchemaConstants.isInternalKeyspace(metadata.keyspace))
+            readType = TPCTaskType.READ_INTERNAL;
+
         this.scheduler = TPC.bestTPCScheduler();
         this.requestExecutor = scheduler.forTaskType(readType);
         this.responseExecutor = scheduler.forTaskType(TPCTaskType.READ_RESPONSE);
+        this.readType = readType;
     }
 
     public Request.Dispatcher<SinglePartitionReadCommand, ReadResponse> dispatcherTo(Collection<InetAddress> endpoints)
@@ -463,7 +469,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         int coreId =  TPC.getNextCore();
         boolean isLocalCore = coreId == localCore;
 
-        if (isLocalCore)
+        if (isLocalCore || readType == TPCTaskType.READ_INTERNAL)
         {
             return queryMemtableAndDisk(cfs, executionController, metricsCollector)
                    .doOnClose(() -> updateMetrics(cfs.metric, metricsCollector));
