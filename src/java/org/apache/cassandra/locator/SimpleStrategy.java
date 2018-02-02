@@ -46,7 +46,7 @@ public class SimpleStrategy extends AbstractReplicationStrategy
     {
         int replicas = getReplicationFactor();
         ArrayList<Token> tokens = metadata.sortedTokens();
-        ArrayList<InetAddress> endpoints = new ArrayList<InetAddress>(replicas);
+        List<InetAddress> endpoints = new ArrayList<InetAddress>(replicas);
 
         if (tokens.isEmpty())
             return endpoints;

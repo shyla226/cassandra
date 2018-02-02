@@ -51,6 +51,8 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.lang3.StringUtils;
 
@@ -83,6 +85,7 @@ import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.sstable.SSTableLoader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.*;
 import org.apache.cassandra.metrics.StorageMetrics;
@@ -4035,16 +4038,35 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * specified key i.e for replication.
      *
      * @param keyspace keyspace name also known as keyspace
-     * @param pos position for which we need to find the endpoint
-     * @param liveEps the list of endpoints to add to
+     * @param key      key for which we need to find the endpoint
+     * @return the endpoint responsible for this key
      */
-    public static void addLiveNaturalEndpointsToList(Keyspace keyspace, RingPosition pos, ArrayList<InetAddress> liveEps)
+    public List<InetAddress> getLiveNaturalEndpoints(Keyspace keyspace, ByteBuffer key)
     {
-        List<InetAddress> endpoints = keyspace.getReplicationStrategy().getCachedNaturalEndpoints(pos);
+        return getLiveNaturalEndpoints(keyspace, tokenMetadata.decorateKey(key));
+    }
 
-        for (int i = 0, size = endpoints.size(); i < size; i++)
+    public List<InetAddress> getLiveNaturalEndpoints(Keyspace keyspace, RingPosition pos)
+    {
+        List<InetAddress> liveEps = new ArrayList<>();
+        getLiveNaturalEndpoints(keyspace, pos, liveEps);
+        return liveEps;
+    }
+
+    /**
+     * This method attempts to return N endpoints that are responsible for storing the
+     * specified key i.e for replication.
+     *
+     * @param keyspace keyspace name also known as keyspace
+     * @param pos position for which we need to find the endpoint
+     * @param liveEps the list of endpoints to mutate
+     */
+    public void getLiveNaturalEndpoints(Keyspace keyspace, RingPosition pos, List<InetAddress> liveEps)
+    {
+        List<InetAddress> endpoints = keyspace.getReplicationStrategy().getNaturalEndpoints(pos);
+
+        for (InetAddress endpoint : endpoints)
         {
-            InetAddress endpoint = endpoints.get(i);
             if (FailureDetector.instance.isAlive(endpoint))
                 liveEps.add(endpoint);
         }

@@ -18,7 +18,6 @@
 package org.apache.cassandra.db;
 
 import java.net.InetAddress;
-import java.util.ArrayList;
 import java.util.List;
 
 import javax.annotation.Nullable;
@@ -156,27 +155,12 @@ public class ReadContext
      * Given the live replicas for the read, return the subset that should actually be queried based on the consistency
      * level and other parameters.
      *
-     * @param scratchLiveEndpoints the live replicas for the read; the list is effectively stack allocated and MUST be
-     * eventually copied if escaped.
+     * @param liveEndpoints the live replicas for the read.
      * @return the subset of {@code liveEndpoints} to which the query should be sent (this can be all endpoints).
      */
-    public ArrayList<InetAddress> filterForQuery(ArrayList<InetAddress> scratchLiveEndpoints)
+    public List<InetAddress> filterForQuery(List<InetAddress> liveEndpoints)
     {
-        return consistencyLevel.filterForQuery(keyspace, scratchLiveEndpoints, readRepairDecision);
-    }
-
-    /**
-     * Given the live replicas for the read, populate the provided target endpoints list with the subset that should
-     * actually be queried based on the consistency level and other parameters.
-     *
-     * @param scratchLiveEndpoints the live replicas for the read; the list is effectively stack allocated and MUST be
-     * eventually copied if escaped.
-     * @param scratchTargetEndpoints the list of endpoints to populate for querying; the list is effectively stack
-     * allocated and MUST be eventually copied if escaped.
-     */
-    public void populateForQuery(ArrayList<InetAddress> scratchLiveEndpoints, ArrayList<InetAddress> scratchTargetEndpoints)
-    {
-        consistencyLevel.populateForQuery(keyspace, scratchLiveEndpoints, readRepairDecision, scratchTargetEndpoints);
+        return consistencyLevel.filterForQuery(keyspace, liveEndpoints, readRepairDecision);
     }
 
     /**

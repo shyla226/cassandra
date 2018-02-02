@@ -1150,8 +1150,8 @@ public class StorageProxy implements StorageProxyMBean
     private static InetAddress findSuitableEndpoint(Keyspace keyspace, DecoratedKey key, ConsistencyLevel cl) throws UnavailableException
     {
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
-        ArrayList<InetAddress> endpoints = new ArrayList<>();
-        StorageService.instance.addLiveNaturalEndpointsToList(keyspace, key, endpoints);
+        List<InetAddress> endpoints = new ArrayList<>();
+        StorageService.instance.getLiveNaturalEndpoints(keyspace, key, endpoints);
 
         // CASSANDRA-13043: filter out those endpoints not accepting clients yet, maybe because still bootstrapping
         endpoints.removeIf(endpoint -> !StorageService.instance.isRpcReady(endpoint));
@@ -1570,30 +1570,21 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    /**
-     * @param liveEndpoints an empty list to use as a container for the sorted result
-     */
-    public static void addLiveSortedEndpointsToList(Keyspace keyspace, RingPosition pos, ArrayList<InetAddress> liveEndpoints)
+    public static List<InetAddress> getLiveSortedEndpoints(Keyspace keyspace, RingPosition pos)
     {
-        StorageService.instance.addLiveNaturalEndpointsToList(keyspace, pos, liveEndpoints);
+        List<InetAddress> liveEndpoints = StorageService.instance.getLiveNaturalEndpoints(keyspace, pos);
         DatabaseDescriptor.getEndpointSnitch().sortByProximity(FBUtilities.getBroadcastAddress(), liveEndpoints);
-    }
-
-    public static ArrayList<InetAddress> getLiveSortedEndpoints(Keyspace keyspace, RingPosition pos)
-    {
-        ArrayList<InetAddress> liveEndpoints = new ArrayList<>();
-        addLiveSortedEndpointsToList(keyspace, pos, liveEndpoints);
         return liveEndpoints;
     }
 
-    private static ArrayList<InetAddress> intersection(List<InetAddress> l1, List<InetAddress> l2)
+    private static List<InetAddress> intersection(List<InetAddress> l1, List<InetAddress> l2)
     {
         // Note: we don't use Guava Sets.intersection() for 3 reasons:
         //   1) retainAll would be inefficient if l1 and l2 are large but in practice both are the replicas for a range and
         //   so will be very small (< RF). In that case, retainAll is in fact more efficient.
         //   2) we do ultimately need a list so converting everything to sets don't make sense
         //   3) l1 and l2 are sorted by proximity. The use of retainAll  maintain that sorting in the result, while using sets wouldn't.
-        ArrayList<InetAddress> inter = new ArrayList<InetAddress>(l1);
+        List<InetAddress> inter = new ArrayList<InetAddress>(l1);
         inter.retainAll(l2);
         return inter;
     }
@@ -1666,7 +1657,7 @@ public class StorageProxy implements StorageProxyMBean
                 return endOfData();
 
             AbstractBounds<PartitionPosition> range = ranges.next();
-            ArrayList<InetAddress> liveEndpoints = getLiveSortedEndpoints(keyspace, range.right);
+            List<InetAddress> liveEndpoints = getLiveSortedEndpoints(keyspace, range.right);
             return new RangeForQuery(range, liveEndpoints, params.filterForQuery(liveEndpoints));
         }
     }
@@ -1706,7 +1697,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 RangeForQuery next = ranges.peek();
 
-                ArrayList<InetAddress> merged = intersection(current.liveEndpoints, next.liveEndpoints);
+                List<InetAddress> merged = intersection(current.liveEndpoints, next.liveEndpoints);
 
                 // Check if there is enough endpoint for the merge to be possible.
                 if (!consistency.isSufficientLiveNodes(keyspace, merged))
