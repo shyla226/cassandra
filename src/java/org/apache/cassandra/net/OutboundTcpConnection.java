@@ -268,8 +268,6 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                     if (m == CLOSE_SENTINEL)
                     {
                         logger.trace("Disconnecting because CLOSE_SENTINEL detected");
-                        if (out != null)
-                            out.flush();
                         disconnect();
                         if (isStopped)
                             break outer;
@@ -454,6 +452,8 @@ public class OutboundTcpConnection extends FastThreadLocalThread
         {
             try
             {
+                if (out != null)
+		    out.flush();
                 socket.close();
                 logger.debug("Socket to {} closed", poolReference.endPoint());
             }
