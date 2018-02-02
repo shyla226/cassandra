@@ -888,7 +888,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             appStates.put(ApplicationState.HOST_ID, valueFactory.hostId(localHostId));
             appStates.put(ApplicationState.NATIVE_TRANSPORT_ADDRESS, valueFactory.rpcaddress(FBUtilities.getNativeTransportBroadcastAddress()));
             appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
-            appStates.put(ApplicationState.STATUS, valueFactory.hibernate(true));
+            // During bootstrapping, bootstrapping node should be marked as alive by peers before peers calculating pending
+            // ranges which causes WTE due to "dead" pending endpoints.
+            if (!shouldBootstrap())
+                appStates.put(ApplicationState.STATUS, valueFactory.hibernate(true));
 
             appStates.put(ApplicationState.NATIVE_TRANSPORT_PORT, valueFactory.nativeTransportPort(DatabaseDescriptor.getNativeTransportPort()));
             appStates.put(ApplicationState.NATIVE_TRANSPORT_PORT_SSL, valueFactory.nativeTransportPortSSL(DatabaseDescriptor.getNativeTransportPortSSL()));
