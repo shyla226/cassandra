@@ -86,7 +86,11 @@ public final class ReservedKeywords
                                                      "NAN",
                                                      "INFINITY",
                                                      "OR",
-                                                     "REPLACE" };
+                                                     "REPLACE",
+                                                     "DEFAULT",
+                                                     "UNSET",
+                                                     "MBEAN",
+                                                     "MBEANS"};
 
     private static final Set<String> reservedSet = new CopyOnWriteArraySet<>(Arrays.asList(reservedKeywords));
 
