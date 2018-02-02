@@ -129,7 +129,7 @@ public enum TPCTaskType
     /** Authorization request */
     AUTHORIZATION(Features.ALWAYS_COUNT),
     /** Scheduled speculative read */
-    READ_SPECULATE(Features.TIMED),
+    READ_SPECULATE(Features.ALWAYS_COUNT),
     /** Scheduled timeout task */
     TIMED_TIMEOUT(Features.TIMED),
     /** Unknown timed task */

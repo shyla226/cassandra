@@ -57,6 +57,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
     private final long deadlineNanos;
     private final Supplier<Flow<T>> timeoutSupplier;
     private final Supplier<StagedScheduler> schedulerSupplier;
+    private final Supplier<Consumer<Flow<T>>> notification;
 
     private volatile FlowSubscriber<T> subscriber;
     private volatile FlowSubscriptionRecipient subscriptionRecipient;
@@ -65,13 +66,14 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
 
     private final AtomicBoolean subscribed = new AtomicBoolean(false);
 
-    DeferredFlowImpl(long deadlineNanos, Supplier<StagedScheduler> schedulerSupplier, Supplier<Flow<T>> timeoutSupplier)
+    DeferredFlowImpl(long deadlineNanos, Supplier<StagedScheduler> schedulerSupplier, Supplier<Flow<T>> timeoutSupplier, Supplier<Consumer<Flow<T>>> notification)
     {
         assert schedulerSupplier != null;
         this.source = new AtomicReference<>(null);
         this.deadlineNanos = deadlineNanos;
         this.timeoutSupplier = timeoutSupplier;
         this.schedulerSupplier = schedulerSupplier;
+        this.notification = notification;
     }
 
     public void requestFirst(FlowSubscriber<T> subscriber, FlowSubscriptionRecipient subscriptionRecipient)
@@ -106,6 +108,17 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
         {
             if (logger.isTraceEnabled())
                 logger.trace("{} - got source", DeferredFlowImpl.this.hashCode());
+
+            Consumer<Flow<T>> action = notification != null ? notification.get() : null;
+            if (action != null)
+                try
+                {
+                    action.accept(value);
+                }
+                catch(Throwable ex)
+                {
+                    logger.warn("onSource notification error: " + ex.getMessage(), ex);
+                }
 
             maybeSubscribe();
             return true;
