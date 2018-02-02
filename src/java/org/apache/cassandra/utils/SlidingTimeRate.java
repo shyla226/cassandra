@@ -22,8 +22,6 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -35,7 +33,6 @@ public class SlidingTimeRate
 {
     private final ConcurrentSkipListMap<Long, AtomicInteger> counters = new ConcurrentSkipListMap<>();
     private final AtomicLong lastCounterTimestamp = new AtomicLong(0);
-    private final ReadWriteLock pruneLock = new ReentrantReadWriteLock();
     private final long sizeInMillis;
     private final long precisionInMillis;
     private final TimeSource timeSource;
@@ -61,40 +58,29 @@ public class SlidingTimeRate
      */
     public void update(int delta)
     {
-        pruneLock.readLock().lock();
-        try
+        while (true)
         {
-            while (true)
+            long now = timeSource.currentTimeMillis();
+            long lastTimestamp = lastCounterTimestamp.get();
+            boolean isWithinPrecisionRange = (now - lastTimestamp) < precisionInMillis;
+            AtomicInteger lastCounter = counters.get(lastTimestamp);
+            // If there's a valid counter for the current last timestamp, and we're in the precision range,
+            // update such counter:
+            if (lastCounter != null && isWithinPrecisionRange)
             {
-                long now = timeSource.currentTimeMillis();
-                long lastTimestamp = lastCounterTimestamp.get();
-                boolean isWithinPrecisionRange = (now - lastTimestamp) < precisionInMillis;
-                AtomicInteger lastCounter = counters.get(lastTimestamp);
-                // If there's a valid counter for the current last timestamp, and we're in the precision range,
-                // update such counter:
-                if (lastCounter != null && isWithinPrecisionRange)
-                {
-                    lastCounter.addAndGet(delta);
-
-                    break;
-                }
-                // Else if there's no counter or we're past the precision range, try to create a new counter,
-                // but only the thread updating the last timestamp will create a new counter:
-                else if (lastCounterTimestamp.compareAndSet(lastTimestamp, now))
-                {
-                    AtomicInteger existing = counters.putIfAbsent(now, new AtomicInteger(delta));
-                    if (existing != null)
-                    {
-                        existing.addAndGet(delta);
-                    }
-
-                    break;
-                }
+                lastCounter.addAndGet(delta);
+                break;
             }
-        }
-        finally
-        {
-            pruneLock.readLock().unlock();
+            // Else if there's no counter or we're past the precision range, try to create a new counter,
+            // but only the thread updating the last timestamp will create a new counter:
+            else if (lastCounterTimestamp.compareAndSet(lastTimestamp, now))
+            {
+                AtomicInteger existing = counters.putIfAbsent(now, new AtomicInteger(delta));
+                if (existing != null)
+                    existing.addAndGet(delta);
+
+                break;
+            }
         }
     }
 
@@ -104,32 +90,23 @@ public class SlidingTimeRate
      */
     public double get(long toAgo, TimeUnit unit)
     {
-        pruneLock.readLock().lock();
-        try
-        {
-            long toAgoInMillis = TimeUnit.MILLISECONDS.convert(toAgo, unit);
-            Preconditions.checkArgument(toAgoInMillis < sizeInMillis, "Cannot get rate in the past!");
+        long toAgoInMillis = TimeUnit.MILLISECONDS.convert(toAgo, unit);
+        Preconditions.checkArgument(toAgoInMillis < sizeInMillis, "Cannot get rate in the past!");
 
-            long now = timeSource.currentTimeMillis();
-            long sum = 0;
-            ConcurrentNavigableMap<Long, AtomicInteger> tailCounters = counters
-                    .tailMap(now - sizeInMillis, true)
-                    .headMap(now - toAgoInMillis, true);
-            for (AtomicInteger i : tailCounters.values())
-            {
-                sum += i.get();
-            }
+        long now = timeSource.currentTimeMillis();
+        long sum = 0;
+        ConcurrentNavigableMap<Long, AtomicInteger> tailCounters = counters
+            .tailMap(now - sizeInMillis, true)
+            .headMap(now - toAgoInMillis, true);
 
-            double rateInMillis = sum == 0
-                                  ? sum
-                                  : sum / (double) Math.max(1000, (now - toAgoInMillis) - tailCounters.firstKey());
-            double multiplier = TimeUnit.MILLISECONDS.convert(1, unit);
-            return rateInMillis * multiplier;
-        }
-        finally
-        {
-            pruneLock.readLock().unlock();
-        }
+        for (AtomicInteger i : tailCounters.values())
+            sum += i.get();
+
+        double multiplier = TimeUnit.MILLISECONDS.convert(1, unit);
+        double rateInMillis = sum == 0
+                              ? sum
+                              : sum / (double) Math.max(multiplier, (now - toAgoInMillis) - tailCounters.firstKey());
+        return rateInMillis * multiplier;
     }
 
     /**
@@ -145,16 +122,8 @@ public class SlidingTimeRate
      */
     public void prune()
     {
-        pruneLock.writeLock().lock();
-        try
-        {
-            long now = timeSource.currentTimeMillis();
-            counters.headMap(now - sizeInMillis, false).clear();
-        }
-        finally
-        {
-            pruneLock.writeLock().unlock();
-        }
+        long now = timeSource.currentTimeMillis();
+        counters.headMap(now - sizeInMillis, false).clear();
     }
 
     @VisibleForTesting

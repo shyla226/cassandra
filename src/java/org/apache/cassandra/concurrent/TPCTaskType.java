@@ -143,7 +143,9 @@ public enum TPCTaskType
     /** Hint dispatch request */
     HINT_DISPATCH(Features.PENDABLE),
     /** Hint dispatch response */
-    HINT_RESPONSE;
+    HINT_RESPONSE,
+    /** Scheduled network backpressure */
+    NETWORK_BACKPRESSURE(Features.BACKPRESSURED);
 
     // Using the constants in the enum class causes "Illegal forward reference", using a nested static class works.
     private static class Features
