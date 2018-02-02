@@ -291,8 +291,6 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
                     if (m == Message.CLOSE_SENTINEL)
                     {
                         logger.trace("Disconnecting because CLOSE_SENTINEL detected");
-                        if (out != null)
-                            out.flush();
                         disconnect();
                         if (isStopped)
                             break outer;
@@ -432,6 +430,8 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
         {
             try
             {
+                if (out != null)
+		    out.flush();
                 socket.close();
                 logger.debug("Socket to {} closed", poolReference.endPoint());
             }
