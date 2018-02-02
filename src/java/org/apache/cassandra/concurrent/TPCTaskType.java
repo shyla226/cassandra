@@ -56,6 +56,8 @@ public enum TPCTaskType
     READ_TIMEOUT(Features.EXCLUDE_FROM_TOTALS),
     /** Single-partition read request that will be first scheduled on an eventloop */
     READ_DEFERRED(Features.PENDABLE),
+    /** Reads to internal tables **/
+    READ_INTERNAL(Features.ALWAYS_COUNT),
     /** Single-partition read response, not always counted */
     READ_RESPONSE("READ_SWITCH_FOR_RESPONSE"),
     /** Partition range read request from local node and directly generated from clients */
@@ -67,6 +69,8 @@ public enum TPCTaskType
     READ_RANGE_REMOTE(Features.PENDABLE),
     /** Partition range read originating from NodeSync**/
     READ_RANGE_NODESYNC(Features.PENDABLE),
+    /** Range reads to internal tables **/
+    READ_RANGE_INTERNAL(Features.ALWAYS_COUNT),
     /** Partition range read response, not always counted */
     READ_RANGE_RESPONSE("READ_RANGE_SWITCH_FOR_RESPONSE"),
     /** Switching thread to read from an iterator */
@@ -82,6 +86,8 @@ public enum TPCTaskType
      * via frame decoding (see the FRAME_DECODE type), while remote requests are always executed straight away, hence
      * the latter could starve the former */
     WRITE_REMOTE(Features.PENDABLE),
+    /** Writes to internal tables **/
+    WRITE_INTERNAL(Features.ALWAYS_COUNT),
     /** Write response, not always counted */
     WRITE_RESPONSE("WRITE_SWITCH_FOR_RESPONSE"),
     /** Write issued to defragment data that required too many sstables to read */

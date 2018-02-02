@@ -42,6 +42,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -115,6 +116,9 @@ public class Mutation implements IMutation, SchedulableMessage
         this.modifications = modifications;
         for (PartitionUpdate pu : modifications.values())
             cdcEnabled |= pu.metadata().params.cdc;
+
+        if (SchemaConstants.isInternalKeyspace(keyspaceName))
+            writeType = TPCTaskType.WRITE_INTERNAL;
 
         this.scheduler = createScheduler(keyspaceName, key);
         this.requestExecutor = scheduler == null ? null : scheduler.forTaskType(writeType);

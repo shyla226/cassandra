@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.schema;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -39,6 +38,8 @@ public final class SchemaConstants
     public static final String TRACE_KEYSPACE_NAME = "system_traces";
     public static final String AUTH_KEYSPACE_NAME = "system_auth";
     public static final String DISTRIBUTED_KEYSPACE_NAME = "system_distributed";
+
+    public static final String DSE_INTERNAL_KEYSPACE_PREFIX = "dse_";
 
     /* system keyspace names (the ones with LocalStrategy replication strategy) */
     public static final Set<String> LOCAL_SYSTEM_KEYSPACE_NAMES =
@@ -97,5 +98,10 @@ public final class SchemaConstants
     public static boolean isUserKeyspace(String keyspaceName)
     {
         return !isLocalSystemKeyspace(keyspaceName) && !isReplicatedSystemKeyspace(keyspaceName);
+    }
+
+    public static boolean isInternalKeyspace(String keyspaceName)
+    {
+        return isLocalSystemKeyspace(keyspaceName) || isReplicatedSystemKeyspace(keyspaceName) || keyspaceName.toLowerCase().startsWith(DSE_INTERNAL_KEYSPACE_PREFIX);
     }
 }
