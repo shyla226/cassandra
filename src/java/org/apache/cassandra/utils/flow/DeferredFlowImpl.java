@@ -18,9 +18,12 @@
 
 package org.apache.cassandra.utils.flow;
 
+import org.apache.cassandra.concurrent.TPCTimeoutTask;
+
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.concurrent.StagedScheduler;
@@ -28,8 +31,6 @@ import org.apache.cassandra.concurrent.StagedScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.disposables.Disposable;
-import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 
 /**
@@ -60,7 +61,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
     private volatile FlowSubscriber<T> subscriber;
     private volatile FlowSubscriptionRecipient subscriptionRecipient;
     private volatile FlowSubscription subscription;
-    private volatile TimeoutTask<T> timeoutTask;
+    private volatile TPCTimeoutTask<DeferredFlow<T>> timeoutTask;
 
     private final AtomicBoolean subscribed = new AtomicBoolean(false);
 
@@ -127,8 +128,8 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
             return;
         }
 
-        timeoutTask = new TimeoutTask<>(this, timeoutSupplier, schedulerSupplier);
-        timeoutTask.submit(timeoutNanos, TimeUnit.NANOSECONDS);
+        timeoutTask = new TPCTimeoutTask<>(this);
+        timeoutTask.submit(new TimeoutAction<>(timeoutSupplier, schedulerSupplier), timeoutNanos, TimeUnit.NANOSECONDS);
 
         // If the source has been just set, we can dispose the timeout early: this also resolves a race causing such
         // timeout task to be kept in memory due to disposeTimeoutTask() being called between/before the task creation
@@ -142,7 +143,7 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
      */
     private void disposeTimeoutTask()
     {
-        TimeoutTask<T> timeoutTask = this.timeoutTask;
+        TPCTimeoutTask<DeferredFlow<T>> timeoutTask = this.timeoutTask;
         if (timeoutTask != null)
             timeoutTask.dispose();
     }
@@ -173,48 +174,31 @@ class DeferredFlowImpl<T> extends DeferredFlow<T> implements FlowSubscriptionRec
 
     /**
      * We create a static class to avoid keeping a reference to the flow, so that we're able to set it null as soon
-     * the timeout task is finished (at the timeout itself might be disposed later).
+     * the timeout task is finished (as the timeout itself might be disposed later) via
+     * {@link org.apache.cassandra.concurrent.TPCTimeoutTask#dispose()}.
      * <p>
      * It's important to dispose of any pending timeout tasks in order to avoid keeping references to
      * the entire topology, which would cause the heap survivor and tenured areas to fill up and as a
      * consequence terrible performance due to high GC activity and long pauses
      */
-    private static class TimeoutTask<T> implements Runnable
+    private static class TimeoutAction<T> implements Consumer<DeferredFlow<T>>
     {
-        private final AtomicReference<DeferredFlow<T>> flowRef;
         private final Supplier<Flow<T>> timeoutSupplier;
         private final Supplier<StagedScheduler> schedulerSupplier;
-        private volatile Disposable disposable;
 
-        public TimeoutTask(DeferredFlow<T> flow, Supplier<Flow<T>> timeoutSupplier, Supplier<StagedScheduler> schedulerSupplier)
+        public TimeoutAction(Supplier<Flow<T>> timeoutSupplier, Supplier<StagedScheduler> schedulerSupplier)
         {
-            this.flowRef = new AtomicReference<>(flow);
             this.timeoutSupplier = timeoutSupplier;
             this.schedulerSupplier = schedulerSupplier;
         }
 
         @Override
-        public void run()
+        public void accept(DeferredFlow<T> flow)
         {
-            DeferredFlow<T> flow = flowRef.getAndSet(null);
-
-            // Might have been disposed (nulled) or set (the source) in the meantime: important to check because it
+            // Might have been disposed or set in the meantime: important to check because it
             // is expensive to create an exception, due to the callstack.
-            if (flow != null && !flow.hasSource())
+            if (!flow.hasSource())
                 flow.onSource(timeoutSupplier.get().lift(Threads.requestOn(schedulerSupplier.get(), TPCTaskType.READ_TIMEOUT)));
-        }
-
-        public void submit(long timeoutNanos, TimeUnit timeUnit)
-        {
-            disposable = TPC.bestTPCTimer().onTimeout(this, timeoutNanos, timeUnit);
-        }
-
-        public void dispose()
-        {
-            if (disposable != null)
-                disposable.dispose();
-
-            flowRef.set(null);
         }
     }
 }

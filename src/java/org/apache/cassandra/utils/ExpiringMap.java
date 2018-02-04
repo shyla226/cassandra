@@ -28,8 +28,8 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.disposables.Disposable;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCTimeoutTask;
 import org.apache.cassandra.concurrent.TPCTimer;
 
 public class ExpiringMap<K, V>
@@ -37,25 +37,33 @@ public class ExpiringMap<K, V>
     private static final Logger logger = LoggerFactory.getLogger(ExpiringMap.class);
     private volatile boolean shutdown;
 
-    public static class ExpiringObject<T>
+    public static class ExpiringObject<K, V>
     {
-        private final T value;
+        private final TPCTimeoutTask<Pair<K, V>> task;
         private final long timeout;
-        private volatile Disposable disposable;
 
-        private ExpiringObject(T value, long timeout)
+        private ExpiringObject(TPCTimer timer, K key, V value, long timeout)
         {
-            assert value != null;
-            this.value = value;
+            this.task = new TPCTimeoutTask<>(timer, Pair.create(key, value));
             this.timeout = timeout;
         }
 
         /**
-         * The value stored.
+         * The key stored, or null if expired.
          */
-        public T get()
+        public K getKey()
         {
-            return value;
+            Pair<K, V> kv = task.getValue();
+            return kv != null ? kv.left : null;
+        }
+
+        /**
+         * The value stored, or null if expired.
+         */
+        public V getValue()
+        {
+            Pair<K, V> kv = task.getValue();
+            return kv != null ? kv.right : null;
         }
 
         /**
@@ -66,27 +74,26 @@ public class ExpiringMap<K, V>
             return timeout;
         }
 
-        void cancel()
+        void submit(Consumer<Pair<K, V>> action)
         {
-            if (disposable != null)
-                disposable.dispose();
+            task.submit(action, timeout, TimeUnit.MILLISECONDS);
         }
 
-        void makeCancellable(Disposable disposable)
+        void cancel()
         {
-            this.disposable = disposable;
+            task.dispose();
         }
     }
 
-    private final ConcurrentMap<K, ExpiringObject<V>> cache = new ConcurrentHashMap<>();
+    private final ConcurrentMap<K, ExpiringObject<K, V>> cache = new ConcurrentHashMap<>();
     private final long defaultExpiration;
-    private final Consumer<Pair<K, ExpiringObject<V>>> postExpireHook;
+    private final Consumer<ExpiringObject<K, V>> postExpireHook;
 
     /**
      * @param defaultExpiration The default TTL for objects in the cache in milliseconds
      * @param postExpireHook The task to execute at expiration.
      */
-    public ExpiringMap(long defaultExpiration, Consumer<Pair<K, ExpiringObject<V>>> postExpireHook)
+    public ExpiringMap(long defaultExpiration, Consumer<ExpiringObject<K, V>> postExpireHook)
     {
         if (defaultExpiration <= 0)
             throw new IllegalArgumentException("Argument specified must be a positive number");
@@ -139,33 +146,42 @@ public class ExpiringMap<K, V>
             }
         }
 
-        ExpiringObject<V> current = new ExpiringObject<>(value, timeout);
-        ExpiringObject<V> previous = cache.put(key, current);
+        ExpiringObject<K, V> current = new ExpiringObject<>(timer, key, value, timeout);
+        ExpiringObject<K, V> previous = cache.put(key, current);
+        V previousValue = null;
         if (previous != null)
-            previous.cancel();
-
-        current.makeCancellable(timer.onTimeout(() ->
         {
-            ExpiringObject<V> removed = cache.remove(key);
+            previousValue = previous.getValue();
+            previous.cancel();
+        }
+
+        current.submit(kv ->
+        {
+            ExpiringObject<K, V> removed = cache.remove(kv.left);
             if (removed != null)
-                postExpireHook.accept(Pair.create(key, removed));
-        }, timeout, TimeUnit.MILLISECONDS));
+                postExpireHook.accept(removed);
+        });
 
-        return (previous == null) ? null : previous.value;
+        return (previousValue == null) ? null : previousValue;
     }
 
-    public ExpiringObject<V> get(K key)
+    public V get(K key)
     {
-        return cache.get(key);
+        ExpiringObject<K, V> expiring = cache.get(key);
+        return expiring != null ? expiring.getValue() : null;
     }
 
-    public ExpiringObject<V> remove(K key)
+    public V remove(K key)
     {
-        ExpiringObject<V> removed = cache.remove(key);
+        ExpiringObject<K, V> removed = cache.remove(key);
+        V value = null;
         if (removed != null)
+        {
+            value = removed.getValue();
             removed.cancel();
+        }
 
-        return removed;
+        return value;
     }
 
     public int size()

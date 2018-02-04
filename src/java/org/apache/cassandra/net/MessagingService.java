@@ -146,13 +146,13 @@ public final class MessagingService implements MessagingServiceMBean
         if (!testOnly)
             droppedMessages.scheduleLogging();
 
-        Consumer<Pair<Integer, ExpiringMap.ExpiringObject<CallbackInfo<?>>>> timeoutReporter = pair ->
+        Consumer<ExpiringMap.ExpiringObject<Integer, CallbackInfo<?>>> timeoutReporter = expiring ->
         {
-            CallbackInfo expiredCallbackInfo = pair.right.get();
+            CallbackInfo expiredCallbackInfo = expiring.getValue();
             MessageCallback<?> callback = expiredCallbackInfo.callback;
             InetAddress target = expiredCallbackInfo.target;
 
-            addLatency(expiredCallbackInfo.verb, target, pair.right.timeoutMillis());
+            addLatency(expiredCallbackInfo.verb, target, expiring.timeoutMillis());
 
             ConnectionMetrics.totalTimeouts.mark();
             OutboundTcpConnectionPool cp = getConnectionPool(expiredCallbackInfo.target).join();
@@ -827,8 +827,8 @@ public final class MessagingService implements MessagingServiceMBean
     // Only required by legacy serialization. Can inline in following method when we get rid of that.
     CallbackInfo<?> getRegisteredCallback(int id, boolean remove, InetAddress from)
     {
-        ExpiringMap.ExpiringObject<CallbackInfo<?>> expiring = remove ? callbacks.remove(id) : callbacks.get(id);
-        if (expiring == null)
+        CallbackInfo<?> callback = remove ? callbacks.remove(id) : callbacks.get(id);
+        if (callback == null)
         {
             String msg = "Callback already removed for message {} from {}, ignoring response";
             logger.trace(msg, id, from);
@@ -837,7 +837,7 @@ public final class MessagingService implements MessagingServiceMBean
             return null;
         }
         else
-            return expiring.get();
+            return callback;
     }
 
     @SuppressWarnings("unchecked")

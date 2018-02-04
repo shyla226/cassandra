@@ -498,7 +498,7 @@ public class HashedWheelTimer implements ParkedThreadsMonitor.MonitorableThread,
                 task.run(this);
             } catch (Throwable t) {
                 if (logger.isWarnEnabled()) {
-                    logger.warn("An exception was thrown by " + TimerTask.class.getSimpleName() + '.', t);
+                    logger.warn("An exception was thrown by timer task " + task.getClass().getSimpleName() + '.', t);
                 }
             }
         }
