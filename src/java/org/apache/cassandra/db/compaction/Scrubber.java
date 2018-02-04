@@ -37,6 +37,7 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.apache.cassandra.utils.memory.HeapAllocator;
 
 public class Scrubber implements Closeable
 {
@@ -64,6 +65,8 @@ public class Scrubber implements Closeable
     private ByteBuffer nextIndexKey;
     long currentRowPositionFromIndex;
     long nextRowPositionFromIndex;
+
+    private NegativeLocalDeletionInfoMetrics negativeLocalDeletionInfoMetrics = new NegativeLocalDeletionInfoMetrics();
 
     private final OutputHandler outputHandler;
 
@@ -307,16 +310,20 @@ public class Scrubber implements Closeable
 
         if (completed)
         {
+            outputHandler.output("Scrub of " + sstable + " complete: " + goodRows + " rows in new sstable and " + emptyRows + " empty (tombstoned) rows dropped");
+            if (negativeLocalDeletionInfoMetrics.fixedRows > 0)
+                outputHandler.output("Fixed " + negativeLocalDeletionInfoMetrics.fixedRows + " rows with overflowed local deletion time.");
+            if (badRows > 0)
+                outputHandler.warn("Unable to recover " + badRows + " rows that were skipped.  You can attempt manual recovery from the pre-scrub snapshot.  You can also run nodetool repair to transfer the data from a healthy replica, if any");
+            if (negativeLocalDeletionInfoMetrics.tombstone > 0)
+                outputHandler.warn("Found " + negativeLocalDeletionInfoMetrics.tombstone + " tombstones with overflowed local deletion time. Data loss may have ocurred.");
+        }
+        else
+        {
             if (badRows > 0)
                 outputHandler.warn("No valid rows found while scrubbing " + sstable + "; it is marked for deletion now. If you want to attempt manual recovery, you can find a copy in the pre-scrub snapshot");
             else
                 outputHandler.output("Scrub of " + sstable + " complete; looks like all " + emptyRows + " rows were tombstoned");
-        }
-        else
-        {
-            outputHandler.output("Scrub of " + sstable + " complete: " + goodRows + " rows in new sstable and " + emptyRows + " empty (tombstoned) rows dropped");
-            if (badRows > 0)
-                outputHandler.warn("Unable to recover " + badRows + " rows that were skipped.  You can attempt manual recovery from the pre-scrub snapshot.  You can also run nodetool repair to transfer the data from a healthy replica, if any");
         }
     }
 
@@ -326,7 +333,8 @@ public class Scrubber implements Closeable
         // OrderCheckerIterator will check, at iteration time, that the rows are in the proper order. If it detects
         // that one row is out of order, it will stop returning them. The remaining rows will be sorted and added
         // to the outOfOrder set that will be later written to a new SSTable.
-        OrderCheckerIterator sstableIterator = new OrderCheckerIterator(new RowMergingSSTableIterator(sstable, dataFile, key),
+        OrderCheckerIterator sstableIterator = new OrderCheckerIterator(new FixNegativeLocalDeletionTimeIterator(new RowMergingSSTableIterator(sstable, dataFile, key),
+                                                                                                                 outputHandler, negativeLocalDeletionInfoMetrics),
                                                                         cfs.metadata.comparator);
 
         try (UnfilteredRowIterator iterator = withValidation(sstableIterator, dataFile.getPath()))
@@ -493,6 +501,12 @@ public class Scrubber implements Closeable
         }
     }
 
+    public class NegativeLocalDeletionInfoMetrics
+    {
+        public volatile int fixedRows = 0;
+        public volatile int tombstone = 0;
+    }
+
     /**
      * During 2.x migration, under some circumstances rows might have gotten duplicated.
      * Merging iterator merges rows with same clustering.
@@ -533,6 +547,7 @@ public class Scrubber implements Closeable
 
             return next;
         }
+
     }
 
     /**
@@ -634,6 +649,172 @@ public class Scrubber implements Closeable
             previous = next;
             return next;
         }
+    }
 
+    /**
+     * This iterator converts negative {@link AbstractCell#localDeletionTime()} into {@link AbstractCell#MAX_DELETION_TIME}
+     *
+     * This is to recover entries with overflowed localExpirationTime due to CASSANDRA-14092
+     */
+    private static final class FixNegativeLocalDeletionTimeIterator extends AbstractIterator<Unfiltered> implements UnfilteredRowIterator
+    {
+        /**
+         * The decorated iterator.
+         */
+        private final UnfilteredRowIterator iterator;
+
+        private final OutputHandler outputHandler;
+        private final NegativeLocalDeletionInfoMetrics negativeLocalExpirationTimeMetrics;
+
+        public FixNegativeLocalDeletionTimeIterator(UnfilteredRowIterator iterator, OutputHandler outputHandler,
+                                                    NegativeLocalDeletionInfoMetrics negativeLocalDeletionInfoMetrics)
+        {
+            this.iterator = iterator;
+            this.outputHandler = outputHandler;
+            this.negativeLocalExpirationTimeMetrics = negativeLocalDeletionInfoMetrics;
+        }
+
+        public CFMetaData metadata()
+        {
+            return iterator.metadata();
+        }
+
+        public boolean isReverseOrder()
+        {
+            return iterator.isReverseOrder();
+        }
+
+        public PartitionColumns columns()
+        {
+            return iterator.columns();
+        }
+
+        public DecoratedKey partitionKey()
+        {
+            return iterator.partitionKey();
+        }
+
+        public Row staticRow()
+        {
+            return iterator.staticRow();
+        }
+
+        @Override
+        public boolean isEmpty()
+        {
+            return iterator.isEmpty();
+        }
+
+        public void close()
+        {
+            iterator.close();
+        }
+
+        public DeletionTime partitionLevelDeletion()
+        {
+            return iterator.partitionLevelDeletion();
+        }
+
+        public EncodingStats stats()
+        {
+            return iterator.stats();
+        }
+
+        protected Unfiltered computeNext()
+        {
+            if (!iterator.hasNext())
+                return endOfData();
+
+            Unfiltered next = iterator.next();
+            if (!next.isRow())
+                return next;
+
+            if (hasNegativeLocalExpirationTime((Row) next, negativeLocalExpirationTimeMetrics))
+            {
+                outputHandler.debug(String.format("Found row with negative local expiration time: %s", next.toString(metadata(), false)));
+                negativeLocalExpirationTimeMetrics.fixedRows++;
+                return removeNegativeLocalExpirationTime((Row) next);
+            }
+
+            return next;
+        }
+
+        private boolean hasNegativeLocalExpirationTime(Row next, NegativeLocalDeletionInfoMetrics negativeLocalExpirationTimeMetrics)
+        {
+            boolean hasCellOrPkWithNegativeLocalExpirationTime = false;
+            boolean hasTombstoneWithNegativeLocalExpirationTime = false;
+            Row row = next;
+            if (row.primaryKeyLivenessInfo().localExpirationTime() < 0)
+            {
+                hasCellOrPkWithNegativeLocalExpirationTime = true;
+            }
+
+            if (row.deletion().time().localDeletionTime() < 0)
+            {
+                hasTombstoneWithNegativeLocalExpirationTime = true;
+            }
+
+            outer:
+            for (ColumnData cd : row)
+            {
+                if (cd.column().isSimple())
+                {
+                    Cell cell = (Cell)cd;
+                    if (cell.localDeletionTime() < 0)
+                    {
+                        if (cell.isTombstone())
+                            hasTombstoneWithNegativeLocalExpirationTime = true;
+                        hasCellOrPkWithNegativeLocalExpirationTime = true;
+                    }
+                }
+                else
+                {
+                    ComplexColumnData complexData = (ComplexColumnData)cd;
+                    for (Cell cell : complexData)
+                    {
+                        if (cell.localDeletionTime() < 0)
+                        {
+                            if (cell.isTombstone())
+                                hasTombstoneWithNegativeLocalExpirationTime = true;
+                            hasCellOrPkWithNegativeLocalExpirationTime = true;
+                        }
+                    }
+                }
+            }
+
+            if (hasTombstoneWithNegativeLocalExpirationTime)
+            {
+                negativeLocalExpirationTimeMetrics.tombstone++;
+                outputHandler.debug(String.format("Found tombstone with negative local expiration time on the following row: %s", row.toString(metadata(), false)));
+            }
+
+            return hasCellOrPkWithNegativeLocalExpirationTime;
+        }
+
+        private Unfiltered removeNegativeLocalExpirationTime(Row row)
+        {
+            Row.Builder builder = HeapAllocator.instance.cloningBTreeRowBuilder();
+            builder.newRow(row.clustering());
+            builder.addPrimaryKeyLivenessInfo(row.primaryKeyLivenessInfo().localExpirationTime() >= 0 ?
+                                              row.primaryKeyLivenessInfo() :
+                                              row.primaryKeyLivenessInfo().withUpdatedLocalDeletionTime(AbstractCell.MAX_DELETION_TIME));
+            builder.addRowDeletion(row.deletion());
+            for (ColumnData cd : row)
+            {
+                if (cd.column().isSimple())
+                {
+                    Cell cell = (Cell)cd;
+                    builder.addCell(cell.localDeletionTime() >= 0 ? cell : cell.withUpdatedLocalDeletionTime(AbstractCell.MAX_DELETION_TIME));
+                }
+                else
+                {
+                    ComplexColumnData complexData = (ComplexColumnData)cd;
+                    builder.addComplexDeletion(complexData.column(), complexData.complexDeletion());
+                    for (Cell cell : complexData)
+                        builder.addCell(cell.localDeletionTime() >= 0 ? cell : cell.withUpdatedLocalDeletionTime(AbstractCell.MAX_DELETION_TIME));
+                }
+            }
+            return builder.build();
+        }
     }
 }
