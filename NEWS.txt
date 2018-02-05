@@ -27,6 +27,8 @@ can decide which policy to apply when dealing with inserts with TTL exceeding th
 
 These policies may be specified via the -Dcassandra.expiration_date_overflow_policy=POLICY startup option.
 
+See CASSANDRA-14092 for more details.
+
 GENERAL UPGRADING ADVICE FOR ANY VERSION
 ========================================
 
