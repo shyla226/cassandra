@@ -34,8 +34,6 @@ public class TPCThread extends FastThreadLocalThread
 {
     private final int coreId;
 
-    private EpollTPCEventLoopGroup.SingleCoreEventLoop eventLoop;
-
     private TPCThread(ThreadGroup group, Runnable target, int coreId)
     {
         super(group, target, "CoreThread-" + coreId);
@@ -46,7 +44,6 @@ public class TPCThread extends FastThreadLocalThread
     {
         return coreId;
     }
-
 
     /**
      * Creates a new factory to create TPC threads.
@@ -66,16 +63,6 @@ public class TPCThread extends FastThreadLocalThread
     public TPCMetrics metrics()
     {
         return TPC.metrics(coreId);
-    }
-
-    public EpollTPCEventLoopGroup.SingleCoreEventLoop eventLoop()
-    {
-        return eventLoop;
-    }
-
-    public void eventLoop(EpollTPCEventLoopGroup.SingleCoreEventLoop eventLoop)
-    {
-        this.eventLoop = eventLoop;
     }
 
     /**
