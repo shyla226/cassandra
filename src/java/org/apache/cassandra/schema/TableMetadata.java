@@ -54,11 +54,6 @@ public final class TableMetadata
     private static final ImmutableSet<Flag> DEFAULT_CQL_FLAGS = ImmutableSet.of(Flag.COMPOUND);
     private static final ImmutableSet<Flag> DEPRECATED_CS_FLAGS = ImmutableSet.of(Flag.DENSE, Flag.SUPER);
 
-    public static final String COMPACT_STORAGE_HALT_MESSAGE =
-             "Compact Tables are not allowed in Cassandra starting with 4.0 version. " +
-             "Use `ALTER %s.%s DROP COMPACT STORAGE` command supplied in 3.x/3.11 Cassandra " +
-             "in order to migrate off Compact Storage.";
-
     private static final String COMPACT_STORAGE_DEPRECATION_MESSAGE =
              "Incorrect set of flags is was detected in table {}.{}: '{}'. \n" +
              "Starting with version 4.0, '{}' flags are deprecated and every table has to have COMPOUND flag. \n" +

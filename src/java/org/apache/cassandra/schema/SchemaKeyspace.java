@@ -36,6 +36,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.*;
+import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.schema.ColumnMetadata.ClusteringOrder;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.*;
@@ -918,6 +919,36 @@ public final class SchemaKeyspace
         return fetchKeyspacesWithout(SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES);
     }
 
+    public static void validateNonCompact() throws StartupException
+    {
+        String query = format("SELECT keyspace_name, table_name, flags FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, TABLES);
+
+        String messages = "";
+        for (UntypedResultSet.Row row : query(query).blockingGet())
+        {
+            if (SchemaConstants.isLocalSystemKeyspace(row.getString("keyspace_name")))
+                continue;
+
+            Set<String> flags = row.getSet("flags", AsciiType.instance);
+            if (!TableMetadata.Flag.isCQLCompatible(TableMetadata.Flag.fromStringSet(flags)))
+            {
+                messages += String.format("ALTER TABLE %s.%s DROP COMPACT STORAGE;\n",
+                                          row.getString("keyspace_name"),
+                                          row.getString("table_name"));
+            }
+        }
+
+        if (!messages.isEmpty())
+        {
+            throw new StartupException(StartupException.ERR_OUTDATED_SCHEMA,
+                                       String.format("Compact Tables are not allowed in Cassandra starting with 4.0 version. " +
+                                                     "In order to migrate off Compact Storage, downgrade to the latest DSE 5.0/5.1, start the " +
+                                                     "node with `-Dcassandra.commitlog.ignorereplayerrors=true` and run the " +
+                                                     "following commands: \n%s",
+                                                     messages));
+        }
+    }
+
     private static Keyspaces fetchKeyspacesWithout(Set<String> excludedKeyspaceNames)
     {
         String query = format("SELECT keyspace_name FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, KEYSPACES);
@@ -1034,13 +1065,6 @@ public final class SchemaKeyspace
         if (rows.isEmpty())
             throw new RuntimeException(String.format("%s:%s not found in the schema definitions keyspace.", keyspaceName, tableName));
         UntypedResultSet.Row row = rows.one();
-
-        Set<TableMetadata.Flag> flags = TableMetadata.Flag.fromStringSet(row.getFrozenSet("flags", UTF8Type.instance));
-
-        if (!TableMetadata.Flag.isCQLCompatible(flags))
-        {
-            throw new IllegalArgumentException(String.format(TableMetadata.COMPACT_STORAGE_HALT_MESSAGE, keyspaceName, tableName));
-        }
 
         return TableMetadata.builder(keyspaceName, tableName, TableId.fromUUID(row.getUUID("id")))
                             .flags(TableMetadata.Flag.fromStringSet(row.getFrozenSet("flags", UTF8Type.instance)))

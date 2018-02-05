@@ -54,6 +54,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NativeLibrary;
@@ -96,6 +97,7 @@ public class StartupChecks
                                                                       checkMaxMapCount,
                                                                       checkDataDirs,
                                                                       checkSSTablesFormat,
+                                                                      checkOutdatedTables,
                                                                       checkSystemKeyspaceState,
                                                                       checkDatacenter,
                                                                       checkRack,
@@ -423,6 +425,14 @@ public class StartupChecks
                                                          "upgradesstables",
                                                          Joiner.on(",").join(invalid)));
 
+        }
+    };
+
+    public static final StartupCheck checkOutdatedTables = new StartupCheck()
+    {
+        public void execute(Logger logger) throws StartupException
+        {
+            SchemaKeyspace.validateNonCompact();
         }
     };
 
