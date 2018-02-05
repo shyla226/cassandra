@@ -126,7 +126,7 @@ public class TPCMetricsAndLimits implements TPCMetrics
     public long activeTaskCount(TPCTaskType stage)
     {
         TaskStats stat = getTaskStats(stage);
-        return stat.scheduledTasks.longValue() - stat.completedTasks.longValue() - stat.pendingTasks.longValue();
+        return stat.scheduledTasks.longValue() - stat.completedTasks.longValue() - stat.pendingTasks.longValue() - stat.blockedTasks.longValue();
     }
 
     public long pendingTaskCount(TPCTaskType stage)
