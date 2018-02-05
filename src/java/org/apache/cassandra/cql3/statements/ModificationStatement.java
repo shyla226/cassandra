@@ -248,7 +248,7 @@ public abstract class ModificationStatement implements CQLStatement
 
     public int getTimeToLive(QueryOptions options) throws InvalidRequestException
     {
-        return attrs.getTimeToLive(options, metadata().params.defaultTimeToLive);
+        return attrs.getTimeToLive(options, metadata);
     }
 
     @Override
