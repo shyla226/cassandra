@@ -562,16 +562,6 @@ public class Keyspace
         if (writeBarrier != null)
             return failDueToWriteBarrier(mutation);
 
-        for (PartitionUpdate upd : mutation.getPartitionUpdates())
-        {
-            if (columnFamilyStores.get(upd.metadata().id) == null)
-            {
-                return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN_TABLE,
-                                                                               String.format("Attempting to mutate non-existant table %s (%s.%s)",
-                                                                                             upd.metadata().id, upd.metadata().keyspace, upd.metadata().name)));
-            }
-        }
-
         final boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
         return requiresViewUpdate ? applyWithViews(mutation, writeCommitLog, updateIndexes, isDroppable)
                                   : applyNoViews(mutation, writeCommitLog, updateIndexes);
@@ -631,9 +621,8 @@ public class Keyspace
             ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().id);
             if (cfs == null)
             {
-                return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN_TABLE,
-                                                                               String.format("Attempting to mutate non-existant table %s (%s.%s)",
-                                                                                             upd.metadata().id, upd.metadata().keyspace, upd.metadata().name)));
+                logger.error("Attempting to mutate non-existant table {} ({}.{})", upd.metadata().id, upd.metadata().keyspace, upd.metadata().name);
+                continue;
             }
 
             // TODO this probably doesn't need to be atomic after TPC
