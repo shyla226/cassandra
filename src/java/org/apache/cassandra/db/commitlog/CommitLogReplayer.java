@@ -412,8 +412,16 @@ public class CommitLogReplayer
                 // continue processing if ignored.
             }
 
-            if (logAndCheckIfShouldSkip(file, desc))
-                return;
+            try
+            {
+                if (logAndCheckIfShouldSkip(file, desc))
+                    return;
+            }
+            catch (Exception e)
+            {
+                handleReplayError(false, "Error while reading commit log (filename %d, descriptor %d) in file %s: %s", segmentId, desc.id, file, e.getMessage());
+                // continue processing if ignored.
+            }
 
             ICompressor compressor = null;
             if (desc.compression != null)

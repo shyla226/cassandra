@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Allow skipping commit log replay does not fail on descriptor errors (DB-1650)
  * Protect against overflow of local expiration time (DB-1619)
  * Fix connections per host in Nodetool GetStreamThroughput (DB-1602)
  * Avoid hibernate on startup for boostrap node to avoid WTE due to not being marked alive (DB-1544)
