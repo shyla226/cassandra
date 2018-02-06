@@ -50,8 +50,9 @@ public abstract class VerbHandlers
     private static <P, Q> FailureResponse<Q> handleFailure(Request<P, Q> request, Throwable t)
     {
         // Calling completeExceptionally() wraps the original exception into a CompletionException even
-        // though the documentation says otherwise
-        if (t instanceof CompletionException && t.getCause() != null)
+        // though the documentation says otherwise. Also if something gets thrown during a subscription to a Single,
+        // RxJava wraps it into a NullPointerException (see Single.subscribe(SingleObserver)).
+        if (t.getCause() != null && (t instanceof CompletionException || t instanceof NullPointerException))
             t = t.getCause();
 
         // These are the exceptions that we don't want silenced and that should (and are) dealt

@@ -28,6 +28,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -42,6 +43,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multimaps;
 
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.jctools.maps.NonBlockingHashMap;
 
 import org.slf4j.Logger;
@@ -399,8 +401,19 @@ public final class MessagingService implements MessagingServiceMBean
                                                                         Consumer<M> consumer,
                                                                         MessageCallback<Q> callback)
     {
-        Consumer<M> delivery = rq -> rq.requestExecutor().execute(() -> consumer.accept(rq), ExecutorLocals.create());
-        messageInterceptors.interceptRequest(request, delivery, callback);
+        try
+        {
+            Consumer<M> delivery = rq -> rq.requestExecutor().execute(() -> consumer.accept(rq), ExecutorLocals.create());
+            messageInterceptors.interceptRequest(request, delivery, callback);
+        }
+        catch (Throwable t)
+        {
+            // For now the only case that we intentionally target with this is rejecting the MessageDeliveryTask by the
+            // event loop. If anything else triggers this log, we should make sure that it didn't fall through the
+            // cracks by chance while it was meant to be handled by another component.
+            logger.error("Error while locally processing {} request:", request.verb(), t);
+            callback.onFailure(request.respondWithFailure(RequestFailureReason.UNKNOWN));
+        }
     }
 
     /**
@@ -771,10 +784,30 @@ public final class MessagingService implements MessagingServiceMBean
             state.trace("{} message received from {}", message.verb(), message.from());
 
         ExecutorLocals locals = ExecutorLocals.create(state, ClientWarn.instance.getForMessage(message.id()));
-        if (message.isRequest())
-            receiveRequestInternal((Request<?, ?>) message, locals);
-        else
-            receiveResponseInternal((Response<?>) message, locals);
+        try
+        {
+            if (message.isRequest())
+                receiveRequestInternal((Request<?, ?>) message, locals);
+            else
+                receiveResponseInternal((Response<?>) message, locals);
+        }
+        // Ideally exceptions during remote message handling should be processed in the corresponding message verb
+        // handler. This however doesn't happen if the exception happens even before the message got the chance to be
+        // handled (e.g. if its task is rejected by its assigned event loop and the corresponding MessageDeliveryTask
+        // is not run at all). In this case, if the remote message is a request-response, we can immediately reply
+        // with a generic FailureResponse.
+        catch (Throwable t)
+        {
+            // For now the only case that we intentionally target with this is rejecting the MessageDeliveryTask by the
+            // event loop. If anything else triggers this log, we should make sure that it didn't fall through the
+            // cracks by chance while it was meant to be handled by another component.
+            logger.error("Error while receiving {} message from {} :", message.verb(), message.from(), t);
+            if (message.isRequest() && !message.verb().isOneWay())
+            {
+                Request<?, ?> request = (Request<?, ?>) message;
+                reply(request.respondWithFailure(RequestFailureReason.UNKNOWN));
+            }
+        }
     }
 
     private <P, Q> void receiveRequestInternal(Request<P, Q> request, ExecutorLocals locals)
