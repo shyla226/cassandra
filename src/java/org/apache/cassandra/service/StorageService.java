@@ -4491,9 +4491,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             setMode(Mode.DRAINING, "starting drain process", !isFinalShutdown);
 
-            // Stop all view builds
-            Keyspace.all().forEach(k -> k.viewManager.stopAllViewBuilds());
-
             BatchlogManager.instance.shutdown();
             HintsService.instance.pauseDispatch();
 
