@@ -18,17 +18,18 @@
 
 package org.apache.cassandra.cql3;
 
+import static org.junit.Assert.*;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import junit.framework.Assert;
 import org.junit.After;
-import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -47,6 +48,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -63,17 +65,8 @@ public class ViewTest extends CQLTester
     @BeforeClass
     public static void startup()
     {
-        //one node, so no need for gossip to settle
-        System.setProperty("cassandra.mv.builder.gossip_settle_wait_in_ms", "0");
         requireNetwork();
     }
-
-    @AfterClass
-    public static void afterClass()
-    {
-        System.clearProperty("cassandra.mv.builder.gossip_settle_wait_in_ms");
-    }
-
     @Before
     public void begin()
     {

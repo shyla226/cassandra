@@ -119,8 +119,6 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static void remove(UUID id)
     {
-        if (logger.isTraceEnabled())
-            logger.trace("Removing batch {}", id);
         new Mutation(PartitionUpdate.fullPartitionDelete(SystemKeyspace.Batches,
                                                          UUIDType.instance.decompose(id),
                                                          FBUtilities.timestampMicros(),
@@ -135,8 +133,6 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static void store(Batch batch, boolean durableWrites)
     {
-        if (logger.isTraceEnabled())
-            logger.trace("Storing batch {}", batch.id);
         List<ByteBuffer> mutations = new ArrayList<>(batch.encodedMutations.size() + batch.decodedMutations.size());
         mutations.addAll(batch.encodedMutations);
 
@@ -423,8 +419,6 @@ public class BatchlogManager implements BatchlogManagerMBean
 
                 if (handler != null)
                 {
-                    if (logger.isTraceEnabled())
-                        logger.trace("Adding hints for undelivered endpoints: {}", handler.undelivered);
                     hintedNodes.addAll(handler.undelivered);
                     HintsService.instance.write(transform(handler.undelivered, StorageService.instance::getHostIdForEndpoint),
                                                 Hint.create(undeliveredMutation, writtenAt));

@@ -170,7 +170,6 @@ public class ViewManager
         if (view == null)
             return;
 
-        view.stopBuild();
         forTable(view.getDefinition().baseTableMetadata()).removeByName(name);
         SystemKeyspace.setViewRemoved(keyspace.getName(), view.name);
         SystemDistributedKeyspace.setViewRemoved(keyspace.getName(), view.name);
@@ -185,12 +184,6 @@ public class ViewManager
     {
         for (View view : allViews())
             view.build();
-    }
-
-    public void stopAllViewBuilds()
-    {
-        for (View view : allViews())
-            view.stopBuild();
     }
 
     public TableViews forTable(CFMetaData metadata)

@@ -6,7 +6,6 @@ Merged from dse5.0:
  * Fix connections per host in Nodetool GetStreamThroughput (DB-1602)
  * Avoid hibernate on startup for boostrap node to avoid WTE due to not being marked alive (DB-1544)
  * Prevent received SSTables with tombstones during repair from being compacted (DB-1333)
- * Wait RING_DELAY for schema to settle before starting view builder (DB-1328)
  * Non-disruptive seed node list reload (DB-1626)
  * Make `ReservedKeywords` mutable (DB-1637)
  * Fix tpc connection being reset due to dc compression and flush socket before reset (DB-1636)
