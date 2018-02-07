@@ -573,9 +573,5 @@ public class AlterTest extends CQLTester
         NodeSyncParams nodeSyncParams2 = new NodeSyncParams(false, (int)TimeUnit.HOURS.toSeconds(24), Collections.emptyMap());
         execute(alterBase + "WITH nodesync=" + nodeSyncParams2);
         assertEquals(nodeSyncParams2, metadata(keyspace, table).params.nodeSync);
-
-        // Lastly, check that we cannot update other parameters (since it shouldn't be allowed as of DB-965)
-        assertInvalidMessage("Only the nodesync option is user-modifiable", alterBase + " WITH comment='foo'");
-        assertInvalidMessage("Only the nodesync option is user-modifiable", alterBase + " WITH gc_grace_seconds=42");
     }
 }
