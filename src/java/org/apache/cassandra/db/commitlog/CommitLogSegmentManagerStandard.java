@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.commitlog;
 
 import java.io.File;
+import java.util.concurrent.RejectedExecutionException;
 
 import io.reactivex.Single;
 import io.reactivex.SingleObserver;
@@ -26,10 +27,11 @@ import io.reactivex.disposables.Disposable;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPCRunnable;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.FileUtils;
+
+import static org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager.logger;
 
 public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentManager
 {
@@ -93,7 +95,27 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
                                                                   ExecutorLocals.create(),
                                                                   TPCTaskType.WRITE_POST_COMMIT_LOG_SEGMENT,
                                                                   scheduler);
-                                advanceAllocatingFrom(segment).thenRun(() -> scheduler.execute(us));
+                                advanceAllocatingFrom(segment).whenComplete((ignored, error) ->
+                                {
+                                    try
+                                    {
+                                        if (error == null)
+                                            scheduler.execute(us);
+                                    }
+                                    catch (Throwable t)
+                                    {
+                                        error = t;
+                                    }
+                                    if (error != null)
+                                    {
+                                        logger.debug("Got exception whilst allocating CL segment: {}", error.getMessage());
+
+                                        if (error instanceof RejectedExecutionException)
+                                            us.cancelled();
+
+                                        observer.onError(error);
+                                    }
+                                });
                             }
                         }
                         catch (Throwable t)
