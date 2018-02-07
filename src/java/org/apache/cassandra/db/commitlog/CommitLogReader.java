@@ -217,12 +217,11 @@ public class CommitLogReader
                 }
             }
 
-            if (shouldSkipSegmentId(file, desc, minPosition))
-                return;
-
             CommitLogSegmentReader segmentReader;
             try
             {
+                if (shouldSkipSegmentId(file, desc, minPosition))
+                    return;
                 segmentReader = new CommitLogSegmentReader(handler, desc, reader, tolerateTruncation);
             }
             catch(Exception e)
