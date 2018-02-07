@@ -89,6 +89,11 @@ public class TPCRunnable implements Runnable
         return taskType.pendable();
     }
 
+    public boolean hasPriority()
+    {
+        return taskType.priority();
+    }
+
     public TPCTaskType taskType()
     {
         return taskType;

@@ -169,6 +169,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         private final TPCMetricsAndLimits.TaskStats parkStats;
         private final MpscArrayQueue<Runnable> queue;
         private final MpscArrayQueue<TPCRunnable> pendingQueue;
+        private final MpscArrayQueue<Runnable> priorityQueue;
 
         @Contended
         private volatile ThreadState state;
@@ -206,6 +207,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             this.parent = parent;
             this.queue = new MpscArrayQueue<>(1 << 16);
             this.pendingQueue = new MpscArrayQueue<>(1 << 16);
+            this.priorityQueue = new MpscArrayQueue<>(1 << 4);
 
             this.state = ThreadState.WORKING;
             this.lastDrainTime = -1;
@@ -352,7 +354,9 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             if (task instanceof TPCRunnable)
             {
                 TPCRunnable tpc = (TPCRunnable) task;
-                if (tpc.isPendable())
+                if (tpc.hasPriority() && priorityQueue.relaxedOffer(tpc))
+                    return;
+                else if (tpc.isPendable())
                 {
                     // If we already have something in the pending queue, this task should not jump it.
                     if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(tpc, metrics.maxQueueSize()))
@@ -599,13 +603,25 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             try
             {
                 final MpscArrayQueue<Runnable> queue = this.queue;
-                Runnable r;
-                while (processed < EVENT_SOURCE_LIMIT &&
-                       (r = queue.relaxedPoll()) != null)
+                final MpscArrayQueue<Runnable> priorityQueue = this.priorityQueue;
+                do
                 {
-                    r.run();
-                    ++processed;
+                    Runnable p = priorityQueue.relaxedPoll();
+                    Runnable q = queue.relaxedPoll();
+                    if (p != null)
+                    {
+                        p.run();
+                        ++processed;
+                    }
+                    if (q != null)
+                    {
+                        q.run();
+                        ++processed;
+                    }
+                    if (p == null && q == null)
+                        break;
                 }
+                while (processed < EVENT_SOURCE_LIMIT - 1);
             }
             catch (Throwable t)
             {
@@ -683,7 +699,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
         private boolean hasQueueTasks()
         {
-            return queue.relaxedPeek() != null;
+            return queue.relaxedPeek() != null || priorityQueue.relaxedPeek() != null;
         }
 
         private static long nanoTimeSinceStartup()
