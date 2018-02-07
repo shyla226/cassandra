@@ -40,6 +40,8 @@ import org.apache.cassandra.utils.concurrent.OpOrderSimple;
 
 public class NativeAllocatorTest
 {
+    // The tick is 100ms, but let's account for a bit over that...
+    private static final int TPCTIMER_TICK = 200;
 
     @BeforeClass
     public static void setupClass()
@@ -190,7 +192,7 @@ public class NativeAllocatorTest
                     Assert.assertEquals(1, TPC.metrics().completedTaskCount(TPCTaskType.WRITE_POST_MEMTABLE_FULL));
 
                     // Check time measured in blockedOnAllocating stats
-                    Uninterruptibles.sleepUninterruptibly(DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis(), TimeUnit.MILLISECONDS); // wait for histograms to aggregate
+                    Uninterruptibles.sleepUninterruptibly(DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis() + TPCTIMER_TICK, TimeUnit.MILLISECONDS); // wait for histograms to aggregate
                     long currBlockedCount = blockedTimer.getCount();
                     double currBlockedAverage = blockedTimer.getSnapshot().getMean();
                     System.out.format("Blocked count %d average time %.3f\n", currBlockedCount, currBlockedAverage);
@@ -239,7 +241,7 @@ public class NativeAllocatorTest
                     Assert.assertEquals(30, allocator.offHeap().owns());
 
                     // Check time measured in blockedOnAllocating stats
-                    Uninterruptibles.sleepUninterruptibly(DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis(), TimeUnit.MILLISECONDS); // wait for histograms to aggregate
+                    Uninterruptibles.sleepUninterruptibly(DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis() + TPCTIMER_TICK, TimeUnit.MILLISECONDS); // wait for histograms to aggregate
                     currBlockedCount = blockedTimer.getCount();
                     currBlockedAverage = blockedTimer.getSnapshot().getMean();
                     System.out.format("Blocked count %d average time %.3f\n", currBlockedCount, currBlockedAverage);
