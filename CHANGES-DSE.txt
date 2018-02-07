@@ -135,6 +135,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no internal DB ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no internal DB ticket)
 Merged from dse5.0:
+ * Allow skipping commit log replay does not fail on descriptor errors (DB-1650)
  * Fix connections per host in Nodetool GetStreamThroughput (DB-1602)
  * Avoid hibernate on startup for boostrap node to avoid WTE due to not being marked alive (DB-1544)
  * Make `ReservedKeywords` mutable (DB-1637)
