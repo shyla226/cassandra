@@ -8,6 +8,7 @@ package com.datastax.bdp.db.util;
 
 import java.io.File;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.BitSet;
@@ -17,31 +18,31 @@ import java.util.BitSet;
  */
 public final class CGroups
 {
-    public static String controllerGroup(String controller)
-    {
-        return controllerGroup(procCGroupsFileContents(), controller);
-    }
-
     /**
      * Get the effective group name for the {@code cpuset} controller.
      */
-    private static String controllerGroup(String procCGroup, String controller)
+    static String controllerGroup(String procCGroup, String controller)
     {
-        if (procCGroup == null)
-            return "";
+        if (procCGroup == null || controller == null)
+            return "/";
 
         // example line in /proc/<pid>/cgroup:
         // 7:cpuset:/docker/1cd79847a997156bcea3178aa51dd8073775aff0575a5a2dff7ae0faf67b403b
 
-        String cpusetCGroup = "";
         for (String cgroupLine : procCGroup.split("\n"))
         {
             String[] parts = cgroupLine.split(":");
-            if (controller.equals(parts[1]))
-                cpusetCGroup = parts[2];
+            if (parts.length < 3)
+                continue;
+            String[] controllers = parts[1].split(",");
+            for (String ctl : controllers)
+            {
+                if (controller.equals(ctl))
+                    return parts[2].isEmpty() ? "/" : parts[2];
+            }
         }
 
-        return cpusetCGroup;
+        return "/";
     }
 
     /**
@@ -75,7 +76,13 @@ public final class CGroups
      */
     static File controllerFile(String procCGroup, String controller, String file)
     {
-        return new File("/sys/fs/cgroup/" + controller + controllerGroup(procCGroup, controller) + '/' + file);
+        if (file == null)
+            return null;
+
+        String cgroupPart = controllerGroup(procCGroup, controller);
+        if (!cgroupPart.endsWith("/"))
+            cgroupPart += "/";
+        return new File("/sys/fs/cgroup/" + controller + cgroupPart + file);
     }
 
     static Integer countCpus(String cpus)
@@ -85,25 +92,32 @@ public final class CGroups
 
         BitSet bits = new BitSet();
 
-        for (String elem : cpus.split(","))
+        try
         {
-            elem = elem.trim();
-            if (elem.isEmpty())
-                continue;
-
-            if (elem.indexOf('-') != -1)
+            for (String elem : cpus.split(","))
             {
-                String[] pair = elem.split("-");
-                int start = Integer.parseInt(pair[0].trim());
-                int end = Integer.parseInt(pair[1].trim());
-                for (int n = start; n <= end; n++)
-                    bits.set(n);
-            }
-            else
-                bits.set(Integer.parseInt(elem));
-        }
+                elem = elem.trim();
+                if (elem.isEmpty())
+                    continue;
 
-        return bits.cardinality();
+                if (elem.indexOf('-') != -1)
+                {
+                    String[] pair = elem.split("-");
+                    int start = Integer.parseInt(pair[0].trim());
+                    int end = Integer.parseInt(pair[1].trim());
+                    for (int n = start; n <= end; n++)
+                        bits.set(n);
+                }
+                else
+                    bits.set(Integer.parseInt(elem));
+            }
+
+            return bits.cardinality();
+        }
+        catch (Exception e)
+        {
+            return null;
+        }
     }
 
     public static Integer countCpus()
@@ -114,7 +128,10 @@ public final class CGroups
         return countCpus(cpus);
     }
 
-    public static long MEM_UNLIMITED = 9223372036854771712L;
+    /**
+     * The value is utopic - it represents roughly 4 exabytes (=4096 PB or 4194304 TB).
+     */
+    public static long MEM_UNLIMITED = 4611686018427387904L;
 
     public static long memoryLimit()
     {
@@ -124,12 +141,28 @@ public final class CGroups
         return Math.min(softLimit, limit);
     }
 
-    private static long longValue(File f)
+    static long longValue(File f)
     {
-        String s = readFile(f);
+        return longValue(readFile(f));
+    }
+
+    static long longValue(String s)
+    {
         if (s == null)
             return MEM_UNLIMITED;
-        return Long.parseLong(s.trim());
+        BigInteger val;
+        long v = Long.MAX_VALUE;
+        try
+        {
+            val = new BigInteger(s);
+            if (val.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) <= 0 && val.compareTo(BigInteger.ZERO) > 0)
+                v = val.longValue();
+        }
+        catch (Exception e)
+        {
+            // ignore bad values
+        }
+        return v >= MEM_UNLIMITED ? MEM_UNLIMITED : v;
     }
 
     public static boolean blkioThrottled()
