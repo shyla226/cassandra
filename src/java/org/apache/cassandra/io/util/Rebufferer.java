@@ -20,7 +20,6 @@ package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Function;
 
 import org.slf4j.Logger;
@@ -157,9 +156,7 @@ public interface Rebufferer extends ReaderFileProxy
                     }
                     if (error != null)
                     {
-                        if (error instanceof RejectedExecutionException)
-                            wrappedOnReady.cancelled();
-
+                        wrappedOnReady.cancelled();
                         onError.apply(error);
                     }
                 });

@@ -326,6 +326,9 @@ public class PartitionRangeReadCommand extends ReadCommand
 
     public Flow<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
+        boolean started = executionController.startIfValid(cfs);
+        assert started;
+
         ColumnFamilyStore.ViewFragment view = cfs.select(View.selectLive(dataRange().keyRange()));
         Tracing.trace("Executing seq scan across {} sstables for {}", view.sstables.size(), dataRange().keyRange().getString(metadata().partitionKeyType));
 

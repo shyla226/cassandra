@@ -31,18 +31,20 @@ public class ReadExecutionController implements AutoCloseable
     private static final Logger logger = LoggerFactory.getLogger(ReadExecutionController.class);
 
     // For every reads
-    private final OpOrder.Group baseOp;
+    private final OpOrder baseOp;
+    private volatile OpOrder.Group baseOpGroup;
     private final TableMetadata baseMetadata; // kept to sanity check that we have take the op order on the right table
 
     // For index reads
     private final ReadExecutionController indexController;
-    private final OpOrder.Group writeOp;
+    private final OpOrder writeOp;
+    private volatile OpOrder.Group writeOpGroup;
     private boolean closed;
 
-    private ReadExecutionController(OpOrder.Group baseOp,
+    private ReadExecutionController(OpOrder baseOp,
                                     TableMetadata baseMetadata,
                                     ReadExecutionController indexController,
-                                    OpOrder.Group writeOp)
+                                    OpOrder writeOp)
     {
         // We can have baseOp == null, but only when empty() is called, in which case the controller will never really be used
         // (which validForReadOn should ensure). But if it's not null, we should have the proper metadata too.
@@ -61,12 +63,23 @@ public class ReadExecutionController implements AutoCloseable
 
     public OpOrder.Group writeOpOrderGroup()
     {
-        return writeOp;
+        assert writeOpGroup != null;
+        return writeOpGroup;
     }
 
-    public boolean validForReadOn(ColumnFamilyStore cfs)
+    public boolean startIfValid(ColumnFamilyStore cfs)
     {
-        return !closed && baseOp != null && cfs.metadata.id.equals(baseMetadata.id);
+        if (closed || !cfs.metadata.id.equals(baseMetadata.id) || baseOp == null)
+            return false;
+
+        if (baseOpGroup == null)
+        {
+            baseOpGroup = baseOp.start();
+            if (writeOp != null)
+                writeOpGroup = writeOp.start();
+        }
+
+        return true;
     }
 
     public static ReadExecutionController empty()
@@ -88,36 +101,30 @@ public class ReadExecutionController implements AutoCloseable
 
         if (indexCfs == null)
         {
-            return new ReadExecutionController(baseCfs.readOrdering.start(), baseCfs.metadata(), null, null);
+            return new ReadExecutionController(baseCfs.readOrdering, baseCfs.metadata(), null, null);
         }
         else
         {
-            OpOrder.Group baseOp = null, writeOp = null;
+            OpOrder baseOp = null, writeOp = null;
             ReadExecutionController indexController = null;
             // OpOrder.start() shouldn't fail, but better safe than sorry.
             try
             {
-                baseOp = baseCfs.readOrdering.start();
-                indexController = new ReadExecutionController(indexCfs.readOrdering.start(), indexCfs.metadata(), null, null);
+                baseOp = baseCfs.readOrdering;
+                indexController = new ReadExecutionController(indexCfs.readOrdering, indexCfs.metadata(), null, null);
                 // TODO: this should perhaps not open and maintain a writeOp for the full duration, but instead only *try* to delete stale entries, without blocking if there's no room
                 // as it stands, we open a writeOp and keep it open for the duration to ensure that should this CF get flushed to make room we don't block the reclamation of any room being made
-                writeOp = Keyspace.writeOrder.start();
+                writeOp = Keyspace.writeOrder;
                 return new ReadExecutionController(baseOp, baseCfs.metadata(), indexController, writeOp);
             }
             catch (RuntimeException e)
             {
                 // Note that must have writeOp == null since ReadOrderGroup ctor can't fail
                 assert writeOp == null;
-                try
-                {
-                    if (baseOp != null)
-                        baseOp.close();
-                }
-                finally
-                {
-                    if (indexController != null)
-                        indexController.close();
-                }
+
+                if (indexController != null)
+                    indexController.close();
+
                 throw e;
             }
         }
@@ -142,9 +149,9 @@ public class ReadExecutionController implements AutoCloseable
         closed = true;
 
         Throwable fail = null;
-        fail = Throwables.closeNonNull(fail, baseOp);
+        fail = Throwables.closeNonNull(fail, baseOpGroup);
         fail = Throwables.closeNonNull(fail, indexController);
-        fail = Throwables.closeNonNull(fail, writeOp);
+        fail = Throwables.closeNonNull(fail, writeOpGroup);
         if (fail != null)
         {
             JVMStabilityInspector.inspectThrowable(fail);
