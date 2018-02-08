@@ -33,7 +33,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.Config;
@@ -324,7 +323,7 @@ public class CassandraRoleManager implements IRoleManager
         {
             return !hasExistingRoles();
         }
-        catch (InvalidQueryException | RequestExecutionException e)
+        catch (RequestExecutionException e)
         {
             return true;
         }
@@ -381,20 +380,32 @@ public class CassandraRoleManager implements IRoleManager
             return Futures.immediateFuture(null);
         }
 
-        // The delay is to give the node a chance to see its peers before attempting the operation
-        return ScheduledExecutors.optionalTasks.schedule(() -> {
-            isClusterReady = true;
-            try
-            {
+        // don't put this into a static final field - otherwise tests may accidentally use the wrong value (default);
+        long setupDelay = Long.getLong("cassandra.superuser_setup_delay_ms", 10000);
 
-                setupDefaultRole();
-            }
-            catch (Exception e)
-            {
-                logger.info("Setup task failed with error, rescheduling", e);
-                scheduleSetupTask();
-            }
-        }, AuthKeyspace.SUPERUSER_SETUP_DELAY, TimeUnit.MILLISECONDS);
+        if (setupDelay < 0L)
+        {
+            doSetupDefaultRole();
+            return Futures.immediateFuture(null);
+        }
+
+
+        // The delay is to give the node a chance to see its peers before attempting the operation
+        return ScheduledExecutors.optionalTasks.schedule(this::doSetupDefaultRole, setupDelay, TimeUnit.MILLISECONDS);
+    }
+
+    private void doSetupDefaultRole()
+    {
+        isClusterReady = true;
+        try
+        {
+            setupDefaultRole();
+        }
+        catch (Exception e)
+        {
+            logger.info("Setup task failed with error, rescheduling", e);
+            scheduleSetupTask();
+        }
     }
 
     /*

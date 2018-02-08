@@ -275,6 +275,8 @@ public abstract class CQLTester
             // clear the SS shutdown hook as it makes the test take longer on Jenkins
             JVMStabilityInspector.removeShutdownHooks();
 
+            Gossiper.instance.registerUpgradeBarrierListener();
+
             logger.info("Server initialized");
             boolean ret = serverStatus.compareAndSet(ServerStatus.PENDING, ServerStatus.INITIALIZED);
 //            assertTrue("Unexpected server status: " + serverStatus, ret);
@@ -461,10 +463,10 @@ public abstract class CQLTester
 
     protected static void requireAuthentication()
     {
+        System.setProperty("cassandra.superuser_setup_delay_ms", "-1");
+
         DatabaseDescriptor.setAuthenticator(new PasswordAuthenticator());
         DatabaseDescriptor.setAuthManager(new AuthManager(new CassandraRoleManager(), new CassandraAuthorizer()));
-
-        System.setProperty("cassandra.superuser_setup_delay_ms", "0");
     }
 
     public static void requireNetwork() throws ConfigurationException
@@ -481,6 +483,9 @@ public abstract class CQLTester
         Gossiper.instance.register(StorageService.instance);
         SchemaLoader.startGossiper();
         Gossiper.instance.maybeInitializeLocalState(1);
+
+        Gossiper.instance.registerUpgradeBarrierListener();
+        Gossiper.instance.clusterVersionBarrier.onLocalNodeReady();
 
         server = new NativeTransportService(nativeAddr, nativePort);
         server.start();

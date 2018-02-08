@@ -64,7 +64,7 @@ public class JMXAuthTest extends CQLTester
     @BeforeClass
     public static void setupClass() throws Exception
     {
-        System.setProperty("cassandra.superuser_setup_delay_ms", "1");
+        System.setProperty("cassandra.superuser_setup_delay_ms", "-1");
 
         setupAuthorizer();
         setupJMXServer();

@@ -232,10 +232,17 @@ public class MigrationManager
      *
      * Note that this is only safe for system tables where we know the id is fixed and will be the same whatever version
      * of the definition is used.
+     *
+     * Same as {@link #forceAnnounceNewTable(TableMetadata, long)} with {@code timestamp=0}.
      */
     public static Completable forceAnnounceNewTable(TableMetadata cfm)
     {
-        return announceNewTable(cfm, false, false, 0);
+        return forceAnnounceNewTable(cfm, 0);
+    }
+
+    public static Completable forceAnnounceNewTable(TableMetadata cfm, long timestamp)
+    {
+        return announceNewTable(cfm, false, false, timestamp);
     }
 
     private static Completable announceNewTable(TableMetadata cfm, boolean announceLocally, boolean throwOnDuplicate)
@@ -285,7 +292,12 @@ public class MigrationManager
 
     public static Completable forceAnnounceNewType(UserType newType)
     {
-        return announceNewType(newType, false, 0);
+        return forceAnnounceNewType(newType, 0L);
+    }
+
+    public static Completable forceAnnounceNewType(UserType newType, long timestamp)
+    {
+        return announceNewType(newType, false, timestamp);
     }
 
     public static Completable announceNewType(UserType newType, boolean announceLocally, long timestamp)

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright DataStax, Inc.
  *
  * Please see the included license file for details.
@@ -8,6 +8,8 @@ package com.datastax.bdp.db.audit;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.datastax.bdp.db.upgrade.ClusterVersionBarrier;
+import com.datastax.bdp.db.upgrade.VersionDependentFeature;
 import com.datastax.driver.core.BatchStatement;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.SimpleStatement;
@@ -17,10 +19,14 @@ import com.datastax.driver.core.exceptions.InvalidQueryException;
 import com.datastax.driver.core.exceptions.SyntaxError;
 import com.datastax.driver.core.exceptions.UnauthorizedException;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -198,6 +204,73 @@ public abstract class CassandraAuditWriterTester extends CQLTester
                    row("REQUEST_FAILURE", KEYSPACE, currentTable(), "sam", "execution of '" + f + "[]' failed: java.lang.RuntimeException INSERT INTO " + KEYSPACE + "." + currentTable() + " (pk, value) VALUES (1, 2)"));
     }
 
+    @Test
+    public void testDSE50FeatureUpgrade() throws Throwable
+    {
+        try
+        {
+            letCassandraAuditWriterUseLegacyMode();
+
+            useSuperUser();
+
+            createTable("CREATE TABLE %s (pk int PRIMARY KEY, value int)");
+            String f = createFunction(KEYSPACE,
+                                      "",
+                                      "CREATE OR REPLACE FUNCTION %s() " +
+                                      "CALLED ON NULL INPUT " +
+                                      "RETURNS int " +
+                                      "LANGUAGE java " +
+                                      "AS 'throw new RuntimeException();';");
+
+            PreparedStatement preparedStmt = prepareNet(formatQuery("DELETE FROM %s WHERE pk = ?"));
+
+            BatchStatement stmt = new BatchStatement();
+            stmt.add(new SimpleStatement(formatQuery("INSERT INTO %s (pk, value) VALUES (1, 2)")));
+            stmt.add(preparedStmt.bind(2));
+            executeNet(stmt);
+
+            // UPGRADE HAPPENS HERE between rows 2 + 3 (--> within the 2nd batch)
+            letCassandraAuditWriterUseNativeyMode();
+
+            stmt = new BatchStatement();
+            stmt.add(new SimpleStatement(formatQuery("INSERT INTO %s (pk, value) VALUES (1, 2)")));
+            stmt.add(new SimpleStatement(formatQuery("ISERT INTO %s (pk, value) VALUES (1, 2)")));
+
+            executeInvalidQuery(stmt, SyntaxError.class);
+
+            stmt = new BatchStatement();
+            stmt.add(new SimpleStatement(formatQuery("INSERT INTO %s (pk, value) VALUES (1, " + f + "())")));
+            stmt.add(new SimpleStatement(formatQuery("INSERT INTO %s (pk, value) VALUES (1, 2)")));
+
+            executeInvalidQuery(stmt, FunctionExecutionException.class);
+
+            waitForLogging(8);
+
+            assertRows(fetchAuditEvents2(),
+                       // row 0
+                       row("CQL_PREPARE_STATEMENT", KEYSPACE, currentTable(), "cassandra", "DELETE FROM " + KEYSPACE + "." + currentTable() + " WHERE pk = ?", null, null),
+                       // row 1
+                       row("CQL_UPDATE", KEYSPACE, currentTable(), "cassandra", "INSERT INTO " + KEYSPACE + "." + currentTable() + " (pk, value) VALUES (1, 2)", null, null),
+                       // row 2
+                       row("CQL_DELETE", KEYSPACE, currentTable(), "cassandra", "DELETE FROM " + KEYSPACE + "." + currentTable() + " WHERE pk = ? [pk=2]", null, null),
+                       // row 3
+                       row("REQUEST_FAILURE", null, null, "cassandra", "line 1:0 no viable alternative at input 'ISERT' ([ISERT]...) ISERT INTO " + KEYSPACE + "." + currentTable() + " (pk, value) VALUES (1, 2)", null, "cassandra"),
+                       // row 4
+                       row("CQL_UPDATE", KEYSPACE, currentTable(), "cassandra", "INSERT INTO " + KEYSPACE + "." + currentTable() + " (pk, value) VALUES (1, " + f + "())", "LOCAL_ONE", "cassandra"),
+                       // row 5
+                       row("CQL_UPDATE", KEYSPACE, currentTable(), "cassandra", "INSERT INTO " + KEYSPACE + "." + currentTable() + " (pk, value) VALUES (1, 2)", "LOCAL_ONE", "cassandra"),
+                       // row 6
+                       row("REQUEST_FAILURE", KEYSPACE, currentTable(), "cassandra", "execution of '" + f + "[]' failed: java.lang.RuntimeException INSERT INTO " + KEYSPACE + "." + currentTable() + " (pk, value) VALUES (1, " + f + "())", "LOCAL_ONE", "cassandra"),
+                       // row 7
+                       row("REQUEST_FAILURE", KEYSPACE, currentTable(), "cassandra", "execution of '" + f + "[]' failed: java.lang.RuntimeException INSERT INTO " + KEYSPACE + "." + currentTable() + " (pk, value) VALUES (1, 2)", "LOCAL_ONE", "cassandra"));
+
+        }
+        finally
+        {
+            letCassandraAuditWriterUseNativeyMode();
+        }
+    }
+
     /**
      * Waits for the specific amount of queries to be logged.
      * @param numberOfQueries the number of queries to be logged.
@@ -267,5 +340,43 @@ public abstract class CassandraAuditWriterTester extends CQLTester
     protected final UntypedResultSet fetchAuditEvents() throws Throwable
     {
         return execute("SELECT type, keyspace_name, table_name, username, operation FROM " + CassandraAuditKeyspace.NAME + "." + CassandraAuditKeyspace.AUDIT_LOG);
+    }
+
+    protected final UntypedResultSet fetchAuditEvents2() throws Throwable
+    {
+        return execute("SELECT type, keyspace_name, table_name, username, operation, consistency, authenticated FROM " + CassandraAuditKeyspace.NAME + "." + CassandraAuditKeyspace.AUDIT_LOG);
+    }
+
+    /**
+     * Use DSE 5.0 compatible statements.
+     */
+    protected void letCassandraAuditWriterUseLegacyMode()
+    {
+        CassandraAuditWriter writer = cassandraAuditWriter();
+        CassandraVersion dse50 = new CassandraVersion("3.0.123");
+        writer.feature.clusterVersionUpdated(new ClusterVersionBarrier.ClusterVersionInfo(dse50,
+                                                                                          dse50,
+                                                                                          Schema.instance.getVersion(),
+                                                                                          true));
+        assertEquals(VersionDependentFeature.FeatureStatus.DEACTIVATED, writer.feature.getStatus());
+    }
+
+    /**
+     * Use DSE 5.1+ compatible statements.
+     */
+    protected void letCassandraAuditWriterUseNativeyMode()
+    {
+        CassandraAuditWriter writer = cassandraAuditWriter();
+        writer.feature.clusterVersionUpdated(new ClusterVersionBarrier.ClusterVersionInfo(ClusterVersionBarrier.ownOssVersion,
+                                                                                          ClusterVersionBarrier.ownOssVersion,
+                                                                                          Schema.instance.getVersion(),
+                                                                                          true));
+        assertEquals(VersionDependentFeature.FeatureStatus.ACTIVATED, writer.feature.getStatus());
+    }
+
+    private CassandraAuditWriter cassandraAuditWriter()
+    {
+        AuditLogger logger = (AuditLogger) DatabaseDescriptor.getAuditLogger();
+        return (CassandraAuditWriter) logger.writer;
     }
 }

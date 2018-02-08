@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright DataStax, Inc.
  *
  * Please see the included license file for details.
@@ -7,19 +7,16 @@ package com.datastax.bdp.db.audit;
 
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
-import io.reactivex.Completable;
-import io.reactivex.Single;
-
 import com.google.common.annotations.VisibleForTesting;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.bdp.db.upgrade.*;
+import io.reactivex.Completable;
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -33,6 +30,7 @@ import org.apache.cassandra.db.marshal.TimestampType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.*;
@@ -58,25 +56,20 @@ public class CassandraAuditWriter implements IAuditWriter
     private static final Logger droppedEventLogger = LoggerFactory.getLogger(DROPPED_EVENT_LOGGER);
 
     // number of fields in the audit table
-    private static int NUM_FIELDS = 14;
+    static int NUM_FIELDS = 14;
     private static final ByteBuffer nodeIp = ByteBufferUtil.bytes(FBUtilities.getBroadcastAddress());
 
     /**
      * The writer possible states.
      */
-    private enum State { NOT_STARTED, STARTING, READY, STOPPING, STOPPED };
+    private enum State { NOT_STARTED, STARTING, READY, STOPPING, STOPPED }
 
     /**
      * The startup time.
      */
     private long startupTime;
 
-    final int retentionPeriod;
-
-    /**
-     * The statement used to perform the inserts.
-     */
-    private ModificationStatement insertStatement;
+    private final int retentionPeriod;
 
     /**
      * The event that need to be persisted (in async mode only).
@@ -91,7 +84,8 @@ public class CassandraAuditWriter implements IAuditWriter
     /**
      * The batching options.
      */
-    private final BatchingOptions batchingOptions;
+    @VisibleForTesting
+    final BatchingOptions batchingOptions;
 
     /**
      * The writer's state.
@@ -102,6 +96,167 @@ public class CassandraAuditWriter implements IAuditWriter
      * The partition of the last batch executed.
      */
     private volatile EventPartition lastPartition;
+
+    private abstract class VersionDepentent implements VersionDependentFeature.VersionDependent
+    {
+        protected ModificationStatement insertStatement;
+
+        @Override
+        public void initialize()
+        {
+            boolean hasTTL = retentionPeriod > 0;
+
+            String cql = insertStatement();
+
+            if (hasTTL)
+            {
+                cql = cql + " USING TTL ?";
+            }
+
+            insertStatement = (ModificationStatement) prepareStatement(cql);
+        }
+
+        abstract String insertStatement();
+
+        final Completable recordEvent(AuditableEvent event)
+        {
+            ModificationStatement stmt = insertStatement;
+
+            EventBindings bindings = new EventBindings(stmt, event, this);
+
+            if (isSynchronous())
+                return stmt.execute(QueryState.forInternalCalls(),
+                                    bindings.getBindings(),
+                                    System.nanoTime())
+                           .toCompletable();
+
+            if (!eventQueue.add(bindings))
+            {
+                // queue is full
+                droppedEventLogger.warn(event.toString());
+            }
+            return Completable.complete();
+        }
+
+        abstract List<ByteBuffer> newEventBindings(AuditableEvent event, EventPartition partition);
+
+        List<ByteBuffer> addEventBindingsShared(AuditableEvent event, EventPartition partition)
+        {
+            List<ByteBuffer> bindings = new ArrayList<>(NUM_FIELDS + (retentionPeriod > 0 ? 1 : 0));
+            bindings.add(TimestampType.instance.decompose(partition.date)); // date pk
+            bindings.add(nodeIp);  // node inet
+            bindings.add(ByteBufferUtil.bytes(partition.dayPartition));  // day partition
+            bindings.add(ByteBufferUtil.bytes(event.getUid())); // event_time ck
+
+            UUID batch_id = event.getBatchId();
+            bindings.add(batch_id != null ? ByteBufferUtil.bytes(batch_id) : null);  // batch id
+
+            bindings.add(ByteBufferUtil.bytes(event.getType().getCategory().toString()));  // category
+            bindings.add(event.getKeyspace() != null ? ByteBufferUtil.bytes(event.getKeyspace()) : null);  // keyspace
+
+            String operation = event.getOperation();
+            bindings.add(operation != null ? ByteBufferUtil.bytes(operation) : null);  // operation
+
+            String source = event.getSource();
+            bindings.add(source != null ? ByteBufferUtil.bytes(source) : null);  // source
+
+            String cf = event.getColumnFamily();
+            bindings.add(cf != null ? ByteBufferUtil.bytes(cf) : null);  // table_name
+            bindings.add(ByteBufferUtil.bytes(event.getType().toString()));  // type
+            bindings.add(ByteBufferUtil.bytes(event.getUser()));  // user
+            return bindings;
+        }
+    }
+
+    private final class Legacy extends VersionDepentent
+    {
+        @Override
+        String insertStatement()
+        {
+            return String.format(
+                "INSERT INTO %s.%s (" +
+                "date, " +
+                "node, " +
+                "day_partition, " +
+                "event_time, " +
+                "batch_id, " +
+                "category, " +
+                "keyspace_name, " +
+                "operation, " +
+                "source, " +
+                "table_name, " +
+                "type, " +
+                "username" +
+                ") " +
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG);
+        }
+
+        @Override
+        List<ByteBuffer> newEventBindings(AuditableEvent event, EventPartition partition)
+        {
+            List<ByteBuffer> bindings = addEventBindingsShared(event, partition);
+
+            if (retentionPeriod > 0)
+                bindings.add(ByteBufferUtil.bytes(retentionPeriod));
+
+            return bindings;
+        }
+    }
+
+    private final class Native extends VersionDepentent
+    {
+        @Override
+        String insertStatement()
+        {
+            return String.format(
+                "INSERT INTO %s.%s (" +
+                "date, " +
+                "node, " +
+                "day_partition, " +
+                "event_time, " +
+                "batch_id, " +
+                "category, " +
+                "keyspace_name, " +
+                "operation, " +
+                "source, " +
+                "table_name, " +
+                "type, " +
+                "username," +
+                "authenticated," +
+                "consistency) " +
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG);
+        }
+
+        @Override
+        List<ByteBuffer> newEventBindings(AuditableEvent event, EventPartition partition)
+        {
+            List<ByteBuffer> bindings = addEventBindingsShared(event, partition);
+
+            bindings.add(event.getAuthenticated() == null ? null : ByteBufferUtil.bytes(event.getAuthenticated()));  // authUser (proxy auth)
+            bindings.add(event.getConsistencyLevel() == null ? null : ByteBufferUtil.bytes(event.getConsistencyLevel().toString()));  // consistency level
+
+            if (retentionPeriod > 0)
+                bindings.add(ByteBufferUtil.bytes(retentionPeriod));
+
+            return bindings;
+        }
+    }
+
+    @VisibleForTesting
+    final VersionDependentFeature<VersionDepentent> feature =
+        VersionDependentFeature.createForSchemaUpgrade("CassandraAuditWriter",
+                                                       new CassandraVersion("3.11.0"),
+                                                       new Legacy(),
+                                                       new Native(),
+                                                       new SchemaUpgrade(CassandraAuditKeyspace.metadata(),
+                                                                         CassandraAuditKeyspace.tablesIfNotExist(),
+                                                                         true),
+                                                       logger,
+                                                       "Preparing upgrade to DSE 5.1/6.0 audit log entries.",
+                                                       "Unlocking DSE 5.1/6.0 audit log entries.",
+                                                       "Using DSE 5.0 compatible audit log entries - DSE 5.1 compatible audit log entries will be written when all nodes are on DSE 5.1 or newer and automatic schema upgrade has finished.");
 
     @Override
     public boolean isSetUpComplete()
@@ -115,7 +270,7 @@ public class CassandraAuditWriter implements IAuditWriter
         if (state.compareAndSet(State.NOT_STARTED, State.STARTING))
         {
             CassandraAuditKeyspace.maybeConfigure();
-            insertStatement = prepareInsertStatement(retentionPeriod > 0);
+            feature.setup(Gossiper.instance.clusterVersionBarrier);
             startupTime = System.currentTimeMillis();
 
             if (!batchingOptions.synchronous)
@@ -126,7 +281,7 @@ public class CassandraAuditWriter implements IAuditWriter
             Runtime.getRuntime().addShutdownHook(new Thread(new WrappedRunnable()
             {
                 @Override
-                protected void runMayThrow() throws Exception
+                protected void runMayThrow()
                 {
                     logger.debug("Shutting down CassandraAuditWritter");
                     state.compareAndSet(State.READY, State.STOPPING);
@@ -226,42 +381,19 @@ public class CassandraAuditWriter implements IAuditWriter
 
     private class EventBindings
     {
+        private final ModificationStatement stmt;
         private final AuditableEvent event;
         private final EventPartition partition;
         private final List<ByteBuffer> bindings;
 
-        private EventBindings(AuditableEvent event)
+        private EventBindings(ModificationStatement stmt, AuditableEvent event, VersionDepentent versionDepentent)
         {
             assert event != null;
+            this.stmt = stmt;
             this.event = event;
             partition = new EventPartition(event);
 
-            bindings = new ArrayList<>(NUM_FIELDS + (retentionPeriod>0?1:0));
-            bindings.add(TimestampType.instance.decompose(partition.date)); // date pk
-            bindings.add(nodeIp);  // node inet
-            bindings.add(ByteBufferUtil.bytes(partition.dayPartition));  // day partition
-            bindings.add(ByteBufferUtil.bytes(event.getUid())); // event_time ck
-
-            UUID batch_id = event.getBatchId();
-            bindings.add(batch_id != null ? ByteBufferUtil.bytes(batch_id) : null);  // batch id
-
-            bindings.add(ByteBufferUtil.bytes(event.getType().getCategory().toString()));  // category
-            bindings.add(event.getKeyspace() != null ? ByteBufferUtil.bytes(event.getKeyspace()) : null);  // keyspace
-
-            String operation = event.getOperation();
-            bindings.add(operation != null ? ByteBufferUtil.bytes(operation) : null);  // operation
-
-            String source = event.getSource();
-            bindings.add(source != null ? ByteBufferUtil.bytes(source) : null);  // source
-
-            String cf = event.getColumnFamily();
-            bindings.add(cf != null ? ByteBufferUtil.bytes(cf) : null);  // table_name
-            bindings.add(ByteBufferUtil.bytes(event.getType().toString()));  // type
-            bindings.add(ByteBufferUtil.bytes(event.getUser()));  // user
-            bindings.add(event.getAuthenticated() == null ? null : ByteBufferUtil.bytes(event.getAuthenticated()));  // authUser (proxy auth)
-            bindings.add(event.getConsistencyLevel() == null ? null : ByteBufferUtil.bytes(event.getConsistencyLevel().toString()));  // consistency level
-            if (retentionPeriod > 0)
-                bindings.add(ByteBufferUtil.bytes(retentionPeriod));
+            bindings = versionDepentent.newEventBindings(event, partition);
         }
 
         private QueryOptions getBindings()
@@ -284,7 +416,7 @@ public class CassandraAuditWriter implements IAuditWriter
 
         void addEvent(EventBindings event)
         {
-            modifications.add(insertStatement);
+            modifications.add(event.stmt);
             values.add(event.bindings);
             events.add(event.event);
         }
@@ -482,40 +614,6 @@ public class CassandraAuditWriter implements IAuditWriter
     }
 
     /**
-     * Prepares the {@code CQLStatement} used to perform the inserts.
-     * @param hasTTL {@code true} if the data has a limited retention period
-     * @return the {@code CQLStatement} used to perform the inserts
-     */
-    private static ModificationStatement prepareInsertStatement(boolean hasTTL)
-    {
-        String insertString = String.format(
-                "INSERT INTO %s.%s (" +
-                        "date, " +
-                        "node, " +
-                        "day_partition, " +
-                        "event_time, " +
-                        "batch_id, " +
-                        "category, " +
-                        "keyspace_name, " +
-                        "operation, " +
-                        "source, " +
-                        "table_name, " +
-                        "type, " +
-                        "username," +
-                        "authenticated," +
-                        "consistency)" +
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG);
-
-        if (hasTTL)
-        {
-            insertString = insertString + " USING TTL ?";
-        }
-
-        return (ModificationStatement) prepareStatement(insertString);
-    }
-
-    /**
      * Gets the CQL statement corresponding to the specified CQL.
      * @param cql the CQL query
      * @return the {@code CQLStatement} corresponding to the specified CQL
@@ -536,20 +634,7 @@ public class CassandraAuditWriter implements IAuditWriter
     @Override
     public Completable recordEvent(final AuditableEvent event)
     {
-        EventBindings bindings = new EventBindings(event);
-
-        if (isSynchronous())
-            return insertStatement.execute(QueryState.forInternalCalls(),
-                                           bindings.getBindings(),
-                                           System.nanoTime())
-                                  .toCompletable();
-
-        if (!eventQueue.add(bindings))
-        {
-            // queue is full
-            droppedEventLogger.warn(event.toString());
-        }
-        return Completable.complete();
+        return feature.implementation().recordEvent(event);
     }
 
     private boolean isSynchronous()

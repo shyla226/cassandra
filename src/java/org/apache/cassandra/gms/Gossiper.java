@@ -34,25 +34,22 @@ import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Sets;
+import com.google.common.collect.*;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
-import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
+import com.datastax.bdp.db.upgrade.ClusterVersionBarrier;
+import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
 
@@ -79,6 +76,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     static final List<String> DEAD_STATES = Arrays.asList(VersionedValue.REMOVING_TOKEN, VersionedValue.REMOVED_TOKEN,
                                                           VersionedValue.STATUS_LEFT, VersionedValue.HIBERNATE);
     static ArrayList<String> SILENT_SHUTDOWN_STATES = new ArrayList<>();
+
     static
     {
         SILENT_SHUTDOWN_STATES.addAll(DEAD_STATES);
@@ -103,6 +101,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     // Maximimum difference between generation value and local time we are willing to accept about a peer
     static final int MAX_GENERATION_DIFFERENCE = 86400 * 365;
+    public final ClusterVersionBarrier clusterVersionBarrier;
     private long fatClientTimeout;
     private final Random random = new Random();
     private final Comparator<InetAddress> inetcomparator = new Comparator<InetAddress>()
@@ -216,6 +215,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         /* register with the Failure Detector for receiving Failure detector events */
         FailureDetector.instance.registerFailureDetectionEventListener(this);
 
+        this.clusterVersionBarrier = new ClusterVersionBarrier(this::getAllEndpoints, this::getEndpointInfo);
+
         // Register this instance with JMX
         if (registerJmx)
         {
@@ -229,6 +230,67 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    public void registerUpgradeBarrierListener()
+    {
+        register(new IEndpointStateChangeSubscriber() {
+            @Override
+            public void onJoin(InetAddress endpoint, EndpointState state)
+            {
+                logger.trace("ClusterVersionBarrier/IEndpointStateChangeSubscriber - onJoin {} / {}", endpoint, state);
+                clusterVersionBarrier.scheduleUpdateVersions();
+            }
+
+            @Override
+            public void beforeChange(InetAddress endpoint, EndpointState currentState, ApplicationState newStateKey, VersionedValue newValue)
+            {
+            }
+
+            @Override
+            public void onChange(InetAddress endpoint, ApplicationState state, VersionedValue value)
+            {
+                // we are only interested in the release-version and schema - nothing else
+                if (state == ApplicationState.RELEASE_VERSION || state == ApplicationState.SCHEMA)
+                {
+                    logger.trace("ClusterVersionBarrier/IEndpointStateChangeSubscriber - onChange {} / {} = {}", endpoint, state, value);
+                    clusterVersionBarrier.scheduleUpdateVersions();
+                }
+            }
+
+            @Override
+            public void onAlive(InetAddress endpoint, EndpointState state)
+            {
+                logger.trace("ClusterVersionBarrier/IEndpointStateChangeSubscriber - onAlive {} / {}", endpoint, state);
+                clusterVersionBarrier.scheduleUpdateVersions();
+            }
+
+            @Override
+            public void onDead(InetAddress endpoint, EndpointState state)
+            {
+                // not needed
+            }
+
+            @Override
+            public void onRemove(InetAddress endpoint)
+            {
+                // wrong time - afterRemove is what we want as the endpoint's been removed from Gossiper then
+            }
+
+            @Override
+            public void afterRemove(InetAddress endpoint)
+            {
+                logger.trace("ClusterVersionBarrier/IEndpointStateChangeSubscriber - onRemove {}", endpoint);
+                clusterVersionBarrier.scheduleUpdateVersions();
+            }
+
+            @Override
+            public void onRestart(InetAddress endpoint, EndpointState state)
+            {
+                logger.trace("ClusterVersionBarrier/IEndpointStateChangeSubscriber - onRestart {} / {}", endpoint, state);
+                clusterVersionBarrier.scheduleUpdateVersions();
+            }
+        });
     }
 
     public void onNewMessageProcessed()
@@ -274,6 +336,14 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     public void unregister(IEndpointStateChangeSubscriber subscriber)
     {
         subscribers.remove(subscriber);
+    }
+
+    /**
+     * Retrieves all endpoints - local endpoint, live endpoints and unreachable endpoints.
+     */
+    public Iterable<InetAddress> getAllEndpoints()
+    {
+        return Iterables.concat(Collections.singleton(FBUtilities.getBroadcastAddress()), liveEndpoints, unreachableEndpoints.keySet());
     }
 
     /**
@@ -436,6 +506,10 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         MessagingService.instance().resetVersion(endpoint);
         quarantineEndpoint(endpoint);
         MessagingService.instance().destroyConnectionPool(endpoint);
+
+        for (IEndpointStateChangeSubscriber subscriber : subscribers)
+            subscriber.afterRemove(endpoint);
+
         if (logger.isDebugEnabled())
             logger.debug("removing endpoint {}", endpoint);
     }
@@ -1789,6 +1863,30 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     public static long computeExpireTime()
     {
         return System.currentTimeMillis() + Gossiper.aVeryLongTime;
+    }
+
+    /**
+     * Retrieve endpoint information. Preferably from Gossiper's endpoint-state.
+     * If not available via endpoint-state, use the information in {@code system.peers}.
+     */
+    @Nullable
+    public ClusterVersionBarrier.EndpointInfo getEndpointInfo(InetAddress ep)
+    {
+        EndpointState state = getEndpointStateForEndpoint(ep);
+
+        CassandraVersion releaseVersion = state != null ? state.getReleaseVersion() : null;
+        if (releaseVersion == null)
+            releaseVersion = SystemKeyspace.getReleaseVersion(ep);
+
+        UUID schemaVersion = state != null ? state.getSchemaVersion() : null;
+        if (schemaVersion == null)
+            schemaVersion = SystemKeyspace.getSchemaVersion(ep);
+
+        // Return endpoint information, if we got some information from Gossiper
+        // or at least the release-version from system.peers
+        return state != null || releaseVersion != null
+               ? new ClusterVersionBarrier.EndpointInfo(releaseVersion, schemaVersion)
+               : null;
     }
 
     @Nullable

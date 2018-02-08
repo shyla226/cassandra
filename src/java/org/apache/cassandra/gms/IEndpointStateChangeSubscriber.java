@@ -46,7 +46,19 @@ public interface IEndpointStateChangeSubscriber
 
     public void onDead(InetAddress endpoint, EndpointState state);
 
+    /**
+     * Called when an endpoint is being removed - the endpoint appears in the set
+     * of live/unreachable endpoints.
+     */
     public void onRemove(InetAddress endpoint);
+
+    /**
+     * Called after the endpoint has been removed - the endpoint has been removed
+     * from the set of live/unreachable endpoints.
+     */
+    public default void afterRemove(InetAddress endpoint)
+    {
+    }
 
     /**
      * Called whenever a node is restarted.

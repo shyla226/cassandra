@@ -41,7 +41,7 @@ public class AuthorizationProxyTest extends CQLTester
     @BeforeClass
     public static void setup() throws Exception
     {
-        System.setProperty("cassandra.superuser_setup_delay_ms", "1");
+        System.setProperty("cassandra.superuser_setup_delay_ms", "-1");
     }
 
     JMXResource osBean = JMXResource.mbean("java.lang:type=OperatingSystem");

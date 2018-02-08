@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,7 +42,8 @@ final class AuditLogger implements IAuditLogger
     /**
      * The writer used to log the events
      */
-    private final IAuditWriter writer;
+    @VisibleForTesting
+    final IAuditWriter writer;
 
     /**
      * The filter used to determine which events must be logged

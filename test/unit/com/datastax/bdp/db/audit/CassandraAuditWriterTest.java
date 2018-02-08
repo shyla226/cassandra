@@ -1,54 +1,42 @@
-/**
+/*
  * Copyright DataStax, Inc.
  *
  * Please see the included license file for details.
  */
 package com.datastax.bdp.db.audit;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.datastax.bdp.db.upgrade.VersionDependentFeature;
 import org.apache.cassandra.auth.user.UserRolesAndPermissions;
-import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.RequestExecutionException;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.MigrationManager;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.schema.*;
+import org.apache.cassandra.utils.*;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 
 import static com.datastax.bdp.db.audit.CassandraAuditWriter.BatchingOptions;
-import static com.datastax.bdp.db.audit.CoreAuditableEventType.*;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static com.datastax.bdp.db.audit.CoreAuditableEventType.INSERT;
+import static org.junit.Assert.*;
 
 public class CassandraAuditWriterTest extends CQLTester
 {
     @Before
-    public void setUp() throws Exception
+    public void setUp()
     {
         if (Schema.instance.getKeyspaceMetadata(CassandraAuditKeyspace.NAME) != null)
             MigrationManager.announceKeyspaceDrop("cassandra_audit", false);
 
         CassandraAuditKeyspace.maybeConfigure();
+        Gossiper.instance.clusterVersionBarrier.removeAllListeners();
+        Gossiper.instance.clusterVersionBarrier.onLocalNodeReady();
 
         QueryProcessor.processBlocking(
                 String.format("TRUNCATE %s.%s", CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG),
@@ -100,7 +88,7 @@ public class CassandraAuditWriterTest extends CQLTester
         rows = query("SELECT ttl(type) as ttltype FROM %s.%s");
         assertEquals(1, rows.size());
         row = rows.one();
-        Assert.assertFalse(row.has("ttltype"));
+        assertFalse(row.has("ttltype"));
     }
 
     @Test
@@ -141,7 +129,7 @@ public class CassandraAuditWriterTest extends CQLTester
         rows = query("SELECT ttl(type) as ttltype FROM %s.%s");
         assertEquals(1, rows.size());
         row = rows.one();
-        Assert.assertFalse(row.has("ttltype"));
+        assertFalse(row.has("ttltype"));
     }
 
     @Test
@@ -164,8 +152,8 @@ public class CassandraAuditWriterTest extends CQLTester
         rows = query("SELECT ttl(type) as ttltype FROM %s.%s");
         assertEquals(1, rows.size());
         UntypedResultSet.Row row = rows.one();
-        Assert.assertTrue(row.has("ttltype"));
-        Assert.assertTrue(row.getInt("ttltype") <= 60 * 60);
+        assertTrue(row.has("ttltype"));
+        assertTrue(row.getInt("ttltype") <= 60 * 60);
     }
 
     @Test
@@ -260,39 +248,143 @@ public class CassandraAuditWriterTest extends CQLTester
         assertEquals(10, rows.size());
     }
 
+    /**
+     * A node starting up with the DSE 5.0 format of the dse_audit.audit_log table update it.
+     *
+     * Also covers the case when dse_audit.audit_log has been manually recreated and therefore
+     * gets a different table-ID.
+     */
     @Test
     public void schemaUpgrade() throws Exception
     {
-        QueryProcessor.executeInternal(String.format("DROP TABLE %s.%s", CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG));
-        String olsSchema = String.format(
-                "CREATE TABLE IF NOT EXISTS %s.%s (" +
-                        "date timestamp," +
-                        "node inet," +
-                        "day_partition int," +
-                        "event_time timeuuid," +
-                        "batch_id uuid," +
-                        "category text," +
-                        "keyspace_name text," +
-                        "operation text," +
-                        "source text," +
-                        "table_name text," +
-                        "type text," +
-                        "username text," +
-                        "PRIMARY KEY ((date, node, day_partition), event_time))",
-                CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG
-        );
-        QueryProcessor.executeInternal(olsSchema);
+        try
+        {
+            QueryProcessor.executeInternal(String.format("DROP TABLE %s.%s", CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG));
 
-        TableMetadata cfm;
-        cfm = Schema.instance.getTableMetadata(CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG);
-        Assert.assertNull(cfm.getColumn(ByteBufferUtil.bytes("consistency")));
+            // create the table as it was defined in DSE 5.0
+            String oldSchema = String.format(
+            "CREATE TABLE IF NOT EXISTS %s.%s (" +
+            "date timestamp," +
+            "node inet," +
+            "day_partition int," +
+            "event_time timeuuid," +
+            "batch_id uuid," +
+            "category text," +
+            "keyspace_name text," +
+            "operation text," +
+            "source text," +
+            "table_name text," +
+            "type text," +
+            "username text," +
+            "PRIMARY KEY ((date, node, day_partition), event_time)) ",
+            CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG
+            );
+            QueryProcessor.executeInternal(oldSchema);
+            TableId createdTableId = Schema.instance
+                                           .getTableMetadata(CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG)
+                                           .id;
+            assertNotEquals(CassandraAuditKeyspace.tableId(CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG), createdTableId);
 
-        CassandraAuditKeyspace.maybeConfigure();
+            CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
+            logger.setUp();
+            assertEquals(VersionDependentFeature.FeatureStatus.ACTIVATING, logger.feature.getStatus());
 
-        cfm = Schema.instance.getTableMetadata(CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG);
-        ColumnMetadata column = cfm.getColumn(ByteBufferUtil.bytes("consistency"));
-        Assert.assertNotNull(column);
-        Assert.assertEquals(UTF8Type.instance, column.type);
+            TableMetadata cfm;
+            cfm = Schema.instance.getTableMetadata(CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG);
+            assertNull(cfm.getColumn(ByteBufferUtil.bytes("consistency")));
+            assertNull(cfm.getColumn(ByteBufferUtil.bytes("authenticated")));
+
+            // triggers callbacks to the VersionDependentFeature in CassandraAuditWriter (no gossip in place)
+            for (int i = 0; i < 5_000; i++)
+            {
+                Thread.sleep(1L);
+                if (VersionDependentFeature.FeatureStatus.ACTIVATED == logger.feature.getStatus())
+                    break;
+            }
+
+            assertEquals(VersionDependentFeature.FeatureStatus.ACTIVATED, logger.feature.getStatus());
+
+            cfm = Schema.instance.getTableMetadata(CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG);
+            ColumnMetadata column = cfm.getColumn(ByteBufferUtil.bytes("authenticated"));
+            assertNotNull(column);
+            assertEquals(UTF8Type.instance, column.type);
+            column = cfm.getColumn(ByteBufferUtil.bytes("consistency"));
+            assertNotNull(column);
+            assertEquals(UTF8Type.instance, column.type);
+
+            assertEquals(cfm.id, createdTableId);
+        }
+        finally
+        {
+            // do not screw up other unit tests - if this unit test fails and leaves the audit-log table without
+            // the native columns, the upgrade code won't get any callbacks and the table will be left as not upgraded
+            // (missing columns)
+            QueryProcessor.executeInternal(String.format("DROP TABLE %s.%s", CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG));
+        }
+    }
+
+    /**
+     * A node starting up without the dse_audit.audit_log table should create it.
+     */
+    @Test
+    public void schemaRecreate()
+    {
+        try
+        {
+            QueryProcessor.executeInternal(String.format("DROP TABLE %s.%s", CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG));
+
+            CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
+            logger.setUp();
+            assertEquals(VersionDependentFeature.FeatureStatus.ACTIVATED, logger.feature.getStatus());
+
+            TableMetadata cfm = Schema.instance.getTableMetadata(CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG);
+            ColumnMetadata column = cfm.getColumn(ByteBufferUtil.bytes("authenticated"));
+            assertNotNull(column);
+            assertEquals(UTF8Type.instance, column.type);
+            column = cfm.getColumn(ByteBufferUtil.bytes("consistency"));
+            assertNotNull(column);
+            assertEquals(UTF8Type.instance, column.type);
+        }
+        finally
+        {
+            // do not screw up other unit tests - if this unit test fails and leaves the audit-log table without
+            // the native columns, the upgrade code won't get any callbacks and the table will be left as not upgraded
+            // (missing columns)
+            QueryProcessor.executeInternal(String.format("DROP TABLE %s.%s", CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG));
+        }
+    }
+
+    /**
+     * In case there are more columns than expected, leave those untouched. This can happen when a newer DSE
+     * version adds new columns.
+     */
+    @Test
+    public void schemaMoreColumns()
+    {
+        try
+        {
+            QueryProcessor.executeInternal(String.format("ALTER TABLE %s.%s ADD (foo text, bar int, baz set<text>)",
+                                                         CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG));
+
+            CassandraAuditWriter logger = new CassandraAuditWriter(0, ConsistencyLevel.ONE, BatchingOptions.SYNC);
+            logger.setUp();
+            assertEquals(VersionDependentFeature.FeatureStatus.ACTIVATED, logger.feature.getStatus());
+
+            TableMetadata cfm = Schema.instance.getTableMetadata(CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG);
+            assertEquals(CassandraAuditWriter.NUM_FIELDS + 3, cfm.columns().size());
+            assertNotNull(cfm.getColumn(ByteBufferUtil.bytes("authenticated")));
+            assertNotNull(cfm.getColumn(ByteBufferUtil.bytes("consistency")));
+            assertNotNull(cfm.getColumn(ByteBufferUtil.bytes("foo")));
+            assertNotNull(cfm.getColumn(ByteBufferUtil.bytes("bar")));
+            assertNotNull(cfm.getColumn(ByteBufferUtil.bytes("baz")));
+        }
+        finally
+        {
+            // do not screw up other unit tests - if this unit test fails and leaves the audit-log table without
+            // the native columns, the upgrade code won't get any callbacks and the table will be left as not upgraded
+            // (missing columns)
+            QueryProcessor.executeInternal(String.format("DROP TABLE %s.%s", CassandraAuditKeyspace.NAME, CassandraAuditKeyspace.AUDIT_LOG));
+        }
     }
 
     /**
@@ -316,7 +408,7 @@ public class CassandraAuditWriterTest extends CQLTester
 
         logger.setUp();
 
-        Assert.assertEquals(0, batches.size());
+        assertEquals(0, batches.size());
 
         AuditableEvent event = newAuditEvent(INSERT,
                                              UUIDGen.getTimeUUID(new DateTime(2016, 1, 1, 1, 59, 0, 0).getMillis()),
@@ -327,7 +419,7 @@ public class CassandraAuditWriterTest extends CQLTester
 
         logger.recordEvent(event);
 
-        Assert.assertEquals(0, batches.size());
+        assertEquals(0, batches.size());
 
         event = newAuditEvent(INSERT,
                               UUIDGen.getTimeUUID(new DateTime(2016, 1, 1, 2, 0, 0, 0).getMillis()),
@@ -340,7 +432,7 @@ public class CassandraAuditWriterTest extends CQLTester
         logger.recordEvent(event);
 
         waitForEventsToBeWritten(2, 2000);
-        Assert.assertEquals(2, batches.size());
+        assertEquals(2, batches.size());
     }
 
     private void waitForEventsToBeWritten(int eventCount, long timeout) throws RequestExecutionException

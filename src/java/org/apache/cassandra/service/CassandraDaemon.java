@@ -21,67 +21,41 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryPoolMXBean;
-import java.net.InetAddress;
-import java.net.URL;
-import java.net.UnknownHostException;
-import java.util.Collections;
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.net.*;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.function.BiConsumer;
-import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
-
-import javax.management.MBeanServer;
-import javax.management.ObjectName;
-import javax.management.StandardMBean;
+import javax.management.*;
 import javax.management.remote.JMXConnectorServer;
 
 import com.addthis.metrics3.reporter.config.ReporterConfig;
 import com.codahale.metrics.Meter;
-import com.codahale.metrics.MetricRegistryListener;
-import com.codahale.metrics.SharedMetricRegistries;
-import com.codahale.metrics.jvm.BufferPoolMetricSet;
-import com.codahale.metrics.jvm.FileDescriptorRatioGauge;
-import com.codahale.metrics.jvm.GarbageCollectorMetricSet;
-import com.codahale.metrics.jvm.MemoryUsageGaugeSet;
+import com.codahale.metrics.*;
+import com.codahale.metrics.jvm.*;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.Uninterruptibles;
-
+import com.google.common.util.concurrent.*;
 import org.apache.commons.lang3.exception.ExceptionUtils;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.concurrent.TPCUtils;
-import org.apache.cassandra.exceptions.RequestExecutionException;
-import org.apache.cassandra.schema.TableMetadata;
+import com.datastax.bdp.db.upgrade.ClusterVersionBarrier;
+import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.cql3.functions.ThreadAwareSecurityManager;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.functions.ThreadAwareSecurityManager;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.metrics.CassandraMetricsRegistry;
-import org.apache.cassandra.metrics.DefaultNameFactory;
-import org.apache.cassandra.metrics.StorageMetrics;
-import org.apache.cassandra.schema.TriggerMetadata;
+import org.apache.cassandra.metrics.*;
+import org.apache.cassandra.schema.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.*;
@@ -362,6 +336,8 @@ public class CassandraDaemon
 
         // Finish startup
         SystemKeyspace.finishStartupBlocking();
+
+        Gossiper.instance.registerUpgradeBarrierListener();
 
         // Re-populate token metadata after commit log recover (new peers might be loaded onto system keyspace #10293)
         StorageService.instance.populateTokenMetadata();
@@ -710,6 +686,31 @@ public class CassandraDaemon
                 System.out.close();
                 System.err.close();
             }
+
+            // Log information about the current version(s) used in the cluster.
+            Gossiper.instance.clusterVersionBarrier.register(new ClusterVersionBarrier.ClusterVersionListener()
+            {
+                private Boolean versionsEquals = null;
+
+                public void clusterVersionUpdated(ClusterVersionBarrier.ClusterVersionInfo versionInfo)
+                {
+                    Boolean newEquals = versionInfo.minOss.equals(versionInfo.maxOss);
+                    if (!Objects.equals(versionsEquals, newEquals))
+                    {
+                        versionsEquals = newEquals;
+                        if (newEquals)
+                            logger.info("All nodes in this cluster are on version {}", versionInfo.minOss);
+                        else
+                            logger.info("Nodes in this cluster are on version {} up to version {}", versionInfo.minOss, versionInfo.maxOss);
+                    }
+                }
+            });
+
+            // Inform the Gossiper's ClusterVersionBarrier that the node's ready - i.e. it got past the
+            // point where endpoint-states change very frequently (during initialization). The
+            // onLocalNodeReady() call triggers an initial callback to all registered listeners.
+            logger.debug("ClusterVersionBarrier starting");
+            Gossiper.instance.clusterVersionBarrier.onLocalNodeReady();
 
             start();
 

@@ -51,7 +51,6 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.lang3.StringUtils;
 
 import org.slf4j.Logger;
@@ -83,6 +82,7 @@ import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.sstable.SSTableLoader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.*;
 import org.apache.cassandra.metrics.StorageMetrics;
@@ -1201,7 +1201,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (doneAuthSetup.getAndSet(true))
             return Completable.complete();
 
-        return maybeAddOrUpdateKeyspace(AuthKeyspace.metadata())
+        return maybeAddOrUpdateKeyspace(AuthKeyspace.metadata(), AuthKeyspace.tablesIfNotExist(), 0L)
                 .doOnComplete(() -> {
                     DatabaseDescriptor.getRoleManager().setup();
                     DatabaseDescriptor.getAuthenticator().setup();
@@ -1254,6 +1254,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      */
     private Completable maybeAddOrUpdateKeyspace(KeyspaceMetadata expected)
     {
+        return maybeAddOrUpdateKeyspace(expected, Collections.emptyList(), 0L);
+    }
+
+    public Completable maybeAddOrUpdateKeyspace(KeyspaceMetadata expected, List<TableMetadata> tablesIfNotExist, long timestamp)
+    {
         // Note that want to deal with the keyspace and its table a bit differently: for the keyspace definition
         // itself, we want to create it if it doesn't exist yet, but if it does exist, we don't want to modify it,
         // because user can modify the definition to change the replication factor (#6016) and we don't want to
@@ -1273,32 +1278,47 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             KeyspaceMetadata defined = Schema.instance.getKeyspaceMetadata(expected.name);
 
             // Same as for tables, it might miss types.
-            return maybeAddOrUpdateTypes(expected.types, defined.types);
+            return maybeAddOrUpdateTypes(expected.types, defined.types, timestamp);
         })).andThen(Completable.defer(() -> {
             KeyspaceMetadata defined = Schema.instance.getKeyspaceMetadata(expected.name);
+
+            // The default behavior is to create a new table or to add unconditionally add
+            // declared columns. In an upgrade scenario, the schema change may not actually
+            // make it to all other nodes (schema migrations are prohibited in major version
+            // upgrades) or not make it immediately, so that different nodes have a different
+            // view on the schema and both modification and read statement might fail.
+            //
+            // Therefore, some tables are only created, if they do not already exist - i.e.
+            // this covers the case when the feature is enabled (or the cluster is new).
+            //
+            // Upgrade scenarios are handled by VersionDependentFeature + SchemaUpgrade classes.
+            Tables expectedTables = expected.tables;
+            for (TableMetadata tableIfNotExists : tablesIfNotExist)
+                if (defined.tables.getNullable(tableIfNotExists.name) == null)
+                    expectedTables = expectedTables.with(tableIfNotExists);
 
             // While the keyspace exists, it might miss table or have outdated one
             // There is also the potential for a race, as schema migrations add the bare
             // keyspace into Schema.instance before adding its tables, so double check that
             // all the expected tables are present
-            return maybeAddOrUpdateTables(expected.tables, defined.tables);
+            return maybeAddOrUpdateTables(expectedTables, defined.tables, timestamp);
         }));
     }
 
-    private Completable maybeAddOrUpdateTypes(Types expected, Types defined)
+    private Completable maybeAddOrUpdateTypes(Types expected, Types defined, long timestamp)
     {
         List<Completable> migrations = new ArrayList<>();
         for (UserType expectedType : expected)
         {
             UserType definedType = defined.get(expectedType.name).orElse(null);
             if (definedType == null || !definedType.equals(expectedType))
-                migrations.add(MigrationManager.forceAnnounceNewType(expectedType));
+                migrations.add(MigrationManager.forceAnnounceNewType(expectedType, timestamp));
         }
 
         return migrations.isEmpty() ? Completable.complete() : Completable.merge(migrations);
     }
 
-    private Completable maybeAddOrUpdateTables(Tables expected, Tables defined)
+    private Completable maybeAddOrUpdateTables(Tables expected, Tables defined, long timestamp)
     {
         List<Completable> migrations = new ArrayList<>();
         for (TableMetadata expectedTable : expected)
@@ -1307,7 +1327,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // If the table doesn't exist yet, create it.
             if (definedTable == null)
             {
-                migrations.add(MigrationManager.forceAnnounceNewTable(expectedTable));
+                migrations.add(MigrationManager.forceAnnounceNewTable(expectedTable, timestamp));
             }
             // If it exists, on an upgrade, it's schema may not be up-to-date so update it if it's not the case.
             // One of the subtlety is that we let users override the NodeSync parameters (see DB-965) and we don't
@@ -1320,7 +1340,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 TableParams newParams = expectedTable.params.unbuild()
                                                             .nodeSync(definedTable.params.nodeSync)
                                                             .build();
-                migrations.add(MigrationManager.forceAnnounceNewTable(expectedTable.unbuild().params(newParams).build()));
+                migrations.add(MigrationManager.forceAnnounceNewTable(expectedTable.unbuild().params(newParams).build(), timestamp));
             }
         }
 

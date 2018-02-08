@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
@@ -39,8 +40,6 @@ public final class AuthKeyspace
     public static final String ROLE_MEMBERS = "role_members";
     public static final String ROLE_PERMISSIONS = "role_permissions";
 
-    public static final long SUPERUSER_SETUP_DELAY = Long.getLong("cassandra.superuser_setup_delay_ms", 10000);
-
     private static final TableMetadata Roles =
         parse(ROLES,
               "role definitions",
@@ -60,8 +59,10 @@ public final class AuthKeyspace
               + "member text,"
               + "PRIMARY KEY(role, member))");
 
-    // role_permissions contains the permissions a role is actually granted on a resource
-
+    // role_permissions is only created, if it does not exist.
+    // For upgrade scenarios, when the table already exists, the columns 'restricted'
+    // and 'grantables', introduced in DSE 6.0, are added by the VersionDependentFeature+SchemaUpgrade
+    // instances defined in CassandraAuthorizer.
     private static final TableMetadata RolePermissions =
         parse(ROLE_PERMISSIONS,
               "permissions granted to db roles",
@@ -72,6 +73,10 @@ public final class AuthKeyspace
               + "restricted set<text>,"
               + "grantables set<text>,"
               + "PRIMARY KEY(role, resource))");
+
+    public static final KeyspaceMetadata metadata = KeyspaceMetadata.create(SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                                            KeyspaceParams.simple(1),
+                                                                            Tables.of(Roles, RoleMembers));
 
     private static TableMetadata parse(String name, String description, String cql)
     {
@@ -85,8 +90,11 @@ public final class AuthKeyspace
 
     public static KeyspaceMetadata metadata()
     {
-        return KeyspaceMetadata.create(SchemaConstants.AUTH_KEYSPACE_NAME,
-                                       KeyspaceParams.simple(1),
-                                       Tables.of(Roles, RoleMembers, RolePermissions));
+        return metadata;
+    }
+
+    public static List<TableMetadata> tablesIfNotExist()
+    {
+        return Collections.singletonList(RolePermissions);
     }
 }

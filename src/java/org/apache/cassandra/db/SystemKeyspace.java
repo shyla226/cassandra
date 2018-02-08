@@ -1127,6 +1127,24 @@ public final class SystemKeyspace
     }
 
     /**
+     * Get schema version for given endpoint.
+     * If schema version is unknown, then this returns null.
+     *
+     * @param ep endpoint address to check
+     * @return Schema version or null if version is unknown.
+     */
+    public static UUID getSchemaVersion(InetAddress ep)
+    {
+        checkPeersCache();
+
+        if (FBUtilities.getBroadcastAddress().equals(ep))
+            return Schema.instance.getVersion();
+
+        PeerInfo info = peers.get(ep);
+        return info == null ? null : info.schemaVersion;
+    }
+
+    /**
      * One of three things will happen if you try to read the system keyspace:
      * 1. files are present and you can read them: great
      * 2. no files are there: great (new node is assumed)
