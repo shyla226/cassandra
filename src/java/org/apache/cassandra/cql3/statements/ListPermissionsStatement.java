@@ -26,6 +26,7 @@ import com.datastax.bdp.db.audit.AuditableEventType;
 import com.datastax.bdp.db.audit.CoreAuditableEventType;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.exceptions.*;
@@ -95,10 +96,13 @@ public class ListPermissionsStatement extends AuthorizationStatement
         if ((grantee != null) && !DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
             throw invalidRequest("%s doesn't exist", grantee);
 
-        // If the user requesting 'LIST PERMISSIONS' is not a superuser OR their username doesn't match 'grantee', we
-        // throw UnauthorizedException. So only a superuser can view everybody's permissions. Regular users are only
-        // allowed to see their own permissions.
-        if (!(state.isSuper() || state.isSystem()) && !state.hasRole(grantee))
+        // If the user requesting 'LIST PERMISSIONS' is not a superuser OR their username doesn't match 'grantee' OR
+        // has no DESCRIBE permission on the role or all roles, we throw UnauthorizedException.
+        // So only a superuser, system user can view everybody's permissions. Regular users are only
+        // allowed to see their own permissions and those of roles for which they have DESCRIBE permission.
+        if (!(state.isSuper() || state.isSystem())
+            && !state.hasRole(grantee)
+            && !state.hasRolePermission(grantee != null ? grantee : RoleResource.root(), CorePermission.DESCRIBE))
             throw new UnauthorizedException(String.format("You are not authorized to view %s's permissions",
                                                           grantee == null ? "everyone" : grantee.getRoleName()));
     }
