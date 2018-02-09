@@ -26,6 +26,10 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 
 public interface IAuthenticator
 {
+    /**
+     * If in doubt about the correctness, look at
+     * https://github.com/riptano/bdp/blob/92f87e99307c9dc5be03b95f5ac5bb8a333d5ec3/dse-core/src/main/java/com/datastax/bdp/cassandra/auth/DseAuthenticator.java
+     */
     public enum TransitionalMode
     {
         /**

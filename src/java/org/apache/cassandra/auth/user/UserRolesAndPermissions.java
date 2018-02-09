@@ -127,7 +127,7 @@ public abstract class UserRolesAndPermissions
             TransitionalMode mode = authorizer.getTransitionalMode();
 
             // Anonymous can never have AUTHORIZE permission.
-            if (perm == CorePermission.AUTHORIZE || !mode.supportPermission(perm))
+            if (!mode.supportPermissionForAnonymous(perm))
                 return false;
 
             if (!authorizer.requireAuthorization())
