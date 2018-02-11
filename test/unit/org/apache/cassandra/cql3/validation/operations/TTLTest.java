@@ -1,5 +1,11 @@
 package org.apache.cassandra.cql3.validation.operations;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -7,6 +13,7 @@ import org.apache.cassandra.cql3.Attributes;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.BufferExpiringCell;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ExpiringCell;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -16,7 +23,14 @@ import org.junit.Test;
 
 public class TTLTest extends CQLTester
 {
+    public static String NEGATIVE_LOCAL_EXPIRATION_TEST_DIR = "test/data/negative-local-expiration-test/%s";
+
     public static int MAX_TTL = ExpiringCell.MAX_TTL;
+
+    public static final String SIMPLE_NOCLUSTERING = "table1";
+    public static final String SIMPLE_CLUSTERING = "table2";
+    public static final String COMPLEX_NOCLUSTERING = "table3";
+    public static final String COMPLEX_CLUSTERING = "table4";
 
     @Test
     public void testTTLPerRequestLimit() throws Throwable
@@ -109,7 +123,7 @@ public class TTLTest extends CQLTester
     @Test
     public void testRejectExpirationDateOverflowPolicy() throws Throwable
     {
-        Attributes.expirationDateOverflowPolicy = Attributes.ExpirationDateOverflowPolicy.REJECT;
+        Attributes.policy = Attributes.ExpirationDateOverflowPolicy.REJECT;
         createTable("CREATE TABLE %s (k int PRIMARY KEY, i int)");
         try
         {
@@ -133,18 +147,18 @@ public class TTLTest extends CQLTester
     @Test
     public void testCapExpirationDatePolicyDefaultTTL() throws Throwable
     {
-        Attributes.expirationDateOverflowPolicy = Attributes.ExpirationDateOverflowPolicy.CAP;
+        Attributes.policy = Attributes.ExpirationDateOverflowPolicy.CAP;
         createTable("CREATE TABLE %s (k int PRIMARY KEY, i int) WITH default_time_to_live=" + MAX_TTL);
         execute("INSERT INTO %s (k, i) VALUES (1, 1)");
         checkTTLIsCapped("i");
-        Attributes.expirationDateOverflowPolicy = Attributes.ExpirationDateOverflowPolicy.REJECT;
+        Attributes.policy = Attributes.ExpirationDateOverflowPolicy.REJECT;
     }
 
     @Test
     public void testCapExpirationDatePolicyPerRequest() throws Throwable
     {
         // Test cap policy
-        Attributes.expirationDateOverflowPolicy = Attributes.ExpirationDateOverflowPolicy.CAP;
+        Attributes.policy = Attributes.ExpirationDateOverflowPolicy.CAP;
 
         // simple column, clustering, flush
         baseCapExpirationDateOverflowTest(true, true, true);
@@ -166,7 +180,20 @@ public class TTLTest extends CQLTester
         baseCapExpirationDateOverflowTest(false, false, false);
 
         // Return to previous policy
-        Attributes.expirationDateOverflowPolicy = Attributes.ExpirationDateOverflowPolicy.REJECT;
+        Attributes.policy = Attributes.ExpirationDateOverflowPolicy.REJECT;
+    }
+
+    @Test
+    public void testRecoverOverflowedExpirationWithScrub() throws Throwable
+    {
+        createTable(true, true);
+        createTable(true, false);
+        createTable(false, true);
+        createTable(false, false);
+
+        baseTestRecoverOverflowedExpiration(false, false);
+        baseTestRecoverOverflowedExpiration(true, false);
+        baseTestRecoverOverflowedExpiration(true, true);
     }
 
     public void baseCapExpirationDateOverflowTest(boolean simple, boolean clustering, boolean flush) throws Throwable
@@ -224,6 +251,18 @@ public class TTLTest extends CQLTester
         }
     }
 
+    public void baseTestRecoverOverflowedExpiration(boolean runScrub, boolean reinsertOverflowedTTL) throws Throwable
+    {
+        // simple column, clustering
+        testRecoverOverflowedExpirationWithScrub(true, true, runScrub, reinsertOverflowedTTL);
+        // simple column, noclustering
+        testRecoverOverflowedExpirationWithScrub(true, false, runScrub, reinsertOverflowedTTL);
+        // complex column, clustering
+        testRecoverOverflowedExpirationWithScrub(false, true, runScrub, reinsertOverflowedTTL);
+        // complex column, noclustering
+        testRecoverOverflowedExpirationWithScrub(false, false, runScrub, reinsertOverflowedTTL);
+    }
+
     private void verifyData(boolean simple) throws Throwable
     {
         if (simple)
@@ -240,20 +279,21 @@ public class TTLTest extends CQLTester
     }
 
     /**
-     * Verify that the computed TTL is equal to the maximum allowed ttl given the
+     * Verify that the computed TTL is approximately equal to the maximum allowed ttl given the
      * {@link ExpiringCell#getLocalDeletionTime()} field limitation (CASSANDRA-14092)
      */
     private void checkTTLIsCapped(String field) throws Throwable
     {
 
-        // Since the max TTL is dynamic, we compute if before and after the query to avoid flakiness
-        int minTTL = computeMaxTTL();
+        // TTL is computed dynamically from row expiration time, so if it is
+        // equal or higher to the minimum max TTL we compute before the query
+        // we are fine.
+        int minMaxTTL = computeMaxTTL();
         UntypedResultSet execute = execute("SELECT ttl(" + field + ") FROM %s");
-        int maxTTL = computeMaxTTL();
         for (UntypedResultSet.Row row : execute)
         {
             int ttl = row.getInt("ttl(" + field + ")");
-            assertTrue(minTTL >= ttl &&  ttl <= maxTTL);
+            assertTrue(ttl >= minMaxTTL);
         }
     }
 
@@ -265,5 +305,106 @@ public class TTLTest extends CQLTester
     {
         int nowInSecs = (int) (System.currentTimeMillis() / 1000);
         return BufferExpiringCell.MAX_DELETION_TIME - nowInSecs;
+    }
+
+    public void testRecoverOverflowedExpirationWithScrub(boolean simple, boolean clustering, boolean runScrub, boolean reinsertOverflowedTTL) throws Throwable
+    {
+        if (reinsertOverflowedTTL)
+        {
+            assert runScrub;
+        }
+
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(getTableName(simple, clustering));
+
+        assertEquals(0, cfs.getLiveSSTableCount());
+
+        copySSTablesToTableDir(simple, clustering);
+
+        cfs.loadNewSSTables();
+
+        if (runScrub)
+        {
+            cfs.scrub(true, false, false, reinsertOverflowedTTL, 1);
+        }
+
+        if (reinsertOverflowedTTL)
+        {
+            if (simple)
+            {
+                UntypedResultSet execute = execute(String.format("SELECT * from %s.%s", KEYSPACE, getTableName(simple, clustering)));
+                assertRows(execute, row(1, 1, 1), row(2, 2, 2));
+
+            }
+            else
+                assertRows(execute(String.format("SELECT * from %s.%s", KEYSPACE, getTableName(simple, clustering))), row(1, 1, set("v11", "v12", "v13", "v14")), row(2, 2, set("v21", "v22", "v23", "v24")));
+
+            cfs.forceMajorCompaction();
+
+            if (simple)
+                assertRows(execute(String.format("SELECT * from %s.%s", KEYSPACE, getTableName(simple, clustering))), row(1, 1, 1), row(2, 2, 2));
+            else
+                assertRows(execute(String.format("SELECT * from %s.%s", KEYSPACE, getTableName(simple, clustering))), row(1, 1, set("v11", "v12", "v13", "v14")), row(2, 2, set("v21", "v22", "v23", "v24")));
+        }
+        else
+        {
+            assertEmpty(execute(String.format("SELECT * from %s.%s", KEYSPACE, getTableName(simple, clustering))));
+        }
+        cfs.truncateBlocking(); //cleanup for next tests
+    }
+
+    private void copySSTablesToTableDir(boolean simple, boolean clustering) throws IOException
+    {
+        File destDir = Keyspace.open(KEYSPACE).getColumnFamilyStore(getTableName(simple, clustering)).directories.getCFDirectories().iterator().next();
+        File sourceDir = getTableDir(simple, clustering);
+        for (File file : sourceDir.listFiles())
+        {
+            copyFile(file, destDir);
+        }
+    }
+
+    private void createTable(boolean simple, boolean clustering) throws Throwable
+    {
+        if (simple)
+        {
+            if (clustering)
+                execute(String.format("create table %s.%s (k int, a int, b int, primary key(k, a))", KEYSPACE, getTableName(simple, clustering)));
+            else
+                execute(String.format("create table %s.%s (k int primary key, a int, b int)", KEYSPACE, getTableName(simple, clustering)));
+        }
+        else
+        {
+            if (clustering)
+                execute(String.format("create table %s.%s (k int, a int, b set<text>, primary key(k, a))", KEYSPACE, getTableName(simple, clustering)));
+            else
+                execute(String.format("create table %s.%s (k int primary key, a int, b set<text>)", KEYSPACE, getTableName(simple, clustering)));
+        }
+    }
+
+    private static File getTableDir(boolean simple, boolean clustering)
+    {
+        return new File(String.format(NEGATIVE_LOCAL_EXPIRATION_TEST_DIR, getTableName(simple, clustering)));
+    }
+
+    private static void copyFile(File src, File dest) throws IOException
+    {
+        byte[] buf = new byte[65536];
+        if (src.isFile())
+        {
+            File target = new File(dest, src.getName());
+            int rd;
+            FileInputStream is = new FileInputStream(src);
+            FileOutputStream os = new FileOutputStream(target);
+            while ((rd = is.read(buf)) >= 0)
+                os.write(buf, 0, rd);
+        }
+    }
+
+    public static String getTableName(boolean simple, boolean clustering)
+    {
+        if (simple)
+            return clustering ? SIMPLE_CLUSTERING : SIMPLE_NOCLUSTERING;
+        else
+            return clustering ? COMPLEX_CLUSTERING : COMPLEX_NOCLUSTERING;
     }
 }

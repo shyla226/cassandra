@@ -48,7 +48,6 @@ public class BufferExpiringCell extends BufferCell implements ExpiringCell
     {
         super(name, value, timestamp);
         assert timeToLive > 0 : timeToLive;
-        assert localExpirationTime > 0 : localExpirationTime;
         this.timeToLive = timeToLive;
         this.localExpirationTime = localExpirationTime;
     }
@@ -68,6 +67,12 @@ public class BufferExpiringCell extends BufferCell implements ExpiringCell
     public Cell withUpdatedTimestamp(long newTimestamp)
     {
         return new BufferExpiringCell(name(), value(), newTimestamp, timeToLive, localExpirationTime);
+    }
+
+    @Override
+    public Cell withUpdatedTimestampAndLocalDeletionTime(long newTimestamp, int newLocalDeletionTime)
+    {
+        return new BufferExpiringCell(name(), value(), newTimestamp, timeToLive, newLocalDeletionTime);
     }
 
     @Override
@@ -181,7 +186,9 @@ public class BufferExpiringCell extends BufferCell implements ExpiringCell
     /** @return Either a DeletedCell, or an ExpiringCell. */
     public static Cell create(CellName name, ByteBuffer value, long timestamp, int timeToLive, int localExpirationTime, int expireBefore, ColumnSerializer.Flag flag)
     {
-        if (localExpirationTime >= expireBefore || flag == ColumnSerializer.Flag.PRESERVE_SIZE)
+        // CASSANDRA-14092 may have written rows with negative localExpirationTime, so we don't turn them into tombstones yet
+        // to be able to recover them with scrub.
+        if (localExpirationTime < 0 || localExpirationTime >= expireBefore || flag == ColumnSerializer.Flag.PRESERVE_SIZE)
             return new BufferExpiringCell(name, value, timestamp, timeToLive, localExpirationTime);
         // The column is now expired, we can safely return a simple tombstone. Note that
         // as long as the expiring column and the tombstone put together live longer than GC grace seconds,

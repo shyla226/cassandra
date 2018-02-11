@@ -48,18 +48,18 @@ public class Attributes
     }
 
     @VisibleForTesting
-    public static ExpirationDateOverflowPolicy expirationDateOverflowPolicy;
+    public static ExpirationDateOverflowPolicy policy;
 
     static {
         String policyAsString = System.getProperty("cassandra.expiration_date_overflow_policy", ExpirationDateOverflowPolicy.REJECT.name());
         try
         {
-            expirationDateOverflowPolicy = ExpirationDateOverflowPolicy.valueOf(policyAsString.toUpperCase());
+            policy = ExpirationDateOverflowPolicy.valueOf(policyAsString.toUpperCase());
         }
         catch (RuntimeException e)
         {
             logger.warn("Invalid expiration date overflow policy: {}. Using default: {}", policyAsString, ExpirationDateOverflowPolicy.REJECT.name());
-            expirationDateOverflowPolicy = ExpirationDateOverflowPolicy.REJECT;
+            policy = ExpirationDateOverflowPolicy.REJECT;
         }
     }
 
@@ -191,12 +191,12 @@ public class Attributes
         int nowInSecs = (int)(System.currentTimeMillis() / 1000);
         if (ttl + nowInSecs < 0)
         {
-            switch (expirationDateOverflowPolicy)
+            switch (policy)
             {
                 case CAP:
                     /**
                      * Capping at this stage is basically not rejecting the request. The actual capping is done
-                     * by {@link org.apache.cassandra.db.BufferExpiringCell#sanitizeLocalExpirationTime(int)},
+                     * by {@link org.apache.cassandra.db.BufferExpiringCell#computeLocalExpirationTime(int)},
                      * which converts the negative TTL to {@link org.apache.cassandra.db.BufferExpiringCell#MAX_DELETION_TIME}
                      */
                     NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, EXPIRATION_OVERFLOW_WARNING_INTERVAL_MINUTES,
