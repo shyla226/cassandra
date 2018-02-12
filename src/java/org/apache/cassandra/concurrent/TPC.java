@@ -84,7 +84,7 @@ public class TPC
     public static final int AIO_BLOCK_SIZE = 512;
 
     public static final AioCoordinator aioCoordinator = new AioCoordinator(NUM_CORES,
-                                                                           DatabaseDescriptor.getTPCIOCores(),
+                                                                           USE_AIO ? DatabaseDescriptor.getTPCIOCores() : 0,
                                                                            DatabaseDescriptor.getIOGlobalQueueDepth());
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task

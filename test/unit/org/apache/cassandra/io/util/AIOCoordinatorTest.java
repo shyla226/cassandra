@@ -95,7 +95,14 @@ public class AIOCoordinatorTest
         testAIOCoordinator(30, 15, 8);
 
         testAIOCoordinator(30, 7, 7);
+    }
 
+    @Test
+    public void testMoreIoCoresThanTheDepth()
+    {
+        testAIOCoordinator(16, 32, 32);
+        testAIOCoordinator(16, 32, 17);
+        testAIOCoordinator(16, 32, 16);
     }
 
     /**
@@ -114,7 +121,7 @@ public class AIOCoordinatorTest
         for (int i = 0; i < numCores; i ++)
         {
             AIOContext.Config aio = coordinator.getIOConfig(i);
-            if (i >= numIOCores)
+            if (i >= numIOCores || i >= globalDepth)
             {
                 assertNull(aio);
             }
@@ -129,5 +136,18 @@ public class AIOCoordinatorTest
         }
 
         assertEquals(globalDepth, totLocalDepths);
+    }
+
+    @Test
+    public void testAIODisabled()
+    {
+        final int nCores = 30;
+        AioCoordinator coordinator = new AioCoordinator(nCores, 0, 128);
+
+        for (int i = 0; i < nCores; i++)
+        {
+            assertNull(coordinator.getIOConfig(i));
+            assertEquals(0, coordinator.getIOCore(i));
+        }
     }
 }
