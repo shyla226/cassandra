@@ -46,9 +46,9 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
                           : bufferType;
     }
 
-    static boolean isAlignedRead(long position, ByteBuffer buffer)
+    private boolean isAlignedRead(long position, ByteBuffer buffer)
     {
-        int blockMask = TPC.AIO_BLOCK_SIZE - 1;
+        int blockMask = sectorSize - 1;
         return (position & blockMask) == 0
                && buffer.isDirect()
                && (buffer.capacity() & blockMask) == 0
@@ -64,7 +64,7 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
             return readChunkWithAlignment(position, buffer);
     }
 
-    public CompletableFuture<ByteBuffer> readChunkDirect(long position, ByteBuffer buffer)
+    private CompletableFuture<ByteBuffer> readChunkDirect(long position, ByteBuffer buffer)
     {
         buffer.clear();
 
@@ -88,20 +88,20 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
         return futureBuffer;
     }
 
-    public CompletableFuture<ByteBuffer> readChunkWithAlignment(long position, ByteBuffer buffer)
+    private CompletableFuture<ByteBuffer> readChunkWithAlignment(long position, ByteBuffer buffer)
     {
         buffer.clear();
         BufferHandle scratchHandle = getScratchHandle();
-        ByteBuffer scratchBuffer = scratchHandle.get((buffer.capacity() + TPC.AIO_BLOCK_SIZE * 2 - 1) & -TPC.AIO_BLOCK_SIZE);
+        ByteBuffer scratchBuffer = scratchHandle.get((buffer.capacity() + sectorSize * 2 - 1) & -sectorSize);
 
         CompletableFuture<ByteBuffer> futureBuffer = new CompletableFuture<>();
 
         //O_DIRECT read positions must be aligned to DMA size
-        long alignedOffset = TPC.roundDownToBlockSize(position);
+        long alignedOffset = roundDownToBlockSize(position);
         int alignmentShift = Ints.checkedCast(position - alignedOffset);
 
         scratchBuffer.clear();
-        scratchBuffer.limit(TPC.roundUpToBlockSize(buffer.capacity() + alignmentShift));
+        scratchBuffer.limit(roundUpToBlockSize(buffer.capacity() + alignmentShift));
 
         channel.read(scratchBuffer, alignedOffset, new CompletionHandler<Integer, ByteBuffer>()
         {

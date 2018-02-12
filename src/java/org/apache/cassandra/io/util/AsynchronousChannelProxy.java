@@ -172,6 +172,7 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
                         logger.error("Got {} and exhausted all retries.", exc.getMessage());
                     }
                 }
+                logger.debug("Failed to read {} with exception {}", filePath, exc);
                 onComplete.failed(exc, attachment);
             }
         };

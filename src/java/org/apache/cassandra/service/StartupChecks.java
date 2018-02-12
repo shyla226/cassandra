@@ -1001,6 +1001,10 @@ public class StartupChecks
         if (!FBUtilities.isLinux)
             return;
 
+        if (FileUtils.dirToPartitions.isEmpty())
+            throw new StartupException(StartupException.ERR_WRONG_DISK_STATE,
+                                       "Could not detect disk partitions on Linux");
+
         try
         {
             checkMountpoint(logger, "saved caches", DatabaseDescriptor.getSavedCachesLocation());
@@ -1011,31 +1015,44 @@ public class StartupChecks
         }
         catch (Exception e)
         {
-            logger.debug("Unable to inspect mounted partitions", e);
-            logger.warn("Unable to inspect mounted partitions");
+            if (e instanceof StartupException)
+            {
+                throw e;
+            }
+            else
+            {
+                logger.debug("Unable to inspect mounted partitions", e);
+                logger.warn("Unable to inspect mounted partitions");
+            }
         }
     };
 
-    private static void checkMountpoint(Logger logger, String type, String directory) throws IOException
+    private static void checkMountpoint(Logger logger, String type, String directory) throws StartupException
     {
         FileUtils.MountPoint mountpoint = FileUtils.mountPointForDirectory(directory);
-        if (mountpoint == null)
+        if (mountpoint == FileUtils.MountPoint.DEFAULT)
         {
             logger.warn("Could not detect mountpoint for directory {} {}", type, directory);
             return;
         }
-        boolean onSsd = FileUtils.isPartitionOnSSD(mountpoint.device);
-        String ssd = onSsd ? "SSD" : "rotational";
+
+        if (Integer.bitCount(mountpoint.sectorSize) != 1)
+        {
+            throw new StartupException(StartupException.ERR_WRONG_DISK_STATE,
+                                       String.format("Sector size for %s is not a power of 2 (%d)", mountpoint.device, mountpoint.sectorSize));
+        }
+
+        String ssd = mountpoint.onSSD ? "SSD" : "rotational";
         switch (mountpoint.fstype)
         {
             case "ext4":
             case "xfs":
-                logger.info("{} directory {} is on device {} (appears to be {}), formatted using {} file system",
-                            type, directory, mountpoint.device, ssd, mountpoint.fstype);
+                logger.info("{} directory {} is on device {} (appears to be {} with logical sector size {}), formatted using {} file system",
+                            type, directory, mountpoint.device, ssd, mountpoint.sectorSize, mountpoint.fstype);
                 break;
             default:
-                logger.warn("{} directory {} on device {} (appears to be {})) uses a not recommended file system type '{}' (mounted as {})",
-                            type, directory, mountpoint.device, ssd, mountpoint.fstype, mountpoint.mountpoint);
+                logger.warn("{} directory {} on device {} (appears to be {} with logical sector size {}) uses a not recommended file system type '{}', (mounted as {})",
+                            type, directory, mountpoint.device, ssd, mountpoint.sectorSize, mountpoint.fstype, mountpoint.mountpoint);
                 break;
         }
     }

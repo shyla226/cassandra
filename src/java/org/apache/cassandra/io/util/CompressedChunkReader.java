@@ -125,7 +125,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
                 // Alignment means we need to round the size up (to cover length of request plus extra to fill block)
                 // plus one more for alignment (one part of which sits before wanted data, the rest after it).
-                return TPC.roundUpToBlockSize(size) + TPC.AIO_BLOCK_SIZE;
+                return roundUpToBlockSize(size) + sectorSize;
             });
         }
 
@@ -173,14 +173,14 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             // able to skip copying for non-compressed chunks).
 
             //O_DIRECT read positions must be aligned to DMA size
-            long alignedOffset = TPC.roundDownToBlockSize(chunk.offset);
+            long alignedOffset = roundDownToBlockSize(chunk.offset);
             int alignmentShift = Ints.checkedCast(chunk.offset - alignedOffset);
 
             // We could optimize for non-compressed chunk with alignmentShift == 0 && !shouldCheckCrc, but that will
             // unfortunately be too rare to have any noticeable effect.
 
             compressed.clear();
-            compressed.limit(TPC.roundUpToBlockSize(chunk.length + alignmentShift + CHECKSUM_BYTES));
+            compressed.limit(roundUpToBlockSize(chunk.length + alignmentShift + CHECKSUM_BYTES));
 
             channel.read(compressed, alignedOffset, new CompletionHandler<Integer, ByteBuffer>()
             {
