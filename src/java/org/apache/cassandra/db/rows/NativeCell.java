@@ -139,9 +139,9 @@ public class NativeCell extends AbstractCell
         throw new UnsupportedOperationException();
     }
 
-    public Cell withUpdatedLocalDeletionTime(int newLocalDeletionTime)
+    public Cell withUpdatedTimestampAndLocalDeletionTime(long newTimestamp, int newLocalDeletionTime)
     {
-        return new BufferCell(column, timestamp(), ttl(), newLocalDeletionTime, value(), path());
+        return new BufferCell(column, newTimestamp, ttl(), newLocalDeletionTime, value(), path());
     }
 
     public Cell withUpdatedColumn(ColumnMetadata column)
