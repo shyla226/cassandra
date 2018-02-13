@@ -1,3 +1,7 @@
+DSE 5.0.13
+ * Fetch/query no columns in priming connections to avoid errors if system.local columns are changed (DB-1708)
+
+
 DSE 5.0.12
  * Allow skipping commit log replay does not fail on descriptor errors (DB-1650)
  * Protect against overflow of local expiration time (DB-1619)
