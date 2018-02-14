@@ -46,7 +46,7 @@ public class AioCoordinator
 
     public AioCoordinator(int numTPCCores, int numIOCores, int globalQueueDepth)
     {
-        assert numIOCores > 0 : String.format("Invalid numIOCores: " + numIOCores);
+        assert numIOCores >= 0 : String.format("Invalid numIOCores: %d", numIOCores);
         assert numIOCores <= numTPCCores : String.format("Expected numIOCores %d to be <= than numTPCCores %d", numIOCores, numTPCCores);
 
         this.numTPCCores = numTPCCores;
@@ -54,7 +54,8 @@ public class AioCoordinator
         this.globalQueueDepth = globalQueueDepth;
         this.tpcToAioCores = new int[numTPCCores];
 
-        initAioCores();
+        if (numIOCores > 0)
+            initAioCores();
 
         logger.debug("AIO coordinator: {}", this);
     }
@@ -77,13 +78,17 @@ public class AioCoordinator
     {
         assert coreId >= 0 && coreId < tpcToAioCores.length : "Invalid core id: " + coreId;
 
+        if (numIOCores == 0)
+            return null;
+
         int aioCore = tpcToAioCores[coreId];
         int depth = globalQueueDepth % numIOCores == 0
                     ? globalQueueDepth / numIOCores
                     : (int)Math.floor((double)globalQueueDepth / numIOCores) +
                       (aioCore + 1 <= globalQueueDepth % numIOCores ? 1 : 0);
 
-        AIOContext.Config ret = coreId == aioCore // if a core is equal to its IO core then it owns an AIO context
+        // if a core is equal to its IO core then it owns an AIO context as long as it has some depth assigned
+        AIOContext.Config ret = coreId == aioCore && depth > 0
                                 ? new AIOContext.Config(depth, maxPendingDepth)
                                 : null;
 
