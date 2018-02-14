@@ -44,6 +44,9 @@ import org.junit.runner.RunWith;
 
 import java.io.*;
 import java.nio.file.Files;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.ExecutionException;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
 
@@ -51,6 +54,8 @@ import static org.apache.cassandra.SchemaLoader.counterCFMD;
 import static org.apache.cassandra.SchemaLoader.createKeyspace;
 import static org.apache.cassandra.SchemaLoader.loadSchema;
 import static org.apache.cassandra.SchemaLoader.standardCFMD;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
@@ -284,7 +289,7 @@ public class VerifyTest
         try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.filenameFor(Component.DIGEST), "rw"))
         {
             Long correctChecksum = Long.valueOf(file.readLine());
-    
+
             writeChecksum(++correctChecksum, sstable.descriptor.filenameFor(Component.DIGEST));
         }
 
@@ -375,6 +380,39 @@ public class VerifyTest
         {
             verifier.verify(false);
         }
+    }
+
+    @Test
+    public void testMutateRepair() throws IOException, ExecutionException, InterruptedException
+    {
+        CompactionManager.instance.disableAutoCompaction();
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CORRUPT_CF2);
+
+        fillCF(cfs, 2);
+
+        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        sstable.descriptor.getMetadataSerializer().mutateRepaired(sstable.descriptor, 1, null);
+        sstable.reloadSSTableMetadata();
+        cfs.getTracker().notifySSTableRepairedStatusChanged(Collections.singleton(sstable));
+        assertTrue(sstable.isRepaired());
+        cfs.forceMajorCompaction();
+
+        sstable = cfs.getLiveSSTables().iterator().next();
+        Long correctChecksum;
+        try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.filenameFor(Component.DIGEST), "rw"))
+        {
+            correctChecksum = Long.parseLong(file.readLine());
+        }
+        writeChecksum(++correctChecksum, sstable.descriptor.filenameFor(Component.DIGEST));
+        try (Verifier verifier = new Verifier(cfs, sstable, false))
+        {
+            verifier.verify(false);
+            fail("should be corrupt");
+        }
+        catch (CorruptSSTableException e)
+        {}
+        assertFalse(sstable.isRepaired());
     }
 
 

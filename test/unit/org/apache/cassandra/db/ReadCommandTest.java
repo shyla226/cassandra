@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.google.common.collect.Lists;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -60,15 +61,32 @@ import static org.junit.Assert.*;
 
 public class ReadCommandTest
 {
+    private static int defaultMetricsHistogramUpdateInterval;
+
     private static final String KEYSPACE = "ReadCommandTest";
     private static final String CF1 = "Standard1";
     private static final String CF2 = "Standard2";
     private static final String CF3 = "Standard3";
+    private static final String CF4 = "Standard4";
+    private static final String CF5 = "Standard5";
+
+    @AfterClass
+    public static void afterClass()
+    {
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateInterval);
+    }
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
         DatabaseDescriptor.daemonInitialization();
+
+        // It appears anything that load metrics currently needs daemon initialization. Only reason for this (and a sad
+        // one).
+        DatabaseDescriptor.daemonInitialization();
+
+        defaultMetricsHistogramUpdateInterval = DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis();
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0); // this guarantees metrics histograms are updated on read
 
         TableMetadata.Builder metadata1 = SchemaLoader.standardCFMD(KEYSPACE, CF1);
 
@@ -90,8 +108,30 @@ public class ReadCommandTest
                          .addRegularColumn("e", AsciiType.instance)
                          .addRegularColumn("f", AsciiType.instance);
 
+        TableMetadata.Builder metadata4 =
+            TableMetadata.builder(KEYSPACE, CF4)
+                         .addPartitionKeyColumn("key", BytesType.instance)
+                         .addClusteringColumn("col", AsciiType.instance)
+                         .addRegularColumn("a", AsciiType.instance)
+                         .addRegularColumn("b", AsciiType.instance)
+                         .addRegularColumn("c", AsciiType.instance)
+                         .addRegularColumn("d", AsciiType.instance)
+                         .addRegularColumn("e", AsciiType.instance)
+                         .addRegularColumn("f", AsciiType.instance);
+
+        TableMetadata.Builder metadata5 =
+            TableMetadata.builder(KEYSPACE, CF5)
+                         .addPartitionKeyColumn("key", BytesType.instance)
+                         .addClusteringColumn("col", AsciiType.instance)
+                         .addRegularColumn("a", AsciiType.instance)
+                         .addRegularColumn("b", AsciiType.instance)
+                         .addRegularColumn("c", AsciiType.instance)
+                         .addRegularColumn("d", AsciiType.instance)
+                         .addRegularColumn("e", AsciiType.instance)
+                         .addRegularColumn("f", AsciiType.instance);
+
         SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE, KeyspaceParams.simple(1), metadata1, metadata2, metadata3);
+        SchemaLoader.createKeyspace(KEYSPACE, KeyspaceParams.simple(1), metadata1, metadata2, metadata3, metadata4, metadata5);
     }
 
     @Test
@@ -242,8 +282,132 @@ public class ReadCommandTest
         // get these clustering rows in this order
         List<String> expectedRows = Lists.newArrayList("col=aa", "col=ff", "col=ee", "col=cc", "col=dd", "col=cc", "col=bb");
 
-        List<ByteBuffer> buffers = new ArrayList<>(groups.length);
         int nowInSeconds = FBUtilities.nowInSeconds();
+        List<Flow<FlowableUnfilteredPartition>> partitions = writeAndThenReadPartitions(cfs, groups, nowInSeconds);
+
+
+        Flow<FlowablePartition> merged = FlowablePartitions.mergeAndFilter(partitions,
+                                                                           nowInSeconds,
+                                                                           FlowablePartitions.MergeListener.NONE);
+
+
+        int i = 0;
+        int numPartitions = 0;
+
+        try(PartitionIterator partitionIterator = FlowablePartitions.toPartitionsFiltered(merged))
+        {
+            while (partitionIterator.hasNext())
+            {
+                numPartitions++;
+                try (RowIterator rowIterator = partitionIterator.next())
+                {
+                    while (rowIterator.hasNext())
+                    {
+                        i++;
+                        Row row = rowIterator.next();
+                        assertTrue(expectedRows.contains(row.clustering().toString(cfs.metadata())));
+                        //System.out.print(row.toString(cfs.metadata, true));
+                    }
+                }
+            }
+
+            assertEquals(5, numPartitions);
+            assertEquals(expectedRows.size(), i);
+        }
+    }
+
+    /**
+     * This test will create several partitions with several rows each. Then, it will perform up to 5 row deletions on
+     * some partitions. We check that when reading the partitions, the maximum number of tombstones reported in the
+     * metrics is indeed equal to 5.
+     */
+    @Test
+    public void testCountDeletedRows() throws Exception
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(CF4);
+
+        String[][][] groups = new String[][][] {
+                new String[][] {
+                        new String[] { "1", "key1", "aa", "a" }, // "1" indicates to create the data, "-1" to delete the
+                                                                 // row
+                        new String[] { "1", "key2", "bb", "b" },
+                        new String[] { "1", "key3", "cc", "c" }
+                },
+                new String[][] {
+                        new String[] { "1", "key3", "dd", "d" },
+                        new String[] { "1", "key2", "ee", "e" },
+                        new String[] { "1", "key1", "ff", "f" }
+                },
+                new String[][] {
+                        new String[] { "1", "key6", "aa", "a" },
+                        new String[] { "1", "key5", "bb", "b" },
+                        new String[] { "1", "key4", "cc", "c" }
+                },
+                new String[][] {
+                        new String[] { "1", "key2", "aa", "a" },
+                        new String[] { "1", "key2", "cc", "c" },
+                        new String[] { "1", "key2", "dd", "d" }
+                },
+                new String[][] {
+                        new String[] { "-1", "key6", "aa", "a" },
+                        new String[] { "-1", "key2", "bb", "b" },
+                        new String[] { "-1", "key2", "ee", "e" },
+                        new String[] { "-1", "key2", "aa", "a" },
+                        new String[] { "-1", "key2", "cc", "c" },
+                        new String[] { "-1", "key2", "dd", "d" }
+                }
+        };
+        int nowInSeconds = FBUtilities.nowInSeconds();
+
+        writeAndThenReadPartitions(cfs, groups, nowInSeconds);
+
+        assertEquals(5, cfs.metric.tombstoneScannedHistogram.getSnapshot().getMax());
+    }
+
+    /**
+     * This test will create several partitions with several rows each and no deletions. We check that when reading the
+     * partitions, the maximum number of tombstones reported in the metrics is equal to 1, which is apparently the
+     * default max value for histograms in the metrics lib (equivalent to having no element reported).
+     */
+    @Test
+    public void testCountWithNoDeletedRow() throws Exception
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(CF5);
+
+        String[][][] groups = new String[][][] {
+                new String[][] {
+                        new String[] { "1", "key1", "aa", "a" }, // "1" indicates to create the data, "-1" to delete the
+                                                                 // row
+                        new String[] { "1", "key2", "bb", "b" },
+                        new String[] { "1", "key3", "cc", "c" }
+                },
+                new String[][] {
+                        new String[] { "1", "key3", "dd", "d" },
+                        new String[] { "1", "key2", "ee", "e" },
+                        new String[] { "1", "key1", "ff", "f" }
+                },
+                new String[][] {
+                        new String[] { "1", "key6", "aa", "a" },
+                        new String[] { "1", "key5", "bb", "b" },
+                        new String[] { "1", "key4", "cc", "c" }
+                }
+        };
+
+        int nowInSeconds = FBUtilities.nowInSeconds();
+
+        writeAndThenReadPartitions(cfs, groups, nowInSeconds);
+
+        assertEquals(1, cfs.metric.tombstoneScannedHistogram.getSnapshot().getMax());
+    }
+
+    /**
+     * Writes rows to the column family store using the groups as input and then reads them. Returns the iterators from
+     * the read.
+     */
+    private List<Flow<FlowableUnfilteredPartition>> writeAndThenReadPartitions(ColumnFamilyStore cfs, String[][][] groups,
+            int nowInSeconds)
+    {
+        List<ByteBuffer> buffers = new ArrayList<>(groups.length);
         ColumnFilter columnFilter = ColumnFilter.allRegularColumnsBuilder(cfs.metadata()).build();
         RowFilter rowFilter = RowFilter.create();
         Slice slice = Slice.make(ClusteringBound.BOTTOM, ClusteringBound.TOP);
@@ -294,33 +458,6 @@ public class ReadCommandTest
                                                   SerializationHelper.Flag.LOCAL));
         }
 
-        Flow<FlowablePartition> merged = FlowablePartitions.mergeAndFilter(partitions,
-                                                                           nowInSeconds,
-                                                                           FlowablePartitions.MergeListener.NONE);
-
-
-        int i = 0;
-        int numPartitions = 0;
-
-        try(PartitionIterator partitionIterator = FlowablePartitions.toPartitionsFiltered(merged))
-        {
-            while (partitionIterator.hasNext())
-            {
-                numPartitions++;
-                try (RowIterator rowIterator = partitionIterator.next())
-                {
-                    while (rowIterator.hasNext())
-                    {
-                        i++;
-                        Row row = rowIterator.next();
-                        assertTrue(expectedRows.contains(row.clustering().toString(cfs.metadata())));
-                        //System.out.print(row.toString(cfs.metadata, true));
-                    }
-                }
-            }
-
-            assertEquals(5, numPartitions);
-            assertEquals(expectedRows.size(), i);
-        }
+        return partitions;
     }
 }
