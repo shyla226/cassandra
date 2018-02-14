@@ -176,7 +176,7 @@ public class Monitor
         {
             case IN_PROGRESS:
                 if (withReporting)
-                    MonitoringTask.addFailedOperation(this, ApproximateTime.currentTimeMillis());
+                    MonitoringTask.addFailedOperation(this, ApproximateTime.millisTime());
                 state = MonitoringState.ABORTED;
                 // Fallback on purpose
             case ABORTED:
@@ -190,7 +190,7 @@ public class Monitor
         if (state == MonitoringState.IN_PROGRESS)
         {
             if (withReporting && isSlow && slowQueryTimeoutMillis > 0)
-                MonitoringTask.addSlowOperation(this, ApproximateTime.currentTimeMillis());
+                MonitoringTask.addSlowOperation(this, ApproximateTime.millisTime());
 
             state = MonitoringState.COMPLETED;
             return true;
@@ -219,7 +219,7 @@ public class Monitor
         // The value returned by ApproximateTime.currentTimeMillis() is updated only every
         // ApproximateTime.CHECK_INTERVAL_MS, by default 10 millis. Since we rely on ApproximateTime, we don't need
         // to check unless the approximate time has elapsed.
-        long currentTime = ApproximateTime.currentTimeMillis();
+        long currentTime = ApproximateTime.millisTime();
 
         if (lastChecked == currentTime)
             return;

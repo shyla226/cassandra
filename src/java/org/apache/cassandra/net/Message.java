@@ -26,6 +26,7 @@ import javax.annotation.Nullable;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.TrackedDataInputPlus;
@@ -100,6 +101,7 @@ public abstract class Message<P>
         // both to segregate messages by size (big/small for OutboundTcpConnectionPool) and then for the actual serialization
         final long payloadSize;
 
+        /** see {@link ApproximateTime#millisTime()} */
         private final long createdAtMillis;
         private final long timeoutMillis;
 
@@ -139,7 +141,7 @@ public abstract class Message<P>
         // Mostly for tests
         Data(P payload)
         {
-            this(payload, -1, System.currentTimeMillis(), Long.MAX_VALUE);
+            this(payload, -1, ApproximateTime.millisTime(), Long.MAX_VALUE);
 
         }
 
@@ -320,9 +322,9 @@ public abstract class Message<P>
     /**
      * Whether the message is timed out and can be dropped.
      *
-     * @param currentTimeMillis the current time in milliseconds.
+     * @param timeMillis the current time in milliseconds (assumed monotonic).
      */
-    boolean isTimedOut(long currentTimeMillis)
+    boolean isTimedOut(long timeMillis)
     {
         // Note1: we used to have a list of droppable verbs (it's still in OSS too) but we don't anymore (since DB-497).
         // Instead, all two-way verbs can be dropped once timed out. The rational is that any two-way verb better have a
@@ -333,7 +335,7 @@ public abstract class Message<P>
         // to update at times is a plus.
         // Note2: this is called pretty often and the precision isn't _that_ important (timeouts are expressed in seconds),
         // so using ApproximateTime is appropriate.
-        return !verb().isOneWay() && (currentTimeMillis - operationStartMillis()) > timeoutMillis();
+        return !verb().isOneWay() && (timeMillis - operationStartMillis()) > timeoutMillis();
     }
 
     /**
@@ -341,7 +343,7 @@ public abstract class Message<P>
      */
     long lifetimeMillis()
     {
-        return Math.max(System.currentTimeMillis() - operationStartMillis(), 0);
+        return Math.max(ApproximateTime.millisTime() - operationStartMillis(), 0);
     }
 
     /**

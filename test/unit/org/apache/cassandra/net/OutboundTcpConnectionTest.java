@@ -60,7 +60,7 @@ public class OutboundTcpConnectionTest
 
     private static long currentTime()
     {
-        return ApproximateTime.currentTimeMillis();
+        return ApproximateTime.millisTime();
     }
 
     private static long expiredTime()

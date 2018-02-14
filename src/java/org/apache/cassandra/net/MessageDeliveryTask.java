@@ -28,7 +28,7 @@ abstract class MessageDeliveryTask<T, M extends Message<T>> implements Runnable
     MessageDeliveryTask(M message)
     {
         this.message = message;
-        this.enqueueTime = ApproximateTime.currentTimeMillis();
+        this.enqueueTime = ApproximateTime.millisTime();
     }
 
     static <P, Q> RequestDeliveryTask<P, Q> forRequest(Request<P, Q> request)
@@ -43,7 +43,7 @@ abstract class MessageDeliveryTask<T, M extends Message<T>> implements Runnable
 
     public void run()
     {
-        long currentTimeMillis = ApproximateTime.currentTimeMillis();
+        long currentTimeMillis = ApproximateTime.millisTime();
         MessagingService.instance().metrics.addQueueWaitTime(message.verb().toString(),
                                                              currentTimeMillis - enqueueTime);
 
