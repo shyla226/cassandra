@@ -8,11 +8,11 @@ package com.datastax.bdp.db.tools.nodesync;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.util.Scanner;
 import javax.annotation.Nullable;
 
-import com.datastax.driver.core.Session;
+import com.datastax.driver.core.Host;
+import com.datastax.driver.core.Metadata;
 import org.apache.cassandra.tools.NodeProbe;
 
 import static org.apache.commons.lang3.StringUtils.EMPTY;
@@ -22,13 +22,13 @@ import static org.apache.commons.lang3.StringUtils.EMPTY;
  */
 class NodeProbesBuilder
 {
-    private final Session session;
+    private final Metadata metadata;
     private String username, password, passwordFilePath;
     private boolean ssl;
 
-    NodeProbesBuilder(Session session)
+    NodeProbesBuilder(Metadata metadata)
     {
-        this.session = session;
+        this.metadata = metadata;
     }
 
     NodeProbesBuilder withUsername(@Nullable String username)
@@ -92,20 +92,26 @@ class NodeProbesBuilder
         if (ssl)
             System.setProperty("ssl.enable", "true");
 
-        return new NodeProbes(session, this::buildNodeProbe);
+        return new NodeProbes(metadata, this::buildNodeProbe);
     }
 
-    private NodeProbe buildNodeProbe(InetSocketAddress address)
+    private NodeProbe buildNodeProbe(Host host)
     {
+        String address = host.getBroadcastAddress().getHostAddress();
+        int port = host.getJmxPort();
+
+        if (port <= 0)
+            throw new NodeSyncException(String.format("Unable to read the JMX port of node %s, this could be because " +
+                                                      "JMX is not enabled in that node or it's running a version " +
+                                                      "without NodeSync support", address));
+
         try
         {
-            String host = address.getHostName();
-            int port = address.getPort();
-            return (username == null) ? new NodeProbe(host, port) : new NodeProbe(host, port, username, password);
+            return username == null ? new NodeProbe(address, port) : new NodeProbe(address, port, username, password);
         }
         catch (IOException | SecurityException e)
         {
-            throw new NodeSyncException(String.format("JMX connection to %s failed: %s", address, e.getMessage()));
+            throw new NodeSyncException(String.format("JMX connection to %s:%d failed: %s", address, port, e.getMessage()));
         }
     }
 }

@@ -161,7 +161,7 @@ public class SubmitValidation extends NodeSyncCommand
                        .flatMap(r -> ranges.stream().filter(r::intersects).map(r::intersectionWith))
                        .flatMap(Collection::stream)
                        .distinct()
-                       .forEach(r -> replicas.computeIfAbsent(r, k -> Sets.newHashSet()).add(host.getAddress()));
+                       .forEach(r -> replicas.computeIfAbsent(r, k -> Sets.newHashSet()).add(host.getBroadcastAddress()));
         }
 
         if (ranges.stream().anyMatch(r -> !r.subtractAll(replicas.keySet()).isEmpty()))
