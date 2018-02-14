@@ -163,6 +163,8 @@
 
 
 3.11.2
+ * Fix ReadCommandTest (CASSANDRA-14234)
+ * Remove trailing period from latency reports at keyspace level (CASSANDRA-14233)
  * Add DEFAULT, UNSET, MBEAN and MBEANS to `ReservedKeywords` (CASSANDRA-14205)
  * Print correct snitch info from nodetool describecluster (CASSANDRA-13528)
  * Enable CDC unittest (CASSANDRA-14141)
@@ -178,7 +180,11 @@
  * Round buffer size to powers of 2 for the chunk cache (CASSANDRA-13897)
  * Update jackson JSON jars (CASSANDRA-13949)
  * Avoid locks when checking LCS fanout and if we should defrag (CASSANDRA-13930)
+ * Correctly count range tombstones in traces and tombstone thresholds (CASSANDRA-8527)
 Merged from 3.0:
+ * Add MinGW uname check to start scripts (CASSANDRA-12840)
+ * Use the correct digest file and reload sstable metadata in nodetool verify (CASSANDRA-14217)
+ * Handle failure when mutating repaired status in Verifier (CASSANDRA-13933)
  * Set encoding for javadoc generation (CASSANDRA-14154)
  * Fix index target computation for dense composite tables with dropped compact storage (CASSANDRA-14104)
  * Extra range tombstone bound creates double rows (CASSANDRA-14008)

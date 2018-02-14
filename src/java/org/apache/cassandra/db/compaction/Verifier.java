@@ -44,7 +44,6 @@ import java.io.IOError;
 import java.io.IOException;
 import java.util.*;
 import java.util.function.LongPredicate;
-import java.util.function.Predicate;
 
 public class Verifier implements Closeable
 {
@@ -230,10 +229,21 @@ public class Verifier implements Closeable
         markAndThrow(true);
     }
 
-    private void markAndThrow(boolean mutateRepaired) throws IOException
+    private void markAndThrow(boolean mutateRepaired)
     {
         if (mutateRepaired) // if we are able to mutate repaired flag, an incremental repair should be enough
-            sstable.descriptor.getMetadataSerializer().mutateRepaired(sstable.descriptor, ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getSSTableMetadata().pendingRepair);
+        {
+            try
+            {
+                sstable.descriptor.getMetadataSerializer().mutateRepaired(sstable.descriptor, ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getSSTableMetadata().pendingRepair);
+                sstable.reloadSSTableMetadata();
+                controller.cfs.getTracker().notifySSTableRepairedStatusChanged(Collections.singleton(sstable));
+            }
+            catch(IOException ioe)
+            {
+                outputHandler.output("Error mutating repairedAt for SSTable " +  sstable.getFilename() + ", as part of markAndThrow");
+            }
+        }
         throw new CorruptSSTableException(new Exception(String.format("Invalid SSTable %s, please force %srepair", sstable.getFilename(), mutateRepaired ? "" : "a full ")), sstable.getFilename());
     }
 
