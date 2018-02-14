@@ -27,6 +27,12 @@ import org.apache.cassandra.exceptions.*;
  */
 public interface IAuthorizer
 {
+    /**
+     * This is effectively a port of the programmatic approach to check permissions with
+     * transitional authorization.
+     * For reference, look at the reference implementation:
+     * https://github.com/riptano/bdp/blob/92f87e99307c9dc5be03b95f5ac5bb8a333d5ec3/dse-core/src/main/java/com/datastax/bdp/cassandra/auth/DseAuthorizer.java#L159-L198
+     */
     public enum TransitionalMode
     {
         /**
@@ -45,17 +51,30 @@ public interface IAuthorizer
             {
                 return true;
             }
-
-            @Override
-            public boolean supportPermission(Permission perm)
-            {
-                return true;
-            }
         },
         /**
          * Permissions can be passed to resources, but are not enforced.
          */
-        NORMAL,
+        NORMAL
+        {
+            @Override
+            public boolean supportPermission(Permission perm)
+            {
+                // Note: unlike the original implementation, we explicitly _allow_ do not
+                // reject the DESCRIBE permission, as that is an essential part of
+                // "separation of duties" (DB-757)
+                return perm != CorePermission.AUTHORIZE;
+            }
+
+            @Override
+            public boolean supportPermissionForAnonymous(Permission perm)
+            {
+                // Note: unlike the original implementation, we explicitly _allow_ do not
+                // reject the DESCRIBE permission, as that is an essential part of
+                // "separation of duties" (DB-757)
+                return perm != CorePermission.AUTHORIZE;
+            }
+        },
         /**
          * Permissions can be passed to resources, and are enforced on authenticated users.
          * Permissions are not enforced against anonymous users.
@@ -66,6 +85,15 @@ public interface IAuthorizer
             public boolean enforcePermissionsOnAuthenticatedUser()
             {
                 return true;
+            }
+
+            @Override
+            public boolean supportPermissionForAnonymous(Permission perm)
+            {
+                // Note: unlike the original implementation, we explicitly _allow_ do not
+                // reject the DESCRIBE permission, as that is an essential part of
+                // "separation of duties" (DB-757)
+                return perm != CorePermission.AUTHORIZE;
             }
         };
 
@@ -92,17 +120,17 @@ public interface IAuthorizer
          */
         public boolean supportPermission(Permission perm)
         {
-            // For all transitional modes, the effective permissions do not include these permissions.
-            // Since these permissions are nonetheless persisted, we have to filter those here.
-            // NOTE: CorePermission.DESCRIBE was orignally always denied. However, DESCRIBE was not
-            // used in the apollo+bdp code base, but is now used for system-keyspace-filtering, which
-            // requires the DESCRIBE permission to work. But the scenario of transitional authorization
-            // in combination with system-keyspace-filtering is untested.
-            return perm != CorePermission.AUTHORIZE // AUTHORIZE _must_ be denied
-                    // NOTE: READ+WRITE are neither used in DSE-DB nor bdp code base. While transitioning
-                    // to authentication/authorization, such permissions should not have been granted.
-                    && perm != CorePermission.READ
-                    && perm != CorePermission.WRITE;
+            return true;
+        }
+
+        /**
+         * Checks if the permission is supported by this transitional mode (e.g. AUTHORIZE).
+         * @param perm the permission to check
+         * @return {@code true} if the permission is supported, {@code false} otherwise.
+         */
+        public boolean supportPermissionForAnonymous(Permission perm)
+        {
+            return true;
         }
 
     }
