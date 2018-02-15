@@ -141,17 +141,31 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
         updateChecksumInt(crc, (int) (descriptor.id & 0xFFFFFFFFL));
         updateChecksumInt(crc, (int) (descriptor.id >>> 32));
         updateChecksumInt(crc, (int) reader.getPosition());
-        final int end = reader.readInt();
+        int end = reader.readInt();
         long filecrc = reader.readInt() & 0xffffffffL;
-        if (crc.getValue() != filecrc)
+
+        if (end == 0)
         {
-            if (end != 0 || filecrc != 0)
-            {
-                String msg = String.format("Encountered bad header at position %d of commit log %s, with invalid CRC. " +
-                             "The end of segment marker should be zero.", offset, reader.getPath());
-                throw new SegmentReadException(msg, true);
-            }
-            return -1;
+            // 0 marker means the segment was not properly closed (e.g. because the process died). There may still be
+            // replayable data in it, though, if the segment is not compressed/encrypted. To deal with this case,
+            // we will act as if the rest of the file is one section.
+
+            // Generally this should not happen unless this is an uncompressed preallocated memory-mapped segment,
+            // but it doesn't hurt to make sure.
+            if (descriptor.compression != null || descriptor.getEncryptionContext().isEnabled())
+                return -1;
+
+            // Note: If we were still reading pre-2.2 format logs and this is one such log, we would have to honour the
+            // end section marker because this might be a partially-overwrittern recycled segment, where we may find
+            // stale data that must not be replayed.
+
+            end = (int) reader.length();
+        }
+        else if (crc.getValue() != filecrc)
+        {
+            String msg = String.format("Encountered bad header at position %d of commit log %s, with invalid CRC. " +
+                                       "The end of segment marker should be zero.", offset, reader.getPath());
+            throw new SegmentReadException(msg, true);
         }
         else if (end < offset || end > reader.length())
         {
