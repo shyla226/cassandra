@@ -163,6 +163,9 @@
  * CQLSH: Don't pause when capturing data (CASSANDRA-13743)
  * nodetool clearsnapshot requires --all to clear all snapshots (CASSANDRA-13391)
 
+3.11.3
+ * Fix wildcard GROUP BY queries (CASSANDRA-14209)
+
 
 3.11.2
  * Fix ReadCommandTest (CASSANDRA-14234)

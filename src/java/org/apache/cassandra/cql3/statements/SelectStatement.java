@@ -1382,15 +1382,11 @@ public class SelectStatement implements CQLStatement, TableStatement
             Set<ColumnMetadata> resultSetOrderingColumns = restrictions.keyIsInRelation() ? orderingColumns.keySet()
                                                                                           : Collections.emptySet();
 
-            Selection selection = selectables.isEmpty()
-                    ? Selection.wildcard(table, parameters.isJson)
-                    : Selection.fromSelectors(table,
-                                              selectables,
-                                              boundNames,
-                                              resultSetOrderingColumns,
-                                              restrictions.nonPKRestrictedColumns(false),
-                                              !parameters.groups.isEmpty(),
-                                              parameters.isJson);
+            Selection selection = prepareSelection(table,
+                                                   selectables,
+                                                   boundNames,
+                                                   resultSetOrderingColumns,
+                                                   restrictions);
 
             if (parameters.isDistinct)
             {
@@ -1435,6 +1431,29 @@ public class SelectStatement implements CQLStatement, TableStatement
                                                        prepareLimit(boundNames, perPartitionLimit, keyspace(), perPartitionLimitReceiver()));
 
             return new ParsedStatement.Prepared(stmt, boundNames, boundNames.getPartitionKeyBindIndexes(table));
+        }
+
+        private Selection prepareSelection(TableMetadata table,
+                                           List<Selectable> selectables,
+                                           VariableSpecifications boundNames,
+                                           Set<ColumnMetadata> resultSetOrderingColumns,
+                                           StatementRestrictions restrictions)
+        {
+            boolean hasGroupBy = !parameters.groups.isEmpty();
+
+            if (selectables.isEmpty()) // wildcard query
+            {
+                return hasGroupBy ? Selection.wildcardWithGroupBy(table, boundNames, parameters.isJson)
+                                  : Selection.wildcard(table, parameters.isJson);
+            }
+
+            return Selection.fromSelectors(table,
+                                           selectables,
+                                           boundNames,
+                                           resultSetOrderingColumns,
+                                           restrictions.nonPKRestrictedColumns(false),
+                                           hasGroupBy,
+                                           parameters.isJson);
         }
 
         /**
