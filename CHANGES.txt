@@ -1,4 +1,6 @@
 4.0
+ * CVE-2017-5929 Security vulnerability and redefine default log rotation policy (CASSANDRA-14183)
+ * Fix sstablemetadata date string for minLocalDeletionTime (CASSANDRA-14132)
  * Make sub-range selection for non-frozen collections return null instead of empty (CASSANDRA-14182)
  * Fix cassandra-stress startup failure (CASSANDRA-14106)
  * Fix trivial log format error (CASSANDRA-14015)
@@ -160,6 +162,9 @@
  * Switch to client init for sstabledump (CASSANDRA-13683)
  * CQLSH: Don't pause when capturing data (CASSANDRA-13743)
  * nodetool clearsnapshot requires --all to clear all snapshots (CASSANDRA-13391)
+
+3.11.3
+ * Fix wildcard GROUP BY queries (CASSANDRA-14209)
 
 
 3.11.2
