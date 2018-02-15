@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.apache.cassandra.concurrent.TPCTimer;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
@@ -52,7 +53,10 @@ abstract class AbstractWriteHandler extends WriteHandler
 
     protected final int blockFor;
 
-    private static final AtomicInteger failures = new AtomicInteger(0);
+    private static final AtomicIntegerFieldUpdater<AbstractWriteHandler> FAILURES_UPDATER =
+            AtomicIntegerFieldUpdater.newUpdater(AbstractWriteHandler.class, "failures");
+    private volatile int failures = 0;
+
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint = new ConcurrentHashMap<>();
 
     AbstractWriteHandler(WriteEndpoints endpoints,
@@ -188,7 +192,7 @@ abstract class AbstractWriteHandler extends WriteHandler
         if (logger.isTraceEnabled())
             logger.trace("{} - Got failure from {}: {}", hashCode(), from, response);
 
-        int n = waitingFor(from) ? failures.incrementAndGet() : failures.get();
+        int n = waitingFor(from) ? FAILURES_UPDATER.incrementAndGet(this) : failures;
 
         failureReasonByEndpoint.put(from, response.reason());
 
