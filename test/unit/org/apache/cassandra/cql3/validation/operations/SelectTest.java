@@ -4642,4 +4642,15 @@ public class SelectTest extends CQLTester
             i++;
         }
     }
+
+    @Test
+    public void testInvalidTokenFunctionCall() throws Throwable
+    {
+        createTable("CREATE TABLE %s(year int, month int, day int, hour int, account_id int, cart_id int, sku_id int, PRIMARY KEY((year, month, day, hour), account_id, cart_id, sku_id));");
+        execute("INSERT INTO %s (year, month, day, hour, account_id, cart_id, sku_id) VALUES (1, 2, 3, 4, 5, 6, 7);");
+
+
+        assertInvalidMessage("Invalid number of arguments for system.token() function: 4 required but 1 provided",
+                             "SELECT token(year) FROM %s");
+    }
 }
