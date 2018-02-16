@@ -67,6 +67,7 @@ public final class FileUtils
     private static final DecimalFormat df = new DecimalFormat("#.##");
     public static final boolean isCleanerAvailable;
     private static final AtomicReference<Optional<FSErrorHandler>> fsErrorHandler = new AtomicReference<>(Optional.empty());
+    public static Map<Path, MountPoint> dirToPartitions = getDiskPartitions();
 
     static String[] CPUID_COMMANDLINE = { "cpuid", "-1", "-r" };
 
@@ -626,20 +627,30 @@ public final class FileUtils
         fsErrorHandler.getAndSet(Optional.ofNullable(handler));
     }
 
-    public static MountPoint mountPointForDirectory(String dir) throws IOException
+    public static MountPoint mountPointForDirectory(String dir)
     {
-        Map<Path, MountPoint> dirToPartition = getDiskPartitions();
+        if (dirToPartitions.isEmpty())
+            return MountPoint.DEFAULT; // a dummy mount-point for non linux partitions
 
-        Path path = Paths.get(dir).toAbsolutePath();
-        for (Map.Entry<Path, MountPoint> entry : dirToPartition.entrySet())
+        try
         {
-            if (path.startsWith(entry.getKey()))
+            Path path = Paths.get(dir).toAbsolutePath();
+            for (Map.Entry<Path, MountPoint> entry : dirToPartitions.entrySet())
             {
-                return entry.getValue();
+                if (path.startsWith(entry.getKey()))
+                {
+                    return entry.getValue();
+                }
             }
-        }
 
-        return null;
+            logger.debug("Could not find mount-point for {}", dir);
+            return MountPoint.DEFAULT;
+        }
+        catch (Throwable t)
+        {
+            logger.debug("Failed to detect mount point for directory {}: {}", dir, t.getMessage());
+            return MountPoint.DEFAULT;
+        }
     }
 
     /**
@@ -647,25 +658,56 @@ public final class FileUtils
      * This only works on Linux.
      * @throws IOException
      */
-    public static Map<Path, MountPoint> getDiskPartitions() throws IOException
+    private static Map<Path, MountPoint> getDiskPartitions()
     {
-        try (Reader source = new InputStreamReader(new FileInputStream("/proc/mounts"), "UTF-8"))
+        if (!FBUtilities.isLinux)
+            return Collections.emptyMap();
+
+        try
         {
-            return getDiskPartitions(source);
+            try (Reader source = new InputStreamReader(new FileInputStream("/proc/mounts"), "UTF-8"))
+            {
+                return getDiskPartitions(source);
+            }
+        }
+        catch (Throwable t)
+        {
+            logger.error("Failed to retrieve disk partitions", t);
+            return Collections.emptyMap();
         }
     }
 
     public static class MountPoint
     {
+        // the default sector size applies to all devices on Linux but only takes effect if logical_block_size does not exist
+        // or for platforms other than Linux
+        private final static Supplier<String> defaultSectorSize = () -> System.getProperty("dse.io.default.sector.size", "512");
+
+        public final static MountPoint DEFAULT = new MountPoint(Paths.get(".").getRoot(), "unknown", "unknown", true, Integer.parseInt(defaultSectorSize.get()));
+
         public final Path mountpoint;
         public final String device;
         public final String fstype;
+        public final boolean onSSD;
+        public final int sectorSize;
 
-        public MountPoint(Path mountpoint, String device, String fstype)
+        MountPoint(Path mountpoint, String device, String fstype) throws IOException
+        {
+            this(mountpoint, device, fstype, getQueueFolder(device));
+        }
+
+        private MountPoint(Path mountpoint, String device, String fstype, Path queueFolder) throws IOException
+        {
+            this(mountpoint, device, fstype, isPartitionOnSSD(queueFolder), getSectorSize(queueFolder, device));
+        }
+
+        private MountPoint(Path mountpoint, String device, String fstype, boolean onSSD, int sectorSize)
         {
             this.mountpoint = mountpoint;
             this.device = device;
             this.fstype = fstype;
+            this.onSSD = onSSD;
+            this.sectorSize = sectorSize;
         }
 
         public boolean equals(Object o)
@@ -676,13 +718,93 @@ public final class FileUtils
             MountPoint that = (MountPoint) o;
             return Objects.equals(mountpoint, that.mountpoint) &&
                    Objects.equals(device, that.device) &&
-                   Objects.equals(fstype, that.fstype);
+                   Objects.equals(fstype, that.fstype) &&
+                   this.onSSD == that.onSSD &&
+                   this.sectorSize == that.sectorSize;
         }
 
         public int hashCode()
         {
-            return Objects.hash(mountpoint, device, fstype);
+            return Objects.hash(mountpoint, device, fstype, onSSD, sectorSize);
         }
+
+        private static Path getQueueFolder(String partition) throws IOException
+        {
+            assert FBUtilities.isLinux;
+
+            Path sysClassBlock = Paths.get("/sys/class/block/" + partition);
+            // not a block device
+            if (!sysClassBlock.toFile().exists())
+                return null;
+
+            // read symlink from /sys/class/block/... to /sys/devices/...
+            sysClassBlock = sysClassBlock.toRealPath();
+            Path device = sysClassBlock.getParent();
+            return device.resolve("queue");
+        }
+
+        /**
+         * Detects if a given partition (i.e. sda2, nvme0n1p2) is rotational or ssd
+         *
+         * This only works on Linux
+         *
+         * @param queue the folder containing files for the block device
+         * @return true for ssd
+         * @throws IOException
+         */
+        private static boolean isPartitionOnSSD(Path queue) throws IOException
+        {
+            assert FBUtilities.isLinux;
+
+            // not a block device - so can't be an SSD
+            if (queue == null)
+                return false;
+
+            Path rotational = queue.resolve("rotational");
+            if (!rotational.toFile().exists())
+                // assume it's rotational, if that file's not there
+                return false;
+
+            // "rotational" contains 0 for non-rotational
+            return "0".equals(Files.lines(rotational).findFirst().orElse("1"));
+        }
+
+        private static int getSectorSize(Path queue, String device) throws IOException
+        {
+            assert FBUtilities.isLinux;
+
+            // if for whatever reason the content of logical_block_size does not contain the correct sector size,
+            // an operator can specify a sector size manually for a specific device which will override the content of
+            // logical_block_size
+            int operatorSectorSize = Integer.parseInt(System.getProperty(String.format("dse.io.%s.sector.size", device), "0"));
+            if (operatorSectorSize > 0)
+            {
+                logger.info("Using operator sector size {} for {}", operatorSectorSize, device);
+                return operatorSectorSize;
+            }
+
+            if (queue == null)
+            {
+                logger.warn("Could not determine sector size for {}, assuming {}", device, defaultSectorSize.get());
+                return Integer.parseInt(defaultSectorSize.get());
+            }
+
+            // according to https://lwn.net/Articles/12032/, for AIO alignment the requirement is to align to what
+            // bdev_hardsect_size() returns, which can be queried with ioctl() using BLKSSZGET, which derives from
+            // the hardsect_size array. This should be the logical block size, not the physical block size. For this
+            // reason we are reading the logical block size. However, it may be that for performance of HDDs using
+            // advanced formatting and 512 emulation, we should really read the physical block size. I'm not sure
+            // if there is ever a case where this could cause problems though.
+            Path logical_block_size = queue.resolve("logical_block_size");
+            if (!logical_block_size.toFile().exists())
+            {
+                logger.warn("Could not determine sector size for {}, assuming {}", device, defaultSectorSize.get());
+                return Integer.parseInt(defaultSectorSize.get());
+            }
+
+            return Integer.parseInt(Files.lines(logical_block_size).findFirst().orElseGet(defaultSectorSize));
+        }
+
     }
 
     @VisibleForTesting
@@ -736,91 +858,8 @@ public final class FileUtils
         return dirToDisk;
     }
 
-
     /**
-     * Detects if a given partition (i.e. sda2, nvme0n1p2) is rotational or ssd
-     *
-     * This only works on Linux
-     *
-     * @param partition the name of the partition
-     * @return true for ssd
-     * @throws IOException
-     */
-    public static boolean isPartitionOnSSD(String partition) throws IOException
-    {
-        assert FBUtilities.isLinux;
-
-        Path sysClassBlock = Paths.get("/sys/class/block/" + partition);
-        // not a block device - so can't be an SSD
-        if (!sysClassBlock.toFile().exists())
-            return false;
-
-        // read symlink from /sys/class/block/... to /sys/devices/...
-        sysClassBlock = sysClassBlock.toRealPath();
-        Path device = sysClassBlock.getParent();
-        Path queue = device.resolve("queue");
-        Path rotational = queue.resolve("rotational");
-        if (!rotational.toFile().exists())
-            // assume it's rotational, if that file's not there
-            return false;
-
-        // "rotational" contains 0 for non-rotational
-
-        return "0".equals(Files.lines(rotational).findFirst().orElse("1"));
-    }
-
-    /**
-     * Detects if the given directories are all on SSDs.
-     * In the case of Linux we check the block device info under /sys
-     *
-     * For non-Linux we use the disk_optimization_strategy in cassandra.yaml
-     *
-     * @return true if data directories are all SSD
-     */
-    public static boolean isSSD(boolean diskOptimStrategyIsSSD, List<String> directories)
-    {
-        if (directories.isEmpty())
-            return false;
-
-        boolean isSSD = diskOptimStrategyIsSSD;
-
-        if (FBUtilities.isLinux)
-        {
-            try
-            {
-                Map<Path, MountPoint> dirToPartition = getDiskPartitions();
-
-                for (String dir : directories)
-                {
-                    Path path = Paths.get(dir).toAbsolutePath();
-                    boolean found = false;
-                    for (Map.Entry<Path, MountPoint> entry : dirToPartition.entrySet())
-                    {
-                        if (path.startsWith(entry.getKey()))
-                        {
-                            found = true;
-                            if (!isPartitionOnSSD(entry.getValue().device))
-                                isSSD = false;
-
-                            break;
-                        }
-                    }
-
-                    if (!found)
-                        logger.debug("Could not determine if disk for {} is an SSD.", dir);
-                }
-            }
-            catch (Throwable e)
-            {
-                logger.debug("Could not determine if disk(s) for {} is SSD.", directories, e);
-            }
-        }
-
-        return isSSD;
-    }
-
-    /**
-     * Best-effort checks to detect wether and eventually on which virtualization we're running.
+     * Best-effort checks to detect whether and eventually on which virtualization we're running.
      *
      * @return {@code null} if unable to detect virtualization (which is usually a good sign) or
      *         the name of the virtualization type.

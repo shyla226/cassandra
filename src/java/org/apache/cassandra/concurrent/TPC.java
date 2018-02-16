@@ -81,7 +81,6 @@ public class TPC
     public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("dse.io.aio.enabled", "true"))
                                           && Aio.isAvailable() && USE_EPOLL &&
                                           (Boolean.parseBoolean(System.getProperty("dse.io.aio.force", "false")) || DatabaseDescriptor.assumeDataDirectoriesOnSSD());
-    public static final int AIO_BLOCK_SIZE = 512;
 
     public static final AioCoordinator aioCoordinator = new AioCoordinator(NUM_CORES,
                                                                            USE_AIO ? DatabaseDescriptor.getTPCIOCores() : 0,
@@ -585,17 +584,6 @@ public class TPC
     public static Executor getWrappedExecutor()
     {
         return command -> TPC.bestTPCScheduler().getExecutor().execute(command);
-    }
-
-
-    public static int roundUpToBlockSize(int size)
-    {
-        return (size + AIO_BLOCK_SIZE - 1) & -AIO_BLOCK_SIZE;
-    }
-
-    public static long roundDownToBlockSize(long size)
-    {
-        return size & -AIO_BLOCK_SIZE;
     }
 
     /**

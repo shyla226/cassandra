@@ -22,11 +22,16 @@ public abstract class AbstractReaderFileProxy implements ReaderFileProxy
 {
     protected final AsynchronousChannelProxy channel;
     protected final long fileLength;
+    /** The sector size is a property of the disk where this file is located. It's required for aligning AIO reads. */
+    protected final int sectorSize;
 
     protected AbstractReaderFileProxy(AsynchronousChannelProxy channel, long fileLength)
     {
         this.channel = channel;
         this.fileLength = fileLength >= 0 ? fileLength : channel.size();
+        this.sectorSize = FileUtils.mountPointForDirectory(channel.filePath).sectorSize;
+
+        assert Integer.bitCount(sectorSize) == 1 : String.format("Sector size %d must be a power of two", sectorSize);
     }
 
     @Override
@@ -57,5 +62,15 @@ public abstract class AbstractReaderFileProxy implements ReaderFileProxy
     public double getCrcCheckChance()
     {
         return 0; // Only valid for compressed files.
+    }
+
+    public int roundUpToBlockSize(int size)
+    {
+        return (size + sectorSize - 1) & -sectorSize;
+    }
+
+    public long roundDownToBlockSize(long size)
+    {
+        return size & -sectorSize;
     }
 }
