@@ -1,4 +1,5 @@
 dse 6.0.0:
+ * Improve message when mixing mutually exclusive deprecated and non-deprecated YAML properties (DB-1719)
  * Multiple functions in GROUP BY clause should be rejected (DB-1660)
  * Introduce fetch type in ColumnFilter, fix and improve ColumnFilterTest (DB-1607)
  * Add trace_ttl_sec to NodeSyncConfig hashing, equality, and string map (DB-1600)

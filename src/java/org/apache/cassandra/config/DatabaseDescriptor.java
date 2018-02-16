@@ -830,7 +830,20 @@ public class DatabaseDescriptor
         broadcastNativeTransportAddress = null;
 
         // Support to deprecated rpc_* properties
-        if (config.rpc_address != null)
+
+        boolean isRpcAddressSet = config.rpc_address != null;
+        boolean isRpcInterfaceSet = config.rpc_interface != null;
+        boolean isNativeTransportAddressSet = config.native_transport_address != null;
+        boolean isNativeTransportInterfaceSet = config.native_transport_interface != null;
+
+        if ((isRpcAddressSet || isNativeTransportAddressSet) && (isRpcInterfaceSet || isNativeTransportInterfaceSet))
+        {
+            String addressProperty = isRpcAddressSet ? "rpc_address (deprecated)" : "native_transport_address";
+            String interfaceProperty = isRpcInterfaceSet ? "rpc_interface (deprecated)" : "native_transport_interface";
+            throw new ConfigurationException(String.format("Set %s OR %s, not both", addressProperty, interfaceProperty), false);
+        }
+
+        if (isRpcAddressSet)
         {
             if (config.native_transport_address == null)
             {
@@ -846,7 +859,7 @@ public class DatabaseDescriptor
             config.native_transport_address = config.rpc_address;
         }
 
-        if (config.rpc_interface != null)
+        if (isRpcInterfaceSet)
         {
             if (config.native_transport_interface == null)
             {
@@ -968,11 +981,7 @@ public class DatabaseDescriptor
         }
 
         /* Local IP, hostname or interface to bind RPC server to */
-        if (config.native_transport_address != null && config.native_transport_interface != null)
-        {
-            throw new ConfigurationException("Set native_transport_address OR native_transport_interface, not both", false);
-        }
-        else if (config.native_transport_address != null)
+        if (config.native_transport_address != null)
         {
             try
             {
@@ -2586,7 +2595,7 @@ public class DatabaseDescriptor
     {
         conf.otc_backlog_expiration_interval_ms = intervalInMillis;
     }
- 
+
     public static int getWindowsTimerInterval()
     {
         return conf.windows_timer_interval;
