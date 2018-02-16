@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import io.reactivex.Single;
+
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.Maps;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import io.reactivex.Single;
 
 import com.datastax.bdp.db.audit.AuditableEventType;
 import com.datastax.bdp.db.audit.CoreAuditableEventType;
@@ -46,30 +46,17 @@ import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.cql3.selection.RawSelector;
-import org.apache.cassandra.cql3.selection.ResultBuilder;
-import org.apache.cassandra.cql3.selection.Selectable;
+import org.apache.cassandra.cql3.selection.*;
 import org.apache.cassandra.cql3.selection.Selectable.WithFunction;
-import org.apache.cassandra.cql3.selection.Selection;
 import org.apache.cassandra.cql3.selection.Selection.Selectors;
-import org.apache.cassandra.cql3.selection.Selector;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
-import org.apache.cassandra.db.filter.ClusteringIndexFilter;
-import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
-import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
-import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.FlowablePartitions;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -97,11 +84,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.flow.Flow;
 
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
-import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+import static org.apache.cassandra.cql3.statements.RequestValidations.*;
 import static org.apache.cassandra.db.aggregation.AggregationSpecification.aggregatePkPrefixFactory;
 import static org.apache.cassandra.db.aggregation.AggregationSpecification.aggregatePkPrefixFactoryWithSelector;
 import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
@@ -1233,7 +1216,6 @@ public class SelectStatement implements CQLStatement, TableStatement
     <T extends ResultBuilder> Flow<T> processPartition(FlowablePartition partition, QueryOptions options, T result, int nowInSec)
     throws InvalidRequestException
     {
-        final ProtocolVersion protocolVersion = options.getProtocolVersion();
         final ByteBuffer[] keyComponents = getComponents(table, partition.header().partitionKey);
 
         return partition
@@ -1254,10 +1236,10 @@ public class SelectStatement implements CQLStatement, TableStatement
                                 result.add(row.clustering().get(def.position()));
                                 break;
                             case REGULAR:
-                                addValue(result, def, row, nowInSec, protocolVersion);
+                                result.add(row.getColumnData(def), nowInSec);
                                 break;
                             case STATIC:
-                                addValue(result, def, partition.staticRow(), nowInSec, protocolVersion);
+                                result.add(partition.staticRow().getColumnData(def), nowInSec);
                                 break;
                         }
                     }
@@ -1276,7 +1258,7 @@ public class SelectStatement implements CQLStatement, TableStatement
                                result.add(keyComponents[def.position()]);
                                break;
                            case STATIC:
-                               addValue(result, def, partition.staticRow(), nowInSec, protocolVersion);
+                                result.add(partition.staticRow().getColumnData(def), nowInSec);
                                break;
                            default:
                                result.add(null);
@@ -1295,25 +1277,6 @@ public class SelectStatement implements CQLStatement, TableStatement
     private boolean queriesFullPartitions()
     {
         return !restrictions.hasClusteringColumnsRestrictions() && !restrictions.hasRegularColumnsRestrictions();
-    }
-
-    private static void addValue(ResultBuilder result, ColumnMetadata def, Row row, int nowInSec, ProtocolVersion protocolVersion)
-    {
-        if (def.isComplex())
-        {
-            assert def.type.isMultiCell();
-            ComplexColumnData complexData = row.getComplexColumnData(def);
-            if (complexData == null)
-                result.add(null);
-            else if (def.type.isCollection())
-                result.add(((CollectionType<?>) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
-            else
-                result.add(((UserType) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
-        }
-        else
-        {
-            result.add(row.getCell(def), nowInSec);
-        }
     }
 
     private boolean needsPostQueryOrdering()
@@ -1579,6 +1542,7 @@ public class SelectStatement implements CQLStatement, TableStatement
 
             Iterator<ColumnMetadata> pkColumns = metadata.primaryKeyColumns().iterator();
             Selector.Factory selectorFactory = null;
+            List<ColumnMetadata> columns = null;
             for (Selectable.Raw raw : parameters.groups)
             {
                 checkNull(selectorFactory, "Functions are only supported on the last element of the GROUP BY clause");
@@ -1591,7 +1555,7 @@ public class SelectStatement implements CQLStatement, TableStatement
                 {
                     WithFunction withFunction = (WithFunction) selectable;
                     validateGroupByFunction(withFunction);
-                    List<ColumnMetadata> columns = new ArrayList<ColumnMetadata>();
+                    columns = new ArrayList<ColumnMetadata>();
                     selectorFactory = selectable.newSelectorFactory(metadata, null, columns, boundNames);
                     checkFalse(columns.isEmpty(), "GROUP BY functions must have one clustering column name as parameter");
                     if (columns.size() > 1)
@@ -1638,7 +1602,8 @@ public class SelectStatement implements CQLStatement, TableStatement
             return selectorFactory == null ? aggregatePkPrefixFactory(metadata.comparator, clusteringPrefixSize)
                                            : aggregatePkPrefixFactoryWithSelector(metadata.comparator,
                                                                                   clusteringPrefixSize,
-                                                                                  selectorFactory);
+                                                                                  selectorFactory,
+                                                                                  columns);
         }
 
         /**

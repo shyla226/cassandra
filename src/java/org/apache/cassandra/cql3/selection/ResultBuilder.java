@@ -24,7 +24,8 @@ import java.util.List;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.aggregation.GroupMaker;
-import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.ColumnData;
+import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * CQL row builder: abstract class for converting filtered rows and cells into CQL rows.
@@ -70,9 +71,9 @@ public abstract class ResultBuilder
         inputRow.add(v);
     }
 
-    public void add(Cell c, int nowInSec)
+    public void add(ColumnData columnData, int nowInSec)
     {
-        inputRow.add(c, nowInSec);
+        inputRow.add(columnData, nowInSec);
     }
 
     /**

@@ -18,6 +18,8 @@
 package org.apache.cassandra.db.aggregation;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.cassandra.cql3.QueryOptions;
@@ -28,8 +30,10 @@ import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -132,7 +136,8 @@ public abstract class AggregationSpecification
 
     public static AggregationSpecification.Factory aggregatePkPrefixFactoryWithSelector(final ClusteringComparator comparator,
                                                                                         final int clusteringPrefixSize,
-                                                                                        final Selector.Factory factory)
+                                                                                        final Selector.Factory factory,
+                                                                                        final List<ColumnMetadata> columns)
     {
         return new Factory()
         {
@@ -149,7 +154,8 @@ public abstract class AggregationSpecification
                 selector.validateForGroupBy();
                 return new  AggregateByPkPrefixWithSelector(comparator,
                                                             clusteringPrefixSize,
-                                                            selector);
+                                                            selector,
+                                                            columns);
             }
         };
     }
@@ -227,18 +233,25 @@ public abstract class AggregationSpecification
          */
         private final Selector selector;
 
+        /**
+         * The columns used by the selector.
+         */
+        private final List<ColumnMetadata> columns;
+
         public AggregateByPkPrefixWithSelector(ClusteringComparator comparator,
                                                int clusteringPrefixSize,
-                                               Selector selector)
+                                               Selector selector,
+                                               List<ColumnMetadata> columns)
         {
             super(Kind.AGGREGATE_BY_PK_PREFIX_WITH_SELECTOR, comparator, clusteringPrefixSize);
             this.selector = selector;
+            this.columns = columns;
         }
 
         @Override
         public GroupMaker newGroupMaker(GroupingState state)
         {
-            return GroupMaker.newSelectorGroupMaker(comparator, clusteringPrefixSize, selector, state);
+            return GroupMaker.newSelectorGroupMaker(comparator, clusteringPrefixSize, selector, columns, state);
         }
     }
 
@@ -263,6 +276,9 @@ public abstract class AggregationSpecification
                     AggregateByPkPrefixWithSelector spec = (AggregateByPkPrefixWithSelector) aggregationSpec;
                     out.writeUnsignedVInt(spec.clusteringPrefixSize);
                     Selector.serializers.get(version).serialize(spec.selector, out);
+                    // Ideally we should serialize the columns but that will break backward compatibility.
+                    // So for the moment we can rebuild the list from the prefix size as we know that there will be
+                    // only one column and that its indice will be: clusteringPrefixSize - 1.
                     break;
                 default:
                     throw new AssertionError();
@@ -281,9 +297,13 @@ public abstract class AggregationSpecification
                 case AGGREGATE_BY_PK_PREFIX_WITH_SELECTOR:
                     int clusteringPrefixSize = (int) in.readUnsignedVInt();
                     Selector selector = Selector.serializers.get(version).deserialize(in, metadata);
+
+                    ColumnMetadata functionArgument = metadata.clusteringColumns().get(clusteringPrefixSize - 1);
+
                     return new AggregateByPkPrefixWithSelector(metadata.comparator,
                                                                clusteringPrefixSize,
-                                                               selector);
+                                                               selector,
+                                                               Collections.singletonList(functionArgument));
                 default:
                     throw new AssertionError();
             }
@@ -303,6 +323,7 @@ public abstract class AggregationSpecification
                     AggregateByPkPrefixWithSelector spec = (AggregateByPkPrefixWithSelector) aggregationSpec;
                     size += TypeSizes.sizeofUnsignedVInt(spec.clusteringPrefixSize);
                     size += Selector.serializers.get(version).serializedSize(spec.selector);
+
                     break;
                 default:
                     throw new AssertionError();

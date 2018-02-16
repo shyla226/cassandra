@@ -1,3 +1,6 @@
+dse 6.1.0:
+ * Add ability to read the TTL and WRITETIME of an element in a collection (DB-1289)
+
 dse 6.0.0:
  * Multiple functions in GROUP BY clause should be rejected (DB-1660)
  * Introduce fetch type in ColumnFilter, fix and improve ColumnFilterTest (DB-1607)

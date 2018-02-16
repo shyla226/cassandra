@@ -22,6 +22,8 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.List;
 
+import com.google.common.collect.Range;
+
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -151,6 +153,38 @@ public abstract class CollectionSerializer<T> implements TypeSerializer<T>
                                                       ByteBuffer to,
                                                       AbstractType<?> comparator,
                                                       boolean frozen);
+
+    /**
+     * Returns the index of an element from a serialized collection.
+     * <p>
+     * Note that this is only supported to sets and maps. For sets, this mostly ends up being
+     * a check for the presence of the provide key: it will return the key if it's present and
+     * {@code null} otherwise.
+     *
+     * @param collection the serialized collection. This cannot be {@code null}.
+     * @param key the key for which the index must be found (This cannot be {@code null} nor {@code ByteBufferUtil.UNSET_BYTE_BUFFER}).
+     * @param comparator the type to use to compare the {@code key} value to those
+     * in the collection.
+     * @return the index of the element associated with {@code key} if one exists, {@code -1} otherwise
+     */
+    public abstract int getIndexFromSerialized(ByteBuffer collection, ByteBuffer key, AbstractType<?> comparator);
+
+    /**
+     * Returns the range of indexes corresponding to specified range of elements in the serialized collection.
+     * <p>
+     * Note that this is only supported by sets and maps.
+     *
+     * @param collection the serialized collection. This cannot be {@code null}.
+     * @param from  the left bound of the slice to extract. This cannot be {@code null} but if this is
+     * {@code ByteBufferUtil.UNSET_BYTE_BUFFER}, then the returned slice starts at the beginning
+     * @param to the left bound of the slice to extract. This cannot be {@code null} but if this is
+     * {@code ByteBufferUtil.UNSET_BYTE_BUFFER}, then the returned slice starts at the beginning
+     * of the {@code collection}.
+     * @param comparator the type to use to compare the {@code from} and {@code to} values to those
+     * in the collection.
+     * @return the range of indexes corresponding to specified range of elements
+     */
+    public abstract Range<Integer> getIndexesRangeFromSerialized(ByteBuffer collection, ByteBuffer from, ByteBuffer to, AbstractType<?> comparator);
 
     /**
      * Creates a new serialized map composed from the data from {@code input} between {@code startPos}

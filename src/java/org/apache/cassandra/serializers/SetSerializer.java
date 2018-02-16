@@ -24,10 +24,13 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import com.google.common.collect.Range;
+
 import org.apache.cassandra.transport.ProtocolVersion;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Pair;
 
 public class SetSerializer<T> extends CollectionSerializer<Set<T>>
 {
@@ -227,6 +230,85 @@ public class SetSerializer<T> extends CollectionSerializer<Set<T>>
                 return null;
 
             return copyAsNewCollection(collection, count, startPos, input.position(), ProtocolVersion.V3);
+        }
+        catch (BufferUnderflowException e)
+        {
+            throw new MarshalException("Not enough bytes to read a set");
+        }
+    }
+
+    @Override
+    public int getIndexFromSerialized(ByteBuffer collection, ByteBuffer key, AbstractType<?> comparator)
+    {
+        try
+        {
+            ByteBuffer input = collection.duplicate();
+            int n = readCollectionSize(input, ProtocolVersion.V3);
+            for (int i = 0; i < n; i++)
+            {
+                ByteBuffer value = readValue(input, ProtocolVersion.V3);
+                int comparison = comparator.compareForCQL(value, key);
+                if (comparison == 0)
+                    return i;
+                else if (comparison > 0)
+                    // since the set is in sorted order, we know we've gone too far and the element doesn't exist
+                    return -1;
+                // else, we're before the element so continue
+            }
+            return -1;
+        }
+        catch (BufferUnderflowException e)
+        {
+            throw new MarshalException("Not enough bytes to read a set");
+        }
+    }
+
+    public Range<Integer> getIndexesRangeFromSerialized(ByteBuffer collection, ByteBuffer from, ByteBuffer to, AbstractType<?> comparator)
+    {
+        if (from == ByteBufferUtil.UNSET_BYTE_BUFFER && to == ByteBufferUtil.UNSET_BYTE_BUFFER)
+            return Range.closed(0, Integer.MAX_VALUE);
+
+        try
+        {
+            ByteBuffer input = collection.duplicate();
+            int n = readCollectionSize(input, ProtocolVersion.V3);
+            int start = from == ByteBufferUtil.UNSET_BYTE_BUFFER ? 0 : -1;
+            int end = to == ByteBufferUtil.UNSET_BYTE_BUFFER ? n : -1;
+
+            for (int i = 0; i < n; i++)
+            {
+                if (start >= 0 && end >= 0)
+                    break;
+
+                ByteBuffer value = readValue(input, ProtocolVersion.V3);
+
+                if (start < 0)
+                {
+                    int comparison = comparator.compareForCQL(from, value);
+                    if (comparison <= 0)
+                        start = i;
+                    else
+                        continue;
+                }
+
+                if (end < 0)
+                {
+                    int comparison = comparator.compareForCQL(value, to);
+                    if (comparison > 0)
+                        end = i;
+                }
+            }
+
+            if (start < 0 && end < 0)
+                return Range.closedOpen(0, 0); //empty
+
+            if (start < 0)
+                return to == ByteBufferUtil.UNSET_BYTE_BUFFER ? Range.closedOpen(0, 0) : Range.closedOpen(0, end);
+
+           if (end < 0)
+                return Range.closedOpen(start, n);
+
+           return Range.closedOpen(start, end);
         }
         catch (BufferUnderflowException e)
         {

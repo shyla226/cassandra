@@ -422,11 +422,11 @@ simpleUnaliasedSelector returns [Selectable.Raw s]
     ;
 
 selectionFunction returns [Selectable.Raw s]
-    : K_COUNT '(' '\*' ')'                      { $s = Selectable.WithFunction.Raw.newCountRowsFunction(); }
-    | K_WRITETIME '(' c=cident ')'              { $s = new Selectable.WritetimeOrTTL.Raw(c, true); }
-    | K_TTL       '(' c=cident ')'              { $s = new Selectable.WritetimeOrTTL.Raw(c, false); }
-    | K_CAST      '(' sn=unaliasedSelector K_AS t=native_type ')' {$s = new Selectable.WithCast.Raw(sn, t);}
-    | f=functionName args=selectionFunctionArgs { $s = new Selectable.WithFunction.Raw(f, args); }
+    : K_COUNT     '(' '\*' ')'                                    { $s = Selectable.WithFunction.Raw.newCountRowsFunction(); }
+    | K_WRITETIME '(' c=cident m=selectorModifier[c] ')'          { $s = new Selectable.WritetimeOrTTL.Raw(c, m, true); }
+    | K_TTL       '(' c=cident m=selectorModifier[c] ')'          { $s = new Selectable.WritetimeOrTTL.Raw(c, m, false); }
+    | K_CAST      '(' sn=unaliasedSelector K_AS t=native_type ')' { $s = new Selectable.WithCast.Raw(sn, t); }
+    | f=functionName args=selectionFunctionArgs                   { $s = new Selectable.WithFunction.Raw(f, args); }
     ;
 
 selectionLiteral returns [Term.Raw value]

@@ -247,20 +247,23 @@ public interface Selectable extends AssignmentTestable
     public static class WritetimeOrTTL implements Selectable
     {
         public final ColumnMetadata column;
+        public final Selectable selectable;
         public final boolean isWritetime;
 
-        public WritetimeOrTTL(ColumnMetadata column, boolean isWritetime)
+        public WritetimeOrTTL(ColumnMetadata column, Selectable selectable, boolean isWritetime)
         {
             this.column = column;
+            this.selectable = selectable;
             this.isWritetime = isWritetime;
         }
 
         @Override
         public String toString()
         {
-            return (isWritetime ? "writetime" : "ttl") + "(" + column.name + ")";
+            return (isWritetime ? "writetime" : "ttl") + '(' + selectable + ')';
         }
 
+        @Override
         public Selector.Factory newSelectorFactory(TableMetadata table,
                                                    AbstractType<?> expectedType,
                                                    List<ColumnMetadata> defs,
@@ -271,13 +274,14 @@ public interface Selectable extends AssignmentTestable
                         String.format("Cannot use selection function %s on PRIMARY KEY part %s",
                                       isWritetime ? "writeTime" : "ttl",
                                       column.name));
-            if (column.type.isCollection())
-                throw new InvalidRequestException(String.format("Cannot use selection function %s on collections",
-                                                                isWritetime ? "writeTime" : "ttl"));
 
-            return WritetimeOrTTLSelector.newFactory(column, addAndGetIndex(column, defs), isWritetime);
+            Selector.Factory factory = selectable.newSelectorFactory(table, expectedType, defs, boundNames);
+            boolean isMultiCell = factory.getColumnSpecification(table).type.isMultiCell();
+
+            return WritetimeOrTTLSelector.newFactory(factory, addAndGetIndex(column, defs), isWritetime, isMultiCell);
         }
 
+        @Override
         public AbstractType<?> getExactTypeIfKnown(String keyspace)
         {
             return isWritetime ? LongType.instance : Int32Type.instance;
@@ -286,23 +290,25 @@ public interface Selectable extends AssignmentTestable
         @Override
         public boolean selectColumns(Predicate<ColumnMetadata> predicate)
         {
-            return predicate.test(column);
+            return selectable.selectColumns(predicate);
         }
 
         public static class Raw extends Selectable.Raw
         {
-            private final ColumnMetadata.Raw id;
+            private final ColumnMetadata.Raw column;
+            private final Selectable.Raw selected;
             private final boolean isWritetime;
 
-            public Raw(ColumnMetadata.Raw id, boolean isWritetime)
+            public Raw(ColumnMetadata.Raw column, Selectable.Raw selected, boolean isWritetime)
             {
-                this.id = id;
+                this.column = column;
+                this.selected = selected;
                 this.isWritetime = isWritetime;
             }
 
             public WritetimeOrTTL prepare(TableMetadata table)
             {
-                return new WritetimeOrTTL(id.prepare(table), isWritetime);
+                return new WritetimeOrTTL(column.prepare(table), selected.prepare(table), isWritetime);
             }
         }
     }

@@ -22,7 +22,7 @@ import java.nio.ByteBuffer;
 
 import java.util.Objects;
 
-import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.ColumnSpecification;
@@ -35,7 +35,6 @@ import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.ByteBufferUtil;
 
 final class WritetimeOrTTLSelector extends Selector
 {
@@ -43,41 +42,44 @@ final class WritetimeOrTTLSelector extends Selector
     {
         protected Selector deserialize(DataInputPlus in, ReadVersion version, TableMetadata metadata) throws IOException
         {
-            ColumnMetadata column = metadata.getColumn(ByteBufferUtil.readWithVIntLength(in));
-            int idx = in.readInt();
+            Selector selected = Selector.serializers.get(version).deserialize(in, metadata);
+            int columnIndex = in.readInt();
             boolean isWritetime = in.readBoolean();
-            return new WritetimeOrTTLSelector(column, idx, isWritetime);
+            boolean isMultiCell = in.readBoolean();
+            return new WritetimeOrTTLSelector(selected, columnIndex, isWritetime, isMultiCell);
         }
     };
 
-    private final ColumnMetadata column;
-    private final int idx;
+    private final Selector selected;
+    private final int columnIndex;
     private final boolean isWritetime;
-    private ByteBuffer current;
+    private final boolean isMultiCell;
+    private ByteBuffer output;
     private boolean isSet;
 
-    public static Factory newFactory(final ColumnMetadata def, final int idx, final boolean isWritetime)
+    public static Factory newFactory(final Selector.Factory factory, final int columnIndex, final boolean isWritetime, final boolean isMultiCell)
     {
         return new Factory()
         {
             protected String getColumnName()
             {
-                return String.format("%s(%s)", isWritetime ? "writetime" : "ttl", def.name.toString());
+                return String.format("%s(%s)", isWritetime ? "writetime" : "ttl", factory.getColumnName());
             }
 
             protected AbstractType<?> getReturnType()
             {
-                return isWritetime ? LongType.instance : Int32Type.instance;
+                AbstractType<?> type = isWritetime ? LongType.instance : Int32Type.instance;
+                return isMultiCell ? ListType.getInstance(type, false) : type;
             }
 
             protected void addColumnMapping(SelectionColumnMapping mapping, ColumnSpecification resultsColumn)
             {
-               mapping.addMapping(resultsColumn, def);
+                factory.addColumnMapping(mapping, resultsColumn);
             }
 
             public Selector newInstance(QueryOptions options)
             {
-                return new WritetimeOrTTLSelector(def, idx, isWritetime);
+                return new WritetimeOrTTLSelector(factory.newInstance(options), columnIndex, isWritetime, isMultiCell);
             }
 
             public boolean isWritetimeSelectorFactory()
@@ -97,63 +99,63 @@ final class WritetimeOrTTLSelector extends Selector
 
             public void addFetchedColumns(ColumnFilter.Builder builder)
             {
-                builder.add(def);
+                factory.addFetchedColumns(builder);
             }
         };
     }
 
     public void addFetchedColumns(ColumnFilter.Builder builder)
     {
-        builder.add(column);
+        selected.addFetchedColumns(builder);
     }
 
-    public void addInput(ProtocolVersion protocolVersion, InputRow input)
+    @Override
+    public void addInput(InputRow input)
     {
+        // Because the write timestamps and TTLs returned by the InputRow are mutables they cannot be safely stored in
+        // the case of aggregation/group by queries with select columns without aggregates.
+        // So we need to compute the output value and store this one.
         if (isSet)
             return;
 
         isSet = true;
-
-        if (isWritetime)
-        {
-            long ts = input.getTimestamp(idx);
-            current = ts != Long.MIN_VALUE ? ByteBufferUtil.bytes(ts) : null;
-        }
-        else
-        {
-            int ttl = input.getTtl(idx);
-            current = ttl > 0 ? ByteBufferUtil.bytes(ttl) : null;
-        }
+        selected.addInput(input);
+        ProtocolVersion protocolVersion = input.getProtocolVersion();
+        output = isWritetime ? selected.getWritetimes(protocolVersion).toByteBuffer(protocolVersion)
+                             : selected.getTTLs(protocolVersion).toByteBuffer(protocolVersion);
     }
 
     public ByteBuffer getOutput(ProtocolVersion protocolVersion)
     {
-        return current;
+        return output;
     }
 
     public void reset()
     {
+        selected.reset();
         isSet = false;
-        current = null;
+        output = null;
     }
 
     public AbstractType<?> getType()
     {
-        return isWritetime ? LongType.instance : Int32Type.instance;
+        AbstractType<?> type = isWritetime ? LongType.instance : Int32Type.instance;
+        return isMultiCell ? ListType.getInstance(type, false) : type;
     }
 
     @Override
     public String toString()
     {
-        return column.name.toString();
+        return selected.toString();
     }
 
-    private WritetimeOrTTLSelector(ColumnMetadata column, int idx, boolean isWritetime)
+    private WritetimeOrTTLSelector(Selector selected, final int columnIndex, boolean isWritetime, boolean isMultiCell)
     {
         super(Kind.WRITETIME_OR_TTL_SELECTOR);
-        this.column = column;
-        this.idx = idx;
+        this.selected = selected;
+        this.columnIndex = columnIndex;
         this.isWritetime = isWritetime;
+        this.isMultiCell = isMultiCell;
     }
 
     @Override
@@ -167,30 +169,30 @@ final class WritetimeOrTTLSelector extends Selector
 
         WritetimeOrTTLSelector s = (WritetimeOrTTLSelector) o;
 
-        return Objects.equals(column, s.column)
-            && Objects.equals(idx, s.idx)
+        return Objects.equals(selected, s.selected)
             && Objects.equals(isWritetime, s.isWritetime);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(column, idx, isWritetime);
+        return Objects.hash(selected, isWritetime);
     }
 
     @Override
     protected int serializedSize(ReadVersion version)
     {
-        return TypeSizes.sizeofWithVIntLength(column.name.bytes)
-                + TypeSizes.sizeof(idx)
+        return serializers.get(version).serializedSize(selected)
+                + TypeSizes.sizeof(columnIndex)
                 + TypeSizes.sizeof(isWritetime);
     }
 
     @Override
     protected void serialize(DataOutputPlus out, ReadVersion version) throws IOException
     {
-        ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
-        out.writeInt(idx);
+        serializers.get(version).serialize(selected, out);
+        out.writeInt(columnIndex);
         out.writeBoolean(isWritetime);
+        out.writeBoolean(isMultiCell);
     }
 }

@@ -24,6 +24,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import com.google.common.collect.Range;
+
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -219,6 +221,91 @@ public class MapSerializer<K, V> extends CollectionSerializer<Map<K, V>>
                 return null;
 
             return copyAsNewCollection(collection, count, startPos, input.position(), ProtocolVersion.V3);
+        }
+        catch (BufferUnderflowException e)
+        {
+            throw new MarshalException("Not enough bytes to read a map");
+        }
+    }
+
+    @Override
+    public int getIndexFromSerialized(ByteBuffer collection, ByteBuffer key, AbstractType<?> comparator)
+    {
+        try
+        {
+            ByteBuffer input = collection.duplicate();
+            int n = readCollectionSize(input, ProtocolVersion.V3);
+            for (int i = 0; i < n; i++)
+            {
+                ByteBuffer kbb = readValue(input, ProtocolVersion.V3);
+                int comparison = comparator.compareForCQL(kbb, key);
+
+                if (comparison == 0)
+                    return i;
+
+                if (comparison > 0)
+                    // since the map is in sorted order, we know we've gone too far and the element doesn't exist
+                    return -1;
+
+                // comparison < 0
+                skipValue(input, ProtocolVersion.V3);
+            }
+            return -1;
+        }
+        catch (BufferUnderflowException e)
+        {
+            throw new MarshalException("Not enough bytes to read a map");
+        }
+    }
+
+    public Range<Integer> getIndexesRangeFromSerialized(ByteBuffer collection, ByteBuffer from, ByteBuffer to, AbstractType<?> comparator)
+    {
+        if (from == ByteBufferUtil.UNSET_BYTE_BUFFER && to == ByteBufferUtil.UNSET_BYTE_BUFFER)
+            return Range.closed(0, Integer.MAX_VALUE);
+
+        try
+        {
+            ByteBuffer input = collection.duplicate();
+            int n = readCollectionSize(input, ProtocolVersion.V3);
+            int start = from == ByteBufferUtil.UNSET_BYTE_BUFFER ? 0 : -1;
+            int end = to == ByteBufferUtil.UNSET_BYTE_BUFFER ? n : -1;
+
+            for (int i = 0; i < n; i++)
+            {
+                if (start >= 0 && end >= 0)
+                    break;
+                else if (i > 0)
+                    skipValue(input, ProtocolVersion.V3);
+
+                ByteBuffer key = readValue(input, ProtocolVersion.V3);
+
+                if (start < 0)
+                {
+                    int comparison = comparator.compareForCQL(from, key);
+                    if (comparison <= 0)
+                        start = i;
+                    else
+                        continue;
+                }
+
+                if (end < 0)
+                {
+                    int comparison = comparator.compareForCQL(key, to);
+                    if (comparison > 0)
+                        end = i;
+                }
+            }
+
+            if (start < 0 && end < 0)
+                return Range.closedOpen(0, 0);
+
+            if (start < 0)
+                return to == ByteBufferUtil.UNSET_BYTE_BUFFER ? Range.closedOpen(0, 0) : Range.closedOpen(0, end);
+
+            if (end < 0)
+                return Range.closedOpen(start, n);
+
+            return Range.closedOpen(start, end);
         }
         catch (BufferUnderflowException e)
         {

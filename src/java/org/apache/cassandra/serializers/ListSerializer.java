@@ -24,8 +24,11 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import com.google.common.collect.Range;
+
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.Pair;
 
 public class ListSerializer<T> extends CollectionSerializer<List<T>>
 {
@@ -184,6 +187,21 @@ public class ListSerializer<T> extends CollectionSerializer<List<T>>
                                              boolean frozen)
     {
         // We don't allow slicing of list so we don't need this.
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int getIndexFromSerialized(ByteBuffer collection, ByteBuffer key, AbstractType<?> comparator)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Range<Integer> getIndexesRangeFromSerialized(ByteBuffer collection,
+                                                        ByteBuffer from,
+                                                        ByteBuffer to,
+                                                        AbstractType<?> comparator)
+    {
         throw new UnsupportedOperationException();
     }
 }

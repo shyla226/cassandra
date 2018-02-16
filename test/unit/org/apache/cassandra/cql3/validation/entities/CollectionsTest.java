@@ -576,15 +576,13 @@ public class CollectionsTest extends CQLTester
     }
 
     /**
-     * Migrated from cql_tests.py:TestCQL.collection_function_test()
+     * Migrated from cql_tests.py:TestCQL.collection_compact_test()
      */
     @Test
-    public void testFunctionsOnCollections() throws Throwable
+    public void testCompactCollections() throws Throwable
     {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, l set<int>)");
-
-        assertInvalid("SELECT ttl(l) FROM %s WHERE k = 0");
-        assertInvalid("SELECT writetime(l) FROM %s WHERE k = 0");
+        String tableName = KEYSPACE + "." + createTableName();
+        assertInvalid(String.format("CREATE TABLE %s (user ascii PRIMARY KEY, mails list < text >) WITH COMPACT STORAGE;", tableName));
     }
 
     @Test

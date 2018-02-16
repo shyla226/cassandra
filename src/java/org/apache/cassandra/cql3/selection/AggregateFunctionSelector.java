@@ -42,14 +42,14 @@ final class AggregateFunctionSelector extends AbstractFunctionSelector<Aggregate
         return true;
     }
 
-    public void addInput(ProtocolVersion protocolVersion, InputRow input)
+    public void addInput(InputRow input)
     {
         // Aggregation of aggregation is not supported
         for (int i = 0, m = argSelectors.size(); i < m; i++)
         {
             Selector s = argSelectors.get(i);
-            s.addInput(protocolVersion, input);
-            setArg(i, s.getOutput(protocolVersion));
+            s.addInput(input);
+            setArg(i, s.getOutput(input.getProtocolVersion()));
             s.reset();
         }
         this.aggregate.addInput(args());

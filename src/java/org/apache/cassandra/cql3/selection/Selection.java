@@ -396,7 +396,7 @@ public abstract class Selection
                 @Override
                 public InputRow newInputRow()
                 {
-                    return new InputRow(getColumns().size(), false, false);
+                    return new InputRow(options.getProtocolVersion(), getColumns());
                 }
 
                 @Override
@@ -491,14 +491,15 @@ public abstract class Selection
                 @Override
                 public InputRow newInputRow()
                 {
-                    return new InputRow(getColumns().size(), collectTimestamps, collectTTLs);
+                    return new InputRow(options.getProtocolVersion(), getColumns(), collectTimestamps, collectTTLs);
                 }
 
                 @Override
                 public void reset()
                 {
-                    for (Selector selector : selectors)
-                        selector.reset();
+                    // It seems that escape analysis is not always working for for-each loops, so using indexed approach
+                    for (int i = 0, m = selectors.size(); i < m; i++)
+                        selectors.get(i).reset();
                 }
 
                 @Override
@@ -512,16 +513,18 @@ public abstract class Selection
                 {
                     List<ByteBuffer> outputRow = new ArrayList<>(selectors.size());
 
-                    for (Selector selector: selectors)
-                        outputRow.add(selector.getOutput(options.getProtocolVersion()));
+                    // It seems that escape analysis is not always working for for-each loops, so using indexed approach
+                    for (int i = 0, m = selectors.size(); i < m; i++)
+                        outputRow.add(selectors.get(i).getOutput(options.getProtocolVersion()));
 
                     return isJson ? rowToJson(outputRow, options.getProtocolVersion(), metadata) : outputRow;
                 }
 
                 public void addInputRow(InputRow input)
                 {
-                    for (Selector selector : selectors)
-                        selector.addInput(options.getProtocolVersion(), input);
+                    // It seems that escape analysis is not always working for for-each loops, so using indexed approach
+                    for (int i = 0, m = selectors.size(); i < m; i++)
+                        selectors.get(i).addInput(input);
                 }
 
                 @Override

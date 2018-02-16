@@ -116,6 +116,8 @@ public final class SimpleSelector extends Selector
     public final ColumnMetadata column;
     private final int idx;
     private ByteBuffer current;
+    private Timestamps timestamps;
+    private Timestamps ttls;
     private boolean isSet;
 
     public static Factory newFactory(final ColumnMetadata def, final int idx)
@@ -130,12 +132,18 @@ public final class SimpleSelector extends Selector
     }
 
     @Override
-    public void addInput(ProtocolVersion protocolVersion, InputRow input)
+    public void addInput(InputRow input)
     {
         if (!isSet)
         {
             isSet = true;
             current = input.getValue(idx);
+            // WARNING: the write timestamps and the TTLs are mutables so the value being stored will change when the
+            // next row will be processed. It is a problem for aggregation/GROUP BY queries with select columns 
+            // without aggregates. To go around that problem the {@link WritetimeOrTTLSelector} will fetch the
+            // timestamps/TTLs within its addInput and store the final output (ByteBuffer) until reset is called.
+            timestamps = input.getTimestamps(idx);
+            ttls = input.getTtls(idx);
         }
     }
 
@@ -146,10 +154,24 @@ public final class SimpleSelector extends Selector
     }
 
     @Override
+    protected Timestamps getWritetimes(ProtocolVersion protocolVersion)
+    {
+        return timestamps;
+    }
+
+    @Override
+    protected Timestamps getTTLs(ProtocolVersion protocolVersion)
+    {
+        return ttls;
+    }
+
+    @Override
     public void reset()
     {
         isSet = false;
         current = null;
+        timestamps = null;
+        ttls = null;
     }
 
     @Override

@@ -161,12 +161,7 @@ public class ArrayBackedRow extends AbstractRow
     public Cell getCell(ColumnMetadata cm)
     {
         assert cm.isSimple();
-
-        int idx = Arrays.binarySearch(data, 0, limit, cm, ColumnMetadata.asymmetricColumnDataComparator);
-        if (idx < 0)
-            return null;
-        else
-            return (Cell)data[idx];
+        return (Cell) getColumnData(cm);
     }
 
     public Cell getCell(ColumnMetadata cm, CellPath path)
@@ -179,15 +174,16 @@ public class ArrayBackedRow extends AbstractRow
         return cd.getCell(path);
     }
 
+    public ColumnData getColumnData(ColumnMetadata cm)
+    {
+        int idx = Arrays.binarySearch(data, 0, limit, cm, ColumnMetadata.asymmetricColumnDataComparator);
+        return idx < 0 ? null : data[idx];
+    }
+
     public ComplexColumnData getComplexColumnData(ColumnMetadata cm)
     {
         assert cm.isComplex();
-
-        int idx = Arrays.binarySearch(data, 0, limit, cm, ColumnMetadata.asymmetricColumnDataComparator);
-        if (idx < 0)
-            return null;
-        else
-            return (ComplexColumnData) data[idx];
+        return (ComplexColumnData) getColumnData(cm);
     }
 
     public Iterable<Cell> cells()

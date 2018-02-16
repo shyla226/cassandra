@@ -194,13 +194,13 @@ final class MapSelector extends Selector
         }
     }
 
-    public void addInput(ProtocolVersion protocolVersion, InputRow input)
+    public void addInput(InputRow input)
     {
         for (int i = 0, m = elements.size(); i < m; i++)
         {
             Pair<Selector, Selector> pair = elements.get(i);
-            pair.left.addInput(protocolVersion, input);
-            pair.right.addInput(protocolVersion, input);
+            pair.left.addInput(input);
+            pair.right.addInput(input);
         }
     }
 

@@ -98,9 +98,9 @@ final class FieldSelector extends Selector
         selected.addFetchedColumns(builder);
     }
 
-    public void addInput(ProtocolVersion protocolVersion, InputRow input)
+    public void addInput(InputRow input)
     {
-        selected.addInput(protocolVersion, input);
+        selected.addInput(input);
     }
 
     public ByteBuffer getOutput(ProtocolVersion protocolVersion)
@@ -110,6 +110,24 @@ final class FieldSelector extends Selector
             return null;
         ByteBuffer[] buffers = type.split(value);
         return field < buffers.length ? buffers[field] : null;
+    }
+
+    @Override
+    protected Timestamps getWritetimes(ProtocolVersion protocolVersion)
+    {
+        if (getOutput(protocolVersion) == null)
+            return Timestamps.NO_TIMESTAMP;
+
+        return selected.getWritetimes(protocolVersion).get(field);
+    }
+
+    @Override
+    protected Timestamps getTTLs(ProtocolVersion protocolVersion)
+    {
+        if (getOutput(protocolVersion) == null)
+            return Timestamps.NO_TIMESTAMP;
+
+        return selected.getTTLs(protocolVersion).get(field);
     }
 
     public AbstractType<?> getType()
