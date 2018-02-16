@@ -68,6 +68,8 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.mos.MemoryOnlyStatus;
@@ -708,8 +710,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // Run priming queries upto N times
         for (int i = 0; i < MAX_PRIMING_ATTEMPTS; i++)
         {
-            SinglePartitionReadCommand qs = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), dKey, Slices.ALL);
-            SinglePartitionReadCommand ql = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), dLongKey, Slice.ALL);
+            SinglePartitionReadCommand qs = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), dKey, ColumnFilter.selection(RegularAndStaticColumns.NONE), new ClusteringIndexSliceFilter(Slices.ALL, false));
+            SinglePartitionReadCommand ql = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), dLongKey, ColumnFilter.selection(RegularAndStaticColumns.NONE), new ClusteringIndexSliceFilter(Slices.ALL, false));
 
             HashMultimap<InetAddress, CompletableFuture<ReadResponse>> responses = HashMultimap.create();
 
