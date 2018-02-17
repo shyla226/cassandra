@@ -74,7 +74,8 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
             public void completed(Integer result, ByteBuffer attachment)
             {
                 buffer.flip();
-                futureBuffer.complete(buffer);
+                if (!futureBuffer.complete(buffer))
+                    logger.warn("Failed to complete read from {}, already timed out.", channel.filePath);
             }
 
             public void failed(Throwable exc, ByteBuffer attachment)
@@ -116,7 +117,8 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
                 }
                 buffer.flip();
                 scratchHandle.recycle();
-                futureBuffer.complete(buffer);
+                if (!futureBuffer.complete(buffer))
+                    logger.warn("Failed to complete read from {}, already timed out.", channel.filePath);
             }
 
             public void failed(Throwable exc, ByteBuffer attachment)

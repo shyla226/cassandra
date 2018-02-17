@@ -328,7 +328,7 @@ implements AsyncCacheLoader<ChunkCacheImpl.Key, ChunkCacheImpl.Buffer>, RemovalL
              * but don't give them the buffer because it has not been referenced.
              */
             metrics.notInCacheExceptions.mark();
-            throw new NotInCacheException(asyncBuffer.thenAccept(buffer -> {}), key.path(), key.position);
+            throw new NotInCacheException(channel(), asyncBuffer.thenAccept(buffer -> {}), key.path(), key.position);
         }
 
         @Override

@@ -104,7 +104,8 @@ public class BigIndexFileFlow extends FlowSource<IndexFileEntry>
                 logger.trace("{} - isRetry? {}, firstPublished? {}  NotInCacheException: {}", hashCode(), isRetry, firstPublished, e.getMessage());
 
             // Retry the request once data is in the cache
-            e.accept(() -> readWithRetry(true),
+            e.accept(this.getClass(),
+                     () -> readWithRetry(true),
                      (t) ->
                      {
                          logger.error("Failed to retry due to exception", t);

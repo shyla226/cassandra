@@ -143,7 +143,7 @@ public class ChunkCacheMocks
                     ForkJoinPool.commonPool().submit(() -> buf.complete(null)); // switch thread from time to time
                 // to avoid stack overflow
 
-                throw new NotInCacheException(buf, wrapped.channel().filePath(), position);
+                throw new NotInCacheException(channel(), buf, wrapped.channel().filePath(), position);
             }
             return wrapped.rebuffer(position, constraint);
         }

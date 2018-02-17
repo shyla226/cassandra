@@ -102,7 +102,7 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
     }
 
     // store a variable to avoid instanceof checks for every read, eventually we should separate the two implementations
-    private final AIOEpollFileChannel epollChannel;
+    public final AIOEpollFileChannel epollChannel;
 
     public AsynchronousChannelProxy(String path)
     {

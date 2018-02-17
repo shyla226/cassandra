@@ -116,7 +116,8 @@ public class TrieIndexFileFlow extends FlowSource<IndexFileEntry>
                 logger.trace("{} - NotInCacheException at retry number {}: {}", hashCode(), retryNum, e.getMessage());
 
             // Retry the request once data is in the cache
-            e.accept(() -> readWithRetry(retryNum + 1),
+            e.accept(this.getClass(),
+                     () -> readWithRetry(retryNum + 1),
                      (t) ->
                      {
                          logger.error("Failed to retry due to exception", t);
