@@ -272,6 +272,42 @@ public class DatabaseDescriptorTest
     }
 
     @Test
+    public void testCannotSetBothRpcAddressAndRpcInterface() throws Exception
+    {
+        final Config testConfig = DatabaseDescriptor.loadConfig();
+        testConfig.rpc_address = suitableInterface.getInterfaceAddresses().get(0).getAddress().getHostAddress();
+        testConfig.rpc_interface = suitableInterface.getName();
+        assertConfigException(() -> DatabaseDescriptor.applyAddressConfig(testConfig), "Set rpc_address \\(deprecated\\) OR rpc_interface \\(deprecated\\), not both");
+    }
+
+    @Test
+    public void testCannotSetBothNativeTransportAddressAndRpcInterface() throws Exception
+    {
+        final Config testConfig = DatabaseDescriptor.loadConfig();
+        testConfig.native_transport_address = suitableInterface.getInterfaceAddresses().get(0).getAddress().getHostAddress();
+        testConfig.rpc_interface = suitableInterface.getName();
+        assertConfigException(() -> DatabaseDescriptor.applyAddressConfig(testConfig), "Set native_transport_address OR rpc_interface \\(deprecated\\), not both");
+    }
+
+    @Test
+    public void testCannotSetBothRpcAddressAndNativeTransportInterface() throws Exception
+    {
+        final Config testConfig = DatabaseDescriptor.loadConfig();
+        testConfig.rpc_address = suitableInterface.getInterfaceAddresses().get(0).getAddress().getHostAddress();
+        testConfig.native_transport_interface = suitableInterface.getName();
+        assertConfigException(() -> DatabaseDescriptor.applyAddressConfig(testConfig), "Set rpc_address \\(deprecated\\) OR native_transport_interface, not both");
+    }
+
+    @Test
+    public void testCannotSetBothNativeTransportAddressAndNativeTransportInterface() throws Exception
+    {
+        final Config testConfig = DatabaseDescriptor.loadConfig();
+        testConfig.native_transport_address = suitableInterface.getInterfaceAddresses().get(0).getAddress().getHostAddress();
+        testConfig.native_transport_interface = suitableInterface.getName();
+        assertConfigException(() -> DatabaseDescriptor.applyAddressConfig(testConfig), "Set native_transport_address OR native_transport_interface, not both");
+    }
+
+    @Test
     public void testTokensFromString()
     {
         assertTrue(DatabaseDescriptor.tokensFromString(null).isEmpty());
