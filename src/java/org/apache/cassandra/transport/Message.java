@@ -46,6 +46,7 @@ import io.netty.channel.*;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.MessageToMessageEncoder;
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
@@ -679,7 +680,10 @@ public abstract class Message
             }
             catch (Throwable t)
             {
-                // in case of exception when subscribing
+                // If something gets thrown during a subscription to a Single, RxJava wraps it into a
+                // NullPointerException (see Single.subscribe(SingleObserver)).
+                if (t instanceof NullPointerException && t.getCause() != null)
+                    t = t.getCause();
                 handleError(ctx, request, t);
             }
         }
@@ -729,7 +733,7 @@ public abstract class Message
             }
 
             if( !flusher.queued.offer(item) )
-                throw new RuntimeException("Backpressure");
+                throw new OverloadedException("Too many outgoing requests");
             flusher.start();
         }
     }
