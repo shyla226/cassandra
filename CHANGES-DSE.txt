@@ -1,4 +1,5 @@
 DSE 5.0.13
+ * Harden txn log files against exceptions when adding records and improve log messages (DB-1732)
  * Fix JVM startup check (DB-1882)
  * Fix materialized view schema backup as table (DB-1828)
  * Init timestamp with Long.MIN_VALUE instead of -1 (DB-1823)

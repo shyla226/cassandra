@@ -452,7 +452,9 @@ class LogTransaction extends Transactional.AbstractTransactional implements Tran
                 }
                 else
                 {
-                    logger.error("Unexpected disk state: failed to read transaction txn {}", txn);
+                    logger.error("Unexpected disk state: failed to read transaction txn {}, " +
+                                 "check logs before last shutdown for any errors, and ensure txn log files were not edited manually.",
+                                 txn);
                 }
             }
         }
