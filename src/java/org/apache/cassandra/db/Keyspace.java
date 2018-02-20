@@ -614,9 +614,15 @@ public class Keyspace
             logger.trace("Got CL position {} for mutation {} (view updates: {})",
                          commitLogPosition, mutation, requiresViewUpdate);
 
-        List<Completable> memtablePutCompletables = new ArrayList<>(mutation.getPartitionUpdates().size());
+        final Collection<PartitionUpdate> partitionUpdates = mutation.getPartitionUpdates();
+        final int partitionUpdatesCount = partitionUpdates.size();
+        assert partitionUpdatesCount != 0;
 
-        for (PartitionUpdate upd : mutation.getPartitionUpdates())
+        // avoid allocation on common case of single update
+        List<Completable> memtablePutCompletables = partitionUpdatesCount > 1 ? new ArrayList<>(partitionUpdatesCount) : null;
+        Completable memtablePutCompletable = null;
+
+        for (PartitionUpdate upd : partitionUpdates)
         {
             ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().id);
             if (cfs == null)
@@ -659,12 +665,20 @@ public class Keyspace
             {
                 memtableCompletable = cfs.apply(upd, indexTransaction, opGroup, pos);
             }
-            memtablePutCompletables.add(memtableCompletable);
+
+            if (partitionUpdatesCount > 1)
+            {
+                memtablePutCompletables.add(memtableCompletable);
+            }
+            else
+            {
+                memtablePutCompletable = memtableCompletable;
+            }
         }
 
         // avoid the expensive concat call if there's only 1 completable
-        if (memtablePutCompletables.size() == 1)
-            return memtablePutCompletables.get(0);
+        if (memtablePutCompletable != null)
+            return memtablePutCompletable;
         else
             return Completable.concat(memtablePutCompletables);
     }
