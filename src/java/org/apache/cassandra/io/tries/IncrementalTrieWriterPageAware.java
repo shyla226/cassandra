@@ -19,7 +19,6 @@ package org.apache.cassandra.io.tries;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -68,7 +67,7 @@ public class IncrementalTrieWriterPageAware<Value>
 extends IncrementalTrieWriterBase<Value, DataOutputPlus, IncrementalTrieWriterPageAware.Node<Value>>
 implements IncrementalTrieWriter<Value>
 {
-    private final static Comparator<Node<?>> branchSizeComparator = (l, r) ->
+    private final static Comparator<Node<?>> BRANCH_SIZE_COMPARATOR = (l, r) ->
     {
         // Smaller branches first.
         int c = Integer.compare(l.branchSize + l.nodeSize, r.branchSize + r.nodeSize);
@@ -86,9 +85,15 @@ implements IncrementalTrieWriter<Value>
         return c;
     };
 
-    public IncrementalTrieWriterPageAware(TrieSerializer<Value, ? super DataOutputPlus> serializer, DataOutputPlus dest)
+    public IncrementalTrieWriterPageAware(TrieSerializer<Value, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest)
     {
-        super(serializer, dest, new Node<>((byte) 0));
+        super(trieSerializer, dest, new Node<>((byte) 0));
+    }
+
+    @Override
+    public void reset()
+    {
+        reset(new Node<>((byte) 0));
     }
 
     @Override
@@ -164,7 +169,7 @@ implements IncrementalTrieWriter<Value>
     {
         assert node.filePos == -1;
 
-        NavigableSet<Node<Value>> children = new TreeSet<>(branchSizeComparator);
+        NavigableSet<Node<Value>> children = new TreeSet<>(BRANCH_SIZE_COMPARATOR);
         for (Node<Value> child : node.children)
             if (child.filePos == -1)
                 children.add(child);

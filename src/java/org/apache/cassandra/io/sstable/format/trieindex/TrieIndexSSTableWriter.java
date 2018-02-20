@@ -178,7 +178,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             o.startPartition(key, startPosition);
         });
 
-        //Reuse the writer for each row
+        // Reuse the writer for each row
         partitionWriter.reset();
 
         try (UnfilteredRowIterator collecting = Transformation.apply(iterator, new StatsCollector(metadataCollector)))
@@ -382,6 +382,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         @Override
         protected Throwable doPostCleanup(Throwable accumulate)
         {
+            partitionWriter.close();
             accumulate = dbuilder.close(accumulate);
             return accumulate;
         }

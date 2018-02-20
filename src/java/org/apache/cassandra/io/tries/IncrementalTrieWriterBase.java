@@ -33,10 +33,10 @@ public abstract class IncrementalTrieWriterBase<Value, Dest, Node extends Increm
 implements IncrementalTrieWriter<Value>
 {
 
+    protected final Deque<Node> stack = new ArrayDeque<>();
     protected final TrieSerializer<Value, ? super Dest> serializer;
     protected final Dest dest;
     protected ByteSource prev = null;
-    protected Deque<Node> stack = new ArrayDeque<>();
     long count = 0;
 
     public IncrementalTrieWriterBase(TrieSerializer<Value, ? super Dest> serializer, Dest dest, Node root)
@@ -44,6 +44,23 @@ implements IncrementalTrieWriter<Value>
         this.serializer = serializer;
         this.dest = dest;
         this.stack.addLast(root);
+    }
+
+    protected void reset(Node root)
+    {
+        this.prev = null;
+        this.count = 0;
+        this.stack.clear();
+        this.stack.addLast(root);
+    }
+
+
+    @Override
+    public void close()
+    {
+        this.prev = null;
+        this.count = 0;
+        this.stack.clear();
     }
 
     public void add(ByteSource next, Value value) throws IOException

@@ -58,7 +58,7 @@ public class TrieBuilderTest
     public void testPartialBuild_Apollo1148() throws IOException
     {
         DataOutputBuffer buf = new DataOutputBuffer();
-        IncrementalTrieWriter<Integer> builder = IncrementalTrieWriter.construct(serializer, buf);
+        IncrementalTrieWriter<Integer> builder = IncrementalTrieWriter.open(serializer, buf);
         long count = 0;
 
         count += addUntilBytesWritten(buf, builder, "a", 1);            // Make a node whose children are written
