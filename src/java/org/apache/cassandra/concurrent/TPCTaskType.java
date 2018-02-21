@@ -78,7 +78,7 @@ public enum TPCTaskType
     /** Switching thread to read from secondary index */
     READ_SECONDARY_INDEX,
     /** Waiting for data from disk */
-    READ_DISK_ASYNC(Features.EXTERNAL_QUEUE),
+    READ_DISK_ASYNC(Features.EXTERNAL_QUEUE | Features.ALWAYS_ENQUEUE | Features.PRIORITY),
     /** Write request from local node and directly generated from clients */
     WRITE_LOCAL(Features.BACKPRESSURED),
     /** Write request from remote replica: this can't be backpressured because remote requests come from a different
@@ -159,6 +159,8 @@ public enum TPCTaskType
         static final int TIMED = TPCTaskType.EXCLUDE_FROM_TOTALS;
         static final int TIMER = TPCTaskType.EXCLUDE_FROM_TOTALS | TPCTaskType.PRIORITY;
         static final int EXCLUDE_FROM_TOTALS = TPCTaskType.EXCLUDE_FROM_TOTALS;
+        static final int ALWAYS_ENQUEUE = TPCTaskType.ALWAYS_ENQUEUE;
+        static final int PRIORITY = TPCTaskType.PRIORITY;
     }
 
     private static final int PENDABLE = 1;
@@ -167,6 +169,7 @@ public enum TPCTaskType
     private static final int EXCLUDE_FROM_TOTALS = 8;
     private static final int BACKPRESSURED = 16;
     private static final int PRIORITY = 32;
+    private static final int ALWAYS_ENQUEUE = 64;
 
     private final int flags;
 
@@ -226,6 +229,14 @@ public enum TPCTaskType
     public final boolean priority()
     {
         return (flags & PRIORITY) != 0;
+    }
+
+    /**
+     * Whether this task should be always enqueued.
+     */
+    public final boolean alwaysEnqueue()
+    {
+        return (flags & ALWAYS_ENQUEUE) != 0;
     }
 
     /**

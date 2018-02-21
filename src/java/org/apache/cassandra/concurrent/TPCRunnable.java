@@ -107,6 +107,11 @@ public class TPCRunnable implements Runnable
         return taskType.priority();
     }
 
+    public boolean alwaysEnqueue()
+    {
+        return taskType.alwaysEnqueue();
+    }
+
     public TPCTaskType taskType()
     {
         return taskType;

@@ -293,7 +293,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         @Override
         public boolean canExecuteImmediately(TPCTaskType taskType)
         {
-            if (coreId() != TPC.getCoreId())
+            if (coreId() != TPC.getCoreId() || taskType.alwaysEnqueue())
                 return false;
             if (!taskType.pendable())
                 return true;
