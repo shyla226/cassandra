@@ -262,7 +262,8 @@ public abstract class Verb<P, Q>
 
     boolean isOnlyLocal(Collection<InetAddress> endpoints)
     {
-        return endpoints.size() == 1 && endpoints.iterator().next() == Request.local;
+        return endpoints.size() == 1 &&
+               (endpoints instanceof List ? ((List)endpoints).get(0) : endpoints.iterator().next()) == Request.local;
     }
 
     /**
@@ -295,7 +296,7 @@ public abstract class Verb<P, Q>
      * @return a dispatcher for requests to {@code endpoints} using payload {@code payload}, using forwarding for remote
      * DCs.
      */
-    public Request.Dispatcher<P, Q> newForwardingDispatcher(Collection<InetAddress> endpoints, String localDc, P payload)
+    public Request.Dispatcher<P, Q> newForwardingDispatcher(List<InetAddress> endpoints, String localDc, P payload)
     {
         return new Request.Dispatcher<>(MessageTargets.createWithFowardingForRemoteDCs(endpoints, localDc),
                                         this,

@@ -21,6 +21,8 @@
 package org.apache.cassandra.locator;
 
 import com.google.common.collect.Iterators;
+
+import org.agrona.collections.ObjectHashSet;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.slf4j.Logger;
@@ -162,9 +164,9 @@ public class PendingRangeMaps implements Iterable<Map.Entry<Range<Token>, List<I
         }
     }
 
-    public Collection<InetAddress> pendingEndpointsFor(Token token)
+    public List<InetAddress> pendingEndpointsFor(Token token)
     {
-        Set<InetAddress> endpoints = new HashSet<>();
+        Set<InetAddress> endpoints = new ObjectHashSet<>();
 
         Range searchRange = new Range(token, token);
 
@@ -196,7 +198,7 @@ public class PendingRangeMaps implements Iterable<Map.Entry<Range<Token>, List<I
             endpoints.addAll(entry.getValue());
         }
 
-        return endpoints;
+        return new ArrayList<>(endpoints);
     }
 
     public String printPendingRanges()

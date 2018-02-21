@@ -1215,7 +1215,7 @@ public class TokenMetadata
         return sb.toString();
     }
 
-    public Collection<InetAddress> pendingEndpointsFor(Token token, String keyspaceName)
+    public List<InetAddress> pendingEndpointsFor(Token token, String keyspaceName)
     {
         PendingRangeMaps pendingRangeMaps = this.pendingRanges.get(keyspaceName);
         if (pendingRangeMaps == null)

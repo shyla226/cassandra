@@ -70,14 +70,15 @@ abstract class MessageTargets
         return new Simple(false, endpoints);
     }
 
-    static MessageTargets createWithFowardingForRemoteDCs(Collection<InetAddress> endpoints, String localDc)
+    static MessageTargets createWithFowardingForRemoteDCs(List<InetAddress> endpoints, String localDc)
     {
         boolean hasLocal = false;
         List<InetAddress> localDcRemotes = null;
         Map<String, WithForwards> remoteDcsRemotes = null;
 
-        for (InetAddress endpoint : endpoints)
+        for (int i = 0; i < endpoints.size(); i++)
         {
+            InetAddress endpoint = endpoints.get(i);
             if (endpoint.equals(local))
             {
                 hasLocal = true;
