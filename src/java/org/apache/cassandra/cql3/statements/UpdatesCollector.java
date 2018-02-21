@@ -47,7 +47,7 @@ final class UpdatesCollector
     /**
      * The mutations per keyspace.
      */
-    private final Map<String, Map<ByteBuffer, IMutation>> mutations = new HashMap<>();
+    private final Map<String, Map<ByteBuffer, IMutation>> mutations = new HashMap<>(4);
 
     public UpdatesCollector(Map<TableId, RegularAndStaticColumns> updatedColumns, int updatedRows)
     {
