@@ -500,7 +500,7 @@ class Validator
             else
             {
                 if (missingNodes == null)
-                    missingNodes = new HashSet<>();
+                    missingNodes = Sets.newConcurrentHashSet();
                 Set<InetAddress> missingThisTime = Sets.difference(segmentReplicas, setOf(responded));
                 missingNodes.addAll(missingThisTime);
 
