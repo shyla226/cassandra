@@ -591,11 +591,13 @@ public class PartitionUpdate extends ArrayBackedPartition
         if (needsSort)
             rowBuilder.sort((a,b) -> metadata.comparator.compare(a.clustering(), b.clustering()));
 
-        holder.rows = new Row[rowBuilder.size()];
+        final int size = rowBuilder.size();
+        holder.rows = new Row[size];
 
         //Simply add / replace
-        for (Row row : rowBuilder)
+        for (int i = 0; i < size; i++)
         {
+            Row row = rowBuilder.get(i);
             int lastIdx = holder.length - 1;
             boolean append = lastIdx < 0 || metadata.comparator.compare(holder.rows[lastIdx], row) != 0;
             if (append)

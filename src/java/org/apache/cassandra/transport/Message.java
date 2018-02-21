@@ -577,8 +577,11 @@ public abstract class Message
                     }
                 }
 
-                for (ChannelHandlerContext c : finishedChannels)
+                for (int i = 0; i < finishedChannels.size(); i++)
+                {
+                    ChannelHandlerContext c = finishedChannels.get(i);
                     channels.remove(c);
+                }
 
                 finishedChannels.clear();
 

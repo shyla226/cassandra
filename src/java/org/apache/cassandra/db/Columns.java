@@ -312,9 +312,23 @@ public class Columns extends AbstractCollection<ColumnMetadata>
         if (other.size() > this.size())
             return false;
 
-        for (Object def : other)
-            if (Arrays.binarySearch(columns, (ColumnMetadata) def, Comparator.naturalOrder()) < 0)
-                return false;
+        if (other instanceof List)
+        {
+            final List list = (List) other;
+            for (int i = 0; i < list.size(); i++)
+            {
+                Object def = list.get(i);
+                if (Arrays.binarySearch(columns, (ColumnMetadata) def, Comparator.naturalOrder()) < 0)
+                    return false;
+            }
+        }
+        else
+        {
+            for (Object def : other)
+                if (Arrays.binarySearch(columns, (ColumnMetadata) def, Comparator.naturalOrder()) < 0)
+                    return false;
+        }
+
         return true;
     }
 
