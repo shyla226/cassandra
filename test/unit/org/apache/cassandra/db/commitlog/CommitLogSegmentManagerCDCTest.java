@@ -69,6 +69,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         {
             DatabaseDescriptor.setCDCSpaceInMB(32);
             // Spin until we hit CDC capacity and make sure we get a WriteTimeout
+            Throwable thrown = null;
             try
             {
                 // Should trigger on anything < 20:1 compression ratio during compressed test
@@ -80,10 +81,12 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
                 }
                 Assert.fail("Expected WriteTimeoutException from full CDC but did not receive it.");
             }
-            catch (WriteTimeoutException e)
+            catch (CDCSegmentFullException e)
             {
-                // expected, do nothing
+                thrown = e;
             }
+
+            Assert.assertNotNull(thrown);
             expectCurrentCDCState(CDCState.FORBIDDEN);
 
             // Confirm we can create a non-cdc table and write to it even while at cdc capacity
@@ -161,6 +164,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
             DatabaseDescriptor.setCDCSpaceInMB(16);
             TableMetadata ccfm = Keyspace.open(keyspace()).getColumnFamilyStore(ct).metadata();
             // Spin until we hit CDC capacity and make sure we get a WriteTimeout
+            Throwable thrown = null;
             try
             {
                 for (int i = 0; i < 1000; i++)
@@ -171,7 +175,11 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
                 }
                 Assert.fail("Expected WriteTimeoutException from full CDC but did not receive it.");
             }
-            catch (WriteTimeoutException e) { }
+            catch (CDCSegmentFullException e)
+            {
+                thrown = e;
+            }
+            Assert.assertNotNull(thrown);
 
             expectCurrentCDCState(CDCState.FORBIDDEN);
             CommitLog.instance.forceRecycleAllSegments();
