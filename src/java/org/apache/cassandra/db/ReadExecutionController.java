@@ -119,9 +119,6 @@ public class ReadExecutionController implements AutoCloseable
             }
             catch (RuntimeException e)
             {
-                // Note that must have writeOp == null since ReadOrderGroup ctor can't fail
-                assert writeOp == null;
-
                 if (indexController != null)
                     indexController.close();
 

@@ -176,10 +176,6 @@ public abstract class MemtableAllocator
                                 prev.cancelled();
                                 subscriber.onError(t);
                             }
-                            catch (Throwable t)
-                            {
-                                subscriber.onError(t);
-                            }
                         }
                     }
 

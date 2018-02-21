@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.utils.flow;
 
-import java.util.concurrent.RejectedExecutionException;
 
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
@@ -108,13 +107,9 @@ public class RxThreads
                 {
                     scheduler.execute(this);
                 }
-                catch(RejectedExecutionException ex)
-                {
-                    cancelled();
-                    subscriber.onError(ex);
-                }
                 catch(Throwable ex)
                 {
+                    cancelled();
                     subscriber.onError(ex);
                 }
             }

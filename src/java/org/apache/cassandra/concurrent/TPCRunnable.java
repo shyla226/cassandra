@@ -18,6 +18,9 @@
 
 package org.apache.cassandra.concurrent;
 
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+
+
 /**
  * Runnable used to wrap TPC scheduled tasks.
  *
@@ -31,10 +34,16 @@ package org.apache.cassandra.concurrent;
  */
 public class TPCRunnable implements Runnable
 {
+    private static final AtomicIntegerFieldUpdater<TPCRunnable> COMPLETION_UPDATER = AtomicIntegerFieldUpdater.newUpdater(TPCRunnable.class, "completed");
+
     private final Runnable runnable;
     private final ExecutorLocals locals;
     private final TPCTaskType taskType;
     private final TPCMetrics metrics;
+
+    // Used via COMPLETION_UPDATER above:
+    @SuppressWarnings({"unused"})
+    private volatile int completed;
 
     public TPCRunnable(Runnable runnable, ExecutorLocals locals, TPCTaskType taskType, int scheduledOn)
     {
@@ -65,13 +74,17 @@ public class TPCRunnable implements Runnable
         }
         finally
         {
-            metrics.completed(taskType);
+            if (COMPLETION_UPDATER.compareAndSet(this, 0, 1))
+                metrics.completed(taskType);
+            else
+                throw new IllegalStateException("TPC task was cancelled while still running.");
         }
     }
 
     public void cancelled()
     {
-        metrics.cancelled(taskType);
+        if (COMPLETION_UPDATER.compareAndSet(this, 0, 1))
+            metrics.cancelled(taskType);
     }
 
     public void setPending()

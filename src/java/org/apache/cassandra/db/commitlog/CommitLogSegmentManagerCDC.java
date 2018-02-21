@@ -156,9 +156,7 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
                                     {
                                         logger.debug("Got exception whilst allocating CL segment: {}", error.getMessage());
 
-                                        if (error instanceof RejectedExecutionException)
-                                            us.cancelled();
-
+                                        us.cancelled();
                                         observer.onError(error);
                                     }
                                 });

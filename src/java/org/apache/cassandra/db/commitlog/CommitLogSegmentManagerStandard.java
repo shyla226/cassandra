@@ -19,7 +19,6 @@
 package org.apache.cassandra.db.commitlog;
 
 import java.io.File;
-import java.util.concurrent.RejectedExecutionException;
 
 import io.reactivex.Single;
 import io.reactivex.SingleObserver;
@@ -30,8 +29,6 @@ import org.apache.cassandra.concurrent.TPCRunnable;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.FileUtils;
-
-import static org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager.logger;
 
 public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentManager
 {
@@ -110,9 +107,7 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
                                     {
                                         logger.debug("Got exception whilst allocating CL segment: {}", error.getMessage());
 
-                                        if (error instanceof RejectedExecutionException)
-                                            us.cancelled();
-
+                                        us.cancelled();
                                         observer.onError(error);
                                     }
                                 });
