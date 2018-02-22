@@ -58,9 +58,9 @@ public class QueryPlan
     {
         try
         {
-            Operation.Builder and = new Operation.Builder(OperationType.AND, controller);
-            controller.getExpressions().forEach(and::add);
-            return and.complete();
+            Operation.TreeBuilder tree = new Operation.TreeBuilder(controller);
+            tree.add(controller.getExpressions());
+            return tree.complete();
         }
         catch (Exception | Error e)
         {
