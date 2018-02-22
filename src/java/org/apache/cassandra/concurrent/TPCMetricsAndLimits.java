@@ -39,9 +39,9 @@ public class TPCMetricsAndLimits implements TPCMetrics
     }
     private final TaskStats[] stats;
 
-    AtomicLong externallyCountedTasks = new AtomicLong();
-    AtomicLong backpressureCountedTasks = new AtomicLong();
-    LongAdder backpressureDelayedTasks = new LongAdder();
+    final AtomicLong externallyCountedTasks = new AtomicLong();
+    final AtomicLong backpressureCountedTasks = new AtomicLong();
+    final LongAdder backpressureDelayedTasks = new LongAdder();
 
     // This max value is based on queues size in EpollTPCEventLoopGroup: this kind of hidden dependency is not great
     // design-wise and we can refactor later, let's not shoot ourselves in the feet for now.
