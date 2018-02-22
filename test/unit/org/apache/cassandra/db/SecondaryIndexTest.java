@@ -381,6 +381,8 @@ public class SecondaryIndexTest
             builder = builder.clustering("c");
         builder.add(colName, 10L);
         keyspace.apply(builder.build(), true, false, false).blockingAwait();
+
+        assertIndexedNone(cfs, col, 10l);
         assertIndexedNone(cfs, col, 20l);
 
         ColumnFamilyStore indexCfs = cfs.indexManager.getAllIndexColumnFamilyStores().iterator().next();
@@ -551,7 +553,7 @@ public class SecondaryIndexTest
 
     private void assertIndexCfsIsEmpty(ColumnFamilyStore indexCfs)
     {
-        PartitionRangeReadCommand command = (PartitionRangeReadCommand)Util.cmd(indexCfs).build();
+        PartitionRangeReadCommand command = Util.cmd(indexCfs).build();
         try (ReadExecutionController controller = command.executionController())
         {
             assertEquals(0, Util.size(Util.executeLocally(command, indexCfs, controller),
