@@ -39,6 +39,9 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
 {
     private static final Logger logger = LoggerFactory.getLogger(GossipingPropertyFileSnitch.class);
 
+    public static final String PFS_COMPAT_MODE_PROP = "cassandra.gpfs.enable_pfs_compatibility_mode";
+    public static Boolean PFS_COMPATIBILITY_ENABLED = Boolean.valueOf(System.getProperty(PFS_COMPAT_MODE_PROP, "false"));
+
     private PropertyFileSnitch psnitch;
 
     private final String myDC;
@@ -47,10 +50,15 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
     private final AtomicReference<ReconnectableSnitchHelper> snitchHelperReference;
 
     private Map<InetAddress, Map<String, String>> savedEndpoints;
-    private static final String DEFAULT_DC = "UNKNOWN_DC";
-    private static final String DEFAULT_RACK = "UNKNOWN_RACK";
+    protected static final String DEFAULT_DC = "UNKNOWN_DC";
+    protected static final String DEFAULT_RACK = "UNKNOWN_RACK";
 
     public GossipingPropertyFileSnitch() throws ConfigurationException
+    {
+        this(PFS_COMPATIBILITY_ENABLED);
+    }
+
+    public GossipingPropertyFileSnitch(boolean enablePfsCompatibilityMode) throws ConfigurationException
     {
         SnitchProperties properties = loadConfiguration();
 
@@ -59,14 +67,21 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
         preferLocal = Boolean.parseBoolean(properties.get("prefer_local", "false"));
         snitchHelperReference = new AtomicReference<>();
 
-        try
+        if (enablePfsCompatibilityMode)
         {
-            psnitch = new PropertyFileSnitch();
-            logger.info("Loaded {} for compatibility", PropertyFileSnitch.SNITCH_PROPERTIES_FILENAME);
+            try
+            {
+                psnitch = new PropertyFileSnitch();
+                logger.info("Loaded {} for compatibility", PropertyFileSnitch.SNITCH_PROPERTIES_FILENAME);
+            }
+            catch (ConfigurationException e)
+            {
+                logger.info("Unable to load {}; compatibility mode disabled", PropertyFileSnitch.SNITCH_PROPERTIES_FILENAME);
+            }
         }
-        catch (ConfigurationException e)
+        else
         {
-            logger.info("Unable to load {}; compatibility mode disabled", PropertyFileSnitch.SNITCH_PROPERTIES_FILENAME);
+            logger.debug("Property file snitch compatibility mode is disabled. Set startup property {}=true to enable.", PFS_COMPAT_MODE_PROP);
         }
     }
 
@@ -95,13 +110,14 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
         if (dc != null)
             return dc.value;
 
-        if (psnitch != null)
-            return psnitch.getDatacenter(endpoint);
-
         if (savedEndpoints == null)
             savedEndpoints = SystemKeyspace.loadDcRackInfo();
         if (savedEndpoints.containsKey(endpoint))
             return savedEndpoints.get(endpoint).get("data_center");
+
+        if (psnitch != null)
+            return psnitch.getDatacenter(endpoint);
+
         return DEFAULT_DC;
     }
 
@@ -121,13 +137,14 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
         if (rack != null)
             return rack.value;
 
-        if (psnitch != null)
-            return psnitch.getRack(endpoint);
-
         if (savedEndpoints == null)
             savedEndpoints = SystemKeyspace.loadDcRackInfo();
         if (savedEndpoints.containsKey(endpoint))
             return savedEndpoints.get(endpoint).get("rack");
+
+        if (psnitch != null)
+            return psnitch.getRack(endpoint);
+
         return DEFAULT_RACK;
     }
 

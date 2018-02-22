@@ -43,6 +43,15 @@ restore snapshots created with the previous major version using the
 using the provided 'sstableupgrade' tool.
 
 
+DSE 5.0.13
+==========
+
+Upgrading
+---------
+    - Automatic fallback of GossipingPropertyFileSnitch to PropertyFileSnitch (cassandra-topology.properties) is
+      disabled by default and can be enabled via the -Dcassandra.gpfs.enable_pfs_compatibility_mode=true startup
+      flag.
+
 DSE 5.0.12
 ==========
 

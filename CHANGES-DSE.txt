@@ -1,4 +1,5 @@
 DSE 5.0.13
+ * Make PFS compatibility mode for GPFS opt-in (DB-1663)
  * Fix how duplicated Tombstones in legacy layout within the same clustering are handled (DB-1745)
  * Avoid NPE when providing invalid number of arguments for token function (DB-855)
  * Fetch/query no columns in priming connections to avoid errors if system.local columns are changed (DB-1708)
