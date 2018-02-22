@@ -665,6 +665,9 @@ public abstract class Flow<T>
 
     /**
      * Apply the operation when the flow completes. To avoid having to split onFinal calls, handler is not allowed to throw.
+     *
+     * In most cases, this method is preferred to overriding `onComplete` and `onFinal`. When overriding, ensure similar
+     * semantics (e.g. callback placed in both methods).
      */
     public Flow<T> doOnComplete(Runnable onComplete)
     {
