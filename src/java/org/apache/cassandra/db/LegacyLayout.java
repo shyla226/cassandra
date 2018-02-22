@@ -1321,8 +1321,7 @@ public abstract class LegacyLayout
                         rowDeletion = tombstone;
                     }
 
-                    // If we're already within a row and there was no delete written before that one, it can't be the same one
-                    return false;
+                    return true;
                 }
 
                 // If we're already within a row and there was no delete written before that one, it can't be the same one
