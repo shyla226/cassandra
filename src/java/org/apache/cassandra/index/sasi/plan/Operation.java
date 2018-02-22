@@ -385,6 +385,79 @@ public class Operation extends RangeIterator<Long, Token>
         controller.releaseIndexes(this);
     }
 
+
+    /**
+     * A builder on which like expressions are built as subtrees using {@link OperationType} OR to
+     * keep their correct semantics. Remaining expressions are added into the root AND OperationType.
+     *
+     *  Example:
+     *
+     *   3 Like expressions:
+     *
+     *                    AND (expressions)
+     *                  /   \
+     *                AND   OR (like)
+     *               /   \
+     *      (like) OR   OR (like)
+     *
+     **/
+    public static class TreeBuilder
+    {
+        private final QueryController controller;
+        final Operation.Builder root;
+        Operation.Builder subtree;
+
+        public TreeBuilder(QueryController controller)
+        {
+            this.controller = controller;
+            this.root = new Operation.Builder(OperationType.AND, controller);
+            this.subtree = root;
+        }
+
+        public TreeBuilder add(Collection<RowFilter.Expression> expressions)
+        {
+            if (expressions != null)
+                expressions.forEach(this::add);
+            return this;
+        }
+
+        public TreeBuilder add(RowFilter.Expression exp)
+        {
+            if (exp.operator().isLike())
+                addToSubTree(exp);
+            else
+                root.add(exp);
+
+            return this;
+        }
+
+        private void addToSubTree(RowFilter.Expression exp)
+        {
+            Builder likeOperation = new Builder(OperationType.OR, controller);
+            likeOperation.add(exp);
+            if (subtree.right == null)
+            {
+                subtree.setRight(likeOperation);
+            }
+            else if (subtree.left == null)
+            {
+                Builder newSubtree = new Builder(OperationType.AND, controller);
+                subtree.setLeft(newSubtree);
+                newSubtree.setRight(likeOperation);
+                subtree = newSubtree;
+            }
+            else
+            {
+                throw new IllegalStateException("Both trees are full");
+            }
+        }
+
+        public Operation complete()
+        {
+            return root.complete();
+        }
+    }
+
     public static class Builder
     {
         private final QueryController controller;

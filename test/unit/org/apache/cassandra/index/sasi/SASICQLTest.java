@@ -104,4 +104,176 @@ public class SASICQLTest extends CQLTester
                        row("3", "ccc", "ccc"));
         });
     }
+
+    @Test
+    public void testLikeOperatorWithMultipleTokens() throws Throwable
+    {
+        createTable("CREATE TABLE %s(id int, clustering int, weight int, val text, PRIMARY KEY((id), clustering));");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {" +
+                    "'mode': 'CONTAINS'," +
+                    "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer'," +
+                    "'analyzed': 'true'};");
+
+        execute("INSERT INTO %s(id, clustering, weight, val) VALUES(10, 1, 12, 'homeworker');");
+        execute("INSERT INTO %s(id, clustering, weight, val) VALUES(10, 2, 12, 'homeworker');");
+        execute("INSERT INTO %s(id, clustering, weight, val) VALUES(11, 1, 14, 'harhomedworker');");
+        execute("INSERT INTO %s(id, clustering, weight, val) VALUES(12, 1, 14, 'casa');");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(executeFormattedQuery(formatQuery("SELECT * FROM %s WHERE val LIKE '%%work home%%';")),
+                       row(10, 1, "homeworker", 12),
+                       row(10, 2, "homeworker", 12),
+                       row(11, 1, "harhomedworker", 14));
+        });
+    }
+
+    @Test
+    public void testMultipleLikeOperatorsInDifferentColumnsWithMultipleTokens() throws Throwable
+    {
+        createTable("CREATE TABLE %s(id int, clustering int, name text, val text, PRIMARY KEY((id), clustering));");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {" +
+                    "'mode': 'CONTAINS'," +
+                    "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer'," +
+                    "'analyzed': 'true'};");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(name) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {" +
+                    "'mode': 'CONTAINS'," +
+                    "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer'," +
+                    "'analyzed': 'true'};");
+
+
+        execute("INSERT INTO %s(id, clustering, name, val) VALUES(10, 1, 'alice', 'homeworker');");
+        execute("INSERT INTO %s(id, clustering, name, val) VALUES(11, 1, 'bob', 'harhomedworker');");
+        execute("INSERT INTO %s(id, clustering, name, val) VALUES(12, 1, 'paul', 'casa');");
+
+
+        String query = formatQuery("SELECT * FROM %s WHERE val LIKE '%%work home%%' AND name LIKE 'alicew bob another' ALLOW FILTERING;");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(executeFormattedQuery(query),
+                       row(11, 1, "bob", "harhomedworker"));
+        });
+    }
+
+    @Test
+    public void testMultipleTokensInSamePartitions() throws Throwable
+    {
+        createTable("CREATE TABLE %s(id int, clustering int, val text, PRIMARY KEY((id), clustering));");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {" +
+                    "'mode': 'CONTAINS', " +
+                    "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer'," +
+                    "'analyzed': 'true'};");
+
+        execute("INSERT INTO %s(id, clustering , val ) VALUES(1, 1, 'aaa bbb ccc ddd');");
+        execute("INSERT INTO %s(id, clustering , val ) VALUES(1, 2, 'eee aaa fff ggg');");
+        execute("INSERT INTO %s(id, clustering , val ) VALUES(1, 3, 'hhh iii bbb jjj');");
+        execute("INSERT INTO %s(id, clustering , val ) VALUES(1, 4, 'kkk lll mmm bbb');");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE val LIKE '%%aaa bbb%%';"),
+                                    row(1, 1, "aaa bbb ccc ddd"),
+                                    row(1, 2, "eee aaa fff ggg"),
+                                    row(1, 3, "hhh iii bbb jjj"),
+                                    row(1, 4, "kkk lll mmm bbb"));
+        });
+    }
+
+    @Test
+    public void testMultipleTokensInDifferentPartitions() throws Throwable
+    {
+        createTable("CREATE TABLE %s(id int, clustering int, val text, PRIMARY KEY((id), clustering));");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {" +
+                    "'mode': 'CONTAINS', " +
+                    "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer'," +
+                    "'analyzed': 'true'};");
+
+        execute("INSERT INTO %s(id, clustering , val ) VALUES(1, 1, 'aaa bbb ccc ddd');");
+        execute("INSERT INTO %s(id, clustering , val ) VALUES(2, 2, 'eee aaa fff ggg');");
+        execute("INSERT INTO %s(id, clustering , val ) VALUES(3, 3, 'hhh iii bbb jjj');");
+        execute("INSERT INTO %s(id, clustering , val ) VALUES(4, 4, 'kkk lll mmm bbb');");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE val LIKE '%%aaa bbb%%';"),
+                                    row(1, 1, "aaa bbb ccc ddd"),
+                                    row(2, 2, "eee aaa fff ggg"),
+                                    row(3, 3, "hhh iii bbb jjj"),
+                                    row(4, 4, "kkk lll mmm bbb"));
+        });
+    }
+
+    @Test
+    public void testMultipleLikeStatementsSinglePartition() throws Throwable
+    {
+        createTable("CREATE TABLE %s(id int, clustering int, val1 text, val2 text, val3 text, PRIMARY KEY((id), clustering));");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(clustering) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
+        for (int i = 1; i <= 3; i++)
+        {
+            createIndex("CREATE CUSTOM INDEX ON %s(val" + i + ") USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {" +
+                        "'mode': 'CONTAINS', " +
+                        "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer'," +
+                        "'analyzed': 'true'};");
+        }
+
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(1, 1, 'aaa bbb ccc ddd', 'aaa bbb ccc ddd', 'aaa bbb ccc ddd');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(1, 2, 'aaa bbb ccc ddd', 'aaa bbb ccc ddd', 'aaa bbb ccc ddd');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(2, 2, 'eee aaa fff ggg', 'eee aaa fff ggg', 'eee aaa fff ggg');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(2, 3, 'eee aaa fff ggg', 'eee aaa fff ggg', 'eee aaa fff ggg');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(3, 3, 'hhh iii bbb jjj', 'hhh iii bbb jjj', 'hhh iii bbb jjj');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(3, 4, 'hhh iii bbb jjj', 'hhh iii bbb jjj', 'zzz zzz zzz zzz');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(4, 4, 'kkk lll mmm bbb', 'kkk lll mmm bbb', 'kkk lll mmm bbb');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(4, 5, 'kkk lll mmm bbb', 'kkk lll mmm bbb', 'kkk lll mmm bbb');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(5, 5, 'nnn ooo ppp qqq', 'nnn ooo ppp qqq', 'nnn ooo ppp qqq');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(5, 6, 'nnn ooo ppp qqq', 'nnn ooo ppp qqq', 'nnn ooo ppp qqq');");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE val1 LIKE '%%aaa bbb%%' AND val2 LIKE '%%aaa bbb%%' AND val3 LIKE '%%aaa bbb%%' allow filtering;"),
+                                    row(1, 1, "aaa bbb ccc ddd", "aaa bbb ccc ddd", "aaa bbb ccc ddd"),
+                                    row(1, 2, "aaa bbb ccc ddd", "aaa bbb ccc ddd", "aaa bbb ccc ddd"),
+                                    row(2, 2, "eee aaa fff ggg", "eee aaa fff ggg", "eee aaa fff ggg"),
+                                    row(2, 3, "eee aaa fff ggg", "eee aaa fff ggg", "eee aaa fff ggg"),
+                                    row(3, 3, "hhh iii bbb jjj", "hhh iii bbb jjj", "hhh iii bbb jjj"),
+                                    row(4, 4, "kkk lll mmm bbb", "kkk lll mmm bbb", "kkk lll mmm bbb"),
+                                    row(4, 5, "kkk lll mmm bbb", "kkk lll mmm bbb", "kkk lll mmm bbb"));
+
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE clustering = 2 AND val1 LIKE '%%aaa bbb%%' AND val2 LIKE '%%aaa bbb%%' AND val3 LIKE '%%aaa bbb%%' allow filtering;"),
+                                    row(1, 2, "aaa bbb ccc ddd", "aaa bbb ccc ddd", "aaa bbb ccc ddd"),
+                                    row(2, 2, "eee aaa fff ggg", "eee aaa fff ggg", "eee aaa fff ggg"));
+        });
+    }
+
+    @Test
+    public void testMultipleLikeStatementsMultiPartition() throws Throwable
+    {
+        createTable("CREATE TABLE %s(id int, clustering int, val1 text, val2 text, val3 text, PRIMARY KEY((id), clustering));");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(clustering) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
+        for (int i = 1; i <= 3; i++)
+        {
+            createIndex("CREATE CUSTOM INDEX ON %s(val" + i + ") USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {" +
+                        "'mode': 'CONTAINS', " +
+                        "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer'," +
+                        "'analyzed': 'true'};");
+        }
+
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(1, 1, 'aaa bbb ccc ddd', 'aaa bbb ccc ddd', 'aaa bbb ccc ddd');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(1, 2, 'eee aaa fff ggg', 'eee aaa fff ggg', 'eee aaa fff ggg');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(2, 3, 'hhh iii bbb jjj', 'hhh iii bbb jjj', 'hhh iii bbb jjj');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(2, 4, 'kkk lll mmm bbb', 'kkk lll mmm bbb', 'kkk lll mmm bbb');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(1, 5, 'nnn ooo ppp qqq', 'nnn ooo ppp qqq', 'nnn ooo ppp qqq');");
+        execute("INSERT INTO %s(id, clustering, val1, val2, val3) VALUES(2, 6, 'nnn ooo ppp qqq', 'nnn ooo ppp qqq', 'nnn ooo ppp qqq');");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE val1 LIKE '%%aaa bbb%%' AND val2 LIKE '%%aaa bbb%%' AND val3 LIKE '%%aaa bbb%%' allow filtering;"),
+                                    row(1, 1, "aaa bbb ccc ddd", "aaa bbb ccc ddd", "aaa bbb ccc ddd"),
+                                    row(1, 2, "eee aaa fff ggg", "eee aaa fff ggg", "eee aaa fff ggg"),
+                                    row(2, 3, "hhh iii bbb jjj", "hhh iii bbb jjj", "hhh iii bbb jjj"),
+                                    row(2, 4, "kkk lll mmm bbb", "kkk lll mmm bbb", "kkk lll mmm bbb"));
+
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE clustering = 2 AND val1 LIKE '%%aaa bbb%%' AND val2 LIKE '%%aaa bbb%%' AND val3 LIKE '%%aaa bbb%%' allow filtering;"),
+                                    row(1, 2, "eee aaa fff ggg", "eee aaa fff ggg", "eee aaa fff ggg"));
+        });
+    }
 }

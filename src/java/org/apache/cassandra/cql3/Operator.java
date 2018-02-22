@@ -258,6 +258,15 @@ public enum Operator
         return this == LT || this == LTE || this == GT || this == GTE;
     }
 
+    /**
+     * Checks if this operator is a like operator.
+     * @return {@code true} if this operator is a like operator, {@code false} otherwise.
+     */
+    public boolean isLike()
+    {
+        return this == LIKE_PREFIX || this == LIKE_CONTAINS || this == LIKE_SUFFIX || this == LIKE_MATCHES;
+    }
+
     @Override
     public String toString()
     {
