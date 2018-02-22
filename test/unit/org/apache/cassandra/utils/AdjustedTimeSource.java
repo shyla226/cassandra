@@ -19,36 +19,41 @@ package org.apache.cassandra.utils;
 
 import java.util.concurrent.TimeUnit;
 
-import com.google.common.util.concurrent.Uninterruptibles;
+public class AdjustedTimeSource implements TimeSource
+{
+    private long nanosAdjustment;
 
-/**
- * Time source backed by JVM clock.
- */
-public class SystemTimeSource implements TimeSource
-{    
+    public TimeSource wrapped = new SystemTimeSource();
+
+    public void setNanosTo(long nanosWanted)
+    {
+        long current = wrapped.nanoTime();
+        nanosAdjustment = nanosWanted - current;
+    }
+
     @Override
     public long currentTimeMillis()
     {
-        return System.currentTimeMillis();
+        return wrapped.currentTimeMillis();
     }
 
     @Override
     public long nanoTime()
     {
-        return System.nanoTime();
-    }
-
-    @Override
-    public TimeSource sleepUninterruptibly(long sleepFor, TimeUnit unit)
-    {
-        Uninterruptibles.sleepUninterruptibly(sleepFor, unit);
-        return this;
+        return wrapped.nanoTime() + nanosAdjustment;
     }
 
     @Override
     public TimeSource sleep(long sleepFor, TimeUnit unit) throws InterruptedException
     {
-        TimeUnit.NANOSECONDS.sleep(TimeUnit.NANOSECONDS.convert(sleepFor, unit));
+        wrapped.sleep(sleepFor, unit);
+        return this;
+    }
+
+    @Override
+    public TimeSource sleepUninterruptibly(long sleepFor, TimeUnit unit)
+    {
+        wrapped.sleepUninterruptibly(sleepFor, unit);
         return this;
     }
 }

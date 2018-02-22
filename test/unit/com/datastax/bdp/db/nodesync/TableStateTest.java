@@ -209,7 +209,7 @@ public class TableStateTest
         // Depth increase are not invalidating validations (as tested above), but we should also make sure validation
         // on-flight during such change are still properly taken into account.
 
-        TimeSource timeSource = new TestTimeSource();
+        TestTimeSource timeSource = new TestTimeSource();
         timeSource.autoAdvance(1, 1, TimeUnit.SECONDS);
         NodeSyncHelpers.setTestParameters(null, null, -1, timeSource);
 

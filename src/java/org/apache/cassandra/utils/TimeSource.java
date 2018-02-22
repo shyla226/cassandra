@@ -43,11 +43,6 @@ public interface TimeSource
      * not related to any other notion of system or wall-clock time.
      */
     long nanoTime();
-    
-    /**
-     * Automatically advance by the given time unit every nth "time" calls.
-     */
-    void autoAdvance(int calls, long time, TimeUnit unit);
 
     /**
      * Sleep for the given amount of time uninterruptibly.

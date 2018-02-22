@@ -48,7 +48,9 @@ public class TestTimeSource implements TimeSource
         return timeInNanos.get();
     }
 
-    @Override
+    /**
+     * Automatically advance by the given time unit every nth "time" calls.
+     */
     public void autoAdvance(int calls, long time, TimeUnit unit)
     {
         advanceCounter = 0;

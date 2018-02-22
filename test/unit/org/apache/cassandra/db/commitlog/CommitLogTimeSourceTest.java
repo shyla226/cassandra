@@ -31,7 +31,7 @@ import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.utils.TestTimeSource;
+import org.apache.cassandra.utils.AdjustedTimeSource;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
@@ -44,7 +44,7 @@ public class CommitLogTimeSourceTest
     public static void beforeClass() throws ConfigurationException
     {
         // Enable the testing time source, so we can manipulate time:
-        System.setProperty("dse.commitlog.timesource", TestTimeSource.class.getCanonicalName());
+        System.setProperty("dse.commitlog.timesource", AdjustedTimeSource.class.getCanonicalName());
 
         // Disable durable writes to avoid writing on the commit log outside the actual test:
         KeyspaceParams.DEFAULT_LOCAL_DURABLE_WRITES = false;
@@ -67,20 +67,28 @@ public class CommitLogTimeSourceTest
         // to the commit log and waiting for it to be synced: this is not deterministic, due to the multithreaded
         // nature of the commit log, but it's the best we can do and has been shown to randomly fail if the nano time
         // arithmetic in the commit log is wrong.
-        TestTimeSource timeSource = (TestTimeSource) CommitLog.instance.timeSource;
-        timeSource.reset(System.currentTimeMillis(), Long.MAX_VALUE - 1000);
-        timeSource.autoAdvance(1, 1, TimeUnit.NANOSECONDS);
+        AdjustedTimeSource timeSource = (AdjustedTimeSource) CommitLog.instance.timeSource;
+        long sleepLength = TimeUnit.MILLISECONDS.toNanos(10);
+        int cycleCount = 60;
+        int mutationsPerCycle = 20;
+        timeSource.setNanosTo(Long.MAX_VALUE - cycleCount / 2 * sleepLength);
 
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(STANDARD1);
 
-        for (int i = 0; i < 1000; i++)
+        Assert.assertTrue("nanoTime() must be close to overflow at the start of this test", Long.MAX_VALUE - timeSource.nanoTime() < (1L << 50));
+        for (int i = 0; i < cycleCount; i++)
         {
-            Mutation m = new RowUpdateBuilder(cfs.metadata(), 0, "k1")
-                .clustering("bytes")
-                .add("val", bytes("this is a string"))
-                .build();
+            for (int j = 0; j < mutationsPerCycle; ++j)
+            {
+                Mutation m = new RowUpdateBuilder(cfs.metadata(), 0, "k1")
+                             .clustering("bytes")
+                             .add("val", bytes("this is a string"))
+                             .build();
 
-            CommitLog.instance.add(m).blockingGet();
+                CommitLog.instance.add(m).blockingGet();
+            }
+            timeSource.sleepUninterruptibly(sleepLength, TimeUnit.NANOSECONDS);
         }
+        Assert.assertTrue("nanoTime() must be overflowed at the end of this test", timeSource.nanoTime() - Long.MIN_VALUE < (1L << 50));
     }
 }
