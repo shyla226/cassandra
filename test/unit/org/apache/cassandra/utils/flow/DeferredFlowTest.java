@@ -21,7 +21,9 @@ package org.apache.cassandra.utils.flow;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
 import org.junit.BeforeClass;
@@ -50,12 +52,17 @@ public class DeferredFlowTest
         final int size = 100000;
         final Flow<Integer> source = Flow.fromIterable(() -> IntStream.range(0, size).iterator());
 
-        final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1));
+        final AtomicBoolean notified = new AtomicBoolean();
+        final Consumer<Flow<Integer>> notification = ignored -> notified.set(true);
+
+        final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1), () -> notification);
         deferred.onSource(source);
         assertTrue(deferred.hasSource());
 
         final long res = deferred.countBlocking();
         assertEquals(size, res);
+
+        assertTrue(notified.get());
     }
 
     @Test
@@ -64,11 +71,16 @@ public class DeferredFlowTest
         final int size = 100000;
         final Flow<Integer> source = Flow.fromIterable(() -> IntStream.range(0, size).iterator());
 
-        final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1));
+        final AtomicBoolean notified = new AtomicBoolean();
+        final Consumer<Flow<Integer>> notification = ignored -> notified.set(true);
+
+        final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1), () -> notification);
         TPC.bestTPCScheduler().scheduleDirect(() -> deferred.onSource(source), 10, TimeUnit.MILLISECONDS);
 
         final long res = deferred.countBlocking();
         assertEquals(size, res);
+
+        assertTrue(notified.get());
     }
 
     @Test
@@ -80,7 +92,7 @@ public class DeferredFlowTest
         for (int i = 0; i < attempts; i++)
         {
             final Flow<Integer> source = Flow.fromIterable(() -> IntStream.range(0, size).iterator());
-            final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1));
+            final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1), null);
 
             CyclicBarrier semaphore = new CyclicBarrier(2);
             AtomicReference<Throwable> error = new AtomicReference<>(null);
@@ -129,7 +141,7 @@ public class DeferredFlowTest
         for (int i = 0; i < attempts; i++)
         {
             final Flow<Integer> source = Flow.fromIterable(() -> IntStream.range(0, size).iterator());
-            final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1));
+            final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1), null);
 
             CyclicBarrier semaphore = new CyclicBarrier(2);
             AtomicReference<Throwable> error = new AtomicReference<>(null);
@@ -176,7 +188,8 @@ public class DeferredFlowTest
     {
         final DeferredFlow<Integer> deferred = DeferredFlow.create(System.nanoTime() + TimeUnit.SECONDS.toNanos(1),
                                                                    () -> TPC.bestTPCScheduler(),
-                                                                   () -> Flow.error(new TimeoutException()));
+                                                                   () -> Flow.error(new TimeoutException()),
+                                                                   null);
 
         try
         {
@@ -196,7 +209,7 @@ public class DeferredFlowTest
     @Test
     public void testError() throws Exception
     {
-        final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1));
+        final DeferredFlow<Integer> deferred = DeferredFlow.createWithTimeout(TimeUnit.SECONDS.toNanos(1), null);
         final RuntimeException testException = new RuntimeException("Test exception");
         TPC.bestTPCScheduler().scheduleDirect(() -> deferred.onSource(Flow.error(testException)));
 

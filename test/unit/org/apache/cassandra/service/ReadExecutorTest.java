@@ -32,6 +32,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
@@ -108,12 +109,12 @@ public class ReadExecutorTest
             //expected
         }
 
-        // when executor.maybeTryAdditionalReplicas() completes, it will have scheduled an event on the command scheduler
-        // to increment the metrics. Schedule another event on the same scheduler and wait for it to complete so we are
+        // when executor.maybeTryAdditionalReplicas() completes, it will have scheduled an event on the TPCTimer
+        // to increment the metrics. Schedule another event at a later time and wait for it to complete so we are
         // sure that the metrics have been updated
-        final CompletableFuture fut = new CompletableFuture();
-        command.getScheduler().execute(() -> fut.complete(true), TPCTaskType.UNKNOWN);
-        fut.get();
+        final CompletableFuture complete = new CompletableFuture();
+        TPC.bestTPCTimer().onTimeout(() -> complete.complete(null), cfs.sampleLatencyNanos + 100, TimeUnit.MILLISECONDS);
+        complete.get();
 
         assertEquals(1, cfs.metric.speculativeInsufficientReplicas.getCount());
         assertEquals(1, ks.metric.speculativeInsufficientReplicas.getCount());
@@ -152,14 +153,15 @@ public class ReadExecutorTest
         executor.maybeTryAdditionalReplicas().blockingAwait();
 
         // make sure that we send the failures after having executed the task scheduled in AbstractReadExecutor.SpeculatingReadExecutor.maybeTryAdditionalReplicas(),
-        // hence the cfs.sampleLatencyNanos + 10 nanoseconds delay
+        // which being executed on the TPCTimer have a latency of at least 100ms, hence the cfs.sampleLatencyNanos + 100
+        // milliseconds delay
         command.getScheduler().schedule(() -> {
             //Failures end the read promptly but don't require mock data to be supplied
             Request<SinglePartitionReadCommand, ReadResponse> request0 = Request.fakeTestRequest(targets.get(0), -1, Verbs.READS.SINGLE_READ, command);
             executor.handler.onFailure(request0.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
             Request<SinglePartitionReadCommand, ReadResponse> request1 = Request.fakeTestRequest(targets.get(1), -1, Verbs.READS.SINGLE_READ, command);
             executor.handler.onFailure(request1.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
-        }, TPCTaskType.READ_SPECULATE, cfs.sampleLatencyNanos + 10, TimeUnit.NANOSECONDS); // see comment above
+        }, TPCTaskType.UNKNOWN, cfs.sampleLatencyNanos + 100, TimeUnit.MILLISECONDS); // see comment above
 
         try
         {

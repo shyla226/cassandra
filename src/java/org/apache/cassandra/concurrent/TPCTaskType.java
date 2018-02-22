@@ -129,9 +129,9 @@ public enum TPCTaskType
     /** Authorization request */
     AUTHORIZATION(Features.ALWAYS_COUNT),
     /** Scheduled speculative read */
-    READ_SPECULATE(Features.TIMED),
+    READ_SPECULATE(Features.ALWAYS_COUNT),
     /** Scheduled timeout task */
-    TIMED_TIMEOUT(Features.TIMED),
+    TIMED_TIMEOUT(Features.TIMER),
     /** Unknown timed task */
     TIMED_UNKNOWN(Features.TIMED),
     /** Number of busy spin cycles done by this TPC thread when it has no tasks to perform */
@@ -155,6 +155,7 @@ public enum TPCTaskType
         static final int ALWAYS_COUNT = TPCTaskType.ALWAYS_COUNT;
         static final int EXTERNAL_QUEUE = TPCTaskType.EXTERNAL_QUEUE;
         static final int TIMED = TPCTaskType.EXCLUDE_FROM_TOTALS;
+        static final int TIMER = TPCTaskType.EXCLUDE_FROM_TOTALS | TPCTaskType.PRIORITY;
         static final int EXCLUDE_FROM_TOTALS = TPCTaskType.EXCLUDE_FROM_TOTALS;
     }
 
@@ -163,6 +164,7 @@ public enum TPCTaskType
     private static final int ALWAYS_COUNT = 4;
     private static final int EXCLUDE_FROM_TOTALS = 8;
     private static final int BACKPRESSURED = 16;
+    private static final int PRIORITY = 32;
 
     private final int flags;
 
@@ -214,6 +216,14 @@ public enum TPCTaskType
     public final boolean includedInTotals()
     {
         return (flags & EXCLUDE_FROM_TOTALS) == 0;
+    }
+
+    /**
+     * Whether this task has priority over other tasks.
+     */
+    public final boolean priority()
+    {
+        return (flags & PRIORITY) != 0;
     }
 
     /**

@@ -20,6 +20,7 @@ package org.apache.cassandra.utils.memory;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -166,7 +167,15 @@ public abstract class MemtableAllocator
                         if (prev != null)
                         {
                             timerContext.close();
-                            observeOnScheduler.execute(prev);
+                            try
+                            {
+                                observeOnScheduler.execute(prev);
+                            }
+                            catch (RejectedExecutionException t)
+                            {
+                                prev.cancelled();
+                                subscriber.onError(t);
+                            }
                         }
                     }
 

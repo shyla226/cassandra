@@ -33,9 +33,9 @@ public class ExpiringMapTest extends WithParkedThreadsMonitorSupport
         map.put("key1", "value1", 100, timer);
         map.put("key2", "value2", 500, timer);
 
-        ExpiringMap.ExpiringObject<String> obj1 = map.get("key1");
+        String obj1 = map.get("key1");
         Assert.assertNotNull(obj1);
-        ExpiringMap.ExpiringObject<String> obj2 = map.get("key2");
+        String obj2 = map.get("key2");
         Assert.assertNotNull(obj2);
 
         sleepFor(timeSource, 200);
@@ -45,25 +45,6 @@ public class ExpiringMapTest extends WithParkedThreadsMonitorSupport
         sleepFor(timeSource, 400);
         Assert.assertTrue(run.await(100, TimeUnit.MILLISECONDS));
         Assert.assertNull(map.get("key2"));
-    }
-
-    @Test
-    public void testManualCancellation() throws InterruptedException
-    {
-        TimeSource timeSource = new TestTimeSource();
-        TPCHashedWheelTimer timer = new TPCHashedWheelTimer(timeSource, TPC.bestTPCScheduler());
-
-        CountDownLatch run = new CountDownLatch(1);
-        ExpiringMap<String, String> map = new ExpiringMap<String, String>(100, ignored -> run.countDown());
-
-        map.put("key", "value", 100, timer);
-
-        ExpiringMap.ExpiringObject<String> obj = map.get("key");
-        obj.cancel();
-
-        sleepFor(timeSource, 200);
-        Assert.assertFalse(run.await(100, TimeUnit.MILLISECONDS));
-        Assert.assertNotNull(map.get("key"));
     }
 
     @Test
@@ -78,7 +59,7 @@ public class ExpiringMapTest extends WithParkedThreadsMonitorSupport
         String previous = map.put("key", "value", 100, timer);
         Assert.assertNull(previous);
 
-        ExpiringMap.ExpiringObject<String> obj = map.remove("key");
+        String obj = map.remove("key");
 
         sleepFor(timeSource, 200);
         Assert.assertFalse(run.await(100, TimeUnit.MILLISECONDS));
@@ -99,8 +80,8 @@ public class ExpiringMapTest extends WithParkedThreadsMonitorSupport
         previous = map.put("key", "value2", 500, timer);
         Assert.assertNotNull(previous);
 
-        ExpiringMap.ExpiringObject<String> obj = map.get("key");
-        Assert.assertEquals("value2", obj.get());
+        String obj = map.get("key");
+        Assert.assertEquals("value2", obj);
 
         sleepFor(timeSource, 200);
         Assert.assertFalse(run.await(100, TimeUnit.MILLISECONDS));

@@ -18,10 +18,10 @@
 
 package org.apache.cassandra.utils.flow;
 
+
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.CompletableOperator;
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.SingleObserver;
 import io.reactivex.disposables.Disposable;
@@ -103,7 +103,15 @@ public class RxThreads
 
             public void onComplete()
             {
-                scheduler.execute(this);
+                try
+                {
+                    scheduler.execute(this);
+                }
+                catch(Throwable ex)
+                {
+                    cancelled();
+                    subscriber.onError(ex);
+                }
             }
 
             public void onError(Throwable throwable)

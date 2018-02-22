@@ -52,7 +52,7 @@ public class TPCHashedWheelTimer implements TPCTimer
             @Override
             public boolean isDisposed()
             {
-                return handle.isCancelled() || handle.isExpired();
+                return handle.isCancelled();
             }
         };
     }
