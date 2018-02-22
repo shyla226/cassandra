@@ -6,6 +6,7 @@
 package com.datastax.bdp.db.nodesync;
 
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,7 +60,7 @@ import org.apache.cassandra.utils.units.Units;
  * conservative in our configured maximums. See the {@link Controller} class for concrete details on that auto-adjustment
  * process.
  */
-class ValidationExecutor implements Validator.PageProcessingStatsListener
+class ValidationExecutor implements Validator.PageProcessingListener
 {
     private static final Logger logger = LoggerFactory.getLogger(ValidationExecutor.class);
 
@@ -239,16 +241,19 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         return state.get().isShutdown();
     }
 
-    private boolean getValidationPermit()
+    /**
+     * Returns the acquired permit number, or 0 if no permit could be acquired.
+     */
+    private int getValidationPermit()
     {
         while (true)
         {
             int current = inFlightValidations.get();
             if (current + 1 > maxInFlightValidations)
-                return false;
+                return 0;
 
             if (inFlightValidations.compareAndSet(current, current + 1))
-                return true;
+                return current + 1;
         }
     }
 
@@ -269,7 +274,8 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
         if (isShutdown())
             return;
 
-        if (getValidationPermit())
+        int permitNr = getValidationPermit();
+        if (permitNr > 0)
         {
             // Note that getNextValidation() is potentially blocking, so it shouldn't be called on the current thread, that is
             // the 2 submit below mean that we submit the validation creation first, and then submit that for execution.
@@ -279,24 +285,41 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                     // We want to block on the acquisition of a new validation if we have nothing else to do (otherwise
                     // we shouldn't block as, given that we can have more threads than segments, we could end up
                     // starving the processing of an ongoing segment otherwise). And we have nothing else to do if
-                    // there is no other in-flight validations (keeping in mind we do have a permit ourselves).
-                    Validator validator;
+                    // we are the first to acquire a permit.
                     Thread currentThread = Thread.currentThread();
-                    waitingOnTaskThreads.put(currentThread, System.nanoTime());
-                    try
+                    boolean blockUntilNextValidation = permitNr == 1;
+
+                    // Try getting the next validation, and if none is found and we should block, start tracking wait time:
+                    Validator validator = getNextValidation(false);
+                    if (validator == null && blockUntilNextValidation)
                     {
-                        validator = getNextValidation(inFlightValidations.get() <= 1);
+                        // We use "putIfAbsent" as we might have been waiting already (due to rescheduling below) and
+                        // the tracked time is cumulative as we're blocking here:
+                        waitingOnTaskThreads.putIfAbsent(currentThread, System.nanoTime());
+                        validator = getNextValidation(true);
                     }
-                    finally
-                    {
-                        blockedOnNewTaskTimeNanos.addAndGet(System.nanoTime() - waitingOnTaskThreads.remove(currentThread));
-                    }
+
                     if (validator != null)
                     {
+                        // If we were blocked, take the waiting time into account:
+                        Long startTimeNanos = waitingOnTaskThreads.remove(currentThread);
+                        if (startTimeNanos != null)
+                            blockedOnNewTaskTimeNanos.addAndGet(System.nanoTime() - startTimeNanos);
+
                         submit(validator);
                     }
                     else
                     {
+                        // We are going to be rescheduled, so:
+                        // * If we were waiting already, account for it and start waiting again.
+                        // * Otherwise just start tracking wait time.
+                        // If in the meantime this thread is used to process any pages, it will be removed from this
+                        // map as considered active (see {@link #onNewPage()} and {@link #onPageComplete(long, long, long)});
+                        // this is obviously an approximation, but being only 100ms, should be good enough.
+                        Long waitingTime = waitingOnTaskThreads.put(currentThread, System.nanoTime());
+                        if (waitingTime != null)
+                            blockedOnNewTaskTimeNanos.addAndGet(System.nanoTime() - waitingTime);
+
                         // It means there was not currently available validation and we have other ones in flight. So
                         // release the permit and re-schedule the new validation creation.
                         returnValidationPermit();
@@ -368,11 +391,18 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                  });
     }
 
-    public void onPageProcessing(long processedBytes, long waitedOnLimiterMicros, long waitedForProcessingNanos)
+    @Override
+    public void onNewPage()
+    {
+        waitingOnTaskThreads.remove(Thread.currentThread());
+    }
+
+    public void onPageComplete(long processedBytes, long waitedOnLimiterMicros, long waitedForProcessingNanos)
     {
         dataValidatedBytes.addAndGet(processedBytes);
         limiterWaitTimeMicros.addAndGet(waitedOnLimiterMicros);
         processingWaitTimeNanos.addAndGet(waitedForProcessingNanos);
+        waitingOnTaskThreads.remove(Thread.currentThread());
     }
 
     private void onValidationDone()
@@ -563,10 +593,17 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             // waiting and haven't reported how long they are blocked.
             // Note that the following is racy, but the reporter is not so precise that this should really matter.
             blockedOnNewTaskMsDiff.update(TimeUnit.NANOSECONDS.toMillis(blockedOnNewTaskTimeNanos.get()));
-            for (long start : waitingOnTaskThreads.values())
+            Iterator<Map.Entry<Thread, Long>> threads = waitingOnTaskThreads.entrySet().iterator();
+            while (threads.hasNext())
             {
-                long totalBlockedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-                blockedOnNewTaskMsDiff.addToCurrentDiff(Math.min(totalBlockedMs, lastIntervalMs));
+                Map.Entry<Thread, Long> thread = threads.next();
+                if (thread.getKey().isAlive())
+                {
+                    long totalBlockedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - thread.getValue());
+                    blockedOnNewTaskMsDiff.addToCurrentDiff(Math.min(totalBlockedMs, lastIntervalMs));
+                }
+                else
+                    threads.remove();
             }
         }
 

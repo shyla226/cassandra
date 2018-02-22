@@ -267,6 +267,7 @@ class Validator
         // Maybe schedule a refresh of the lock.
         lifecycle.onNewPage(pageSize);
         observer.onNewPage();
+        executor.onNewPage();
         return Flow.concat(pager.fetchPage(pageSize, context),
                            Flow.defer(() -> { onPageComplete(executor); return Flow.empty(); }));
     }
@@ -283,7 +284,7 @@ class Validator
         lifecycle.onCompletedPage(outcome, observer.pageMetrics);
     }
 
-    private void handleError(Throwable t, PageProcessingStatsListener listener)
+    private void handleError(Throwable t, PageProcessingListener listener)
     {
         t = Throwables.unwrapped(t);
 
@@ -382,19 +383,20 @@ class Validator
         completionFuture.complete(info);
     }
 
-    private void recordPage(ValidationOutcome outcome, PageProcessingStatsListener listener)
+    private void recordPage(ValidationOutcome outcome, PageProcessingListener listener)
     {
         metrics.addPageOutcome(outcome);
         validationOutcome = validationOutcome.composeWith(outcome);
 
-        listener.onPageProcessing(observer.dataValidatedBytesForPage,
+        listener.onPageComplete(observer.dataValidatedBytesForPage,
                                   observer.limiterWaitTimeMicrosForPage,
                                   observer.timeIdleBeforeProcessingPage);
     }
 
-    static interface PageProcessingStatsListener
+    static interface PageProcessingListener
     {
-        void onPageProcessing(long processedBytes, long waitedOnLimiterMicros, long waitedForProcessingNanos);
+        void onNewPage();
+        void onPageComplete(long processedBytes, long waitedOnLimiterMicros, long waitedForProcessingNanos);
     }
 
     /**
