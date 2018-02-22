@@ -25,11 +25,15 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+
 import org.apache.commons.lang3.StringUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -69,6 +73,8 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
 
     private final DeferredFlow<T> result;
+    private final Supplier<Consumer<Flow<T>>> notification;
+    private volatile Consumer<Flow<T>> notificationAction;
 
     private ReadCallback(ResponseResolver<T> resolver, List<InetAddress> endpoints)
     {
@@ -78,9 +84,11 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
 
         long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(command().getTimeout());
+        this.notification = () -> notificationAction;
         this.result = DeferredFlow.create(queryStartNanos() + timeoutNanos,
                                           resolver.command.getSchedulerSupplier(),
-                                          this::generateFlowOnTimeout);
+                                          this::generateFlowOnTimeout,
+                                          notification);
 
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockfor, StringUtils.join(this.endpoints, ","));
@@ -170,9 +178,14 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
         return result;
     }
 
-    boolean hasValue()
+    boolean hasResult()
     {
         return result.hasSource();
+    }
+
+    void onResult(Consumer<Flow<T>> action)
+    {
+        notificationAction = action;
     }
 
     public int blockFor()

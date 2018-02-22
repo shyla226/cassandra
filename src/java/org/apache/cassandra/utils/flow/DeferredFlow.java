@@ -19,10 +19,12 @@
 package org.apache.cassandra.utils.flow;
 
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.concurrent.StagedScheduler;
 import org.apache.cassandra.concurrent.TPC;
+
 import com.google.common.annotations.VisibleForTesting;
 
 /**
@@ -56,9 +58,9 @@ public abstract class DeferredFlow<T> extends Flow<T>
      * @return a deferred flow implementation
      */
     @VisibleForTesting
-    static <T> DeferredFlow<T> createWithTimeout(long timeoutNanos)
+    static <T> DeferredFlow<T> createWithTimeout(long timeoutNanos, Supplier<Consumer<Flow<T>>> notification)
     {
-        return create(System.nanoTime() + timeoutNanos, () -> TPC.bestTPCScheduler(), () -> Flow.error(new TimeoutException()));
+        return create(System.nanoTime() + timeoutNanos, () -> TPC.bestTPCScheduler(), () -> Flow.error(new TimeoutException()), notification);
     }
 
     /**
@@ -72,8 +74,8 @@ public abstract class DeferredFlow<T> extends Flow<T>
      *
      * @return a deferred flow implementation
      */
-    public static <T> DeferredFlow<T> create(long deadlineNanos, Supplier<StagedScheduler> schedulerSupplier, Supplier<Flow<T>> timeoutSupplier)
+    public static <T> DeferredFlow<T> create(long deadlineNanos, Supplier<StagedScheduler> schedulerSupplier, Supplier<Flow<T>> timeoutSupplier, Supplier<Consumer<Flow<T>>> notification)
     {
-        return new DeferredFlowImpl<>(deadlineNanos, schedulerSupplier, timeoutSupplier);
+        return new DeferredFlowImpl<>(deadlineNanos, schedulerSupplier, timeoutSupplier, notification);
     }
 }

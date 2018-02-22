@@ -142,10 +142,24 @@ public interface Rebufferer extends ReaderFileProxy
             else
             {
                 //Track the ThreadLocals
-                Runnable wrappedOnReady = TPCRunnable.wrap(onReady, ExecutorLocals.create(), TPCTaskType.READ_DISK_ASYNC, scheduler);
-
-                cacheReady.thenRunAsync(wrappedOnReady, scheduler.getExecutor())
-                          .exceptionally(onError);
+                TPCRunnable wrappedOnReady = TPCRunnable.wrap(onReady, ExecutorLocals.create(), TPCTaskType.READ_DISK_ASYNC, scheduler);
+                cacheReady.whenComplete((ignored, error) ->
+                {
+                    try
+                    {
+                        if (error == null)
+                            scheduler.execute(wrappedOnReady);
+                    }
+                    catch(Throwable t)
+                    {
+                        error = t;
+                    }
+                    if (error != null)
+                    {
+                        wrappedOnReady.cancelled();
+                        onError.apply(error);
+                    }
+                });
             }
         }
 

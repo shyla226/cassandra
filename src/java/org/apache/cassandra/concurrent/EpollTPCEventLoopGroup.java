@@ -89,10 +89,9 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
     private static final long LAST_BACKOFF_STAGE = -1;
 
     /**
-     * We limit the amount of processing carried out from each stream of events feeding a TPC loop to prevent one source
-     * from starving another.
+     * We limit the amount of tasks processing to prevent starving other sources.
      */
-    private static final int EVENT_SOURCE_LIMIT = Integer.parseInt(System.getProperty("dse.tpc.event_source_limit", "1024"));
+    private static final int TASKS_LIMIT = Integer.parseInt(System.getProperty("netty.eventloop.tasks_processing_limit", "1024"));
 
     @Contended
     private final ImmutableList<SingleCoreEventLoop> eventLoops;
@@ -169,6 +168,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         private final TPCMetricsAndLimits.TaskStats parkStats;
         private final MpscArrayQueue<Runnable> queue;
         private final MpscArrayQueue<TPCRunnable> pendingQueue;
+        private final MpscArrayQueue<Runnable> priorityQueue;
 
         @Contended
         private volatile ThreadState state;
@@ -206,6 +206,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             this.parent = parent;
             this.queue = new MpscArrayQueue<>(1 << 16);
             this.pendingQueue = new MpscArrayQueue<>(1 << 16);
+            this.priorityQueue = new MpscArrayQueue<>(1 << 4);
 
             this.state = ThreadState.WORKING;
             this.lastDrainTime = -1;
@@ -352,7 +353,9 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             if (task instanceof TPCRunnable)
             {
                 TPCRunnable tpc = (TPCRunnable) task;
-                if (tpc.isPendable())
+                if (tpc.hasPriority() && priorityQueue.relaxedOffer(tpc))
+                    return;
+                else if (tpc.isPendable())
                 {
                     // If we already have something in the pending queue, this task should not jump it.
                     if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(tpc, metrics.maxQueueSize()))
@@ -502,6 +505,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             }
 
             int processed = 0;
+
             // throttle epoll calls
             if (throttledHasEpollEvents(nanoTimeSinceStartup))
             {
@@ -517,6 +521,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             processed += processTasks();
 
             processed += transferFromPendingTasks();
+
             return  processed;
         }
 
@@ -524,23 +529,21 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         {
             final int currPendingEpollEvents = this.pendingEpollEvents;
             if (currPendingEpollEvents == 0)
-            {
                 return 0;
-            }
-            final int eventsToProcess =  Math.min(currPendingEpollEvents, EVENT_SOURCE_LIMIT);
-            this.pendingEpollEvents = currPendingEpollEvents - eventsToProcess;
+
+            this.pendingEpollEvents = 0;
             try
             {
-                processReady(events, eventsToProcess);
+                processReady(events, currPendingEpollEvents);
 
                 if (allowGrowing && currPendingEpollEvents == events.length())
                 {
                     events.increase();
                 }
 
-                return eventsToProcess;
+                return currPendingEpollEvents;
             }
-            catch (Exception e)
+            catch (Throwable e)
             {
                 handleEpollEventError(e);
                 return 0;
@@ -584,7 +587,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             }
         }
 
-        private void handleEpollEventError(Exception e)
+        private void handleEpollEventError(Throwable e)
         {
             LOGGER.error("Unexpected exception in the selector loop.", e);
 
@@ -599,13 +602,25 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             try
             {
                 final MpscArrayQueue<Runnable> queue = this.queue;
-                Runnable r;
-                while (processed < EVENT_SOURCE_LIMIT &&
-                       (r = queue.relaxedPoll()) != null)
+                final MpscArrayQueue<Runnable> priorityQueue = this.priorityQueue;
+                do
                 {
-                    r.run();
-                    ++processed;
+                    Runnable p = priorityQueue.relaxedPoll();
+                    Runnable q = queue.relaxedPoll();
+                    if (p != null)
+                    {
+                        p.run();
+                        ++processed;
+                    }
+                    if (q != null)
+                    {
+                        q.run();
+                        ++processed;
+                    }
+                    if (p == null && q == null)
+                        break;
                 }
+                while (processed < TASKS_LIMIT - 1);
             }
             catch (Throwable t)
             {
@@ -660,7 +675,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             lastScheduledCheckTime = nanoTimeSinceStartup;
             int processed = 0;
             Runnable scheduledTask;
-            while (processed < EVENT_SOURCE_LIMIT &&
+            while (processed < TASKS_LIMIT &&
                    (scheduledTask = pollScheduledTask(nanoTimeSinceStartup)) != null)
             {
                 try
@@ -683,7 +698,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
         private boolean hasQueueTasks()
         {
-            return queue.relaxedPeek() != null;
+            return queue.relaxedPeek() != null || priorityQueue.relaxedPeek() != null;
         }
 
         private static long nanoTimeSinceStartup()

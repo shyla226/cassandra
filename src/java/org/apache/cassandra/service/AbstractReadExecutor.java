@@ -21,15 +21,19 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import com.google.common.collect.Iterables;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCTaskType;
+import org.apache.cassandra.concurrent.TPCTimeoutTask;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DigestVersion;
@@ -276,7 +280,7 @@ public abstract class AbstractReadExecutor
 
     void onReadTimeout() {}
 
-    public static class NeverSpeculatingReadExecutor extends AbstractReadExecutor
+    static class NeverSpeculatingReadExecutor extends AbstractReadExecutor
     {
         /**
          * If never speculating due to lack of replicas
@@ -303,16 +307,13 @@ public abstract class AbstractReadExecutor
                 if (!shouldSpeculate() || !logFailedSpeculation)
                     return CompletableObserver::onComplete;
 
-                command.getScheduler().schedule(() ->
-                                                           {
-                                                               if (!handler.hasValue())
-
-                                                                   cfs.metric.speculativeInsufficientReplicas.inc();
-
-                                                           },
-                                                TPCTaskType.READ_SPECULATE,
-                                                cfs.sampleLatencyNanos,
-                                                TimeUnit.NANOSECONDS);
+                TPCTimeoutTask<ReadCallback<FlowablePartition>> timeoutTask = new TPCTimeoutTask<>(handler);
+                timeoutTask.submit(callback ->
+                {
+                    if (!callback.hasResult())
+                        cfs.metric.speculativeInsufficientReplicas.inc();
+                }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+                handler.onResult(new Disposer(timeoutTask));
 
                 return CompletableObserver::onComplete;
             });
@@ -359,29 +360,34 @@ public abstract class AbstractReadExecutor
 
         public Completable maybeTryAdditionalReplicas()
         {
-            return Completable.defer(
-            () -> {
-
+            return Completable.defer(() ->
+            {
                 if (!shouldSpeculate())
                     return CompletableObserver::onComplete;
 
-                command.getScheduler().schedule(() -> {
-                       if (!handler.hasValue())
-                       {
-                           //Handle speculation stats first in case the callback fires immediately
-                           speculated = true;
-                           cfs.metric.speculativeRetries.inc();
-                           // Could be waiting on the data, or on enough digests.
-                           ReadCommand retryCommand = command;
-                           if (handler.resolver.isDataPresent() && (handler.resolver instanceof DigestResolver))
-                               retryCommand = command.createDigestCommand(digestVersion);
+                TPCTimeoutTask<ReadCallback<FlowablePartition>> timeoutTask = new TPCTimeoutTask<>(handler);
+                timeoutTask.submit(callback ->
+                {
+                    if (!callback.hasResult())
+                    {
+                        TPC.bestTPCScheduler().execute(() ->
+                        {
+                            // Handle speculation stats first in case the callback fires immediately
+                            speculated = true;
+                            cfs.metric.speculativeRetries.inc();
+                            // Could be waiting on the data, or on enough digests.
+                            ReadCommand retryCommand = command;
+                            if (callback.resolver.isDataPresent() && (callback.resolver instanceof DigestResolver))
+                                retryCommand = command.createDigestCommand(digestVersion);
 
-                           InetAddress extraReplica = Iterables.getLast(targetReplicas);
-                           Tracing.trace("Speculating read retry on {}", extraReplica);
-                           logger.trace("Speculating read retry on {}", extraReplica);
-                           MessagingService.instance().send(retryCommand.requestTo(extraReplica), handler);
-                       }
-                   }, TPCTaskType.READ_SPECULATE, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+                            InetAddress extraReplica = Iterables.getLast(targetReplicas);
+                            Tracing.trace("Speculating read retry on {}", extraReplica);
+                            logger.trace("Speculating read retry on {}", extraReplica);
+                            MessagingService.instance().send(retryCommand.requestTo(extraReplica), callback);
+                        }, TPCTaskType.READ_SPECULATE);
+                    }
+                }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+                handler.onResult(new Disposer(timeoutTask));
 
                 return CompletableObserver::onComplete;
             });
@@ -404,7 +410,7 @@ public abstract class AbstractReadExecutor
         }
     }
 
-    private static class AlwaysSpeculatingReadExecutor extends AbstractReadExecutor
+    static class AlwaysSpeculatingReadExecutor extends AbstractReadExecutor
     {
         public AlwaysSpeculatingReadExecutor(ColumnFamilyStore cfs,
                                              ReadCommand command,
@@ -436,6 +442,22 @@ public abstract class AbstractReadExecutor
         void onReadTimeout()
         {
             cfs.metric.speculativeFailedRetries.inc();
+        }
+    }
+
+    private static class Disposer implements Consumer<Flow<FlowablePartition>>
+    {
+        private final TPCTimeoutTask timeoutTask;
+
+        public Disposer(TPCTimeoutTask timeoutTask)
+        {
+            this.timeoutTask = timeoutTask;
+        }
+
+        @Override
+        public void accept(Flow<FlowablePartition> ignored)
+        {
+            timeoutTask.dispose();
         }
     }
 }

@@ -23,14 +23,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import org.apache.cassandra.concurrent.TPCTimer;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.function.Consumer;
 
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
-import io.reactivex.disposables.Disposable;
 import io.reactivex.internal.disposables.EmptyDisposable;
+import org.apache.cassandra.concurrent.TPCTimeoutTask;
+import org.apache.cassandra.concurrent.TPCTimer;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -135,13 +135,14 @@ abstract class AbstractWriteHandler extends WriteHandler
             protected void subscribeActual(CompletableObserver subscriber)
             {
                 subscriber.onSubscribe(EmptyDisposable.INSTANCE);
-                Disposable timeout = requestExpirer.onTimeout(() -> completeExceptionally(TIMEOUT_EXCEPTION), currentTimeout(), TimeUnit.NANOSECONDS);
+                TPCTimeoutTask<WriteHandler> timeoutTask = new TPCTimeoutTask<>(requestExpirer, AbstractWriteHandler.this);
+                timeoutTask.submit(new TimeoutAction(), currentTimeout(), TimeUnit.NANOSECONDS);
 
                 whenComplete((result, error) -> {
                     if (logger.isTraceEnabled())
                         logger.trace("{} - Completed with {}/{}", AbstractWriteHandler.this.hashCode(), result, error == null ? null : error.getClass().getName());
 
-                    timeout.dispose();
+                    timeoutTask.dispose();
                     if (error != null)
                     {
                         if (logger.isTraceEnabled())
@@ -210,5 +211,14 @@ abstract class AbstractWriteHandler extends WriteHandler
         // We do nothing by default, but a WriteHandler can be wrapped to run
         // task on timeout (typically, submitting hints) using
         // WriteHandler.Builder.onTimeout())
+    }
+
+    private static class TimeoutAction implements Consumer<WriteHandler>
+    {
+        @Override
+        public void accept(WriteHandler handler)
+        {
+            handler.completeExceptionally(TIMEOUT_EXCEPTION);
+        }
     }
 }

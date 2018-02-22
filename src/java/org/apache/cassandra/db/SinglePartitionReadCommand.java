@@ -524,6 +524,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                 Tracing.trace("Row cache hit");
                 FlowableUnfilteredPartition ret = clusteringIndexFilter().getFlowableUnfilteredPartition(columnFilter(), cachedPartition);
                 cfs.metric.updateSSTableIterated(0);
+                boolean started = executionController.startIfValid(cfs);
+                assert started;
                 return Flow.just(ret);
             }
 
@@ -619,7 +621,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                                    ReadExecutionController executionController,
                                                                    SSTableReadMetricsCollector metricsCollector)
     {
-        assert executionController != null && executionController.validForReadOn(cfs);
+        boolean started = executionController.startIfValid(cfs);
+        assert started;
 
         Tracing.trace("Executing single-partition query on {}", cfs.name);
 
