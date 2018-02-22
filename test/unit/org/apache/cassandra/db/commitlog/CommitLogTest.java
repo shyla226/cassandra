@@ -367,9 +367,11 @@ public abstract class CommitLogTest
 
         // "Flush" second cf: The first segment should be deleted since we
         // didn't write anything on cf1 since last flush (and we flush cf2)
-
         TableId id2 = rm2.getTableIds().iterator().next();
         CommitLog.instance.discardCompletedSegments(id2, CommitLogPosition.NONE, CommitLog.instance.getCurrentPosition());
+
+        // Make sure system tables aren't messing with the segment release
+        markSystemTablesFlushed(CommitLog.instance.getCurrentPosition());
 
         segments = CommitLog.instance.segmentManager.getActiveSegments();
 
@@ -624,9 +626,7 @@ public abstract class CommitLogTest
 
             assertEquals(2, CommitLog.instance.segmentManager.getActiveSegments().size());
             CommitLogPosition position = CommitLog.instance.getCurrentPosition();
-            for (String keyspace : new String[] {SchemaConstants.SYSTEM_KEYSPACE_NAME, SchemaConstants.SCHEMA_KEYSPACE_NAME})
-                for (ColumnFamilyStore syscfs : Keyspace.open(keyspace).getColumnFamilyStores())
-                    CommitLog.instance.discardCompletedSegments(syscfs.metadata().id, CommitLogPosition.NONE, position);
+            markSystemTablesFlushed(position);
             CommitLog.instance.discardCompletedSegments(cfs2.metadata().id, CommitLogPosition.NONE, position);
 
             Collection<CommitLogSegment> segments = CommitLog.instance.segmentManager.getActiveSegments();
@@ -636,6 +636,13 @@ public abstract class CommitLogTest
         {
             DatabaseDescriptor.setAutoSnapshot(originalState);
         }
+    }
+
+    public void markSystemTablesFlushed(CommitLogPosition position)
+    {
+        for (String keyspace : new String[] { SchemaConstants.SYSTEM_KEYSPACE_NAME, SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaConstants.AUTH_KEYSPACE_NAME})
+            for (ColumnFamilyStore syscfs : Keyspace.open(keyspace).getColumnFamilyStores())
+                CommitLog.instance.discardCompletedSegments(syscfs.metadata().id, CommitLogPosition.NONE, position);
     }
 
     @Test
