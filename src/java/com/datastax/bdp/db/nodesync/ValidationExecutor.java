@@ -171,12 +171,16 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                 return; // start() called twice, that's fine
         }
 
+        // Setup the controller:
         this.controller = new Controller(controllerIntervalMs);
         controller.updateValues();
-        updaterExecutor.scheduleAtFixedRate(controller, controllerIntervalMs, controllerIntervalMs, TimeUnit.MILLISECONDS);
 
+        // Submit initial validations:
         for (int i = 0; i < maxInFlightValidations; i++)
             submitNewValidation();
+
+        // Schedule the controller after initial validations so it starts using actual metrics:
+        updaterExecutor.scheduleAtFixedRate(controller, controllerIntervalMs, controllerIntervalMs, TimeUnit.MILLISECONDS);
     }
 
     /**
