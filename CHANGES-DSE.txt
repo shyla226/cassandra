@@ -67,6 +67,7 @@ dse 6.0.0:
  * For TWCS, flush to separate sstables based on write time (DB-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (DB-302)
 Merged from dse5.1:
+ * Fix SASI AND/OR semantics for StandardAnalyzer (DB-548)
  * Remove invalid path from compaction-stress script, populate data base on initial size (DB-1652)
  * Fix infinite loop when replaying a truncated commit log file and truncation is tolerated (DB-1557)
  * Switch RMIExporter to dynamic proxy (DB-1591)

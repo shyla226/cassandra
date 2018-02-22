@@ -1527,7 +1527,7 @@ public class SASIIndexTest
 
         rows = getIndexed(store, 10, buildExpression(name, Operator.LIKE_PREFIX, UTF8Type.instance.decompose("j")),
                                      buildExpression(name, Operator.NEQ, UTF8Type.instance.decompose("joh")));
-        Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key2", "key6", "key8" }, rows.toArray(new String[0])));
+        Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key2", "key5", "key6", "key8" }, rows.toArray(new String[rows.size()])));
 
         rows = getIndexed(store, 10, buildExpression(name, Operator.LIKE_MATCHES, UTF8Type.instance.decompose("pavel")));
         Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1" }, rows.toArray(new String[0])));
@@ -2372,6 +2372,63 @@ public class SASIIndexTest
         results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Zwei';", KS_NAME, tableName)).blockingGet();
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
+    }
+
+    @Test
+    public void testLikeOperatorWithMultipleTokensAndNEQOperator()
+    {
+        String tokenizedContainsTable = "sasi_like_analyzed_containss_test";
+
+        QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (k text primary key, v text, age int);", KS_NAME, tokenizedContainsTable)).blockingGet();
+
+        QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) " +
+                                                         "USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = " +
+                                                         "{ 'mode' : 'CONTAINS', 'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer'," +
+                                                         "'analyzed': 'true'};",
+                                                         KS_NAME, tokenizedContainsTable)).blockingGet();
+
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v, age) VALUES (?, ?, ?);", KS_NAME, tokenizedContainsTable), "1", "speedrun", 2).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v, age) VALUES (?, ?, ?);", KS_NAME, tokenizedContainsTable), "2", "longrun", 4).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v, age) VALUES (?, ?, ?);", KS_NAME, tokenizedContainsTable), "3", "homere", 3).blockingGet();
+
+
+        final ByteBuffer v = UTF8Type.instance.decompose("v");
+        final ByteBuffer age = UTF8Type.instance.decompose("age");
+        Keyspace keyspace = Keyspace.open(KS_NAME);
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore(tokenizedContainsTable);
+
+        Set<String> rows;
+        rows = getIndexed(store, 2, buildExpression(v, Operator.LIKE_CONTAINS, UTF8Type.instance.decompose("%run long%")),
+                          buildExpression(v, Operator.NEQ, UTF8Type.instance.decompose("speedrun")),
+                          buildExpression(age, Operator.GT, Int32Type.instance.decompose(3)));
+        Assert.assertTrue(rows.toString(), Arrays.equals(new String[]{ "2" }, rows.toArray(new String[0])));
+    }
+
+    @Test
+    public void testLikeOperatorWithMultipleTokens()
+    {
+        String tokenizedContainsTable = "sasi_like_analyzed_containss_test";
+
+        QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (k text primary key, v text, age int);", KS_NAME, tokenizedContainsTable)).blockingGet();
+
+        QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) " +
+                                                         "USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = " +
+                                                         "{ 'mode' : 'CONTAINS', 'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer'," +
+                                                         "'analyzed': 'true'};",
+                                                         KS_NAME, tokenizedContainsTable)).blockingGet();
+
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v, age) VALUES (?, ?, ?);", KS_NAME, tokenizedContainsTable), "1", "speedrun", 2).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v, age) VALUES (?, ?, ?);", KS_NAME, tokenizedContainsTable), "2", "longrun", 3).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("INSERT INTO %s.%s (k, v, age) VALUES (?, ?, ?);", KS_NAME, tokenizedContainsTable), "3", "homere", 3).blockingGet();
+
+
+        final ByteBuffer v = UTF8Type.instance.decompose("v");
+        Keyspace keyspace = Keyspace.open(KS_NAME);
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore(tokenizedContainsTable);
+
+        Set<String> rows;
+        rows = getIndexed(store, 2, buildExpression(v, Operator.LIKE_CONTAINS, UTF8Type.instance.decompose("%run long%")));
+        Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "1", "2"}, rows.toArray(new String[0])));
     }
 
     private static ColumnFamilyStore loadData(Map<String, Pair<String, Integer>> data, boolean forceFlush)
