@@ -178,6 +178,12 @@ public class QueryStateTest
             return all;
         }
 
+        @Override
+        public Set<RoleResource> getRoleMemberOf(RoleResource role)
+        {
+            return null;
+        }
+
         /*
          * Retrieve all roles granted to the given role. includeInherited specifies
          * whether to include only those roles granted directly or all inherited roles.
@@ -375,7 +381,7 @@ public class QueryStateTest
             throw new UnsupportedOperationException();
         }
 
-        public void revokeAllOn(IResource droppedResource)
+        public Set<RoleResource> revokeAllOn(IResource droppedResource)
         {
             throw new UnsupportedOperationException();
         }

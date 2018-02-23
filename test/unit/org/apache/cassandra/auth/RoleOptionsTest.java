@@ -178,6 +178,12 @@ public class RoleOptionsTest
                 return null;
             }
 
+            @Override
+            public Set<RoleResource> getRoleMemberOf(RoleResource role)
+            {
+                return null;
+            }
+
             public Set<RoleResource> getAllRoles() throws RequestValidationException, RequestExecutionException
             {
                 return null;
