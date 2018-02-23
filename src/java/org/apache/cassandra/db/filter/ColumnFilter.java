@@ -637,7 +637,7 @@ public class ColumnFilter
             // queried some columns that are actually only fetched, but it's fine during upgrade).
             // More concretely, we replace our filter by a non-fetch-all one that queries every columns that our
             // current filter fetches.
-            Set<ColumnMetadata> queriedStatic = new HashSet<>();
+            List<ColumnMetadata> queriedStatic = new ArrayList<>();
             Iterables.addAll(queriedStatic, Iterables.filter(selection.queried, ColumnMetadata::isStatic));
             return new ColumnFilter(FetchType.COLUMNS_IN_QUERIED,
                                     (TableMetadata) null,
