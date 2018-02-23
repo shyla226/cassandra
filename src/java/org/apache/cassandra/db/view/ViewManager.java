@@ -19,18 +19,17 @@ package org.apache.cassandra.db.view;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
-import com.google.common.base.Throwables;
 import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.Striped;
 
@@ -49,7 +48,6 @@ import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.Views;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.concurrent.CoordinatedAction;
 import org.apache.cassandra.utils.concurrent.ExecutableLock;
 
 /**
@@ -58,7 +56,7 @@ import org.apache.cassandra.utils.concurrent.ExecutableLock;
  *
  * The main purposes of the manager are to provide a single location for updates to be vetted to see whether they update
  * any views {@link #updatesAffectView(Collection, boolean)}, provide locks to prevent multiple
- * updates from creating incoherent updates in the view {@link #acquireLockFor(int)}, and
+ * updates from creating incoherent updates in the view {@link #getLockFor(int)}, and
  * to affect change on the view.
  *
  * TODO: I think we can get rid of that class. For addition/removal of view by names, we could move it Keyspace. And we
@@ -239,82 +237,40 @@ public class ViewManager
         // Get the locks for the mutation:
         SortedMap<Long, ExecutableLock> locks = getLocksFor(mutation);
 
-        // The coordinated action to execute:
-        CoordinatedAction coordinator = new CoordinatedAction(
-            () ->
+        Supplier<CompletableFuture<Void>> onLocksAcquired = () -> {
+            // Collect metrics before actually applying the update.
+            // Bulk non-droppable operations (e.g. commitlog replay, hint delivery) are not measured.
+            if (isDroppable)
             {
-                // Collect metrics before actually applying the update.
-                // Bulk non-droppable operations (e.g. commitlog replay, hint delivery) are not measured.
-                if (isDroppable)
-                {
-                    long acquireTime = System.currentTimeMillis() - mutation.viewLockAcquireStart;
-                    Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
-                    for (TableId tableId : mutation.getTableIds())
-                        keyspace.getColumnFamilyStore(tableId).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
-                }
-                // Apply the original update:
-                return update.get();
-            },
-            locks.size(),
-            mutation.createdAt,
-            isDroppable ? DatabaseDescriptor.getWriteRpcTimeout() : Long.MAX_VALUE, TimeUnit.MILLISECONDS);
-
-        // Loop over the locks and execute the action by chaining them: chaining is necessary to make sure each lock
-        // is taken only after the previous one (again, to avoid deadlocks):
-        CompletableFuture<Void> first = new CompletableFuture<>();
-        CompletableFuture<Void> prev = first;
-        CompletableFuture<Void> result = null;
-        for (ExecutableLock lock : locks.values())
-        {
-            CompletableFuture<Void> current = new CompletableFuture<>();
-            // Chain / compose:
-            result = prev.thenCompose(ignored ->
-            {
-                return lock.execute(() ->
-                {
-                    // Complete the current future, so that the next chained one can run:
-                    current.complete(null);
-                    // Return the action future:
-                    return coordinator.get();
-                }, TPC.bestTPCScheduler().getExecutor());
-            });
-            prev = current;
-        }
-        // Kickoff the chain:
-        first.complete(null);
-
-        // Handle timeout on failure to acquire lock
-        result = result.exceptionally(t -> {
-
-            if (t instanceof CompletionException && t.getCause() != null)
-                t = t.getCause();
-
-            if (t instanceof TimeoutException)
-            {
-                List<String> tables = new ArrayList<>(mutation.getTableIds().size());
+                long acquireTime = System.currentTimeMillis() - mutation.viewLockAcquireStart;
                 Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
                 for (TableId tableId : mutation.getTableIds())
-                {
-                    ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(tableId);
-                    cfs.metric.viewLockAcquisitionTimeouts.inc();
-                    tables.add(cfs.name);
-                }
-                String message = String.format("Could not acquire view lock in %d milliseconds for table%s %s of keyspace %s.",
-                                               System.currentTimeMillis() - mutation.createdAt,
-                                               tables.size() > 1 ? "s" : "", Joiner.on(",").join(tables), keyspace.getName());
-                // Getting a timeout here should mean the coordinator that forwarded that base table
-                // write has already timed out on its own, so there isn't much benefit in answering
-                throw new DroppingResponseException(message);
+                    keyspace.getColumnFamilyStore(tableId).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
             }
-            else
-            {
-                // Otherwise, it's unexpected so let the normal exception handling from VerbHandlers do its job
-                throw Throwables.propagate(t);
-            }
-        });
 
-        // Return the result of chaining all locks:
-        return result;
+            // Apply the original update:
+            return update.get();
+        };
+
+        Function<TimeoutException, RuntimeException> onTimeout = err -> {
+            List<String> tables = new ArrayList<>(mutation.getTableIds().size());
+            Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
+            for (TableId tableId : mutation.getTableIds())
+            {
+                ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(tableId);
+                cfs.metric.viewLockAcquisitionTimeouts.inc();
+                tables.add(cfs.name);
+            }
+            String message = String.format("Could not acquire view lock in %d milliseconds for table%s %s of keyspace %s.",
+                                           System.currentTimeMillis() - mutation.createdAt,
+                                           tables.size() > 1 ? "s" : "", Joiner.on(",").join(tables), keyspace.getName());
+            // Getting a timeout here should mean the coordinator that forwarded that base table
+            // write has already timed out on its own, so there isn't much benefit in answering
+            return new DroppingResponseException(message);
+        };
+
+        long timeoutMillis = isDroppable ? DatabaseDescriptor.getWriteRpcTimeout() : Long.MAX_VALUE;
+        return TPCUtils.withLocks(locks, mutation.createdAt, timeoutMillis, onLocksAcquired, onTimeout);
     }
 
     /**

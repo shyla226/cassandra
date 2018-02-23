@@ -26,11 +26,11 @@ import org.apache.cassandra.utils.TimeSource;
  * The supplied action itself is a {@link CompletableFuture} supplier, to allow for either sync or async execution,
  * and is guaranteed to be executed at most once.
  */
-public class CoordinatedAction implements Supplier<CompletableFuture<Void>>
+public class CoordinatedAction<T> implements Supplier<CompletableFuture<T>>
 {
-    final Set<CompletableFuture<Void>> futures;
+    final Set<CompletableFuture<T>> futures;
     final Lock lock;
-    final Supplier<CompletableFuture<Void>> action;
+    final Supplier<CompletableFuture<T>> action;
     final CountDownLatch latch;
     final TimeSource source;
     final long timeoutInMillis;
@@ -45,13 +45,13 @@ public class CoordinatedAction implements Supplier<CompletableFuture<Void>>
      * @param timeout The timeout, computed based on {@code startTimeInMillis).
      * @param unit The time unit.
      */
-    public CoordinatedAction(Supplier<CompletableFuture<Void>> action, int parties, long startTimeInMillis, long timeout, TimeUnit unit)
+    public CoordinatedAction(Supplier<CompletableFuture<T>> action, int parties, long startTimeInMillis, long timeout, TimeUnit unit)
     {
         this(action, parties, startTimeInMillis, timeout, unit, new SystemTimeSource());
     }
 
     @VisibleForTesting
-    CoordinatedAction(Supplier<CompletableFuture<Void>> action, int parties, long startTimeInMillis, long timeout, TimeUnit unit, TimeSource source)
+    CoordinatedAction(Supplier<CompletableFuture<T>> action, int parties, long startTimeInMillis, long timeout, TimeUnit unit, TimeSource source)
     {
         this.futures = Sets.newConcurrentHashSet();
         this.lock = new ReentrantLock();
@@ -63,13 +63,13 @@ public class CoordinatedAction implements Supplier<CompletableFuture<Void>>
     }
 
     @Override
-    public CompletableFuture<Void> get()
+    public CompletableFuture<T> get()
     {
         try
         {
             if (source.currentTimeMillis() - startTimeInMillis < timeoutInMillis)
             {
-                CompletableFuture<Void> future = new CompletableFuture<>();
+                CompletableFuture<T> future = new CompletableFuture<>();
                 futures.add(future);
 
                 latch.countDown();
@@ -102,7 +102,7 @@ public class CoordinatedAction implements Supplier<CompletableFuture<Void>>
             }
             else
             {
-                CompletableFuture<Void> future = new CompletableFuture<>();
+                CompletableFuture<T> future = new CompletableFuture<>();
                 futures.add(future);
                 futures.stream().forEach(f -> f.completeExceptionally(new TimeoutException()));
                 latch.countDown();
@@ -111,7 +111,7 @@ public class CoordinatedAction implements Supplier<CompletableFuture<Void>>
         }
         catch (InterruptedException ex)
         {
-            CompletableFuture<Void> future = new CompletableFuture<>();
+            CompletableFuture<T> future = new CompletableFuture<>();
             future.completeExceptionally(ex);
             return future;
         }

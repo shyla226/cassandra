@@ -1186,33 +1186,34 @@ public class StorageProxy implements StorageProxyMBean
     {
        CompletableFuture<Void> ret = new CompletableFuture<>();
 
-        cm.applyCounterMutation().subscribe(
-            result -> {
+        cm.applyCounterMutation().whenComplete((result, ex) -> {
 
-                WriteEndpoints endpoints = WriteEndpoints.compute(cm.getKeyspaceName(), cm.key());
-                WriteHandler handler = WriteHandler.builder(endpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime, TPC.bestTPCTimer())
-                                                   .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
-                                                   .hintOnTimeout(result)
-                                                   .build();
-
-                // We already wrote locally
-                handler.onLocalResponse();
-
-                WriteEndpoints remainingEndpoints = handler.endpoints().withoutLocalhost(true);
-                if (!remainingEndpoints.isEmpty())
-                    sendToHintedEndpoints(result, remainingEndpoints, handler, Verbs.WRITES.WRITE);
-
-                handler.whenComplete((r, t) -> {
-                    if (t != null)
-                        ret.completeExceptionally(t);
-                    else
-                        ret.complete(r);
-                });
-            },
-            ex -> {
+            if (ex != null)
+            {
                 ret.completeExceptionally(ex);
-            });
+                return;
+            }
 
+            WriteEndpoints endpoints = WriteEndpoints.compute(cm.getKeyspaceName(), cm.key());
+            WriteHandler handler = WriteHandler.builder(endpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime, TPC.bestTPCTimer())
+                                               .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
+                                               .hintOnTimeout(result)
+                                               .build();
+
+            // We already wrote locally
+            handler.onLocalResponse();
+
+            WriteEndpoints remainingEndpoints = handler.endpoints().withoutLocalhost(true);
+            if (!remainingEndpoints.isEmpty())
+                sendToHintedEndpoints(result, remainingEndpoints, handler, Verbs.WRITES.WRITE);
+
+            handler.whenComplete((r, t) -> {
+                if (t != null)
+                    ret.completeExceptionally(t);
+                else
+                    ret.complete(r);
+            });
+        });
 
         return ret;
     }

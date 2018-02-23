@@ -18,7 +18,9 @@
 
 package org.apache.cassandra.concurrent;
 
+import java.util.SortedMap;
 import java.util.concurrent.*;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import io.reactivex.Completable;
@@ -27,6 +29,7 @@ import io.reactivex.Single;
 import io.reactivex.SingleObserver;
 import io.reactivex.internal.disposables.EmptyDisposable;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.concurrent.CoordinatedAction;
 import org.apache.cassandra.utils.concurrent.ExecutableLock;
 
 public class TPCUtils
@@ -279,5 +282,69 @@ public class TPCUtils
         {
             throw Throwables.cleaned(ex);
         }
+    }
+
+    /**
+     * Perform the supplied action by first acquiring locks where each lock is acquired in order, so to avoid deadlocks.
+     *
+     * @param locks  The locks to be acquired
+     * @param startTimeMillis The start time for the timeout in milliseconds
+     * @param timeoutMillis The timeout in milliseconds
+     * @param onLocksAcquired The action to execute.
+     * @param onTimeout The timeout handler
+     * @param <T> - the result type of the action to perform
+     *
+     * @return The future that will be completed when all locks are acquired and the action executed.
+     * Locks are released after such future completes.
+     */
+    public static <T> CompletableFuture<T> withLocks(SortedMap<Long, ExecutableLock> locks,
+                                                    long startTimeMillis,
+                                                    long timeoutMillis,
+                                                    Supplier<CompletableFuture<T>> onLocksAcquired,
+                                                    Function<TimeoutException, RuntimeException> onTimeout)
+    {
+        // The coordinated action to execute:
+        CoordinatedAction<T> coordinator = new CoordinatedAction(onLocksAcquired,
+                                                                 locks.size(),
+                                                                 startTimeMillis,
+                                                                 timeoutMillis,
+                                                                 TimeUnit.MILLISECONDS);
+
+        // Loop over the locks and execute the action by chaining them: chaining is necessary to make sure each lock
+        // is taken only after the previous one (again, to avoid deadlocks):
+        CompletableFuture<T> first = new CompletableFuture<>();
+        CompletableFuture<T> prev = first;
+        CompletableFuture<T> result = null;
+        for (ExecutableLock lock : locks.values())
+        {
+            CompletableFuture<T> current = new CompletableFuture<>();
+            // Chain / compose:
+            result = prev.thenCompose(ignored -> lock.execute(() -> {
+                // Complete the current future, so that the next chained one can run:
+                current.complete(null);
+                // Return the action future:
+                return coordinator.get();
+            }, TPC.bestTPCScheduler().getExecutor()));
+            prev = current;
+        }
+
+        // Kickoff the chain:
+        first.complete(null);
+
+        // Handle timeout on failure to acquire lock
+        result = result.exceptionally(t ->
+        {
+            if (t instanceof CompletionException && t.getCause() != null)
+                t = t.getCause();
+
+            if (t instanceof TimeoutException)
+                throw onTimeout.apply((TimeoutException) t);
+            else
+                // Otherwise, it's unexpected so let the normal exception handling from VerbHandlers do its job
+                throw com.google.common.base.Throwables.propagate(t);
+        });
+
+        // Return the result of chaining all locks:
+        return result;
     }
 }
