@@ -28,7 +28,6 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -411,8 +410,13 @@ public final class MessagingService implements MessagingServiceMBean
             // For now the only case that we intentionally target with this is rejecting the MessageDeliveryTask by the
             // event loop. If anything else triggers this log, we should make sure that it didn't fall through the
             // cracks by chance while it was meant to be handled by another component.
-            logger.error("Error while locally processing {} request:", request.verb(), t);
-            callback.onFailure(request.respondWithFailure(RequestFailureReason.UNKNOWN));
+            logger.error("{} while locally processing {} request.", t.getClass().getCanonicalName(), request.verb());
+            logger.trace("Stacktrace: ", t);
+            if (!request.verb().isOneWay())
+            {
+                MessagingService.instance().incrementDroppedMessages(request);
+                callback.onFailure(request.respondWithFailure(RequestFailureReason.UNKNOWN));
+            }
         }
     }
 
@@ -801,9 +805,11 @@ public final class MessagingService implements MessagingServiceMBean
             // For now the only case that we intentionally target with this is rejecting the MessageDeliveryTask by the
             // event loop. If anything else triggers this log, we should make sure that it didn't fall through the
             // cracks by chance while it was meant to be handled by another component.
-            logger.error("Error while receiving {} message from {} :", message.verb(), message.from(), t);
+            logger.error("{} while receiving {} message from {}", t.getClass().getCanonicalName(), message.verb(), message.from());
+            logger.trace("Stacktrace: ", t);
             if (message.isRequest() && !message.verb().isOneWay())
             {
+                MessagingService.instance().incrementDroppedMessages(message);
                 Request<?, ?> request = (Request<?, ?>) message;
                 reply(request.respondWithFailure(RequestFailureReason.UNKNOWN));
             }
