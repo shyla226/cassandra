@@ -45,7 +45,8 @@ public final class AuthManager
     /**
      * The role cache.
      */
-    private final RolesCache rolesCache;
+    @VisibleForTesting
+    final RolesCache rolesCache;
 
     /**
      * The authorizer.
@@ -55,7 +56,8 @@ public final class AuthManager
     /**
      * The permission cache.
      */
-    private final PermissionsCache permissionsCache;
+    @VisibleForTesting
+    final PermissionsCache permissionsCache;
 
     public AuthManager(IRoleManager roleManager, IAuthorizer authorizer)
     {
@@ -472,9 +474,16 @@ public final class AuthManager
         public void dropRole(AuthenticatedUser performer,
                              RoleResource role)
         {
+            Set<RoleResource> roles = new HashSet<>();
+            roles.add(role);
+
             // We do not want to load those roles within the cache so we have to fetch them directly from
-            // the IRoleManager
-            Set<RoleResource> roles = getRoles(role, true);
+            // the IRoleManager.
+            Set<RoleResource> memberOf = roleManager.getRoleMemberOf(role);
+
+            if (roles != null)
+                roles.addAll(memberOf);
+
             roleManager.dropRole(performer, role);
             authorizer.revokeAllFrom(role);
             authorizer.revokeAllOn(role);
@@ -498,12 +507,8 @@ public final class AuthManager
                               RoleResource role,
                               RoleResource grantee)
         {
-            // We do not want to load those roles within the cache so we have to fetch them directly from
-            // the IRoleManager
-            Set<RoleResource> roles = getRoles(role, true);
-            roles.addAll(getRoles(grantee, true));
             roleManager.grantRole(performer, role, grantee);
-            invalidateRoles(roles);
+            invalidateRoles(Collections.singleton(grantee));
         }
 
         @Override
@@ -511,12 +516,8 @@ public final class AuthManager
                                RoleResource role,
                                RoleResource revokee)
         {
-            // We do not want to load those roles within the cache so we have to fetch them directly from
-            // the IRoleManager
-            Set<RoleResource> roles = getRoles(role, true);
-            roles.addAll(getRoles(revokee, true));
             roleManager.revokeRole(performer, role, revokee);
-            invalidateRoles(roles);
+            invalidateRoles(Collections.singleton(revokee));
         }
 
         @Override
@@ -524,6 +525,12 @@ public final class AuthManager
                                           boolean includeInherited)
         {
             return roleManager.getRoles(grantee, includeInherited);
+        }
+
+        @Override
+        public Set<RoleResource> getRoleMemberOf(RoleResource role)
+        {
+            return roleManager.getRoleMemberOf(role);
         }
 
         @Override
@@ -645,13 +652,10 @@ public final class AuthManager
                                      RoleResource grantee,
                                      GrantMode... grantModes)
         {
-            // We do not want to load those roles within the cache so we have to fetch them directly from 
-            // the IRoleManager
-            Set<RoleResource> roles = roleManager.getRoles(grantee, true);
             Set<Permission> granted = authorizer.grant(performer, permissions, resource, grantee, grantModes);
             if (!granted.isEmpty())
             {
-                invalidateRoles(roles);
+                invalidateRoles(Collections.singleton(grantee));
             }
             return granted;
         }
@@ -663,13 +667,10 @@ public final class AuthManager
                                       RoleResource revokee,
                                       GrantMode... grantModes)
         {
-            // We do not want to load those roles within the cache so we have to fetch them directly from
-            // the IRoleManager
-            Set<RoleResource> roles = roleManager.getRoles(revokee, true);
             Set<Permission> revoked = authorizer.revoke(performer, permissions, resource, revokee, grantModes);
             if (!revoked.isEmpty())
             {
-                invalidateRoles(roles);
+                invalidateRoles(Collections.singleton(revokee));
             }
             return revoked;
         }
@@ -685,17 +686,17 @@ public final class AuthManager
         @Override
         public void revokeAllFrom(RoleResource revokee)
         {
-            // We do not want to load those roles within the cache so we have to fetch them directly from
-            // the IRoleManager
-            Set<RoleResource> roles = roleManager.getRoles(revokee, true);
             authorizer.revokeAllFrom(revokee);
-            invalidateRoles(roles);
+            invalidateRoles(Collections.singleton(revokee));
         }
 
         @Override
-        public void revokeAllOn(IResource droppedResource)
+        public Set<RoleResource> revokeAllOn(IResource droppedResource)
         {
-            authorizer.revokeAllOn(droppedResource);
+            Set<RoleResource> roles = authorizer.revokeAllOn(droppedResource);
+            if (!roles.isEmpty())
+                invalidateRoles(roles);
+            return roles;
         }
 
         @Override

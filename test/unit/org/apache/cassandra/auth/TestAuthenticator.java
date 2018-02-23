@@ -148,6 +148,12 @@ public class TestAuthenticator implements IAuthenticator
                 return Collections.singleton(grantee);
             }
 
+            @Override
+            public Set<RoleResource> getRoleMemberOf(RoleResource role)
+            {
+                return Collections.singleton(role);
+            }
+
             public Set<RoleResource> getAllRoles() throws RequestValidationException, RequestExecutionException
             {
                 return null;
