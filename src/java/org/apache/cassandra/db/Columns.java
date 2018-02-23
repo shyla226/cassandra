@@ -89,6 +89,8 @@ public class Columns extends AbstractCollection<ColumnMetadata>
      */
     public static Columns from(Collection<ColumnMetadata> s)
     {
+        assert s instanceof List || s instanceof SortedSet : "Must pass an ordered collection";
+
         ColumnMetadata[] columns = new ColumnMetadata[s.size()];
         int i = 0;
         int firstComplexId = columns.length;
