@@ -49,7 +49,7 @@ public class CancelValidation extends NodeSyncCommand
         Set<InetAddress> allLiveNodes = metadata.getAllHosts()
                                                 .stream()
                                                 .filter(Host::isUp)
-                                                .map(Host::getAddress)
+                                                .map(Host::getBroadcastAddress)
                                                 .collect(toSet());
 
         // Get the nodes where the validation is running

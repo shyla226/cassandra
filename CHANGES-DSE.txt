@@ -2,6 +2,7 @@ dse 6.1.0:
  * Add ability to read the TTL and WRITETIME of an element in a collection (DB-1289)
 
 dse 6.0.0:
+ * Use the CQL driver to retrieve the JMX addresses in NodeSync tool (DB-1710)
  * Use thread-safe set to track missing nodes in NodeSync Validation (DB-1713)
  * Improve message when mixing mutually exclusive deprecated and non-deprecated YAML properties (DB-1719)
  * Multiple functions in GROUP BY clause should be rejected (DB-1660)

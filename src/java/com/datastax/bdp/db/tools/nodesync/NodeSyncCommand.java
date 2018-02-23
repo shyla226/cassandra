@@ -74,7 +74,8 @@ public abstract class NodeSyncCommand implements Runnable
     {
         try (Cluster cluster = buildCluster(); Session session = cluster.newSession())
         {
-            execute(cluster.getMetadata(), session, buildNodeProbes(session));
+            Metadata metadata = cluster.getMetadata();
+            execute(metadata, session, buildNodeProbes(metadata));
         }
     }
 
@@ -93,13 +94,13 @@ public abstract class NodeSyncCommand implements Runnable
                                                    .build();
     }
 
-    private NodeProbes buildNodeProbes(Session session)
+    private NodeProbes buildNodeProbes(Metadata metadata)
     {
-        return new NodeProbesBuilder(session).withUsername(jmxUsername)
-                                             .withPassword(jmxPassword)
-                                             .withPasswordFilePath(jmxPasswordFile)
-                                             .withSSL(jmxSSL)
-                                             .build();
+        return new NodeProbesBuilder(metadata).withUsername(jmxUsername)
+                                              .withPassword(jmxPassword)
+                                              .withPasswordFilePath(jmxPasswordFile)
+                                              .withSSL(jmxSSL)
+                                              .build();
     }
 
     protected abstract void execute(Metadata metadata, Session session, NodeProbes nodes);
