@@ -260,7 +260,7 @@ public final class MessagingService implements MessagingServiceMBean
 
         Consumer<Request<P, Q>> consumer = rq ->
         {
-            if (rq.isTimedOut(ApproximateTime.currentTimeMillis()))
+            if (rq.isTimedOut(ApproximateTime.millisTime()))
             {
                 onAborted.run();
                 return;

@@ -27,10 +27,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.LockSupport;
 
 import org.junit.After;
-import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -106,7 +104,7 @@ public class MonitoringTaskTest
     private static void waitForOperationsToComplete(List<Monitor> operations) throws InterruptedException
     {
         long timeout = operations.stream().map(Monitor::timeoutMillis).reduce(0L, Long::max);
-        Thread.sleep(timeout * 2 + ApproximateTime.precision());
+        Thread.sleep(timeout * 2 + ApproximateTime.accuracy());
 
         long start = System.nanoTime();
         while (System.nanoTime() - start <= MAX_SPIN_TIME_NANOS)
@@ -125,7 +123,7 @@ public class MonitoringTaskTest
     private static void waitForOperationsToBeReportedAsSlow(List<Monitor> operations) throws InterruptedException
     {
         long timeout = operations.stream().map(Monitor::slowQueryTimeoutMillis).reduce(0L, Long::max);
-        Thread.sleep(timeout * 2 + ApproximateTime.precision());
+        Thread.sleep(timeout * 2 + ApproximateTime.accuracy());
 
         long start = System.nanoTime();
         while(System.nanoTime() - start <= MAX_SPIN_TIME_NANOS)
@@ -222,10 +220,10 @@ public class MonitoringTaskTest
         assertFalse(operation.isCompleted());
 
         // aborted operations are not logged as slow
-        assertFalse(MonitoringTask.instance.logSlowOperations(ApproximateTime.currentTimeMillis()));
+        assertFalse(MonitoringTask.instance.logSlowOperations(ApproximateTime.millisTime()));
         assertEquals(0, MonitoringTask.instance.getSlowOperations().size());
 
-        assertTrue(MonitoringTask.instance.logFailedOperations(ApproximateTime.currentTimeMillis()));
+        assertTrue(MonitoringTask.instance.logFailedOperations(ApproximateTime.millisTime()));
         assertEquals(0, MonitoringTask.instance.getFailedOperations().size());
     }
 
@@ -240,11 +238,11 @@ public class MonitoringTaskTest
         assertFalse(operation.isCompleted());
 
         // skipeReporting = true ensures operations are not logged as slow
-        assertFalse(MonitoringTask.instance.logSlowOperations(ApproximateTime.currentTimeMillis()));
+        assertFalse(MonitoringTask.instance.logSlowOperations(ApproximateTime.millisTime()));
         assertEquals(0, MonitoringTask.instance.getSlowOperations().size());
 
         // skipeReporting = true ensures operations are not logged as failed
-        assertFalse(MonitoringTask.instance.logFailedOperations(ApproximateTime.currentTimeMillis()));
+        assertFalse(MonitoringTask.instance.logFailedOperations(ApproximateTime.millisTime()));
         assertEquals(0, MonitoringTask.instance.getFailedOperations().size());
     }
 
@@ -267,7 +265,7 @@ public class MonitoringTaskTest
             assertFalse(operation2.isAborted());
             assertTrue(operation2.isCompleted());
 
-            Thread.sleep(ApproximateTime.precision() + 500);
+            Thread.sleep(ApproximateTime.accuracy() + 500);
             assertEquals(0, MonitoringTask.instance.getFailedOperations().size());
             assertEquals(0, MonitoringTask.instance.getSlowOperations().size());
         }

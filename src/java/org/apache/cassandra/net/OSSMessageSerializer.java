@@ -548,6 +548,8 @@ public class OSSMessageSerializer implements Message.Serializer
         // Reconstruct the message construction time sent by the remote host (we sent only the lower 4 bytes, assuming the
         // higher 4 bytes wouldn't change between the sender and receiver)
         int partial = in.readInt(); // make sure to readInt, even if cross_node_to is not enabled
+
+        // We use an approximate wall clock time source
         long currentTime = ApproximateTime.currentTimeMillis();
         long sentConstructionTime = (currentTime & 0xFFFFFFFF00000000L) | (((partial & 0xFFFFFFFFL) << 2) >> 2);
 

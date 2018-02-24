@@ -114,7 +114,7 @@ public class MessagingServiceTest
         ConcurrentHashMap<String, Timer> dcLatency = MessagingService.instance().metrics.dcLatency;
         dcLatency.clear();
 
-        long now = ApproximateTime.currentTimeMillis();
+        long now = ApproximateTime.millisTime();
         long sentAt = now - latency;
         assertNull(dcLatency.get("datacenter1"));
         addDCLatency(sentAt, now);

@@ -156,7 +156,7 @@ public class ReadCommandTest
         ReadCommand readCommand = Util.cmd(cfs).build();
         assertEquals(2, Util.getAll(readCommand).size());
 
-        Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
+        Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.millisTime(), 0, false);
 
         try (PartitionIterator iterator = FlowablePartitions.toPartitionsFiltered(readCommand.executeInternal(monitor)))
         {
@@ -196,7 +196,7 @@ public class ReadCommandTest
         assertEquals(1, partitions.size());
         assertEquals(2, partitions.get(0).rowCount());
 
-        Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
+        Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.millisTime(), 0, false);
 
         readCommand = readCommand.withUpdatedLimit(readCommand.limits());   // duplicate command as they are not reusable
         try (PartitionIterator iterator = FlowablePartitions.toPartitionsFiltered(readCommand.executeInternal(monitor)))
@@ -237,7 +237,7 @@ public class ReadCommandTest
         assertEquals(1, partitions.size());
         assertEquals(2, partitions.get(0).rowCount());
 
-        Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
+        Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.millisTime(), 0, false);
 
         readCommand = readCommand.withUpdatedLimit(readCommand.limits());   // duplicate command as they are not reusable
         try (PartitionIterator iterator = FlowablePartitions.toPartitionsFiltered(readCommand.executeInternal(monitor)))

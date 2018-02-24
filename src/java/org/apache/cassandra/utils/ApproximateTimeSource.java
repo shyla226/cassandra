@@ -31,6 +31,7 @@ public class ApproximateTimeSource implements TimeSource
     @Override
     public long currentTimeMillis()
     {
+        // consistent with other time source implementation we use the wall clock time
         return ApproximateTime.currentTimeMillis();
     }
 

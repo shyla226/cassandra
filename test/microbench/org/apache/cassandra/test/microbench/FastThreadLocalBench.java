@@ -36,57 +36,37 @@ import org.openjdk.jmh.infra.Blackhole;
 
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
-@Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 5, time = 2, timeUnit = TimeUnit.SECONDS)
+@Warmup(iterations = 3)
+@Measurement(iterations = 3)
 @Fork(value = 1,jvmArgsAppend = {"-Xmx512M", "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"})
 @Threads(4) // make sure this matches the number of _physical_cores_
 @State(Scope.Benchmark)
 public class FastThreadLocalBench
 {
-    @Param({"2", "4", "8", "12"})
-    private int variables = 2;
-
-    static final int max = 20;
-    static final ThreadLocal[] threadLocals = new ThreadLocal[max];
-    static final FastThreadLocal[] fastThreadLocals = new FastThreadLocal[max];
-    static
-    {
-        for (int i = 0; i < max; i++)
+    static final ThreadLocal threadLocals = ThreadLocal.withInitial(Object::new);
+    static final FastThreadLocal fastThreadLocals = new FastThreadLocal() {
+        protected Object initialValue() throws Exception
         {
-            threadLocals[i] = ThreadLocal.withInitial(Object::new);
-            fastThreadLocals[i] = new FastThreadLocal() {
-                protected Object initialValue() throws Exception
-                {
-                    return new Object();
-                }
-            };
+            return new Object();
         }
-    }
+    };
 
-    @State(Scope.Thread)
-    public static class FastThreadLocalBenchState
+    @Benchmark
+    public Object baseline()
     {
-        public int index;
+        // compare with getting a field from the thread
+        return Thread.currentThread().getThreadGroup();
     }
 
     @Benchmark
-    public void baseline(FastThreadLocalBenchState state, Blackhole bh)
+    public Object threadLocal()
     {
-        if (variables != 2)
-            throw new IllegalArgumentException("skipped");
-
-        bh.consume("foo");
+        return threadLocals.get();
     }
 
     @Benchmark
-    public void threadLocal(FastThreadLocalBenchState state, Blackhole bh)
+    public Object fastThreadLocal()
     {
-        bh.consume(threadLocals[state.index % max].get());
-    }
-
-    @Benchmark
-    public void fastThreadLocal(FastThreadLocalBenchState state, Blackhole bh)
-    {
-        bh.consume(fastThreadLocals[state.index % max].get());
+        return fastThreadLocals.get();
     }
 }

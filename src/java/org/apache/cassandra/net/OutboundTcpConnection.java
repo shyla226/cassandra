@@ -297,7 +297,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
                         continue;
                     }
 
-                    if (m.isTimedOut(ApproximateTime.currentTimeMillis()))
+                    if (m.isTimedOut(ApproximateTime.millisTime()))
                         dropped.incrementAndGet();
                     else if (socket != null || connect())
                         writeConnected(qm, count == 1 && backlog.isEmpty());

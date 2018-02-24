@@ -16,31 +16,47 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.metrics;
+package org.apache.cassandra.test.microbench;
 
-import com.codahale.metrics.Clock;
+import java.util.concurrent.TimeUnit;
+
 import org.apache.cassandra.db.monitoring.ApproximateTime;
+import org.openjdk.jmh.annotations.*;
 
-class ApproximateClock extends Clock
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@Warmup(iterations = 3)
+@Measurement(iterations = 3)
+@State(Scope.Benchmark)
+public class ApproximateTimeBench
 {
-    private static final Clock DEFAULT = new ApproximateClock();
 
-    public static Clock defaultClock()
+    @Benchmark
+    public long nanoTime()
     {
-        return DEFAULT;
+        return System.nanoTime();
     }
 
+    @Benchmark
+    public long currentTimeMillis()
+    {
+        return System.currentTimeMillis();
+    }
+    @Benchmark
+    public long approximateNanoTime()
+    {
+        return ApproximateTime.nanoTime();
+    }
 
-    /**
-     * This is consistent with {@link Clock#getTime()} which returns {@link System#currentTimeMillis()}
-     */
-    public long getTime()
+    @Benchmark
+    public long approximateCurrentTimeMillis()
     {
         return ApproximateTime.currentTimeMillis();
     }
 
-    public long getTick()
+    @Benchmark
+    public long approximateMillisTime()
     {
-        return ApproximateTime.nanoTime();
+        return ApproximateTime.millisTime();
     }
 }

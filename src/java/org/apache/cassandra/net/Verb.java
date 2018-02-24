@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import org.apache.cassandra.concurrent.ExecutorSupplier;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.utils.TimeoutSupplier;
 import org.apache.cassandra.utils.versioning.Version;
 
@@ -221,7 +222,7 @@ public abstract class Verb<P, Q>
     {
         return new Message.Data<>(payload,
                                   skipPayloadSizeComputation ? -1 : computeRequestPayloadSize(payload),
-                                  System.currentTimeMillis(),
+                                  ApproximateTime.millisTime(),
                                   timeoutSupplier == null ? -1 : timeoutSupplier.get(payload));
     }
 
