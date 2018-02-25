@@ -1,4 +1,5 @@
 DSE 5.0.13
+ * Delay closing connection when nodes are removed to allow inflight commands to complete (DB-1721)
  * Harden txn log files against exceptions when adding records and improve log messages (DB-1732)
  * Fix JVM startup check (DB-1882)
  * Fix materialized view schema backup as table (DB-1828)
