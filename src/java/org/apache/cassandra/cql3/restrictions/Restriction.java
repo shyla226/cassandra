@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.restrictions;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -60,6 +61,7 @@ public interface Restriction
      */
     void addFunctionsTo(List<Function> functions);
 
+    void forEachFunction(Consumer<Function> consumer);
     /**
      * Check if the restriction is on indexed columns.
      *

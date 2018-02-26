@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -272,6 +273,12 @@ public class Json
         @Override
         public void addFunctionsTo(List<Function> functions)
         {
+        }
+
+        @Override
+        public void forEachFunction(Consumer<Function> c)
+        {
+
         }
     }
 

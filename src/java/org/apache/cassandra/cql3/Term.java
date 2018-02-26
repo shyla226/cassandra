@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -79,6 +80,8 @@ public interface Term
     }
 
     public void addFunctionsTo(List<Function> functions);
+
+    public void forEachFunction(Consumer<Function> c);
 
     /**
      * A parsed, non prepared (thus untyped) term.
@@ -151,6 +154,10 @@ public interface Term
         public Terminal bind(QueryOptions options) { return this; }
 
         public void addFunctionsTo(List<Function> functions)
+        {
+        }
+
+        public void forEachFunction(Consumer<Function> c)
         {
         }
 

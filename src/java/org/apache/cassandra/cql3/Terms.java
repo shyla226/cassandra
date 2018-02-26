@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.cql3.Term.MultiItemTerminal;
 import org.apache.cassandra.cql3.Term.Terminal;
@@ -56,6 +57,8 @@ public interface Terms
      */
     public void addFunctionsTo(List<Function> functions);
 
+    public void forEachFunction(Consumer<Function> consumer);
+
     /**
      * Collects the column specifications for the bind variables in the terms.
      * This is obviously a no-op if the terms are Terminal.
@@ -91,6 +94,11 @@ public interface Terms
         {
             @Override
             public void addFunctionsTo(List<Function> functions)
+            {
+            }
+
+            @Override
+            public void forEachFunction(Consumer<Function> consumer)
             {
             }
 
@@ -176,6 +184,12 @@ public interface Terms
                     }
 
                     @Override
+                    public void forEachFunction(Consumer<Function> consumer)
+                    {
+                        term.forEachFunction(consumer);
+                    }
+
+                    @Override
                     public void collectMarkerSpecification(VariableSpecifications boundNames)
                     {
                         term.collectMarkerSpecification(boundNames);
@@ -198,7 +212,7 @@ public interface Terms
     /**
      * Creates a {@code Terms} containing a set of {@code Term}.
      *
-     * @param term the {@code Term}
+     * @param terms the {@code Term}
      * @return a {@code Terms} containing a set of {@code Term}.
      */
     public static Terms of(final List<Term> terms)
@@ -209,6 +223,12 @@ public interface Terms
                     public void addFunctionsTo(List<Function> functions)
                     {
                         addFunctions(terms, functions);
+                    }
+
+                    @Override
+                    public void forEachFunction(Consumer<Function> consumer)
+                    {
+                        Terms.forEachFunction(terms, consumer);
                     }
 
                     @Override
@@ -260,6 +280,37 @@ public interface Terms
             if (term != null)
                 term.addFunctionsTo(functions);
         }
+    }
+
+    /**
+     * Feed all functions (native and user-defined) of the specified terms to the consumer.
+     * @param consumer the consumer to feed to
+     */
+    public static void forEachFunction(List<Term> terms, Consumer<Function> consumer)
+    {
+        for (int i = 0; i < terms.size(); i++)
+        {
+            Term term = terms.get(i);
+            if (term != null)
+                term.forEachFunction(consumer);
+        }
+    }
+
+    public static void forEachFunction(Set<Term> terms, Consumer<Function> consumer)
+    {
+        for (Term term : terms)
+        {
+            if (term != null)
+                term.forEachFunction(consumer);
+        }
+    }
+
+    public static void forEachFunction(Map<? extends Term, ? extends Term> terms, Consumer<Function> consumer)
+    {
+        terms.forEach((k,v) -> {
+            if (k != null) k.forEachFunction(consumer);
+            if (v != null) v.forEachFunction(consumer);
+        });
     }
 
     public static ByteBuffer asBytes(String keyspace, String term, AbstractType type)

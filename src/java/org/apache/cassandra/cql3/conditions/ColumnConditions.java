@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -103,6 +104,13 @@ public final class ColumnConditions extends AbstractConditions
     {
         columnConditions.forEach(p -> p.addFunctionsTo(functions));
         staticConditions.forEach(p -> p.addFunctionsTo(functions));
+    }
+
+    @Override
+    public void forEachFunction(Consumer<Function> consumer)
+    {
+        columnConditions.forEach(p -> p.forEachFunction(consumer));
+        staticConditions.forEach(p -> p.forEachFunction(consumer));
     }
 
     /**

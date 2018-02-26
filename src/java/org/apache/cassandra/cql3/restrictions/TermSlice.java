@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.restrictions;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
@@ -176,5 +177,14 @@ final class TermSlice
 
         if (hasBound(Bound.END))
             bound(Bound.END).addFunctionsTo(functions);
+    }
+
+    public void forEachFunction(Consumer<Function> consumer)
+    {
+        if (hasBound(Bound.START))
+            bound(Bound.START).forEachFunction(consumer);
+
+        if (hasBound(Bound.END))
+            bound(Bound.END).forEachFunction(consumer);
     }
 }

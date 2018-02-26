@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.functions;
 import java.util.List;
 
 import java.util.Objects;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
@@ -84,6 +85,11 @@ public abstract class AbstractFunction implements Function
     public void addFunctionsTo(List<Function> functions)
     {
         functions.add(this);
+    }
+
+    public void forEachFunction(Consumer<Function> c)
+    {
+        c.accept(this);
     }
 
     public boolean hasReferenceTo(Function function)

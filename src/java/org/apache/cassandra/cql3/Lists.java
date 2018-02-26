@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -301,6 +302,11 @@ public abstract class Lists
         public void addFunctionsTo(List<Function> functions)
         {
             Terms.addFunctions(elements, functions);
+        }
+
+        public void forEachFunction(Consumer<Function> c)
+        {
+            Terms.forEachFunction(elements, c);
         }
     }
 

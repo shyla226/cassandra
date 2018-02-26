@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Consumer;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
@@ -383,6 +384,13 @@ public class StatementRestrictions
         partitionKeyRestrictions.addFunctionsTo(functions);
         clusteringColumnsRestrictions.addFunctionsTo(functions);
         nonPrimaryKeyRestrictions.addFunctionsTo(functions);
+    }
+
+    public void forEachFunction(Consumer<Function> consumer)
+    {
+        partitionKeyRestrictions.forEachFunction(consumer);
+        clusteringColumnsRestrictions.forEachFunction(consumer);
+        nonPrimaryKeyRestrictions.forEachFunction(consumer);
     }
 
     // may be used by QueryHandler implementations

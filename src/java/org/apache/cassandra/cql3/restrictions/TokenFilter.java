@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Consumer;
 
 import com.google.common.collect.BoundType;
 import com.google.common.collect.ImmutableRangeSet;
@@ -269,6 +270,12 @@ final class TokenFilter implements PartitionKeyRestrictions
     public void addFunctionsTo(List<Function> functions)
     {
         restrictions.addFunctionsTo(functions);
+    }
+
+    @Override
+    public void forEachFunction(Consumer<Function> consumer)
+    {
+        restrictions.forEachFunction(consumer);
     }
 
     @Override

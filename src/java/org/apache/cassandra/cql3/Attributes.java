@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.ExpirationDateOverflowHandling;
@@ -64,6 +65,14 @@ public class Attributes
             timestamp.addFunctionsTo(functions);
         if (timeToLive != null)
             timeToLive.addFunctionsTo(functions);
+    }
+
+    public void forEachFunction(Consumer<Function> consumer)
+    {
+        if (timestamp != null)
+            timestamp.forEachFunction(consumer);
+        if (timeToLive != null)
+            timeToLive.forEachFunction(consumer);
     }
 
     public boolean isTimestampSet()
@@ -146,6 +155,8 @@ public class Attributes
         if (timeToLive != null)
             timeToLive.collectMarkerSpecification(boundNames);
     }
+
+
 
     public static class Raw
     {

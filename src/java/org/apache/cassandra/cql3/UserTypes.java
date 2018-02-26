@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -257,6 +258,11 @@ public abstract class UserTypes
         public void addFunctionsTo(List<Function> functions)
         {
             Terms.addFunctions(values, functions);
+        }
+
+        public void forEachFunction(Consumer<Function> c)
+        {
+            Terms.forEachFunction(values, c);
         }
 
         public boolean containsBindMarker()

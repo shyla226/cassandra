@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.StatementType;
@@ -106,21 +107,6 @@ public final class Operations implements Iterable<Operation>
     }
 
     /**
-     * Checks if one of the operations requires a read.
-     *
-     * @return <code>true</code> if one of the operations requires a read, <code>false</code> otherwise.
-     */
-    public boolean requiresRead()
-    {
-        // Lists SET operation incurs a read.
-        for (Operation operation : this)
-            if (operation.requiresRead())
-                return true;
-
-        return false;
-    }
-
-    /**
      * Checks if this <code>Operations</code> is empty.
      * @return <code>true</code> if this <code>Operations</code> is empty, <code>false</code> otherwise.
      */
@@ -140,7 +126,25 @@ public final class Operations implements Iterable<Operation>
 
     public void addFunctionsTo(List<Function> functions)
     {
-        regularOperations.forEach(p -> p.addFunctionsTo(functions));
-        staticOperations.forEach(p -> p.addFunctionsTo(functions));
+        for (int i = 0, size = regularOperations.size(); i < size; i++)
+        {
+            regularOperations.get(i).addFunctionsTo(functions);
+        }
+        for (int i = 0, size = staticOperations.size(); i < size; i++)
+        {
+            staticOperations.get(i).addFunctionsTo(functions);
+        }
+    }
+
+    public void forEachFunction(Consumer<Function> consumer)
+    {
+        for (int i = 0, size = regularOperations.size(); i < size; i++)
+        {
+            regularOperations.get(i).forEachFunction(consumer);
+        }
+        for (int i = 0, size = staticOperations.size(); i < size; i++)
+        {
+            staticOperations.get(i).forEachFunction(consumer);
+        }
     }
 }

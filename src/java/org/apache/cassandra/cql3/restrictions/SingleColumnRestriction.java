@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.*;
@@ -135,6 +136,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addFunctionsTo(List<Function> functions)
         {
             value.addFunctionsTo(functions);
+        }
+
+        @Override
+        public void forEachFunction(Consumer<Function> consumer)
+        {
+            value.forEachFunction(consumer);
         }
 
         @Override
@@ -253,6 +260,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
+        public void forEachFunction(Consumer<Function> consumer)
+        {
+            Terms.forEachFunction(values, consumer);
+        }
+
+        @Override
         protected List<ByteBuffer> getValues(QueryOptions options)
         {
             List<ByteBuffer> buffers = new ArrayList<>(values.size());
@@ -280,6 +293,11 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
         @Override
         public void addFunctionsTo(List<Function> functions)
+        {
+        }
+
+        @Override
+        public void forEachFunction(Consumer<Function> consumer)
         {
         }
 
@@ -320,6 +338,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addFunctionsTo(List<Function> functions)
         {
             slice.addFunctionsTo(functions);
+        }
+
+        @Override
+        public void forEachFunction(Consumer<Function> consumer)
+        {
+            slice.forEachFunction(consumer);
         }
 
         @Override
@@ -531,6 +555,15 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
+        public void forEachFunction(Consumer<Function> consumer)
+        {
+            Terms.forEachFunction(values, consumer);
+            Terms.forEachFunction(keys, consumer);
+            Terms.forEachFunction(entryKeys, consumer);
+            Terms.forEachFunction(entryValues, consumer);
+        }
+
+        @Override
         public String toString()
         {
             return String.format("CONTAINS(values=%s, keys=%s, entryKeys=%s, entryValues=%s)", values, keys, entryKeys, entryValues);
@@ -602,6 +635,11 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
+        public void forEachFunction(Consumer<Function> consumer)
+        {
+        }
+
+        @Override
         public boolean isNotNull()
         {
             return true;
@@ -663,6 +701,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addFunctionsTo(List<Function> functions)
         {
             value.addFunctionsTo(functions);
+        }
+
+        @Override
+        public void forEachFunction(Consumer<Function> consumer)
+        {
+            value.forEachFunction(consumer);
         }
 
         @Override

@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.cql3.*;
@@ -49,6 +50,12 @@ public class FunctionCall extends Term.NonTerminal
     {
         Terms.addFunctions(terms, functions);
         fun.addFunctionsTo(functions);
+    }
+
+    public void forEachFunction(Consumer<Function> c)
+    {
+        Terms.forEachFunction(terms, c);
+        fun.forEachFunction(c);
     }
 
     public void collectMarkerSpecification(VariableSpecifications boundNames)
