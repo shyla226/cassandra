@@ -116,15 +116,20 @@ public class Descriptor
 
     public String filenameFor(Component component)
     {
-        return baseFilename() + separator + component.name();
+        return baseFilenameBuilder().append(separator).append(component.name()).toString();
     }
 
     public String baseFilename()
     {
+        return baseFilenameBuilder().toString();
+    }
+
+    private StringBuilder baseFilenameBuilder()
+    {
         StringBuilder buff = new StringBuilder();
         buff.append(directory).append(File.separatorChar);
         appendFileName(buff);
-        return buff.toString();
+        return buff;
     }
 
     private void appendFileName(StringBuilder buff)

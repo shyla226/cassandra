@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.io.sstable.format;
 
+import java.io.File;
 import java.util.*;
 import java.util.function.Consumer;
 
@@ -45,6 +46,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 /**
@@ -325,13 +327,28 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 
     public static void rename(Descriptor tmpdesc, Descriptor newdesc, Set<Component> components)
     {
+        List<Pair<File, File>> renames = new ArrayList<>();
         for (Component component : Sets.difference(components, ImmutableSet.of(Component.DATA)))
-        {
-            FileUtils.renameWithConfirm(tmpdesc.filenameFor(component), newdesc.filenameFor(component));
-        }
+            renames.add(Pair.create(new File(tmpdesc.filenameFor(component)), new File(newdesc.filenameFor(component))));
 
         // do -Data last because -Data present should mean the sstable was completely renamed before crash
-        FileUtils.renameWithConfirm(tmpdesc.filenameFor(Component.DATA), newdesc.filenameFor(Component.DATA));
+        renames.add(Pair.create(new File(tmpdesc.filenameFor(Component.DATA)), new File(newdesc.filenameFor(Component.DATA))));
+
+        List<File> nonExisting = null;
+        for (Pair<File, File> rename : renames)
+        {
+            if (!rename.left.exists())
+            {
+                if (nonExisting == null)
+                    nonExisting = new ArrayList<>();
+                nonExisting.add(rename.left);
+            }
+        }
+        if (nonExisting != null)
+            throw new AssertionError("One or more of the required components for the rename does not exist: " + nonExisting);
+
+        for (Pair<File, File> rename : renames)
+            FileUtils.renameWithConfirm(rename.left, rename.right);
     }
 
 
