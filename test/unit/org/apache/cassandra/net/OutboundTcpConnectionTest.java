@@ -20,6 +20,8 @@ package org.apache.cassandra.net;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.WrappedBoolean;
+import org.jctools.queues.MessagePassingQueue;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -68,6 +70,29 @@ public class OutboundTcpConnectionTest
         return currentTime() + 2 * TIMEOUT_MS;
     }
 
+    private static void expireMessages(OutboundTcpConnection otc, long currentTimeMillis)
+    {
+        MessagePassingQueue<OutboundTcpConnection.QueuedMessage> backlog = otc.backlog();
+        backlog.drain(entry -> {
+            if (!entry.message.isTimedOut(currentTimeMillis))
+                backlog.relaxedOffer(entry);
+        }, backlog.size());
+    }
+
+    private static boolean backlogContainsExpiredMessages(OutboundTcpConnection otc, long currentTimeMillis)
+    {
+        MessagePassingQueue<OutboundTcpConnection.QueuedMessage> backlog = otc.backlog();
+        WrappedBoolean hasExpired = new WrappedBoolean(false);
+        backlog.drain(entry -> {
+            if (entry.message.isTimedOut(currentTimeMillis))
+                hasExpired.set(true);
+
+            backlog.offer(entry);
+        }, backlog.size());
+
+        return hasExpired.get();
+    }
+
     /**
      * Tests that non-droppable (one-way) messages are never expired
      */
@@ -77,13 +102,13 @@ public class OutboundTcpConnectionTest
         OutboundTcpConnection otc = getOutboundTcpConnectionForLocalhost();
 
         assertFalse("Fresh OutboundTcpConnection contains expired messages",
-                    otc.backlogContainsExpiredMessages(expiredTime()));
+                    backlogContainsExpiredMessages(otc, expiredTime()));
 
-        fillToPurgeSize(otc, NON_DROPPABLE);
-        otc.expireMessages(expiredTime());
+        fill(otc, NON_DROPPABLE);
+        expireMessages(otc, expiredTime());
 
         assertFalse("OutboundTcpConnection with non-droppable verbs should not expire",
-                    otc.backlogContainsExpiredMessages(expiredTime()));
+                    backlogContainsExpiredMessages(otc, expiredTime()));
     }
 
     /**
@@ -97,30 +122,30 @@ public class OutboundTcpConnectionTest
         OutboundTcpConnection otc = getOutboundTcpConnectionForLocalhost();
         
         assertFalse("Fresh OutboundTcpConnection contains expired messages",
-                    otc.backlogContainsExpiredMessages(expiredTime()));
+                    backlogContainsExpiredMessages(otc, expiredTime()));
 
         initialFill(otc, DROPPABLE);
         assertFalse("OutboundTcpConnection with droppable verbs should not expire immediately",
-                    otc.backlogContainsExpiredMessages(currentTime()));
+                    backlogContainsExpiredMessages(otc, currentTime()));
 
         assertTrue("OutboundTcpConnection with droppable verbs should expire after the delay",
-                    otc.backlogContainsExpiredMessages(expiredTime()));
+                   backlogContainsExpiredMessages(otc, expiredTime()));
 
-        otc.expireMessages(currentTime());
+        expireMessages(otc, currentTime());
 
         // Lets presume, expiration time have passed => At that time there shall be expired messages in the Queue
         assertTrue("OutboundTcpConnection with droppable verbs should have expired",
-                   otc.backlogContainsExpiredMessages(expiredTime()));
+                   backlogContainsExpiredMessages(otc, expiredTime()));
 
         // Using the same timestamp, lets expire them and check whether they have gone
-        otc.expireMessages(expiredTime());
+        expireMessages(otc, expiredTime());
         assertFalse("OutboundTcpConnection should have expired entries",
-                    otc.backlogContainsExpiredMessages(expiredTime()));
+                    backlogContainsExpiredMessages(otc, expiredTime()));
 
         // Actually the previous test can be done in a harder way: As expireMessages() has run, we cannot have
         // ANY expired values, thus lets test also against currentTime()
         assertFalse("OutboundTcpConnection should not have any expired entries",
-                    otc.backlogContainsExpiredMessages(currentTime()));
+                    backlogContainsExpiredMessages(otc, currentTime()));
 
     }
 
@@ -130,31 +155,32 @@ public class OutboundTcpConnectionTest
     }
 
     /**
-     * Fills the given OutboundTcpConnection with (1 + BACKLOG_PURGE_SIZE), elements. The first
-     * BACKLOG_PURGE_SIZE elements are non-droppable, the last one is a message with the given Verb and can be
+     * Fills the given OutboundTcpConnection with (1 + 1024), elements. The first
+     * 1024 elements are non-droppable, the last one is a message with the given Verb and can be
      * droppable or non-droppable.
      */
     private void initialFill(OutboundTcpConnection otc, Verb verb)
     {
         assertFalse("Fresh OutboundTcpConnection contains expired messages",
-                otc.backlogContainsExpiredMessages(System.nanoTime()));
+                    backlogContainsExpiredMessages(otc, System.nanoTime()));
 
-        fillToPurgeSize(otc, NON_DROPPABLE);
+        fill(otc, NON_DROPPABLE);
         otc.enqueue(msg(verb));
-        otc.expireMessages(currentTime());
+        expireMessages(otc, currentTime());
     }
 
     /**
-     * Adds BACKLOG_PURGE_SIZE messages to the queue. Hint: At BACKLOG_PURGE_SIZE expiration starts to work.
+     * Enqueues 1024 messages to the {@link OutboundTcpConnection}. Hint: 1024 was the value of the
+     * old {@code OutboundTcpConnection.BACKLOG_PURGE_SIZE} constant.
      * 
      * @param otc
      *            The OutboundTcpConnection
      * @param verb
      *            The verb that defines the message type
      */
-    private void fillToPurgeSize(OutboundTcpConnection otc, Verb verb)
+    private void fill(OutboundTcpConnection otc, Verb verb)
     {
-        for (int i = 0; i < OutboundTcpConnection.BACKLOG_PURGE_SIZE; i++)
+        for (int i = 0; i < 1024; i++)
         {
             otc.enqueue(msg(verb));
         }

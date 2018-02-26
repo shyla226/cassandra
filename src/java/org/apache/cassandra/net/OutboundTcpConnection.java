@@ -27,7 +27,6 @@ import java.nio.channels.Channels;
 import java.nio.channels.WritableByteChannel;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import java.util.zip.Checksum;
@@ -57,7 +56,6 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.utils.WrappedBoolean;
 import org.jctools.queues.MessagePassingQueue;
 import org.jctools.queues.MpscGrowableArrayQueue;
 
@@ -118,10 +116,6 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
         if (coalescingWindow < 0)
             throw new ExceptionInInitializerError(
                     "Value provided for coalescing window must be greater than 0: " + coalescingWindow);
-
-        int otc_backlog_expiration_interval_in_ms = DatabaseDescriptor.getOtcBacklogExpirationInterval();
-        if (otc_backlog_expiration_interval_in_ms != Config.otc_backlog_expiration_interval_ms_default)
-            logger.info("OutboundTcpConnection backlog expiration interval set to to {}ms", otc_backlog_expiration_interval_in_ms);
     }
 
     private volatile boolean isStopped = false;
@@ -134,11 +128,6 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
     static final int LZ4_HASH_SEED = 0x9747b28c;
 
     private final MessagePassingQueue<QueuedMessage> backlog = new MpscGrowableArrayQueue<>(4096, 1 << 30);
-    private static final String BACKLOG_PURGE_SIZE_PROPERTY = PREFIX + "otc_backlog_purge_size";
-    @VisibleForTesting
-    static final int BACKLOG_PURGE_SIZE = Integer.getInteger(BACKLOG_PURGE_SIZE_PROPERTY, 1024);
-    private final AtomicBoolean backlogExpirationActive = new AtomicBoolean(false);
-    private volatile long backlogNextExpirationTime;
 
     private final OutboundTcpConnectionPool poolReference;
 
@@ -192,26 +181,6 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
     {
         boolean success = backlog.relaxedOffer(new QueuedMessage(message));
         assert success;
-    }
-
-    /**
-     * This is a helper method for unit testing. Disclaimer: Do not use this method outside unit tests, as
-     * this method is iterating the queue which can be an expensive operation (CPU time, queue locking).
-     *
-     * @return true, if the queue contains at least one expired element
-     */
-    @VisibleForTesting // (otherwise = VisibleForTesting.NONE)
-    boolean backlogContainsExpiredMessages(long currentTimeMillis)
-    {
-        WrappedBoolean hasExpired = new WrappedBoolean(false);
-        backlog.drain(entry -> {
-            if (entry.message.isTimedOut(currentTimeMillis))
-                hasExpired.set(true);
-
-            backlog.offer(entry);
-        }, backlog.size());
-
-        return hasExpired.get();
     }
 
     void closeSocket(boolean destroyThread)
@@ -616,45 +585,14 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
         }
     }
 
-    /**
-     * Expire elements from the queue if the queue is pretty full and expiration is not already in progress.
-     * This method will only remove droppable expired entries. If no such element exists, nothing is removed from the queue.
-     */
     @VisibleForTesting
-    void expireMessages(long currentTimeMillis)
+    MessagePassingQueue<QueuedMessage> backlog()
     {
-        if (backlog.size() <= BACKLOG_PURGE_SIZE)
-            return; // Plenty of space
-
-        if (backlogNextExpirationTime > currentTimeMillis)
-            return; // Expiration is not due.
-
-        /**
-         * Expiration is an expensive process. Iterating the queue locks the queue for both writes and
-         * reads during iter.next() and iter.remove(). Thus letting only a single Thread do expiration.
-         */
-        if (backlogExpirationActive.compareAndSet(false, true))
-        {
-            try
-            {
-                backlog.drain(entry -> {
-                    if (!entry.message.isTimedOut(currentTimeMillis))
-                        backlog.relaxedOffer(entry);
-                    else
-                        dropped.incrementAndGet();
-                }, backlog.size());
-            }
-            finally
-            {
-                long backlogExpirationInterval = DatabaseDescriptor.getOtcBacklogExpirationInterval();
-                backlogNextExpirationTime = currentTimeMillis + backlogExpirationInterval;
-                backlogExpirationActive.set(false);
-            }
-        }
+        return backlog;
     }
 
     /** messages that have not been retried yet */
-    private static class QueuedMessage implements Coalescable
+    static class QueuedMessage implements Coalescable
     {
         final Message message;
         final long timestampNanos;
