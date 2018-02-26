@@ -481,7 +481,7 @@ public final class AuthManager
             // the IRoleManager.
             Set<RoleResource> memberOf = roleManager.getRoleMemberOf(role);
 
-            if (roles != null)
+            if (memberOf != null)
                 roles.addAll(memberOf);
 
             roleManager.dropRole(performer, role);
