@@ -693,6 +693,20 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                         descriptor.getFormat().getLatestVersion(),
                         descriptor));
 
+            boolean anyNotExists = false;
+            for (Component component : entry.getValue())
+            {
+                if (!new File(descriptor.filenameFor(component)).exists())
+                {
+                    logger.debug("Component {} for {} not found - ignoring sstable to add",
+                                 component,
+                                 descriptor.filenameFor(component));
+                    anyNotExists = true;
+                }
+            }
+            if (anyNotExists)
+                continue;
+
             // force foreign sstables to level 0
             if (resetLevels)
             {try
