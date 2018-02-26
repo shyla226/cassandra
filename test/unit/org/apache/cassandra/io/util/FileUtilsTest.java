@@ -201,15 +201,14 @@ public class FileUtilsTest
         String procMounts =
         "sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0\n" +
         "proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n" +
-        "tmpfs /run tmpfs rw,nosuid,noexec,relatime,size=6587372k,mode=755 0 0\n" +
         "/dev/nvme0n1p2 / ext4 rw,relatime,errors=remount-ro,data=ordered 0 0\n" +
         "/dev/sda3 /foobar ext4 rw,relatime,errors=remount-ro,data=ordered 0 0\n" +
+        "tmpfs /tmp tmpfs rw,nosuid,nodev,noatime 0 0\n" +
         "securityfs /sys/kernel/security securityfs rw,nosuid,nodev,noexec,relatime 0 0\n" +
         "cgroup /sys/fs/cgroup/systemd cgroup rw,nosuid,nodev,noexec,relatime,xattr,release_agent=/lib/systemd/systemd-cgroups-agent,name=systemd 0 0\n" +
         "fusectl /sys/fs/fuse/connections fusectl rw,relatime 0 0\n" +
         "/dev/nvme0n1p1 /boot/efi vfat rw,relatime,fmask=0077,dmask=0077,codepage=437,iocharset=iso8859-1,shortname=mixed,errors=remount-ro 0 0\n" +
         "binfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc rw,relatime 0 0\n" +
-        "tmpfs /run/user/1000 tmpfs rw,nosuid,nodev,relatime,size=6587368k,mode=700,uid=1000,gid=1000 0 0\n" +
         "gvfsd-fuse /run/user/1000/gvfs fuse.gvfsd-fuse rw,nosuid,nodev,relatime,user_id=1000,group_id=1000 0 0\n" +
         "/dev/nvme0n1p2 /var/lib/docker/aufs ext4 rw,relatime,errors=remount-ro,data=ordered 0 0\n" +
         "diskstation:/volume1/backup-bear /home/snazy/backup-bear nfs4 rw,relatime,vers=4.0 0 0\n";
@@ -220,7 +219,7 @@ public class FileUtilsTest
                                                                                  "nvme0n1p2",
                                                                                  "ext4"));
         expected.put(Paths.get("/home/snazy/backup-bear"), new FileUtils.MountPoint(Paths.get("/home/snazy/backup-bear"),
-                                                                                    "WE_DO_NOT_KNOW",
+                                                                                    "diskstation:/volume1/backup-bear",
                                                                                     "nfs4"));
         expected.put(Paths.get("/boot/efi"), new FileUtils.MountPoint(Paths.get("/boot/efi"),
                                                                       "nvme0n1p1",
@@ -228,6 +227,9 @@ public class FileUtilsTest
         expected.put(Paths.get("/foobar"), new FileUtils.MountPoint(Paths.get("/foobar"),
                                                                     "sda3",
                                                                     "ext4"));
+        expected.put(Paths.get("/tmp"), new FileUtils.MountPoint(Paths.get("/tmp"),
+                                                                 "tmpfs",
+                                                                 "tmpfs"));
         expected.put(Paths.get("/"), new FileUtils.MountPoint(Paths.get("/"),
                                                               "nvme0n1p2",
                                                               "ext4"));
