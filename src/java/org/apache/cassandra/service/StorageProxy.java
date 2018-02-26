@@ -2422,10 +2422,9 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     public int getOtcBacklogExpirationInterval() {
-        return DatabaseDescriptor.getOtcBacklogExpirationInterval();
+        return 0;
     }
 
     public void setOtcBacklogExpirationInterval(int intervalInMillis) {
-        DatabaseDescriptor.setOtcBacklogExpirationInterval(intervalInMillis);
     }
 }
