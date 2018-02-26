@@ -29,8 +29,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 
-import junit.framework.Assert;
-
+import org.junit.Assert;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -468,6 +467,17 @@ public class LeveledCompactionStrategyTest
     @Test
     public void testLevelPicking() throws Exception
     {
+        // With the new "level picking on streaming" functionality (DB-639), we place incoming sstables
+        // in the same level or up-level, if necessary. This heavily reduces compaction induced by streaming
+        // on the receiving node.
+        //
+        // Without "level picking on streaming", all incoming sstables land in L0 and causes lots of
+        // compaction activity.
+        //
+        // This test disables auto-compaction during streaming and enables it after streaming.
+        // At the end we check that after auto-compaction has been enabled, no compaction occurs and
+        // that some sstables were up-leveled.
+
         DatabaseDescriptor.setPickLevelOnStreaming(true);
         try
         {
@@ -492,16 +502,22 @@ public class LeveledCompactionStrategyTest
                 rm.apply();
                 cfs.forceBlockingFlush();
             }
-            LeveledCompactionStrategyTest.waitForLeveling(cfs);
+
             LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getStrategies().get(1).get(0);
-            while (!cfs.getTracker().getCompacting().isEmpty())
-                Thread.sleep(100);
+
+            waitForLevelingAndCompactions(cfs, strategy);
+
             cfs.disableAutoCompaction();
+
             int[] startLevels = strategy.getAllLevelSize();
             int higestLevel = 0;
+            int startSum = 0;
             for (int i = 0; i < startLevels.length; i++)
+            {
+                startSum += startLevels[i];
                 if (startLevels[i] != 0)
                     higestLevel = i;
+            }
 
             logger.info("Starting Levels {}", startLevels);
 
@@ -513,36 +529,65 @@ public class LeveledCompactionStrategyTest
             for (int i = 0; i < 2; i++)
             {
                 for (SSTableReader table : tables)
-                    transferKeepLevels(table);
+                {
+                    // MUST exclude sstables from L0, otherwise auto-compaction will kick in when enabled
+                    if (table.getSSTableLevel() > 0)
+                    {
+                        transferKeepLevels(table);
+                    }
+                }
             }
 
             refs.release(tables);
 
-            long compactionTasks = CompactionManager.instance.getCompletedTasks();
+            long startCompactions = CompactionManager.instance.getTotalCompactionsCompleted();
 
-            cfs.enableAutoCompaction();
-            LeveledCompactionStrategyTest.waitForLeveling(cfs);
-            while (!cfs.getTracker().getCompacting().isEmpty())
-                Thread.sleep(100);
+            cfs.enableAutoCompaction(); // this seems to trigger a (noop) background task, that's counted in CompactionManager.instance.getCompletedTasks()
 
-            long endCompactionTasks = CompactionManager.instance.getCompletedTasks();
+            waitForLevelingAndCompactions(cfs, strategy);
+
+            long endCompactions = CompactionManager.instance.getTotalCompactionsCompleted();
 
 
             int[] endLevels = strategy.getAllLevelSize();
             int higestLevelEnd = 0;
+            int endSum = 0;
             for (int i = 0; i < endLevels.length; i++)
+            {
+                endSum += endLevels[i];
                 if (endLevels[i] != 0)
                     higestLevelEnd = i;
+            }
 
 
-            logger.info("Ending Levels {} {}", endLevels, endCompactionTasks);
-            Assert.assertEquals(compactionTasks, endCompactionTasks);
-            Assert.assertTrue(higestLevelEnd > higestLevel);
+            String msg = String.format("Level comparison:\n" +
+                                       "Starting Levels %s - sum:%d - compactions:%d\n" +
+                                       "Ending Levels %s - sum:%d - compactions:%d",
+                                       Arrays.toString(startLevels), startSum, startCompactions,
+                                       Arrays.toString(endLevels), endSum, endCompactions);
+            logger.info("{}", msg);
+            // no compaction activity
+            Assert.assertEquals(msg, startCompactions, endCompactions);
+            // up-leveling should have happened
+            Assert.assertTrue(msg, higestLevelEnd > higestLevel);
         }
         finally
         {
             DatabaseDescriptor.setPickLevelOnStreaming(false);
         }
+    }
+
+    private void waitForLevelingAndCompactions(ColumnFamilyStore cfs, LeveledCompactionStrategy strategy) throws InterruptedException
+    {
+        LeveledCompactionStrategyTest.waitForLeveling(cfs);
+        waitForCompactions(cfs, strategy);
+    }
+
+    private void waitForCompactions(ColumnFamilyStore cfs, LeveledCompactionStrategy strategy) throws InterruptedException
+    {
+        while (!cfs.getTracker().getCompacting().isEmpty()
+               || (!cfs.isAutoCompactionDisabled() && strategy.manifest.getEstimatedTasks() > 0))
+            Thread.sleep(100);
     }
 
     private Collection<StreamSession.SSTableStreamingSections> makeStreamingDetails(Refs<SSTableReader> sstables)
@@ -599,8 +644,7 @@ public class LeveledCompactionStrategyTest
         LeveledCompactionStrategyTest.waitForLeveling(cfs);
         LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getStrategies().get(1).get(0);
         cfs.disableAutoCompaction();
-        while (!cfs.getTracker().getCompacting().isEmpty())
-            Thread.sleep(100);
+        waitForCompactions(cfs, strategy);
         int [] levelsBefore = strategy.getAllLevelSize();
         Set<SSTableReader> sstablesToRemove = new HashSet<>();
         int totalSSTableCount = cfs.getLiveSSTables().size();
