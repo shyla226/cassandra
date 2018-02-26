@@ -698,7 +698,9 @@ public final class FileUtils
 
         private MountPoint(Path mountpoint, String device, String fstype, Path queueFolder) throws IOException
         {
-            this(mountpoint, device, fstype, isPartitionOnSSD(queueFolder), getSectorSize(queueFolder, device));
+            this(mountpoint, device, fstype,
+                 checkRamdisk(fstype) ? true : isPartitionOnSSD(queueFolder),
+                 checkRamdisk(fstype) ? DEFAULT.sectorSize : getSectorSize(queueFolder, device));
         }
 
         private MountPoint(Path mountpoint, String device, String fstype, boolean onSSD, int sectorSize)
@@ -708,24 +710,6 @@ public final class FileUtils
             this.fstype = fstype;
             this.onSSD = onSSD;
             this.sectorSize = sectorSize;
-        }
-
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            MountPoint that = (MountPoint) o;
-            return Objects.equals(mountpoint, that.mountpoint) &&
-                   Objects.equals(device, that.device) &&
-                   Objects.equals(fstype, that.fstype) &&
-                   this.onSSD == that.onSSD &&
-                   this.sectorSize == that.sectorSize;
-        }
-
-        public int hashCode()
-        {
-            return Objects.hash(mountpoint, device, fstype, onSSD, sectorSize);
         }
 
         private static Path getQueueFolder(String partition) throws IOException
@@ -805,6 +789,35 @@ public final class FileUtils
             return Integer.parseInt(Files.lines(logical_block_size).findFirst().orElseGet(defaultSectorSize));
         }
 
+        @Override
+        public String toString()
+        {
+            return "MountPoint{" +
+                   "mountpoint=" + mountpoint +
+                   ", device='" + device + '\'' +
+                   ", fstype='" + fstype + '\'' +
+                   ", onSSD=" + onSSD +
+                   ", sectorSize=" + sectorSize +
+                   '}';
+        }
+
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            MountPoint that = (MountPoint) o;
+            return onSSD == that.onSSD &&
+                   sectorSize == that.sectorSize &&
+                   Objects.equals(mountpoint, that.mountpoint) &&
+                   Objects.equals(device, that.device) &&
+                   Objects.equals(fstype, that.fstype);
+        }
+
+        public int hashCode()
+        {
+
+            return Objects.hash(mountpoint, device, fstype, onSSD, sectorSize);
+        }
     }
 
     @VisibleForTesting
@@ -830,7 +843,9 @@ public final class FileUtils
 
                 String partition =  parts[0];
 
-                if (partition.indexOf('/') == -1)
+                String fstype = parts[2];
+
+                if (!checkRamdisk(fstype) && partition.indexOf('/') == -1)
                     // this _should_ be a Linux internal thing (sysfs, procfs, tmpfs, cgroup, whatever)
                     continue;
 
@@ -842,12 +857,6 @@ public final class FileUtils
                     //   /dev/nvme0n1p2
                     partition = partition.substring("/dev/".length());
                 }
-                else
-                {
-                    partition = "WE_DO_NOT_KNOW";
-                }
-
-                String fstype = parts[2];
 
                 // /home, /dev/sda
                 Path mp = Paths.get(parts[1]);
@@ -856,6 +865,11 @@ public final class FileUtils
         }
 
         return dirToDisk;
+    }
+
+    private static boolean checkRamdisk(String fstype)
+    {
+        return "tmpfs".equals(fstype);
     }
 
     /**
