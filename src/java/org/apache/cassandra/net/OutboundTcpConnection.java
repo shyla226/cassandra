@@ -447,7 +447,15 @@ public class OutboundTcpConnection extends Thread
             try
             {
                 if (out != null)
-		    out.flush();
+                    out.flush();
+            }
+            catch (IOException e)
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("exception flushing output stream before closing connection to " + poolReference.endPoint(), e);
+            }
+            try
+            {
                 socket.close();
                 if (logger.isTraceEnabled())
                     logger.trace("Socket to {} closed", poolReference.endPoint());
