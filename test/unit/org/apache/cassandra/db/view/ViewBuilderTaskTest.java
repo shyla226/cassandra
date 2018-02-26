@@ -94,14 +94,14 @@ public class ViewBuilderTaskTest extends CQLTester
                 Token lastToken = indexOfLastToken == null ? null : tokens.get(indexOfLastToken);
                 Range<Token> range = new Range<>(startToken, endToken);
 
-                // Run the view build task, verifying the returned number of bult keys
+                // Run the view build task, verifying the returned number of built keys
                 long actualKeysBuilt = new ViewBuilderTask(cfs, view, range, lastToken, keysBuilt).call();
                 assertEquals(expectedKeysBuilt, actualKeysBuilt);
 
                 // Verify that the rows have been written to the MV
                 assertRowCount(execute("SELECT * FROM " + viewName), expectedRowsInView);
 
-                // Verify that the last position and number of bult keys have been stored
+                // Verify that the last position and number of built keys have been stored
                 assertRows(execute(String.format("SELECT last_token, keys_built " +
                                                  "FROM %s.%s WHERE keyspace_name='%s' AND view_name='%s' " +
                                                  "AND start_token=? AND end_token=?",
@@ -115,19 +115,19 @@ public class ViewBuilderTaskTest extends CQLTester
         }
         Tester tester = new Tester();
 
-        // Build range from rows 0 to 100 without any recorded start position
+        // Build range from partitions 0 to 10 without any recorded start position
         tester.test(0, 10, null, 0, 10, 100);
 
-        // Build range from rows 100 to 200 starting at row 150
+        // Build range from partitions 10 to 20 starting at partition 15
         tester.test(10, 20, 15, 0, 5, 50);
 
-        // Build range from rows 300 to 400 starting at row 350 with 10 built keys
+        // Build range from partitions 30 to 40 starting at partition 35 with 10 built keys
         tester.test(30, 40, 35, 10, 15, 50);
 
-        // Build range from rows 400 to 500 starting at row 100 (out of range) with 10 built keys
+        // Build range from partitions 40 to 50 starting at partition 10 (out of range) with 10 built keys
         tester.test(40, 50, 10, 10, 20, 100);
 
-        // Build range from rows 900 to 100 (wrap around) without any recorded start position
+        // Build range from partitions 90 to 10 (wrap around) without any recorded start position
         tester.test(90, 10, null, 0, 20, 200);
 
         executeNet(protocolVersion, "DROP MATERIALIZED VIEW " + view.name);

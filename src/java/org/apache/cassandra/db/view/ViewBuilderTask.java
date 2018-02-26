@@ -23,6 +23,8 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.base.Function;
@@ -144,7 +146,7 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
                         ++keysBuilt;
                     }
                     if (keysBuilt % ROWS_BETWEEN_CHECKPOINTS == 1)
-                        SystemKeyspace.updateViewBuildStatus(ksName, view.name, range, token, keysBuilt);
+                        updateViewBuildStatus(ksName, token);
                     prevToken = token;
                 }
             }
@@ -155,6 +157,18 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
         return keysBuilt;
     }
 
+    private void updateViewBuildStatus(String ksName, Token token)
+    {
+        try
+        {
+            SystemKeyspace.updateViewBuildStatus(ksName, view.name, range, token, keysBuilt).get();
+        }
+        catch (Exception e)
+        {
+            logger.warn("Problem while setting view build status of view {}.{}", ksName, view.name, e);
+        }
+    }
+
     private void finish()
     {
         String ksName = baseCfs.keyspace.getName();
@@ -162,7 +176,7 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
         {
             // Save the completed status using the end of the range as last token. This way it will be possible for
             // future view build attempts to don't even create a task for this range
-            SystemKeyspace.updateViewBuildStatus(ksName, view.name, range, range.right, keysBuilt);
+            updateViewBuildStatus(ksName, range.right);
 
             logger.debug("Completed build of view({}.{}) for range {} after covering {} keys ", ksName, view.name, range, keysBuilt);
         }
