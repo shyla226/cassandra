@@ -142,6 +142,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no internal DB ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no internal DB ticket)
 Merged from dse5.0:
+ * Make PFS compatibility mode for GPFS opt-in (DB-1663)
  * Avoid NPE when providing invalid number of arguments for token function (DB-855)
  * Fetch/query no columns in priming connections to avoid errors if system.local columns are changed (DB-1708)
  * Allow skipping commit log replay does not fail on descriptor errors (DB-1650)

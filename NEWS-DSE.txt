@@ -138,6 +138,9 @@ Upgrading
      Check the system log after startup to see if suboptimal configurations are present.
    - Since client connections are tied to a TPC thread, single process applications issuing a large
      number of concurrent requests may benefit from increasing the number of connections per host.
+   - Automatic fallback of GossipingPropertyFileSnitch to PropertyFileSnitch (cassandra-topology.properties) is
+     disabled by default and can be enabled via the -Dcassandra.gpfs.enable_pfs_compatibility_mode=true startup
+     flag.
 
 Deprecation
 -----------

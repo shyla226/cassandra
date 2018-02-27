@@ -21,10 +21,18 @@ package org.apache.cassandra.locator;
 import java.net.InetAddress;
 
 import com.google.common.net.InetAddresses;
+import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.*;
@@ -34,11 +42,28 @@ import static org.junit.Assert.*;
  */
 public class GossipingPropertyFileSnitchTest
 {
-
     @BeforeClass
-    public static void setupDD()
+    public static void beforeClass() throws Exception
     {
         DatabaseDescriptor.daemonInitialization();
+        SchemaLoader.mkdirs();
+        SchemaLoader.cleanup();
+        Keyspace.setInitialized();
+        StorageService.instance.initServer(0);
+    }
+
+    @AfterClass
+    public static void afterClass()
+    {
+        StorageService.instance.stopClient();
+    }
+
+    @After
+    public void after()
+    {
+        SystemKeyspace.resetStartupBlocking();
+        ColumnFamilyStore systemPeers = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.PEERS);
+        systemPeers.truncateBlocking();
     }
 
     public static void checkEndpoint(final AbstractNetworkTopologySnitch snitch,
@@ -55,5 +80,48 @@ public class GossipingPropertyFileSnitchTest
     {
         final GossipingPropertyFileSnitch snitch = new GossipingPropertyFileSnitch();
         checkEndpoint(snitch, FBUtilities.getBroadcastAddress().getHostAddress(), "DC1", "RAC1");
+    }
+
+    @Test
+    public void testPfsCompatibilityEnabled() throws Exception
+    {
+        testPfsCompatibility(true, false);
+    }
+
+    @Test
+    public void testPfsCompatibilityEnabledWithSavedInfo() throws Exception
+    {
+        testPfsCompatibility(true, true);
+    }
+
+    @Test
+    public void testPfsCompatibilityDisabled() throws Exception
+    {
+        testPfsCompatibility(false, false);
+    }
+
+    public void testPfsCompatibility(boolean enablePfsCompatibility, boolean savedInfo) throws Exception
+    {
+        final GossipingPropertyFileSnitch snitch = new GossipingPropertyFileSnitch(enablePfsCompatibility);
+        if (enablePfsCompatibility)
+        {
+            if (savedInfo)
+            {
+                SystemKeyspace.updatePeerInfo(InetAddress.getByName("127.0.0.2"), "data_center", "DC3").get();
+                SystemKeyspace.updatePeerInfo(InetAddress.getByName("127.0.0.2"), "rack", "RAC3").get();
+                // saved info should have precedence over property file snitch
+                checkEndpoint(snitch, "127.0.0.2", "DC3", "RAC3");
+            }
+            else
+            {
+                // test/conf/cassandra-topology.properties defines endpoint 127.0.0.2 on DC1/RAC2
+                checkEndpoint(snitch, "127.0.0.2", "DC1", "RAC2");
+            }
+        }
+        else
+        {
+            // when PFS compatibility is not enabled, default rc/rack should be returned
+            checkEndpoint(snitch, "127.0.0.2", GossipingPropertyFileSnitch.DEFAULT_DC, GossipingPropertyFileSnitch.DEFAULT_RACK);
+        }
     }
 }
