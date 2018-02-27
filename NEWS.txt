@@ -1,5 +1,5 @@
-WARNING: MAXIMUM TTL EXPIRATION DATE NOTICE
---------------------------------------------
+PLEASE READ: MAXIMUM TTL EXPIRATION DATE NOTICE (CASSANDRA-14092)
+------------------------------------------------------------------
 (General upgrading instructions are available in the next section)
 
 The maximum expiration timestamp that can be represented by the storage engine is
@@ -41,6 +41,15 @@ When upgrading major versions of Cassandra, you will be unable to
 restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
+
+DSE 5.1.7
+==========
+
+Upgrading
+---------
+    - Automatic fallback of GossipingPropertyFileSnitch to PropertyFileSnitch (cassandra-topology.properties) is
+      disabled by default and can be enabled via the -Dcassandra.gpfs.enable_pfs_compatibility_mode=true startup
+      flag.
 
 DSE 5.1.6
 =========
