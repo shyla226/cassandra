@@ -712,19 +712,30 @@ public final class FileUtils
             this.sectorSize = sectorSize;
         }
 
-        private static Path getQueueFolder(String partition) throws IOException
+        private static Path getQueueFolder(String device) throws IOException
         {
             assert FBUtilities.isLinux;
 
-            Path sysClassBlock = Paths.get("/sys/class/block/" + partition);
+            Path sysClassBlock = Paths.get("/sys/class/block/" + device);
             // not a block device
             if (!sysClassBlock.toFile().exists())
                 return null;
 
             // read symlink from /sys/class/block/... to /sys/devices/...
             sysClassBlock = sysClassBlock.toRealPath();
-            Path device = sysClassBlock.getParent();
-            return device.resolve("queue");
+
+            // If 'device' points to a partition, there will be no "queue" folder, because partitions don't have
+            // that - but the device does. The device is found in the parent folder.
+            // If 'device' directly points to a device (e.g. /dev/loopX or /dev/sda), then the "queue" folder will
+            // be there.
+
+            // pointers to the device itself (e.g. via /sys/class/block/sda) have the "queue" folder in there
+            if (sysClassBlock.resolve("queue").toFile().isDirectory())
+                return sysClassBlock.resolve("queue");
+
+            // pointers to the partition (e.g. /sys/class/block/sda1) have the "queue" folder in the parent, which is the device
+            Path devDir = sysClassBlock.getParent();
+            return devDir.resolve("queue");
         }
 
         /**
