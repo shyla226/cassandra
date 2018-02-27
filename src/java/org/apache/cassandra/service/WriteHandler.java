@@ -113,7 +113,8 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
         private ConsistencyLevel idealConsistencyLevel;
 
         private List<Consumer<Response<EmptyPayload>>> onResponseTasks;
-        private List<Consumer<InetAddress>> onTimeoutTasks;
+        /* To minimize list allocations this reference is either a single task(common case) or a list of tasks **/
+        private Object onTimeoutTasks;
         private List<Consumer<FailureResponse<EmptyPayload>>> onFailureTasks;
 
         private Builder(WriteEndpoints endpoints,
@@ -178,9 +179,7 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
          */
         public Builder onTimeout(Consumer<InetAddress> task)
         {
-            if (onTimeoutTasks == null)
-                onTimeoutTasks = new ArrayList<>(1);
-            onTimeoutTasks.add(task);
+            onTimeoutTasks = setTaskOrAddToList(task, onTimeoutTasks);
             return this;
         }
 
@@ -244,7 +243,7 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
         private WriteHandler withTasks(WriteHandler handler)
         {
             final List<Consumer<Response<EmptyPayload>>> onResponseTasks = freeze(this.onResponseTasks);
-            final List<Consumer<InetAddress>> onTimeoutTasks = freeze(this.onTimeoutTasks);
+            final Object onTimeoutTasks = freezeTaskOrList(this.onTimeoutTasks);
             final List<Consumer<FailureResponse<EmptyPayload>>> onFailureTasks = freeze(this.onFailureTasks);
             return new WrappingWriteHandler(handler)
             {
@@ -268,10 +267,55 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
                 public void onTimeout(InetAddress host)
                 {
                     super.onTimeout(host);
-                    for (Consumer<InetAddress> task : onTimeoutTasks)
-                        accept(task, host, "onTimeout");
+                    acceptTaskOrListOfTasks(host, onTimeoutTasks, "onTimeout");
                 }
             };
+        }
+
+        private static void acceptTaskOrListOfTasks(InetAddress host, Object taskOrList, String taskType)
+        {
+            if (taskOrList instanceof List)
+            {
+                for (Consumer<InetAddress> task : (List<Consumer<InetAddress>>) taskOrList)
+                    accept(task, host, taskType);
+            }
+            else
+            {
+                accept((Consumer<InetAddress>) taskOrList, host, taskType);
+            }
+        }
+
+        private static Object freezeTaskOrList(Object taskOrList)
+        {
+            return !(taskOrList instanceof ArrayList) &&
+                     taskOrList != null ?
+                     taskOrList : freeze((List<? extends Object>) taskOrList);
+        }
+
+        private static Object setTaskOrAddToList(Consumer<InetAddress> task, Object taskOrList)
+        {
+            // to support the dual nature of taskOrList we impose this restriction
+            if (task instanceof ArrayList)
+                throw new IllegalArgumentException("tasks are not permitted to subclass ArrayList");
+
+            // no task -> single task
+            if (taskOrList == null)
+            {
+                taskOrList = task;
+            }
+            // we're already in list mode, just add another task
+            else if (taskOrList instanceof ArrayList)
+                ((ArrayList) taskOrList).add(task);
+                // single task -> task list
+            else
+            {
+                // replace the single task with a list of tasks containing current + new task
+                final ArrayList<Consumer<InetAddress>> consumers = new ArrayList<>(2);
+                consumers.add((Consumer<InetAddress>) taskOrList);
+                consumers.add(task);
+                taskOrList = consumers;
+            }
+            return taskOrList;
         }
 
         private WriteHandler withIdealConsistencyLevel(WriteHandler handler)
