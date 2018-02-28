@@ -28,7 +28,8 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -57,6 +58,12 @@ public class ShadowRoundTest
         IEndpointSnitch snitch = new PropertyFileSnitch();
         DatabaseDescriptor.setEndpointSnitch(snitch);
         Keyspace.setInitialized();
+        // DB-1749: by getting this stage here, we trigger the static block in StageManager that initializes
+        // the stages. Without this, we first hit this static block when handling the first ack below.
+        // Depending on the size of these stages and the environment, the prestarting of core threads can take
+        // over a second, which causes the shadow round triggered in initServer() to fail. This failure
+        // happens because RING_DELAY is only one second in unit tests.
+        StageManager.getStage(Stage.GOSSIP);
     }
 
     @After
