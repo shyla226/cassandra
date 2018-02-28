@@ -453,7 +453,15 @@ public class OutboundTcpConnection extends FastThreadLocalThread
             try
             {
                 if (out != null)
-		    out.flush();
+                    out.flush();
+            }
+            catch (IOException e)
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("exception flushing output stream before closing connection to " + poolReference.endPoint(), e);
+            }
+            try
+            {
                 socket.close();
                 logger.debug("Socket to {} closed", poolReference.endPoint());
             }
