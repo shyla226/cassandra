@@ -26,7 +26,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
@@ -34,27 +33,19 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
-
-import io.reactivex.Completable;
-import io.reactivex.Single;
-
 import org.apache.commons.lang3.StringUtils;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.batchlog.Batch;
-import org.apache.cassandra.batchlog.BatchRemove;
-import org.apache.cassandra.batchlog.BatchlogManager;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCTaskType;
-import org.apache.cassandra.concurrent.TPCUtils;
+import io.reactivex.Completable;
+import io.reactivex.Single;
+import org.apache.cassandra.batchlog.*;
+import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.dht.*;
@@ -67,18 +58,13 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.locator.*;
 import org.apache.cassandra.metrics.*;
 import org.apache.cassandra.net.*;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.paxos.Commit;
-import org.apache.cassandra.service.paxos.CommitCallback;
-import org.apache.cassandra.service.paxos.PrepareCallback;
-import org.apache.cassandra.service.paxos.ProposeCallback;
+import org.apache.cassandra.schema.*;
+import org.apache.cassandra.service.paxos.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.triggers.TriggerExecutor;
-import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.AsyncLatch;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.Threads;
@@ -88,7 +74,7 @@ public class StorageProxy implements StorageProxyMBean
     public static final String MBEAN_NAME = "org.apache.cassandra.db:type=StorageProxy";
     private static final Logger logger = LoggerFactory.getLogger(StorageProxy.class);
 
-    public static final String UNREACHABLE = "UNREACHABLE";
+    private static final String UNREACHABLE = "UNREACHABLE";
 
     public static final StorageProxy instance = new StorageProxy();
 
@@ -509,7 +495,7 @@ public class StorageProxy implements StorageProxyMBean
 
         if (shouldHint)
         {
-            Collection<InetAddress> endpointsToHint = Collections2.filter(endpoints.dead(), e -> shouldHint(e));
+            Collection<InetAddress> endpointsToHint = Collections2.filter(endpoints.dead(), StorageProxy::shouldHint);
             if (!endpointsToHint.isEmpty())
                 submitHint(mutation, endpointsToHint, null);
         }
@@ -540,8 +526,9 @@ public class StorageProxy implements StorageProxyMBean
         Tracing.trace("Determining replicas for mutation");
 
         long startTime = System.nanoTime();
-        List<WriteHandler> responseHandlers = new ArrayList<>(mutations.size());
+        final ArrayList<WriteHandler> responseHandlers = allocateHandlersList(mutations.size());
 
+        Completable ret;
         try
         {
             for (IMutation mutation : mutations)
@@ -556,6 +543,8 @@ public class StorageProxy implements StorageProxyMBean
                     responseHandlers.add(mutateStandard((Mutation)mutation, consistencyLevel, wt, queryStartNanoTime));
                 }
             }
+            List<Completable> transform = Lists.transform(responseHandlers, WriteHandler::toObservable);
+            ret = Completable.concat(transform);
         }
         catch(UnavailableException | OverloadedException ex)
         {
@@ -565,10 +554,10 @@ public class StorageProxy implements StorageProxyMBean
             writeMetrics.unavailables.mark();
             writeMetricsMap.get(consistencyLevel).unavailables.mark();
             Tracing.trace("Unavailable");
+            recycleHandlersList(responseHandlers);
             return Single.error(ex);
         }
 
-        Completable ret = Completable.concat(Lists.transform(responseHandlers, WriteHandler::toObservable));
         return ret.onErrorResumeNext(ex -> {
             if (logger.isTraceEnabled())
                 logger.trace("Failed to wait for handlers", ex);
@@ -614,7 +603,25 @@ public class StorageProxy implements StorageProxyMBean
                 Tracing.trace("Overloaded");
             }
             return Completable.error(ex);
-        }).doFinally(() -> recordLatency(consistencyLevel, startTime)).toSingleDefault(new ResultMessage.Void());
+        }).doFinally(() -> {
+            recycleHandlersList(responseHandlers);
+            recordLatency(consistencyLevel, startTime);
+        }).toSingleDefault(new ResultMessage.Void());
+    }
+
+    /* reduce list allocation in the #mutate method above */
+    private static final int HANDLER_LIST_RECYCLER_LIMIT = 128;
+    private static final LightweightRecycler<ArrayList<WriteHandler>> HANDLER_LIST_RECYCLER =
+        new LightweightRecycler<>(HANDLER_LIST_RECYCLER_LIMIT);
+
+    private static void recycleHandlersList(ArrayList<WriteHandler> responseHandlers)
+    {
+        HANDLER_LIST_RECYCLER.tryRecycle(responseHandlers);
+    }
+
+    private static ArrayList<WriteHandler> allocateHandlersList(int sizeHint)
+    {
+        return HANDLER_LIST_RECYCLER.reuseOrAllocate(() -> new ArrayList<>(sizeHint));
     }
 
     /**
@@ -719,7 +726,7 @@ public class StorageProxy implements StorageProxyMBean
             if (endpoint.equals(FBUtilities.getBroadcastAddress()) && endpoints.pendingCount() == 0 && StorageService.instance.isJoined())
             {
                 completables.add(mutation.applyAsync(writeCommitLog, true)
-                                         .doFinally(() -> cleanupLatch.countDown())
+                                         .doFinally(cleanupLatch::countDown)
                                          .doOnError(exc -> logger.error("Error applying local view update to keyspace {}: {}", mutation.getKeyspaceName(), mutation)));
 
                 nonLocalMutations.remove(mutation);
@@ -1576,7 +1583,7 @@ public class StorageProxy implements StorageProxyMBean
      */
     public static void addLiveSortedEndpointsToList(Keyspace keyspace, RingPosition pos, ArrayList<InetAddress> liveEndpoints)
     {
-        StorageService.instance.addLiveNaturalEndpointsToList(keyspace, pos, liveEndpoints);
+        StorageService.addLiveNaturalEndpointsToList(keyspace, pos, liveEndpoints);
         DatabaseDescriptor.getEndpointSnitch().sortByProximity(FBUtilities.getBroadcastAddress(), liveEndpoints);
     }
 
@@ -1620,10 +1627,10 @@ public class StorageProxy implements StorageProxyMBean
     private static class RangeForQuery
     {
         public final AbstractBounds<PartitionPosition> range;
-        public final List<InetAddress> liveEndpoints;
-        public final List<InetAddress> filteredEndpoints;
+        final List<InetAddress> liveEndpoints;
+        final List<InetAddress> filteredEndpoints;
 
-        public RangeForQuery(AbstractBounds<PartitionPosition> range, List<InetAddress> liveEndpoints, List<InetAddress> filteredEndpoints)
+        RangeForQuery(AbstractBounds<PartitionPosition> range, List<InetAddress> liveEndpoints, List<InetAddress> filteredEndpoints)
         {
             this.range = range;
             this.liveEndpoints = liveEndpoints;
@@ -1743,7 +1750,7 @@ public class StorageProxy implements StorageProxyMBean
         private int liveReturned;
         private int rangesQueried;
 
-        public RangeCommandPartitions(RangeIterator ranges,
+        RangeCommandPartitions(RangeIterator ranges,
                                       PartitionRangeReadCommand command,
                                       int concurrencyFactor,
                                       ReadContext ctx)
@@ -1760,7 +1767,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             Flow<FlowablePartition> partitions = nextBatch().concatWith(this::moreContents);
 
-            /** continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}. */
+            // continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}.
             if (!ctx.forContinuousPaging)
                 partitions = partitions.doOnClose(this::close);
 
@@ -1771,7 +1778,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             Flow<FlowablePartition> batch = sendNextRequests();
 
-            /** continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}. */
+            // continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}.
             if (!ctx.forContinuousPaging)
                 batch = batch.doOnError(this::handleError);
 
@@ -1994,7 +2001,7 @@ public class StorageProxy implements StorageProxyMBean
      * @return the filtered partition iterator
      */
     @SuppressWarnings("resource")
-    public static Flow<FlowablePartition> getRangeSliceLocalContinuous(PartitionRangeReadCommand command, ReadContext ctx)
+    private static Flow<FlowablePartition> getRangeSliceLocalContinuous(PartitionRangeReadCommand command, ReadContext ctx)
     {
         assert ctx.consistencyLevel.isSingleNode();
 
@@ -2018,7 +2025,7 @@ public class StorageProxy implements StorageProxyMBean
      * migration id. This is useful for determining if a schema change has propagated through the cluster. Disagreement
      * is assumed if any node fails to respond.
      */
-    public static Map<String, List<String>> describeSchemaVersions()
+    private static Map<String, List<String>> describeSchemaVersions()
     {
         final String myVersion = Schema.instance.getVersion().toString();
         final Map<InetAddress, UUID> versions = new ConcurrentHashMap<InetAddress, UUID>();
