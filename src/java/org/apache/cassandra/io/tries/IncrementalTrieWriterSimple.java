@@ -19,7 +19,6 @@ package org.apache.cassandra.io.tries;
 
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.Arrays;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -46,6 +45,7 @@ implements IncrementalTrieWriter<Value>
     {
         super(trieSerializer, dest, new Node<>((byte) 0));
     }
+
     @Override
     protected void complete(Node<Value> node) throws IOException
     {
@@ -105,7 +105,7 @@ implements IncrementalTrieWriter<Value>
         @Override
         Node<Value> newNode(byte transition)
         {
-            return new Node<Value>(transition & 0xFF);
+            return new Node<>(transition & 0xFF);
         }
 
         public long serializedPositionDelta(int i, long nodePosition)
