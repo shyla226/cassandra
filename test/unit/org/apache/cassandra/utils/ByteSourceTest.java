@@ -56,7 +56,8 @@ public class ByteSourceTest
     Boolean[] testBools = new Boolean[] { null, false, true };
     UUID[] testUUIDs = new UUID[] { null, UUIDGen.getTimeUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
             UUIDGen.getTimeUUID(123, 234), UUIDGen.getTimeUUID(123, 234), UUIDGen.getTimeUUID(123),
-            UUID.fromString("6ba7b811-9dad-11d1-80b4-00c04fd430c8"), UUID.fromString("6ba7b810-9dad-11d1-80b4-00c04fd430c8"), UUID.fromString("e902893a-9d22-3c7e-a7b8-d6e313b71d9f"), UUID.fromString("74738ff5-5367-5958-9aee-98fffdcd1876")};
+            UUID.fromString("6ba7b811-9dad-11d1-80b4-00c04fd430c8"), UUID.fromString("6ba7b810-9dad-11d1-80b4-00c04fd430c8"), UUID.fromString("e902893a-9d22-3c7e-a7b8-d6e313b71d9f"), UUID.fromString("74738ff5-5367-5958-9aee-98fffdcd1876"),
+            UUID.fromString("52df1bb0-6a2f-11e6-b6e4-a6dea7a01b67"), UUID.fromString("52df1bb0-6a2f-11e6-362d-aff2143498ea"), UUID.fromString("52df1bb0-6a2f-11e6-b62d-aff2143498ea")};
     // Instant.MIN/MAX fail Date.from.
     Date[] testDates = new Date[] { null, Date.from(Instant.ofEpochSecond(Integer.MIN_VALUE)), Date.from(Instant.ofEpochSecond(Short.MIN_VALUE)), Date.from(Instant.ofEpochMilli(-2000)), Date.from(Instant.EPOCH), Date.from(Instant.ofEpochMilli(2000)), Date.from(Instant.ofEpochSecond(Integer.MAX_VALUE)), Date.from(Instant.now()) };
     BigInteger[] testBigInts;
