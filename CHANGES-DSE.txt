@@ -2,6 +2,7 @@ dse 6.1.0:
  * Add ability to read the TTL and WRITETIME of an element in a collection (DB-1289)
 
 dse 6.0.0:
+ * Use same least significant bytes for TimeUUIDType comparison and its conversion as ByteSource. (DB-1758)
  * Use the CQL driver to retrieve the JMX addresses in NodeSync tool (DB-1710)
  * Use thread-safe set to track missing nodes in NodeSync Validation (DB-1713)
  * Improve message when mixing mutually exclusive deprecated and non-deprecated YAML properties (DB-1719)
