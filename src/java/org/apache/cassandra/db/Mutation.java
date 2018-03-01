@@ -101,7 +101,7 @@ public class Mutation implements IMutation, SchedulableMessage
 
     public Mutation(String keyspaceName, DecoratedKey key)
     {
-        this(keyspaceName, key, new HashMap<>(), TPCTaskType.WRITE_LOCAL);
+        this(keyspaceName, key, new HashMap<>(4), TPCTaskType.WRITE_LOCAL);
     }
 
     public Mutation(PartitionUpdate update)

@@ -47,7 +47,7 @@ final class UpdatesCollector
     /**
      * The mutations per keyspace.
      */
-    private final Map<String, Map<ByteBuffer, IMutation>> mutations = new HashMap<>(4);
+    private final Map<String, Map<ByteBuffer, IMutation>> mutations = new HashMap<>(16);
 
     public UpdatesCollector(Map<TableId, RegularAndStaticColumns> updatedColumns, int updatedRows)
     {
@@ -94,12 +94,13 @@ final class UpdatesCollector
     private Mutation getMutation(TableMetadata metadata, DecoratedKey dk, ConsistencyLevel consistency)
     {
         String ksName = metadata.keyspace;
-        IMutation mutation = keyspaceMap(ksName).get(dk.getKey());
+        Map<ByteBuffer, IMutation> keyspaceMap = keyspaceMap(ksName);
+        IMutation mutation = keyspaceMap.get(dk.getKey());
         if (mutation == null)
         {
             Mutation mut = new Mutation(ksName, dk);
             mutation = metadata.isCounter() ? new CounterMutation(mut, consistency) : mut;
-            keyspaceMap(ksName).put(dk.getKey(), mutation);
+            keyspaceMap.put(dk.getKey(), mutation);
             return mut;
         }
         return metadata.isCounter() ? ((CounterMutation) mutation).getMutation() : (Mutation) mutation;
@@ -133,7 +134,7 @@ final class UpdatesCollector
         Map<ByteBuffer, IMutation> ksMap = mutations.get(ksName);
         if (ksMap == null)
         {
-            ksMap = new HashMap<>();
+            ksMap = new HashMap<>(4);
             mutations.put(ksName, ksMap);
         }
         return ksMap;
