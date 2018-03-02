@@ -360,6 +360,7 @@ public class CounterMutationTest
                                 }
                                 catch (Throwable t)
                                 {
+                                    t.printStackTrace();
                                     failedWrites.put(i + writerOffset, t);
                                 }
                             }
@@ -404,7 +405,7 @@ public class CounterMutationTest
         final List<Throwable> failedWrites = new ArrayList<>(writers - 1);
 
         long defaultTimeout = DatabaseDescriptor.getCounterWriteRpcTimeout();
-        DatabaseDescriptor.setCounterWriteRpcTimeout(0);
+        DatabaseDescriptor.setCounterWriteRpcTimeout(1);
         try
         {
             Thread[] threads = new Thread[writers];
@@ -436,7 +437,7 @@ public class CounterMutationTest
             for (int i = 0; i < writers; i++)
                 threads[i].join();
 
-            // most of writers should have failed since the wait timeout was zero
+            // most of writers should have failed since the wait timeout was 1 ms
             assertTrue(String.format("At most one writer should have succeeded but %d failed", failedWrites.size()),
                        (failedWrites.size() > writers / 3) && (failedWrites.size() < writers));
 
