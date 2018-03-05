@@ -517,7 +517,7 @@ public class StorageProxy implements StorageProxyMBean
         WriteHandler.Builder builder = WriteHandler.builder(endpoints, consistencyLevel, WriteType.SIMPLE, queryStartNanoTime, TPC.bestTPCTimer())
                                                    .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel());
         if (shouldHint)
-            builder.hintOnTimeout(mutation);
+            builder.hintOnTimeout(mutation).hintOnFailure(mutation);
 
         WriteHandler handler = builder.build();
         MessagingService.instance().send(Verbs.LWT.COMMIT.newDispatcher(endpoints.live(), proposal), handler);
@@ -993,6 +993,7 @@ public class StorageProxy implements StorageProxyMBean
         WriteHandler handler = WriteHandler.builder(endpoints, consistencyLevel, writeType, queryStartNanoTime, TPC.bestTPCTimer())
                                            .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
                                            .hintOnTimeout(mutation)
+                                           .hintOnFailure(mutation)
                                            .build();
         sendToHintedEndpoints(mutation, handler.endpoints(), handler, Verbs.WRITES.WRITE);
         return handler;
@@ -1186,8 +1187,8 @@ public class StorageProxy implements StorageProxyMBean
     {
        CompletableFuture<Void> ret = new CompletableFuture<>();
 
-        cm.applyCounterMutation().whenComplete((result, ex) -> {
-
+        cm.applyCounterMutation().whenComplete((result, ex) ->
+        {
             if (ex != null)
             {
                 ret.completeExceptionally(ex);
@@ -1198,6 +1199,7 @@ public class StorageProxy implements StorageProxyMBean
             WriteHandler handler = WriteHandler.builder(endpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime, TPC.bestTPCTimer())
                                                .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
                                                .hintOnTimeout(result)
+                                               .hintOnFailure(result)
                                                .build();
 
             // We already wrote locally
