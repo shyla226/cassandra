@@ -189,8 +189,7 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
          * node that doesn't respond before the handler timeout.
          * <p>
          * This is a shorthand for {@code onTimeout} that calls {@code
-         * StorageProxy.submitHint()} unless it's the localhost, in which case
-         * the mutation is written locally since it is as costly as storing a hint.
+         * StorageProxy.submitHint()}.
          *
          * @param mutation - the mutation to hint on timeout
          * @return this builder
@@ -209,6 +208,27 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
                     return;
 
                 StorageProxy.submitHint(mutation, host, null);
+            });
+        }
+
+        /**
+         * Register a task to submit hints for the provided mutation for each
+         * node that responds with failure.
+         * <p>
+         * This is a shorthand for {@code onFinal} that calls {@code
+         * StorageProxy.submitHint()}.
+         *
+         * @param mutation - the mutation to hint on failure
+         * @return this builder
+         */
+        public Builder hintOnFailure(Mutation mutation)
+        {
+            return onFailure(response ->
+            {
+                if (!StorageProxy.shouldHint(response.from()))
+                    return;
+
+                StorageProxy.submitHint(mutation, response.from(), null);
             });
         }
 
