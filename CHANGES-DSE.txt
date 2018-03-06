@@ -1,9 +1,13 @@
+DSE 5.1.8
+Merged from dse5.0:
+ * Ignore lost+found directory on startup checks (DB-1215)
+
+
 DSE 5.1.7
  * Fix SASI AND/OR semantics for StandardAnalyzer (DB-548)
  * Remove invalid path from compaction-stress script, populate data base on initial size (DB-1652)
  * Fix infinite loop when replaying a truncated commit log file and truncation is tolerated (DB-1557)
 Merged from dse5.0:
- * Ignore lost+found directory on startup checks (DB-1215)
  * Fix NPE via QueryProcessor.resultify (DB-1739)
  * Handle output stream flush failed before closing OutboundTcpConnection (DB-1774)
  * Make PFS compatibility mode for GPFS opt-in (DB-1663)
