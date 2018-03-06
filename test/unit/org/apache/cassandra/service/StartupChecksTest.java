@@ -40,6 +40,7 @@ public class StartupChecksTest
     public static final String INVALID_LEGACY_SSTABLE_ROOT_PROP = "invalid-legacy-sstable-root";
     StartupChecks startupChecks;
     Path sstableDir;
+    File lostAndFound;
 
     @BeforeClass
     public static void setupServer()
@@ -59,12 +60,21 @@ public class StartupChecksTest
         sstableDir = Paths.get(dataDir.getAbsolutePath(), "Keyspace1", "Standard1");
         Files.createDirectories(sstableDir);
 
+        // Emulate lost+found directory, of which owner is usually root.
+        Path lostAndFoundPath = Paths.get(dataDir.getAbsolutePath(), "lost+found");
+        Files.createDirectories(lostAndFoundPath);
+        lostAndFound = lostAndFoundPath.toFile();
+        lostAndFound.setReadable(false, false);
+        lostAndFound.setWritable(false, false);
+
         startupChecks = new StartupChecks();
     }
 
     @After
     public void tearDown() throws IOException
     {
+        lostAndFound.setWritable(true);
+        lostAndFound.setReadable(true);
         FileUtils.deleteRecursive(sstableDir.toFile());
     }
 

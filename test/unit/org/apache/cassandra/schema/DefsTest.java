@@ -137,7 +137,7 @@ public class DefsTest
         for (String s : valid)
             assertTrue(CFMetaData.isNameValid(s));
 
-        String[] invalid = {"b@t", "dash-y", "", " ", "dot.s", ".hidden"};
+        String[] invalid = {"b@t", "dash-y", "", " ", "dot.s", ".hidden", "lost+found"};
         for (String s : invalid)
             assertFalse(CFMetaData.isNameValid(s));
     }
