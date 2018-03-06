@@ -226,7 +226,6 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
             shutdownFuture.complete(null);
 
         updaterExecutor.shutdown();
-        this.controller = null;
 
         return shutdownFuture;
     }
@@ -573,6 +572,9 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
 
         public void run()
         {
+            if (isShutdown())
+                return;
+
             updateValues();
 
             double targetRate = (double) config.getRate().in(RateUnit.B_S);
