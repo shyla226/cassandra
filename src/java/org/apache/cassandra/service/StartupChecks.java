@@ -33,6 +33,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -366,6 +367,8 @@ public class StartupChecks
 
     public static final StartupCheck checkSSTablesFormat = new StartupCheck()
     {
+        private final Set<String> IGNORED_DIRECTORIES = ImmutableSet.of("lost+found");
+
         public void execute(Logger logger) throws StartupException
         {
             final Set<String> invalid = new HashSet<>();
@@ -392,6 +395,14 @@ public class StartupChecks
                         invalid.add(file.toString());
                     }
                     return FileVisitResult.CONTINUE;
+                }
+
+                public FileVisitResult visitFileFailed(Path path, IOException e) throws IOException
+                {
+                    String directoryName = path.toFile().getCanonicalFile().getName();
+                    if (IGNORED_DIRECTORIES.contains(directoryName))
+                        return FileVisitResult.SKIP_SUBTREE;
+                    return super.visitFileFailed(path, e);
                 }
 
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException

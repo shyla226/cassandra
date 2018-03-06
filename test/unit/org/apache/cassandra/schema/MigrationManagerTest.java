@@ -138,7 +138,7 @@ public class MigrationManagerTest
         for (String s : valid)
             assertTrue(SchemaConstants.isValidName(s));
 
-        String[] invalid = {"b@t", "dash-y", "", " ", "dot.s", ".hidden"};
+        String[] invalid = {"b@t", "dash-y", "", " ", "dot.s", ".hidden", "lost+found"};
         for (String s : invalid)
             assertFalse(SchemaConstants.isValidName(s));
     }
