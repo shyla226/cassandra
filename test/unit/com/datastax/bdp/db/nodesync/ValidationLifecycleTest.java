@@ -65,7 +65,7 @@ public class ValidationLifecycleTest
     @Test
     public void testNormalLifecycle() throws Exception
     {
-        TimeSource timeSource = new TestTimeSource();
+        TestTimeSource timeSource = new TestTimeSource();
         timeSource.autoAdvance(1, 1, TimeUnit.SECONDS);
         NodeSyncHelpers.setTestParameters(null, null, -1, timeSource);
 

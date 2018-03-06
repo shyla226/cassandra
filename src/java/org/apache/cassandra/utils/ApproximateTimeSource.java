@@ -40,12 +40,6 @@ public class ApproximateTimeSource implements TimeSource
     {
         return ApproximateTime.nanoTime();
     }
-    
-    @Override
-    public void autoAdvance(int calls, long time, TimeUnit unit)
-    {
-        throw new UnsupportedOperationException();
-    }
 
     @Override
     public TimeSource sleepUninterruptibly(long sleepFor, TimeUnit unit)

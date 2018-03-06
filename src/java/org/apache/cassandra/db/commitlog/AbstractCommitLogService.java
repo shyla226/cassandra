@@ -200,7 +200,7 @@ public abstract class AbstractCommitLogService
 
     Completable awaitSyncAt(long syncTime)
     {
-        return syncTimePublisher.filter(v -> v - syncTime > 0)
+        return syncTimePublisher.filter(v -> v - syncTime >= 0)
                                 .first(0L)
                                 .toCompletable();
     }
