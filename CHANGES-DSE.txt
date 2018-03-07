@@ -1,4 +1,5 @@
 DSE 5.1.8
+ * Read connection ssl option from cqlshrc (DB-1800)
 Merged from dse5.0:
  * Ignore lost+found directory on startup checks (DB-1215)
 
