@@ -40,6 +40,8 @@ import io.netty.channel.epoll.AIOContext;
 import io.netty.channel.epoll.AIOEpollFileChannel;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.channel.unix.FileDescriptor;
+import io.netty.util.concurrent.FastThreadLocal;
+import io.netty.util.internal.InternalThreadLocalMap;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.io.FSReadError;
@@ -246,6 +248,15 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
     }
 
     /**
+     * Start a batch of reads. By default each read is submitted immediately and so this is a no-op but
+     * {@link AIOEpollBatchedChannelProxy} implements this method by creating a batch to submit later.
+     */
+    public void startBatch()
+    {
+        //no op for non-batched channels, since each read request is submitted immediately
+    }
+
+    /**
      * Submit a batch of reads. By default each read is submitted immediately and so this is a no-op but
      * {@link AIOEpollBatchedChannelProxy} implements this method by submitting a batch.
      */
@@ -282,31 +293,61 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
     {
         private final boolean vectored;
         private final AIOEpollFileChannel epollChannel;
-        private AIOContext.Batch<ByteBuffer> batch;
+        private FastThreadLocal<AIOContext.Batch<ByteBuffer>> batch;
 
         private AIOEpollBatchedChannelProxy(AsynchronousChannelProxy inner, boolean vectored)
         {
             super(inner);
             this.vectored = vectored;
             this.epollChannel = (AIOEpollFileChannel) inner.channel;
-            this.batch = epollChannel.newBatch(vectored);
+            this.batch = new FastThreadLocal<>();
         }
 
         @Override
         public void read(ByteBuffer dest, long offset, CompletionHandler<Integer, ByteBuffer> onComplete)
         {
-            // we don't batch retries, it would be too complex and there shouldn't be any retries anyway
-            batch.add(offset, dest, dest, makeRetryingHandler(dest, offset, onComplete));
+            CompletionHandler<Integer, ByteBuffer> handler = makeRetryingHandler(dest, offset, onComplete);
+            try
+            {
+                if (!batch.isSet())
+                    epollChannel.read(dest, offset, dest, handler, (EpollEventLoop) TPC.bestIOEventLoop());
+                else
+                    batch.get().add(offset, dest, dest, handler);
+            }
+            catch (Throwable err)
+            {
+                handler.failed(err, dest);
+            }
+        }
+
+        @Override
+        public void startBatch()
+        {
+            assert !batch.isSet() : "Batch was already started";
+            batch.set(epollChannel.newBatch(vectored));
         }
 
         @Override
         public void submitBatch()
         {
-            if (batch.numRequests() == 0)
+            if (!this.batch.isSet())
                 return;
 
-            epollChannel.read(batch);
-            batch = epollChannel.newBatch(vectored);
+            AIOContext.Batch<ByteBuffer> batch = this.batch.get();
+
+            try
+            {
+                if (batch.numRequests() > 0)
+                    epollChannel.read(batch, (EpollEventLoop) TPC.bestIOEventLoop());
+            }
+            catch (Throwable err)
+            {
+                batch.failed(err);
+            }
+            finally
+            {
+                this.batch.remove();
+            }
         }
     }
 }

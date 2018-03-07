@@ -156,9 +156,6 @@ public class PrefetchingRebufferer extends WrappingRebufferer
                 queue.addFirst(entry); // add it back, it may be required in future
 
             ret = super.rebufferAsync(pageAlignedPos);
-
-            if (!ret.isDone())
-                channel.submitBatch(); // principal buffer goes asap
         }
 
         // do no prefetch if the queue has entries later in the file as this is a jump-back for which we
@@ -190,17 +187,22 @@ public class PrefetchingRebufferer extends WrappingRebufferer
         if (toPrefetch < windowSize)
             return;
 
-        for (int i = 0; i < toPrefetch; i++)
+        try
         {
-            long prefetchPosition = firstPositionToPrefetch + i * source.rebufferSize();
-            if (prefetchPosition >= source.fileLength())
-                break; // nothing else to read
+            channel.startBatch();
+            for (int i = 0; i < toPrefetch; i++)
+            {
+                long prefetchPosition = firstPositionToPrefetch + i * source.rebufferSize();
+                if (prefetchPosition >= source.fileLength())
+                    break; // nothing else to read
 
-            queue.addLast(new PrefetchedEntry(prefetchPosition, super.rebufferAsync(prefetchPosition)));
+                queue.addLast(new PrefetchedEntry(prefetchPosition, super.rebufferAsync(prefetchPosition)));
+            }
         }
-
-        if (toPrefetch > 0)
-            channel.submitBatch(); // fire the read-head requests!!!
+        finally
+        {
+            channel.submitBatch();
+        }
     }
 
     @Override
