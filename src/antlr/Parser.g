@@ -434,6 +434,7 @@ sident returns [Selectable.Raw id]
     : t=IDENT              { $id = Selectable.RawIdentifier.forUnquoted($t.text); }
     | t=QUOTED_NAME        { $id = ColumnDefinition.RawIdentifier.forQuoted($t.text); }
     | k=unreserved_keyword { $id = ColumnDefinition.RawIdentifier.forUnquoted(k); }
+    | EMPTY_QUOTED_NAME    { $id = ColumnDefinition.RawIdentifier.forQuoted(""); }
     ;
 
 whereClause returns [WhereClause.Builder clause]

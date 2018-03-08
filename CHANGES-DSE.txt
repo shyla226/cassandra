@@ -1,4 +1,5 @@
 DSE 5.1.8
+ * Add support again for "" as selectable to select SuperColumns (DB-1599)
  * Read connection ssl option from cqlshrc (DB-1800)
 Merged from dse5.0:
  * Ignore lost+found directory on startup checks (DB-1215)
