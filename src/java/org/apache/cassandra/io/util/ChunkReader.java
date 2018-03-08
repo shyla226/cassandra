@@ -74,7 +74,7 @@ public interface ChunkReader extends RebuffererFactory
     // unsuitable for BufferPool. These buffers may grow until they reach the maximum size in use, and will not shrink.
     // TODO: This should eventually be handled by the BufferPool
     static final MpmcArrayQueue<BufferHandle> scratchBuffers = new MpmcArrayQueue<>(Short.MAX_VALUE);
-    static final Long memoryLimit = Long.getLong("dse.total_chunk_reader_buffer_limit_mb", 32) * 1024 * 1024;
+    static final Long memoryLimit = Long.getLong("dse.total_chunk_reader_buffer_limit_mb", 128) * 1024 * 1024;
     static final AtomicLong bufferSize = new AtomicLong();
 
     default BufferHandle getScratchHandle()

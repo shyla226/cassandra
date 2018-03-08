@@ -53,10 +53,9 @@ public class BufferPoolMetrics
     {
         misses = Metrics.meter(factory.createMetricName("Misses"));
 
-        totalSize = Metrics.register(factory.createMetricName("Size"), () -> BufferPool.sizeInBytes());
-        usedSize = Metrics.register(factory.createMetricName("UsedSize"), () -> BufferPool.usedSizeInBytes());
-        overflowSize = Metrics.register(factory.createMetricName("OverflowSize"), () -> BufferPool.sizeInBytesOverLimit());
-
-        chunkReaderBufferSize = Metrics.register(factory.createMetricName("ChunkReaderBufferSize"), () -> ChunkReader.bufferSize.get());
+        totalSize = Metrics.register(factory.createMetricName("Size"), BufferPool::sizeInBytes);
+        usedSize = Metrics.register(factory.createMetricName("UsedSize"), BufferPool::usedSizeInBytes);
+        overflowSize = Metrics.register(factory.createMetricName("OverflowSize"), BufferPool::sizeInBytesOverLimit);
+        chunkReaderBufferSize = Metrics.register(factory.createMetricName("ChunkReaderBufferSize"), ChunkReader.bufferSize::get);
     }
 }

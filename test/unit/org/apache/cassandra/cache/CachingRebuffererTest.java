@@ -199,7 +199,7 @@ public class CachingRebuffererTest
 
                         // removes the buffer from the cache, other threads should still be able to create a new one and
                         // insert it into the cache thanks to the ref. counting mechanism
-                        ((ChunkCache.CachingRebufferer) rebufferer).invalidate(0);
+                        ((ChunkCacheImpl.CachingRebufferer) rebufferer).invalidate(0);
                     }
                 }
                 catch (Throwable t)

@@ -49,11 +49,14 @@ import static org.junit.Assert.*;
 
 public class CompressedChunkReaderTest
 {
+    private static BufferPool bufferPool;
+
     @BeforeClass
     public static void setupClass()
     {
         System.setProperty("cassandra.native.aio.force", "true");
         DatabaseDescriptor.daemonInitialization();
+        bufferPool = new BufferPool();
     }
 
     @Test
@@ -84,7 +87,7 @@ public class CompressedChunkReaderTest
     private void testReadChunkOnTPC_Standard(int chunkSize, String message, int throwAt, boolean corruptData) throws IOException
     {
         CompressionParams params = BlockingCompressorMock.compressionParams(chunkSize, throwAt);
-        ByteBuffer buffer = BufferPool.get(chunkSize, BufferType.OFF_HEAP);
+        ByteBuffer buffer = bufferPool.get(chunkSize, BufferType.OFF_HEAP);
         File file = createCompressedFile(params, message, corruptData);
 
         CompressionMetadata metadata = new CompressionMetadata(file.getAbsolutePath() + ".metadata", file.length(), true);
@@ -109,7 +112,7 @@ public class CompressedChunkReaderTest
         }
         finally
         {
-            BufferPool.put(buffer);
+            bufferPool.put(buffer);
         }
     }
 
@@ -141,7 +144,7 @@ public class CompressedChunkReaderTest
     private void testReadChunkOnTPC_Mmap(int chunkSize, String message, int throwAt, boolean corruptData) throws IOException
     {
         CompressionParams params = BlockingCompressorMock.compressionParams(chunkSize, throwAt);
-        ByteBuffer buffer = BufferPool.get(chunkSize, BufferType.OFF_HEAP);
+        ByteBuffer buffer = bufferPool.get(chunkSize, BufferType.OFF_HEAP);
         File file = createCompressedFile(params, message, corruptData);
 
         CompressionMetadata metadata = new CompressionMetadata(file.getAbsolutePath() + ".metadata", file.length(), true);
@@ -169,7 +172,7 @@ public class CompressedChunkReaderTest
         }
         finally
         {
-            BufferPool.put(buffer);
+            bufferPool.put(buffer);
         }
     }
 

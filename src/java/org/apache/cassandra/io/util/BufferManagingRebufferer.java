@@ -36,6 +36,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
  */
 public abstract class BufferManagingRebufferer implements Rebufferer
 {
+    private static final BufferPool bufferPool = new BufferPool();
     private final Deque<BufferHolderImpl> buffers;
     protected final ChunkReader source;
 
@@ -156,7 +157,7 @@ public abstract class BufferManagingRebufferer implements Rebufferer
             assert this.offset == -1L && this.buffer == null : "Attempted to initialize before releasing for previous use";
 
             this.offset = offset;
-            this.buffer = BufferPool.get(source.chunkSize(), source.preferredBufferType()).order(ByteOrder.BIG_ENDIAN);
+            this.buffer = bufferPool.get(source.chunkSize(), source.preferredBufferType()).order(ByteOrder.BIG_ENDIAN);
             this.buffer.limit(0);
 
             return this;
@@ -176,7 +177,7 @@ public abstract class BufferManagingRebufferer implements Rebufferer
         {
             assert offset != -1 && buffer != null : "released twice";
 
-            BufferPool.put(buffer);
+            bufferPool.put(buffer);
             buffer = null;
             offset = -1;
 

@@ -22,7 +22,10 @@ import java.lang.ref.PhantomReference;
 import java.lang.ref.ReferenceQueue;
 import java.nio.ByteBuffer;
 import java.util.Queue;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
@@ -36,7 +39,9 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.BufferPoolMetrics;
-import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.UnsafeByteBufferAccess;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 /**
@@ -65,9 +70,10 @@ public class BufferPool
 
     /** A global pool of chunks (page aligned buffers) */
     private static final GlobalPool globalPool = new GlobalPool();
+    private static final BufferPoolMetrics metrics = new BufferPoolMetrics();
 
     /** A thread local pool of chunks, where chunks come from the global pool */
-    private static final FastThreadLocal<LocalPool> localPool = new FastThreadLocal<LocalPool>()
+    private final FastThreadLocal<LocalPool> localPool = new FastThreadLocal<LocalPool>()
     {
         @Override
         protected LocalPool initialValue()
@@ -76,7 +82,7 @@ public class BufferPool
         }
     };
 
-    public static ByteBuffer get(int size)
+    public ByteBuffer get(int size)
     {
         if (DISABLED)
             return allocate(size, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
@@ -84,7 +90,7 @@ public class BufferPool
             return takeFromPool(size, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
     }
 
-    public static ByteBuffer get(int size, BufferType bufferType)
+    public ByteBuffer get(int size, BufferType bufferType)
     {
         boolean direct = bufferType != BufferType.ON_HEAP;
         if (DISABLED || !direct)
@@ -94,7 +100,7 @@ public class BufferPool
     }
 
     /** Unlike the get methods, this will return null if the pool is exhausted */
-    public static ByteBuffer tryGet(int size)
+    public ByteBuffer tryGet(int size)
     {
         if (DISABLED)
             return allocate(size, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
@@ -109,7 +115,7 @@ public class BufferPool
                : BufferType.OFF_HEAP_ALIGNED.allocate(size);
     }
 
-    private static ByteBuffer takeFromPool(int size, boolean allocateOnHeapWhenExhausted)
+    private ByteBuffer takeFromPool(int size, boolean allocateOnHeapWhenExhausted)
     {
         ByteBuffer ret = maybeTakeFromPool(size, allocateOnHeapWhenExhausted);
         if (ret != null)
@@ -123,7 +129,7 @@ public class BufferPool
         return buf;
     }
 
-    private static ByteBuffer maybeTakeFromPool(int size, boolean allocateOnHeapWhenExhausted)
+    private ByteBuffer maybeTakeFromPool(int size, boolean allocateOnHeapWhenExhausted)
     {
         if (size < 0)
             throw new IllegalArgumentException("Size must be positive (" + size + ")");
@@ -152,7 +158,7 @@ public class BufferPool
         return buf;
     }
 
-    public static void put(ByteBuffer buffer)
+    public void put(ByteBuffer buffer)
     {
         if (!(DISABLED || buffer.hasArray()))
             localPool.get().put(buffer);
@@ -160,20 +166,20 @@ public class BufferPool
 
     /** This is not thread safe and should only be used for unit testing. */
     @VisibleForTesting
-    static void reset()
+    void reset()
     {
         localPool.get().reset();
         globalPool.reset();
     }
 
     @VisibleForTesting
-    static Chunk currentChunk()
+    Chunk currentChunk()
     {
         return localPool.get().chunks[0];
     }
 
     @VisibleForTesting
-    static int numChunks()
+    int numChunks()
     {
         int ret = 0;
         for (Chunk chunk : localPool.get().chunks)
@@ -185,7 +191,7 @@ public class BufferPool
     }
 
     @VisibleForTesting
-    static void assertAllRecycled()
+    void assertAllRecycled()
     {
         globalPool.debug.check();
     }
@@ -257,6 +263,11 @@ public class BufferPool
         private final Queue<Chunk> chunks = new ConcurrentLinkedQueue<>();
         private final AtomicLong memoryUsage = new AtomicLong();
         private final AtomicLong activeMemoryUsage = new AtomicLong();
+
+        private GlobalPool()
+        {
+
+        }
 
         /** Return a chunk, the caller will take owership of the parent chunk. */
         public Chunk get()
@@ -364,7 +375,6 @@ public class BufferPool
      */
     static final class LocalPool
     {
-        private final static BufferPoolMetrics metrics = new BufferPoolMetrics();
         // a microqueue of Chunks:
         //  * if any are null, they are at the end;
         //  * new Chunks are added to the last null index
@@ -375,7 +385,7 @@ public class BufferPool
         private final Chunk[] chunks = new Chunk[3];
         private byte chunkCount = 0;
 
-        public LocalPool()
+        private LocalPool()
         {
             localPoolReferences.add(new LocalPoolRef(this, localPoolRefQueue));
         }
@@ -429,7 +439,7 @@ public class BufferPool
             if (chunk != null)
                 return chunk.get(size);
 
-           return null;
+            return null;
         }
 
         private ByteBuffer allocate(int size, boolean onHeap)
@@ -503,7 +513,7 @@ public class BufferPool
         }
     }
 
-    private static final class LocalPoolRef extends  PhantomReference<LocalPool>
+    private static final class LocalPoolRef extends PhantomReference<LocalPool>
     {
         private final Chunk[] chunks;
         public LocalPoolRef(LocalPool localPool, ReferenceQueue<? super LocalPool> q)
@@ -593,6 +603,7 @@ public class BufferPool
         Chunk(Chunk recycle)
         {
             assert recycle.freeSlots == 0L;
+
             this.slab = recycle.slab;
             this.baseAddress = recycle.baseAddress;
             this.shift = recycle.shift;
