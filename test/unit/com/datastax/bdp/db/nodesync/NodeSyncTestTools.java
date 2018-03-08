@@ -464,7 +464,7 @@ public class NodeSyncTestTools
     }
 
     /**
-     * A fake validator suitable for testing (where we can't really span multiple nodes.
+     * A fake validator suitable for testing (where we can't really span multiple nodes).
      */
     static class TestValidator extends Validator
     {

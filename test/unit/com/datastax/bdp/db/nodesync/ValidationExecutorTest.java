@@ -15,6 +15,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
 import org.junit.Test;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.config.NodeSyncConfig;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.schema.TableMetadata;
@@ -37,7 +38,6 @@ public class ValidationExecutorTest extends CQLTester
     private static final long CONTROLLER_WAIT_TIME_SEC = 2;
 
     private final NodeSyncTestTools.DevNullTableProxy statusProxy = new NodeSyncTestTools.DevNullTableProxy(debugLog);
-    private final NodeSyncService service = new NodeSyncService(testConfig(), statusProxy);
 
     private volatile ValidationExecutor executor;
 
@@ -51,9 +51,14 @@ public class ValidationExecutorTest extends CQLTester
 
     private static NodeSyncConfig testConfig()
     {
+        return testConfig(4, 8);
+    }
+
+    private static NodeSyncConfig testConfig(int maxThreads, int maxInflightValidations)
+    {
         NodeSyncConfig config = new NodeSyncConfig();
-        config.setMax_threads(4);
-        config.setMax_inflight_validations(8);
+        config.setMax_threads(maxThreads);
+        config.setMax_inflight_validations(maxInflightValidations);
         return config;
     }
 
@@ -63,15 +68,31 @@ public class ValidationExecutorTest extends CQLTester
                                        int rowsPerPage,
                                        int rowSize)
     {
+        return prepare(new NodeSyncService(testConfig(), statusProxy), validations, pagesByValidation,
+                       pageQueryDelayMs, rowsPerPage, rowSize, -1);
+    }
+
+    private ValidationExecutor prepare(NodeSyncService service,
+                                       int validations,
+                                       int pagesByValidation,
+                                       int pageQueryDelayMs,
+                                       int rowsPerPage,
+                                       int rowSize,
+                                       int indexOfValidatorError)
+    {
         String ks = createKeyspace("CREATE KEYSPACE %s WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : '3' }");
         String tbl = createTable(ks, "CREATE TABLE %s (k int PRIMARY KEY) WITH nodesync = { 'enabled' : 'true' }");
         TableMetadata table =  tableMetadata(ks, tbl);
         TableState state = TableState.load(service, table, Collections.singleton(range(min(), min())), 0);
 
-        AtomicInteger remaining = new AtomicInteger(validations);
+        AtomicInteger suppliedValidations = new AtomicInteger(0);
         Supplier<Validator> supplier = () -> {
-            if (remaining.getAndDecrement() <= 0)
+            int index = suppliedValidations.getAndIncrement();
+            if (index >= validations)
                 return null;
+
+            if (index == indexOfValidatorError)
+                throw new RuntimeException("Artifical error triggered for testing");
 
             TableState.Ref ref = state.nextSegmentToValidate();
             ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(ref,
@@ -81,7 +102,6 @@ public class ValidationExecutorTest extends CQLTester
         };
         executor = executor(service, CONTROLLER_INTERVAL_MS, supplier);
         executor.start();
-        waitForController(executor);
         return executor;
     }
 
@@ -110,6 +130,7 @@ public class ValidationExecutorTest extends CQLTester
     public void testNoWork()
     {
         ValidationExecutor executor = prepare(0, 0, 0, 0, 0);
+        waitForController(executor);
 
         // We didn't do anything, so we should have considered MINED_OUT.
         assertHistory(executor, a -> a == Action.MINED_OUT);
@@ -128,11 +149,27 @@ public class ValidationExecutorTest extends CQLTester
                                               500,
                                               10,
                                               1024);
+        waitForController(executor);
 
         // We should have tried to increase all the time, eventually maxing out.
         assertHistory(executor, a -> a.isIncrease() || a == Action.MAXED_OUT);
 
         // Also make sure we've logged our warning that the rate cannot be achieved.
         assertMaxedOutWarn(executor, true);
+    }
+
+    @Test
+    public void testUnexpectedErrorRecovery()
+    {
+        NodeSyncService service = new NodeSyncService(testConfig(1, 2), statusProxy);
+        ValidationExecutor executor = prepare(service,
+                                              Integer.MAX_VALUE,
+                                              Integer.MAX_VALUE,
+                                              Integer.MAX_VALUE,
+                                              Integer.MAX_VALUE,
+                                              Integer.MAX_VALUE,
+                                              1);
+
+        Util.spinAssertEquals(2, () -> executor.inFlightValidators().size(), 30);
     }
 }

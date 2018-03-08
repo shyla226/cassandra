@@ -87,7 +87,7 @@ class NodeSyncState
     }
 
     /**
-     * Get the sate for a particular table. If said state is not loaded in memory yet, load it and return the loaded
+     * Get the state for a particular table. If said state is not loaded in memory yet, load it and return the loaded
      * state. Note that once the reference returned by this method becomes unreachable, the state may get unloaded,
      * so caller must keep that reference if they want to guarantee the table state stick in memory.
      *

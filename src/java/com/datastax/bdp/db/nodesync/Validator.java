@@ -159,7 +159,15 @@ class Validator
      */
     static Validator create(ValidationLifecycle lifecycle)
     {
-        return new Validator(lifecycle);
+        try
+        {
+            return new Validator(lifecycle);
+        }
+        catch (Exception e)
+        {
+            lifecycle.cancel(String.format("Unexpected error \"%s\" on validator creation", e.getMessage()));
+            throw e;
+        }
     }
 
     /**

@@ -148,6 +148,12 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
     }
 
     @VisibleForTesting
+    Set<Validator> inFlightValidators()
+    {
+        return inFlightValidators;
+    }
+
+    @VisibleForTesting
     long lastMaxedOutWarn()
     {
         if (controller == null)
@@ -328,6 +334,7 @@ class ValidationExecutor implements Validator.PageProcessingStatsListener
                                  + "and should be reported but unless this happens repeatedly, this shouldn't prevent "
                                  + "NodeSync general progress", e);
                     returnValidationPermit();
+                    ScheduledExecutors.scheduledTasks.schedule(this::submitNewValidation, 100, TimeUnit.MILLISECONDS);
                 }
             });
         }

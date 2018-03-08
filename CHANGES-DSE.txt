@@ -1,4 +1,5 @@
 dse 6.0.0:
+ * Better handle keyspace drops and unexpected exceptions in NodeSync (DB-1711)
  * Emit warning when NodeSync is enabled on TWCS table with split_during_flush disabled (DB-1797)
  * Use same least significant bytes for TimeUUIDType comparison and its conversion as ByteSource. (DB-1758)
  * Use the CQL driver to retrieve the JMX addresses in NodeSync tool (DB-1710)

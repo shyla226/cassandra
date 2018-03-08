@@ -14,6 +14,8 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.exceptions.UnknownKeyspaceException;
+import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.TableMetadata;
 
 import static com.datastax.bdp.db.nodesync.NodeSyncTestTools.*;
@@ -88,6 +90,31 @@ public class ValidatorTest extends CQLTester
         {
             // That's what we actually except.
             // further, we should have initially locked the segment and force unlocked it, but not have recorded anything
+            assertEquals(1, statusProxy.lockCalls);
+            assertEquals(1, statusProxy.forceUnlockCalls);
+            assertEquals(0, statusProxy.recordValidationCalls);
+        }
+    }
+
+    @Test
+    public void testLockReleaseOnCreationError()
+    {
+        TableMetadata table = prepare();
+        TableState state = TableState.load(service, table, Collections.singleton(range(min(), min())), 0);
+
+        TableState.Ref ref = state.nextSegmentToValidate();
+        ValidationLifecycle lifecycle = ValidationLifecycle.createAndStart(ref,
+                                                                           NodeSyncTracing.SegmentTracing.NO_TRACING);
+
+        MigrationManager.announceKeyspaceDrop(table.keyspace, true).blockingAwait();
+
+        try
+        {
+            Validator.create(lifecycle);
+            fail("Validator creation should have failed");
+        }
+        catch (UnknownKeyspaceException e)
+        {
             assertEquals(1, statusProxy.lockCalls);
             assertEquals(1, statusProxy.forceUnlockCalls);
             assertEquals(0, statusProxy.recordValidationCalls);

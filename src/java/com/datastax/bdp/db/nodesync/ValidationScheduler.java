@@ -712,7 +712,10 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
                                  .map(p -> p.table().id)
                                  .findAny()
                                  .ifPresent(id -> {
-                                    continuousValidations.remove(id);
+                                    ContinuousValidationProposer proposer = continuousValidations.remove(id);
+                                    if (proposer != null)
+                                        proposer.cancel();
+
                                     // Logging at debug because when you explicitly dropped a table, it doesn't feel like you'd care too much
                                     // about that confirmation. Further, when a keyspace is dropped, this is called for every table it has
                                     // and this would feel like log spamming if the keyspace has very many tables.
