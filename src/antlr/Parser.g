@@ -447,6 +447,7 @@ sident returns [Selectable.Raw id]
     : t=IDENT              { $id = Selectable.RawIdentifier.forUnquoted($t.text); }
     | t=QUOTED_NAME        { $id = ColumnMetadata.RawIdentifier.forQuoted($t.text); }
     | k=unreserved_keyword { $id = ColumnMetadata.RawIdentifier.forUnquoted(k); }
+    | EMPTY_QUOTED_NAME    { $id = ColumnMetadata.RawIdentifier.forQuoted(""); }
     ;
 
 whereClause returns [WhereClause.Builder clause]

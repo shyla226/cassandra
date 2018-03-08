@@ -70,6 +70,7 @@ dse 6.0.0:
  * For TWCS, flush to separate sstables based on write time (DB-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (DB-302)
 Merged from dse5.1:
+ * Add support again for "" as selectable to select SuperColumns (DB-1599)
  * Read connection ssl option from cqlshrc (DB-1800)
  * Fix SASI AND/OR semantics for StandardAnalyzer (DB-548)
  * Remove invalid path from compaction-stress script, populate data base on initial size (DB-1652)
