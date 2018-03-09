@@ -80,6 +80,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         return create(sstable, file, key, false);
     }
 
+    @SuppressWarnings("resource")
     static SSTableIdentityIterator create(SSTableReader sstable, FileDataInput file, DecoratedKey key, boolean shouldClose)
     {
         try
@@ -96,6 +97,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         }
     }
 
+    @SuppressWarnings("resource")
     public static SSTableIdentityIterator create(SSTableReader sstable, FileDataInput dfile, RowIndexEntry indexEntry, DecoratedKey key, boolean tombstoneOnly)
     {
         try
