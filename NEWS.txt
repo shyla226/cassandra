@@ -116,7 +116,6 @@ Upgrading
       are not supported by the older 1.7 and 1.8 JVMs. A warning will be logged at startup if none of those JVM
       options are used. See CASSANDRA-13006 for more details
 
-
 3.11.0
 ======
 
