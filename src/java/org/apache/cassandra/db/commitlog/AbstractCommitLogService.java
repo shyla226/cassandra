@@ -37,7 +37,7 @@ public abstract class AbstractCommitLogService
      */
     static final long DEFAULT_MARKER_INTERVAL_MILLIS = 100;
 
-    private Thread thread;
+    private volatile Thread thread;
     private volatile boolean shutdown = false;
 
     // all Allocations written before this time will be synced
@@ -168,8 +168,8 @@ public abstract class AbstractCommitLogService
                 if (lastSyncedAt + syncIntervalMillis <= pollStarted || shutdown || syncRequested)
                 {
                     // in this branch, we want to flush the commit log to disk
-                    commitLog.sync(shutdown, true);
                     syncRequested = false;
+                    commitLog.sync(shutdown, true);
                     lastSyncedAt = pollStarted;
                     syncComplete.signalAll();
                 }
@@ -263,10 +263,15 @@ public abstract class AbstractCommitLogService
      */
     public WaitQueue.Signal requestExtraSync()
     {
-        syncRequested = true;
         WaitQueue.Signal signal = syncComplete.register();
-        haveWork.release(1);
+        requestSync();
         return signal;
+    }
+
+    protected void requestSync()
+    {
+        syncRequested = true;
+        haveWork.release(1);
     }
 
     public void shutdown()

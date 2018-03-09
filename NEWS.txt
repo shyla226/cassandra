@@ -42,7 +42,6 @@ restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
 
-
 DSE 5.0.13
 ==========
 
@@ -105,6 +104,17 @@ Upgrading
    - Incremental repairs are no longer supported on tables with materialized views until
      its limitations are addressed. An incremental repair triggered on a base table or
      materialized view run a full repair instead. See CASSANDRA-12888 for details.
+
+
+3.0.17
+=====
+
+Upgrading
+---------
+    - Materialized view users upgrading from 3.0.15 or later that have performed range movements (join, decommission, move, etc),
+      should run repair on the base tables, and subsequently on the views to ensure data affected by CASSANDRA-14251 is correctly
+      propagated to all replicas.
+
 
 3.0.16
 =====
