@@ -358,11 +358,12 @@ public abstract class CommitLogSegment
         {
             flush(startMarker, sectionEnd);
             lastSyncedOffset = lastMarkerOffset = nextMarker;
-        }
 
-        if (close)
-            internalClose();
-        syncComplete.signalAll();
+            if (close)
+                internalClose();
+
+            syncComplete.signalAll();
+        }
     }
 
     /**
