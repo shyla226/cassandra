@@ -366,8 +366,8 @@ public class CompactionManager implements CompactionManagerMBean
 
                 if (jobs > 0 && futures.size() == jobs)
                 {
-                    FBUtilities.waitOnFutures(futures);
-                    futures.clear();
+                    Future<?> f = FBUtilities.waitOnFirstFuture(futures);
+                    futures.remove(f);
                 }
             }
             FBUtilities.waitOnFutures(futures);
@@ -455,8 +455,9 @@ public class CompactionManager implements CompactionManagerMBean
             @Override
             public Iterable<SSTableReader> filterSSTables(LifecycleTransaction transaction)
             {
-                Iterable<SSTableReader> sstables = new ArrayList<>(transaction.originals());
-                Iterator<SSTableReader> iter = sstables.iterator();
+                List<SSTableReader> sortedSSTables = Lists.newArrayList(transaction.originals());
+                Collections.sort(sortedSSTables, SSTableReader.sizeComparator.reversed());
+                Iterator<SSTableReader> iter = sortedSSTables.iterator();
                 while (iter.hasNext())
                 {
                     SSTableReader sstable = iter.next();
@@ -466,7 +467,7 @@ public class CompactionManager implements CompactionManagerMBean
                         iter.remove();
                     }
                 }
-                return sstables;
+                return sortedSSTables;
             }
 
             @Override
