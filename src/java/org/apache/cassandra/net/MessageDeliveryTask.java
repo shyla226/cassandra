@@ -44,7 +44,8 @@ abstract class MessageDeliveryTask<T, M extends Message<T>> implements Runnable
     public void run()
     {
         long currentTimeMillis = ApproximateTime.currentTimeMillis();
-        MessagingService.instance().metrics.addQueueWaitTime(message.verb().toString(),
+        if (message.verb().droppedGroup() != null) // not one-way
+            MessagingService.instance().metrics.addQueueWaitTime(message.verb().droppedGroup().toString(),
                                                              currentTimeMillis - enqueueTime);
 
         if (message.isTimedOut(currentTimeMillis))
