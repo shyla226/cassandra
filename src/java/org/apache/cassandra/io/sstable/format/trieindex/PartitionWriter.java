@@ -41,16 +41,17 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * for each row within a partition that follows {@link org.apache.cassandra.config.Config#column_index_cache_size_in_kb}
  * kilobytes of written data.
  */
-class PartitionWriter
+class PartitionWriter implements AutoCloseable
 {
     public int rowIndexCount;
 
     private final SerializationHeader header;
     private final EncodingVersion version;
     private final SequentialWriter writer;
-    private final SequentialWriter indexWriter;
+    private final Collection<SSTableFlushObserver> observers;
+    private final RowIndexWriter rowTrie;
+
     private long initialPosition;
-    public long headerLength;
     private long startPosition;
 
     private int written;
@@ -58,33 +59,27 @@ class PartitionWriter
 
     private ClusteringPrefix firstClustering;
     private ClusteringPrefix lastClustering;
-    private final ClusteringComparator comparator;
 
     private DeletionTime openMarker = DeletionTime.LIVE;
     private DeletionTime startOpenMarker = DeletionTime.LIVE;
 
-    private final Collection<SSTableFlushObserver> observers;
-    RowIndexWriter rowTrie;
-
-    public PartitionWriter(SerializationHeader header,
-                        ClusteringComparator comparator,
-                        SequentialWriter writer,
-                        SequentialWriter indexWriter,
-                        Version version,
-                        Collection<SSTableFlushObserver> observers)
+    PartitionWriter(SerializationHeader header,
+                    ClusteringComparator comparator,
+                    SequentialWriter writer,
+                    SequentialWriter indexWriter,
+                    Version version,
+                    Collection<SSTableFlushObserver> observers)
     {
         this.header = header;
         this.writer = writer;
-        this.indexWriter = indexWriter;
         this.version = version.encodingVersion();
         this.observers = observers;
-        this.comparator = comparator;
+        rowTrie = new RowIndexWriter(comparator, indexWriter);
     }
 
     public void reset()
     {
         this.initialPosition = writer.position();
-        this.headerLength = -1;
         this.startPosition = -1;
         this.previousRowStart = 0;
         this.rowIndexCount = 0;
@@ -92,13 +87,18 @@ class PartitionWriter
         this.firstClustering = null;
         this.lastClustering = null;
         this.openMarker = DeletionTime.LIVE;
-        rowTrie = new RowIndexWriter(comparator, indexWriter);
+        rowTrie.reset();
+    }
+
+    @Override
+    public void close()
+    {
+        rowTrie.close();
     }
 
     public long writePartition(UnfilteredRowIterator iterator) throws IOException
     {
         writePartitionHeader(iterator);
-        this.headerLength = writer.position() - initialPosition;
 
         while (iterator.hasNext())
             add(iterator.next());

@@ -22,9 +22,6 @@ import static org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.so
 import java.io.IOException;
 import java.util.function.Consumer;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.tries.IncrementalTrieWriter;
 import org.apache.cassandra.io.util.FileHandle;
@@ -39,7 +36,9 @@ import org.apache.cassandra.utils.ByteSource;
  */
 public class PartitionIndexBuilder implements AutoCloseable
 {
-    private static final Logger logger = LoggerFactory.getLogger(PartitionIndexBuilder.class);
+    private final SequentialWriter writer;
+    private final IncrementalTrieWriter<PartitionIndex.Payload> trieWriter;
+    private final FileHandle.Builder fhBuilder;
 
     // the last synced data file position
     private long dataSyncPosition;
@@ -49,28 +48,25 @@ public class PartitionIndexBuilder implements AutoCloseable
     private long partitionIndexSyncPosition;
 
     // Partial index can only be used after all three files have been synced to the required positions.
-    private IncrementalTrieWriter.PartialTail partialIndexTail;
-    private Consumer<PartitionIndex> partialIndexConsumer;
     private long partialIndexDataEnd;
     private long partialIndexRowEnd;
     private long partialIndexPartitionEnd;
+    private IncrementalTrieWriter.PartialTail partialIndexTail;
+    private Consumer<PartitionIndex> partialIndexConsumer;
     private DecoratedKey partialIndexLastKey;
 
-    private final IncrementalTrieWriter<PartitionIndex.Payload> trieWriter;
-    SequentialWriter writer;
+    private int lastDiffPoint;
     private DecoratedKey firstKey;
     private DecoratedKey lastKey;
     private DecoratedKey lastWrittenKey;
     private PartitionIndex.Payload lastPayload;
-    private int lastDiffPoint;
 
-    final FileHandle.Builder fhBuilder;
 
     @SuppressWarnings("resource")
     public PartitionIndexBuilder(SequentialWriter writer, FileHandle.Builder fhBuilder)
     {
         this.writer = writer;
-        trieWriter = IncrementalTrieWriter.construct(PartitionIndex.trieSerializer, writer);
+        this.trieWriter = IncrementalTrieWriter.open(PartitionIndex.TRIE_SERIALIZER, writer);
         this.fhBuilder = fhBuilder;
     }
 
@@ -165,6 +161,7 @@ public class PartitionIndexBuilder implements AutoCloseable
         }
 
         long root = trieWriter.complete();
+        long count = trieWriter.count();
         long firstKeyPos = writer.position();
         if (firstKey != null)
         {
@@ -178,9 +175,10 @@ public class PartitionIndexBuilder implements AutoCloseable
             writer.writeShort(0);
         }
         writer.writeLong(firstKeyPos);
-        writer.writeLong(trieWriter.count());
+        writer.writeLong(count);
         writer.writeLong(root);
         writer.sync();
+
         return root;
     }
 
@@ -230,5 +228,6 @@ public class PartitionIndexBuilder implements AutoCloseable
     // close the builder and release any associated memory
     public void close()
     {
+        trieWriter.close();
     }
 }

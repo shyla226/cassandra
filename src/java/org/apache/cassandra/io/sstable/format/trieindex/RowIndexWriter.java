@@ -33,17 +33,30 @@ import org.apache.cassandra.utils.ByteSource;
  * Uses IncrementalTrieWriter to build a trie of index section separators of shortest possible length such that
  * prevMax < separator <= nextMin.
  */
-class RowIndexWriter
+class RowIndexWriter implements AutoCloseable
 {
-    ByteSource prevMax = null;
-    ByteSource prevSep = null;
     final ClusteringComparator comparator;
     final IncrementalTrieWriter<IndexInfo> trie;
+    ByteSource prevMax = null;
+    ByteSource prevSep = null;
 
-    public RowIndexWriter(ClusteringComparator comparator, DataOutputPlus out)
+    RowIndexWriter(ClusteringComparator comparator, DataOutputPlus out)
     {
-        trie = IncrementalTrieWriter.construct(RowIndexReader.trieSerializer, out);
         this.comparator = comparator;
+        trie = IncrementalTrieWriter.open(RowIndexReader.trieSerializer, out);
+    }
+
+    void reset()
+    {
+        prevMax = null;
+        prevSep = null;
+        trie.reset();
+    }
+
+    @Override
+    public void close()
+    {
+        trie.close();
     }
 
     void add(ClusteringPrefix firstName, ClusteringPrefix lastName, IndexInfo info) throws IOException

@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.conditions;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Consumer;
 
 import com.google.common.collect.Iterators;
 
@@ -58,6 +59,11 @@ public abstract class ColumnCondition
     public void addFunctionsTo(List<Function> functions)
     {
         terms.addFunctionsTo(functions);
+    }
+
+    public void forEachFunction(Consumer<Function> consumer)
+    {
+        terms.forEachFunction(consumer);
     }
 
     /**

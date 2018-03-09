@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.DecoratedKey;
@@ -60,6 +61,12 @@ public abstract class Operation
     {
         if (t != null)
             t.addFunctionsTo(functions);
+    }
+
+    public void forEachFunction(Consumer<Function> consumer)
+    {
+        if (t != null)
+            t.forEachFunction(consumer);
     }
 
     /**

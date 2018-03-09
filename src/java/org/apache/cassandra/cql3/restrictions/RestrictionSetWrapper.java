@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -57,6 +58,11 @@ class RestrictionSetWrapper implements Restrictions
     public void addFunctionsTo(List<Function> functions)
     {
         restrictions.addFunctionsTo(functions);
+    }
+
+    public void forEachFunction(Consumer<Function> consumer)
+    {
+        restrictions.forEachFunction(consumer);
     }
 
     public boolean isEmpty()

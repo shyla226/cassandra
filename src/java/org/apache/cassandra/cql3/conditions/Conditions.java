@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.conditions;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
@@ -51,6 +52,8 @@ public interface Conditions
      * @param functions the list to add to
      */
     void addFunctionsTo(List<Function> functions);
+
+    void forEachFunction(Consumer<Function> consumer);
 
     /**
      * Returns the column definitions to which apply the conditions.

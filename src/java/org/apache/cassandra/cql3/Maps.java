@@ -21,6 +21,7 @@ import static org.apache.cassandra.cql3.Constants.UNSET_VALUE;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -319,6 +320,11 @@ public abstract class Maps
         {
             Terms.addFunctions(elements.keySet(), functions);
             Terms.addFunctions(elements.values(), functions);
+        }
+
+        public void forEachFunction(Consumer<Function> c)
+        {
+            Terms.forEachFunction(elements, c);
         }
     }
 

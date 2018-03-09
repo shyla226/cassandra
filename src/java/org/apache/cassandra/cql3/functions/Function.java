@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.functions;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.selection.Selector;
@@ -65,6 +66,8 @@ public interface Function extends AssignmentTestable
     public boolean isAggregate();
 
     public void addFunctionsTo(List<Function> functions);
+
+    public void forEachFunction(Consumer<Function> c);
 
     public boolean hasReferenceTo(Function function);
 

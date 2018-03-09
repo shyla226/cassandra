@@ -19,7 +19,6 @@ package org.apache.cassandra.io.tries;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -68,7 +67,7 @@ public class IncrementalTrieWriterPageAware<Value>
 extends IncrementalTrieWriterBase<Value, DataOutputPlus, IncrementalTrieWriterPageAware.Node<Value>>
 implements IncrementalTrieWriter<Value>
 {
-    private final static Comparator<Node<?>> branchSizeComparator = (l, r) ->
+    private final static Comparator<Node<?>> BRANCH_SIZE_COMPARATOR = (l, r) ->
     {
         // Smaller branches first.
         int c = Integer.compare(l.branchSize + l.nodeSize, r.branchSize + r.nodeSize);
@@ -86,9 +85,15 @@ implements IncrementalTrieWriter<Value>
         return c;
     };
 
-    public IncrementalTrieWriterPageAware(TrieSerializer<Value, ? super DataOutputPlus> serializer, DataOutputPlus dest)
+    IncrementalTrieWriterPageAware(TrieSerializer<Value, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest)
     {
-        super(serializer, dest, new Node<>((byte) 0));
+        super(trieSerializer, dest, new Node<>((byte) 0));
+    }
+
+    @Override
+    public void reset()
+    {
+        reset(new Node<>((byte) 0));
     }
 
     @Override
@@ -160,17 +165,17 @@ implements IncrementalTrieWriter<Value>
         layoutChildren(node);
     }
 
-    void layoutChildren(Node<Value> node) throws IOException
+    private void layoutChildren(Node<Value> node) throws IOException
     {
         assert node.filePos == -1;
 
-        NavigableSet<Node<Value>> children = new TreeSet<>(branchSizeComparator);
+        NavigableSet<Node<Value>> children = new TreeSet<>(BRANCH_SIZE_COMPARATOR);
         for (Node<Value> child : node.children)
             if (child.filePos == -1)
                 children.add(child);
 
         int bytesLeft = bytesLeftInPage();
-        Node<Value> cmp = new Node<Value>(256); // goes after all equal-sized unplaced nodes (whose transition character is 0-255)
+        Node<Value> cmp = new Node<>(256); // goes after all equal-sized unplaced nodes (whose transition character is 0-255)
         cmp.nodeSize = 0;
         while (!children.isEmpty())
         {
@@ -259,30 +264,30 @@ implements IncrementalTrieWriter<Value>
         return nodePosition;
     }
 
-    String dumpNode(Node<Value> node, long nodePosition)
+    private String dumpNode(Node<Value> node, long nodePosition)
     {
-        String res = String.format("At %,d(%x) type %s child count %s nodeSize %,d branchSize %,d %s%s\n",
-                                   nodePosition, nodePosition,
-                                   TrieNode.typeFor(node, nodePosition), node.childCount(), node.nodeSize, node.branchSize,
-                                   node.hasOutOfPageChildren ? "C" : "",
-                                   node.hasOutOfPageInBranch ? "B" : "");
+        StringBuilder res = new StringBuilder(String.format("At %,d(%x) type %s child count %s nodeSize %,d branchSize %,d %s%s\n",
+                                                            nodePosition, nodePosition,
+                                                            TrieNode.typeFor(node, nodePosition), node.childCount(), node.nodeSize, node.branchSize,
+                                                            node.hasOutOfPageChildren ? "C" : "",
+                                                            node.hasOutOfPageInBranch ? "B" : ""));
         for (Node<Value> child : node.children)
-            res += String.format("Child %2x at %,d(%x) type %s child count %s size %s nodeSize %,d branchSize %,d %s%s\n",
-                                 child.transition & 0xFF,
-                                 child.filePos,
-                                 child.filePos,
-                                 child.children != null ? TrieNode.typeFor(child, child.filePos) : "n/a",
-                                 child.children != null ? child.childCount() : "n/a",
-                                 child.children != null ? serializer.sizeofNode(child, child.filePos) : "n/a",
-                                 child.nodeSize,
-                                 child.branchSize,
-                                 child.hasOutOfPageChildren ? "C" : "",
-                                 child.hasOutOfPageInBranch ? "B" : "");
+            res.append(String.format("Child %2x at %,d(%x) type %s child count %s size %s nodeSize %,d branchSize %,d %s%s\n",
+                                     child.transition & 0xFF,
+                                     child.filePos,
+                                     child.filePos,
+                                     child.children != null ? TrieNode.typeFor(child, child.filePos) : "n/a",
+                                     child.children != null ? child.childCount() : "n/a",
+                                     child.children != null ? serializer.sizeofNode(child, child.filePos) : "n/a",
+                                     child.nodeSize,
+                                     child.branchSize,
+                                     child.hasOutOfPageChildren ? "C" : "",
+                                     child.hasOutOfPageInBranch ? "B" : ""));
 
-        return res;
+        return res.toString();
     }
 
-    int bytesLeftInPage()
+    private int bytesLeftInPage()
     {
         long position = dest.position();
         long bytesLeft = PageAware.pageLimit(position) - position;
@@ -381,7 +386,7 @@ implements IncrementalTrieWriter<Value>
         @Override
         Node<Value> newNode(byte transition)
         {
-            return new Node<Value>(transition & 0xFF);
+            return new Node<>(transition & 0xFF);
         }
 
         public long serializedPositionDelta(int i, long nodePosition)

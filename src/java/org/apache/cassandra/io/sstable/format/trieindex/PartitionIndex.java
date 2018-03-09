@@ -93,8 +93,9 @@ public class PartitionIndex implements Closeable
         }
     }
 
-    public static PartitionIndexSerializer trieSerializer = new PartitionIndexSerializer();
-    static class PartitionIndexSerializer implements TrieSerializer<Payload, DataOutput>
+    static final PartitionIndexSerializer TRIE_SERIALIZER = new PartitionIndexSerializer();
+
+    private static class PartitionIndexSerializer implements TrieSerializer<Payload, DataOutput>
     {
         public int sizeofNode(SerializationNode<Payload> node, long nodePosition)
         {
@@ -364,7 +365,10 @@ public class PartitionIndex implements Closeable
         }
     }
 
-    public void dumpTrie(String fileName)
+    /**
+     * debug/test code
+     */
+    private void dumpTrie(String fileName)
     {
         try(PrintStream ps = new PrintStream(new File(fileName)))
         {
@@ -376,7 +380,7 @@ public class PartitionIndex implements Closeable
         }
     }
 
-    public void dumpTrie(PrintStream out)
+    private void dumpTrie(PrintStream out)
     {
         try (Reader rdr = openReader(Rebufferer.ReaderConstraint.NONE))
         {

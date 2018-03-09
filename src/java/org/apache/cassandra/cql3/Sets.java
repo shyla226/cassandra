@@ -21,6 +21,7 @@ import static org.apache.cassandra.cql3.Constants.UNSET_VALUE;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -277,6 +278,11 @@ public abstract class Sets
         public void addFunctionsTo(List<Function> functions)
         {
             Terms.addFunctions(elements, functions);
+        }
+
+        public void forEachFunction(Consumer<Function> c)
+        {
+            Terms.forEachFunction(elements, c);
         }
     }
 

@@ -19,9 +19,9 @@ package org.apache.cassandra.io.tries;
 
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.Arrays;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.io.util.DataOutputPlus;
 
 /**
  * Incremental builder of on-disk tries. Takes sorted input.
@@ -41,9 +41,9 @@ implements IncrementalTrieWriter<Value>
 {
     private long position = 0;
 
-    public IncrementalTrieWriterSimple(TrieSerializer<Value, DataOutput> serializer, DataOutput dest)
+    public IncrementalTrieWriterSimple(TrieSerializer<Value, ? super DataOutput> trieSerializer, DataOutputPlus dest)
     {
-        super(serializer, dest, new Node<>((byte) 0));
+        super(trieSerializer, dest, new Node<>((byte) 0));
     }
 
     @Override
@@ -52,6 +52,19 @@ implements IncrementalTrieWriter<Value>
         long nodePos = position;
         position += write(node, dest, position);
         node.finalizeWithPosition(nodePos);
+    }
+
+    @Override
+    public void close()
+    {
+        super.close();
+    }
+
+    @Override
+    public void reset()
+    {
+        reset(new Node<>((byte) 0));
+        position = 0;
     }
 
     @Override
@@ -92,7 +105,7 @@ implements IncrementalTrieWriter<Value>
         @Override
         Node<Value> newNode(byte transition)
         {
-            return new Node<Value>(transition & 0xFF);
+            return new Node<>(transition & 0xFF);
         }
 
         public long serializedPositionDelta(int i, long nodePosition)

@@ -31,6 +31,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 import com.google.common.collect.Iterables;
 
@@ -192,6 +193,14 @@ public abstract class ModificationStatement implements CQLStatement, TableStatem
         conditions.addFunctionsTo(functions);
     }
 
+    private void forEachFunction(Consumer<Function> consumer)
+    {
+        attrs.forEachFunction(consumer);
+        restrictions.forEachFunction(consumer);
+        operations.forEachFunction(consumer);
+        conditions.forEachFunction(consumer);
+    }
+
     public TableMetadata metadata()
     {
         return metadata;
@@ -261,10 +270,9 @@ public abstract class ModificationStatement implements CQLStatement, TableStatem
 
         // Modification on base table with MV should skip SELECT access control to base table and WRITE access control to view table.
         // RowLevelAccessControl is skipped for System user in DSE and it won't affect view update.
-
-        for (Function function : getFunctions())
-            state.checkFunctionPermission(function, CorePermission.EXECUTE);
+        forEachFunction(function -> state.checkFunctionPermission(function, CorePermission.EXECUTE));
     }
+
 
     public void validate(QueryState state) throws InvalidRequestException
     {

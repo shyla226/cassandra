@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.restrictions;
 
 import java.util.*;
+import java.util.function.Consumer;
 
 import com.google.common.collect.AbstractIterator;
 
@@ -98,6 +99,12 @@ public final class RestrictionSet implements Restrictions, Iterable<SingleRestri
             restriction.addFunctionsTo(functions);
     }
 
+    @Override
+    public void forEachFunction(Consumer<Function> consumer)
+    {
+        for (Restriction restriction : this)
+            restriction.forEachFunction(consumer);
+    }
     @Override
     public boolean isEmpty()
     {

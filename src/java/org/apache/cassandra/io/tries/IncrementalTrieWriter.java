@@ -28,7 +28,7 @@ import org.apache.cassandra.utils.ByteSource;
  * buffering only limited amount of data.
  * The writing itself is done by some node serializer passed on construction time.
  */
-public interface IncrementalTrieWriter<Value>
+public interface IncrementalTrieWriter<Value> extends AutoCloseable
 {
     /**
      * Add an entry to the trie with the associated value.
@@ -45,12 +45,17 @@ public interface IncrementalTrieWriter<Value>
      */
     long complete() throws IOException;
 
+    void reset();
+
+    void close();
+
     /**
      * Make a temporary in-memory representation of the unwritten nodes that covers everything added to the trie until
      * this point. The object returned represents a "tail" for the file that needs to be attached at the "cutoff" point
      * to the file (using e.g. TailOverridingRebufferer).
      */
     PartialTail makePartialRoot() throws IOException;
+
 
     public interface PartialTail
     {
@@ -68,8 +73,8 @@ public interface IncrementalTrieWriter<Value>
      * Construct a suitable trie writer.
      */
     static <Value>
-    IncrementalTrieWriter<Value> construct(TrieSerializer<Value, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest)
+    IncrementalTrieWriter<Value> open(TrieSerializer<Value, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest)
     {
-        return new IncrementalTrieWriterPageAware<Value>(trieSerializer, dest);
+        return new IncrementalTrieWriterPageAware<>(trieSerializer, dest);
     }
 }

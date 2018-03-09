@@ -21,10 +21,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
-import java.util.List;
 
+import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.utils.ByteSource;
+import org.apache.cassandra.utils.LightweightRecycler;
 
 /**
  * Helper base class for incremental trie builders.
@@ -32,11 +34,10 @@ import org.apache.cassandra.utils.ByteSource;
 public abstract class IncrementalTrieWriterBase<Value, Dest, Node extends IncrementalTrieWriterBase.BaseNode<Value, Node>>
 implements IncrementalTrieWriter<Value>
 {
-
+    protected final Deque<Node> stack = new ArrayDeque<>();
     protected final TrieSerializer<Value, ? super Dest> serializer;
     protected final Dest dest;
     protected ByteSource prev = null;
-    protected Deque<Node> stack = new ArrayDeque<>();
     long count = 0;
 
     public IncrementalTrieWriterBase(TrieSerializer<Value, ? super Dest> serializer, Dest dest, Node root)
@@ -44,6 +45,23 @@ implements IncrementalTrieWriter<Value>
         this.serializer = serializer;
         this.dest = dest;
         this.stack.addLast(root);
+    }
+
+    protected void reset(Node root)
+    {
+        this.prev = null;
+        this.count = 0;
+        this.stack.clear();
+        this.stack.addLast(root);
+    }
+
+
+    @Override
+    public void close()
+    {
+        this.prev = null;
+        this.count = 0;
+        this.stack.clear();
     }
 
     public void add(ByteSource next, Value value) throws IOException
@@ -150,14 +168,28 @@ implements IncrementalTrieWriter<Value>
 
     static abstract class BaseNode<Value, Node extends BaseNode<Value, Node>> implements SerializationNode<Value>
     {
+        private static final int CHILDREN_LIST_RECYCLER_LIMIT = 1024;
+        private static final LightweightRecycler<ArrayList> CHILDREN_LIST_RECYCLER = new LightweightRecycler<>(CHILDREN_LIST_RECYCLER_LIMIT);
+        private static final ArrayList EMPTY_LIST = new ArrayList<>(0);
+
+        private static <Node> ArrayList<Node> allocateChildrenList()
+        {
+            return CHILDREN_LIST_RECYCLER.reuseOrAllocate(() -> new ArrayList(4));
+        }
+
+        private static <Node> void recycleChildrenList(ArrayList<Node> children)
+        {
+            CHILDREN_LIST_RECYCLER.tryRecycle(children);
+        }
+
         Value payload;
-        List<Node> children;
+        ArrayList<Node> children;
         final int transition;
         long filePos = -1;
 
         BaseNode(int transition)
         {
-            children = new ArrayList<>();
+            children = EMPTY_LIST;
             this.transition = transition;
         }
 
@@ -177,6 +209,9 @@ implements IncrementalTrieWriter<Value>
         {
             assert children.isEmpty() || (children.get(children.size() - 1).transition & 0xFF) < (b & 0xFF);
             Node node = newNode(b);
+            if (children == EMPTY_LIST)
+                children = allocateChildrenList();
+
             children.add(node);
             return node;
         }
@@ -192,6 +227,9 @@ implements IncrementalTrieWriter<Value>
 
             // Make sure we are not holding on to pointers to data we no longer need
             // (otherwise we keep the whole trie in memory).
+            if (children != EMPTY_LIST)
+                recycleChildrenList(children);
+
             children = null;
             payload = null;
         }

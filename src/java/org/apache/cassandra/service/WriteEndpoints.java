@@ -54,14 +54,14 @@ public class WriteEndpoints implements Iterable<InetAddress>
     private final Keyspace keyspace;
 
     private final List<InetAddress> natural;
-    private final Collection<InetAddress> pending;
+    private final List<InetAddress> pending;
 
     private final List<InetAddress> live;
     private final List<InetAddress> dead;
 
     private WriteEndpoints(Keyspace keyspace,
                            List<InetAddress> natural,
-                           Collection<InetAddress> pending,
+                           List<InetAddress> pending,
                            List<InetAddress> live,
                            List<InetAddress> dead)
     {
@@ -72,7 +72,7 @@ public class WriteEndpoints implements Iterable<InetAddress>
         this.dead = dead;
     }
 
-    private WriteEndpoints(Keyspace keyspace, List<InetAddress> natural, Collection<InetAddress> pending)
+    private WriteEndpoints(Keyspace keyspace, List<InetAddress> natural, List<InetAddress> pending)
     {
         this.keyspace = keyspace;
         this.natural = natural;
@@ -116,7 +116,7 @@ public class WriteEndpoints implements Iterable<InetAddress>
     {
         Token tk = partitionKey.getToken();
         List<InetAddress> natural = StorageService.instance.getNaturalEndpoints(keyspace, tk);
-        Collection<InetAddress> pending = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspace);
+        List<InetAddress> pending = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspace);
         return new WriteEndpoints(Keyspace.open(keyspace), natural, pending);
     }
 
@@ -173,7 +173,7 @@ public class WriteEndpoints implements Iterable<InetAddress>
         List<InetAddress> natural = pairedEndpoint.isPresent()
                                  ? Collections.singletonList(pairedEndpoint.get())
                                  : Collections.emptyList();
-        Collection<InetAddress> pending = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspace);
+        List<InetAddress> pending = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspace);
         return new WriteEndpoints(Keyspace.open(keyspace), natural, pending);
     }
 
@@ -271,7 +271,7 @@ public class WriteEndpoints implements Iterable<InetAddress>
         return natural;
     }
 
-    public Collection<InetAddress> pending()
+    public List<InetAddress> pending()
     {
         return pending;
     }

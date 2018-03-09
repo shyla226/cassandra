@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Consumer;
 
 import com.google.common.base.Joiner;
 
@@ -196,6 +197,12 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
         }
 
         @Override
+        public void forEachFunction(Consumer<Function> consumer)
+        {
+            value.forEachFunction(consumer);
+        }
+
+        @Override
         protected PartitionKeyRestrictions doMergeWith(TokenRestriction otherRestriction) throws InvalidRequestException
         {
             throw invalidRequest("%s cannot be restricted by more than one relation if it includes an Equal",
@@ -275,6 +282,12 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
         public void addFunctionsTo(List<Function> functions)
         {
             slice.addFunctionsTo(functions);
+        }
+
+        @Override
+        public void forEachFunction(Consumer<Function> consumer)
+        {
+            slice.forEachFunction(consumer);
         }
 
         @Override
