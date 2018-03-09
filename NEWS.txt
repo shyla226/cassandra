@@ -164,7 +164,6 @@ Upgrading
      especially if you are upgrading from 2.2.
 
 Compact Storage
->>>>>>> dse5.0
 ---------------
     - Starting version 4.0, Thrift and COMPACT STORAGE is no longer supported.
       'ALTER ... DROP COMPACT STORAGE' statement makes Compact Tables CQL-compatible,
