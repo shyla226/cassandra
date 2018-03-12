@@ -174,7 +174,6 @@ public interface Terms
      */
     public static Terms of(final Term term)
     {
-        assert !(term instanceof Lists.Marker);
         return new Terms()
                 {
                     @Override
