@@ -618,9 +618,9 @@ public class Keyspace
         final int partitionUpdatesCount = partitionUpdates.size();
         assert partitionUpdatesCount != 0;
 
-        // avoid allocation on common case of single update
-        List<Completable> memtablePutCompletables = partitionUpdatesCount > 1 ? new ArrayList<>(partitionUpdatesCount) : null;
-        Completable memtablePutCompletable = null;
+        // Avoid allocation on common case of single update; it might turn out that a single partition update is skipped because
+        // of schema disagreement. Empty collection is initialised for this case.
+        List<Completable> memtablePutCompletables = partitionUpdatesCount > 1 ? new ArrayList<>(partitionUpdatesCount) : Collections.emptyList();
 
         for (PartitionUpdate upd : partitionUpdates)
         {
@@ -666,21 +666,14 @@ public class Keyspace
                 memtableCompletable = cfs.apply(upd, indexTransaction, opGroup, pos);
             }
 
-            if (partitionUpdatesCount > 1)
-            {
-                memtablePutCompletables.add(memtableCompletable);
-            }
+            // avoid the expensive concat call if there's only 1 completable
+            if (partitionUpdatesCount == 1)
+                return memtableCompletable;
             else
-            {
-                memtablePutCompletable = memtableCompletable;
-            }
+                memtablePutCompletables.add(memtableCompletable);
         }
 
-        // avoid the expensive concat call if there's only 1 completable
-        if (memtablePutCompletable != null)
-            return memtablePutCompletable;
-        else
-            return Completable.concat(memtablePutCompletables);
+        return Completable.concat(memtablePutCompletables);
     }
 
     private Completable failDueToWriteBarrier(Mutation mutation)
