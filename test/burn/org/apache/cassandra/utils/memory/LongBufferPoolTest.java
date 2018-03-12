@@ -39,6 +39,7 @@ import static org.junit.Assert.*;
 public class LongBufferPoolTest
 {
     private static final Logger logger = LoggerFactory.getLogger(LongBufferPoolTest.class);
+    private static final BufferPool bufferPool = new BufferPool();
 
     @Test
     public void testAllocate() throws InterruptedException, ExecutionException
@@ -122,14 +123,14 @@ public class LongBufferPoolTest
                         return;
                     }
 
-                    ByteBuffer buffer = BufferPool.tryGet(BufferPool.CHUNK_SIZE);
+                    ByteBuffer buffer = bufferPool.tryGet(BufferPool.CHUNK_SIZE);
                     if (buffer == null)
                     {
                         Thread.yield();
                         return;
                     }
 
-                    BufferPool.put(buffer);
+                    bufferPool.put(buffer);
                     burn.add(buffer);
                     count++;
                 }
@@ -148,7 +149,7 @@ public class LongBufferPoolTest
                         Thread.yield();
                         return;
                     }
-                    BufferPool.put(buffer);
+                    bufferPool.put(buffer);
                 }
                 void cleanup()
                 {
@@ -225,7 +226,7 @@ public class LongBufferPoolTest
                         else
                         {
                             check.validate();
-                            BufferPool.put(check.buffer);
+                            bufferPool.put(check.buffer);
                             totalSize -= size;
                         }
                     }
@@ -267,7 +268,7 @@ public class LongBufferPoolTest
                     while (checks.size() > 0)
                     {
                         BufferCheck check = checks.get(0);
-                        BufferPool.put(check.buffer);
+                        bufferPool.put(check.buffer);
                         checks.remove(check.listnode);
                     }
                     latch.countDown();
@@ -279,13 +280,13 @@ public class LongBufferPoolTest
                     if (check == null)
                         return false;
                     check.validate();
-                    BufferPool.put(check.buffer);
+                    bufferPool.put(check.buffer);
                     return true;
                 }
 
                 BufferCheck allocate(int size)
                 {
-                    ByteBuffer buffer = BufferPool.get(size);
+                    ByteBuffer buffer = bufferPool.get(size);
                     assertNotNull(buffer);
                     BufferCheck check = new BufferCheck(buffer, rand.nextLong());
                     assertEquals(size, buffer.capacity());
@@ -339,7 +340,7 @@ public class LongBufferPoolTest
         while (!latch.await(10L, TimeUnit.SECONDS))
         {
             if (!first)
-                BufferPool.assertAllRecycled();
+                bufferPool.assertAllRecycled();
             first = false;
             for (AtomicBoolean progress : makingProgress)
             {
@@ -354,7 +355,7 @@ public class LongBufferPoolTest
             while ( null != (check = queue.poll()) )
             {
                 check.validate();
-                BufferPool.put(check.buffer);
+                bufferPool.put(check.buffer);
             }
         }
 
@@ -395,7 +396,7 @@ public class LongBufferPoolTest
             {
                 logger.error("Got exception {}, current chunk {}",
                              ex.getMessage(),
-                             BufferPool.currentChunk());
+                             bufferPool.currentChunk());
                 ex.printStackTrace();
                 return false;
             }

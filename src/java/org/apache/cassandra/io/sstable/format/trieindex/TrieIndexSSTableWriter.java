@@ -303,7 +303,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     {
         chunkCache.ifPresent(cache -> {
             if (lastEarlyOpenLength != 0 && dfile.dataLength() > lastEarlyOpenLength)
-                cache.invalidatePosition(dfile, lastEarlyOpenLength);
+                ChunkCache.invalidatePosition(dfile, lastEarlyOpenLength);
         });
         lastEarlyOpenLength = dfile.dataLength();
     }

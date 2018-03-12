@@ -116,9 +116,9 @@ public final class CompressedChecksummedDataInput extends ChecksummedDataInput
             int bufferSize = compressedSize + (compressedSize / 20);  // allocate +5% to cover variability in compressed size
             if (compressedBuffer != null)
             {
-                BufferPool.put(compressedBuffer);
+                bufferPool.put(compressedBuffer);
             }
-            compressedBuffer = BufferPool.get(bufferSize, compressor.preferredBufferType());
+            compressedBuffer = bufferPool.get(bufferSize, compressor.preferredBufferType());
         }
 
         compressedBuffer.clear();
@@ -130,8 +130,8 @@ public final class CompressedChecksummedDataInput extends ChecksummedDataInput
         if (buffer.capacity() < uncompressedSize)
         {
             int bufferSize = uncompressedSize + (uncompressedSize / 20);
-            BufferPool.put(buffer);
-            buffer = BufferPool.get(bufferSize, compressor.preferredBufferType());
+            bufferPool.put(buffer);
+            buffer = bufferPool.get(bufferSize, compressor.preferredBufferType());
         }
 
         buffer.clear();
@@ -150,7 +150,7 @@ public final class CompressedChecksummedDataInput extends ChecksummedDataInput
     @Override
     public void close()
     {
-        BufferPool.put(compressedBuffer);
+        bufferPool.put(compressedBuffer);
         super.close();
     }
 

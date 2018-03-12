@@ -110,8 +110,6 @@ public interface Rebufferer extends ReaderFileProxy
         {
             super("Requested data (" + path + "@" + position +") is not in cache.");
             this.cacheReady = cacheReady;
-
-            ChunkCache.instance.metrics.notInCacheExceptions.mark();
         }
 
         @Override
