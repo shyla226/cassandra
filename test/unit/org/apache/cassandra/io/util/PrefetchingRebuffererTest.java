@@ -297,7 +297,8 @@ public class PrefetchingRebuffererTest
 
         ret.join();
 
-        verify(channel, times(2)).submitBatch(); // one call for the requested buffer and one for read-ahead
+        verify(channel, times(1)).startBatch(); // one call for read-ahead
+        verify(channel, times(1)).submitBatch(); // one call for read-ahead
     }
 
 
