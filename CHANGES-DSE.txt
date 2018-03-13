@@ -2,6 +2,7 @@ DSE 5.1.8
  * Add support again for "" as selectable to select SuperColumns (DB-1599)
  * Read connection ssl option from cqlshrc (DB-1800)
 Merged from dse5.0:
+ * Backport CASSANDRA-9241, fix 'nodetool toppartitions' (DB-1825)
  * Ignore lost+found directory on startup checks (DB-1215)
 
 

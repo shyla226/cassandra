@@ -159,6 +159,17 @@ public class ByteBufferUtil
     /**
      * You should almost never use this.  Instead, use the write* methods to avoid copies.
      */
+    public static byte[] getArrayUnsafe(ByteBuffer buffer)
+    {
+        if (buffer.hasArray() && buffer.arrayOffset() == 0)
+        {
+            byte[] array = buffer.array();
+            if (buffer.remaining() == array.length)
+                return array;
+        }
+        return getArray(buffer);
+    }
+
     public static byte[] getArray(ByteBuffer buffer)
     {
         int length = buffer.remaining();
