@@ -306,6 +306,8 @@ public class RowIndexTest
                 }
 
                 int idx = (int) indexInfo.offset;
+                if (indexInfo.offset == END_MARKER)
+                    idx = keys.size();
                 if (idx > 0)
                     assertTrue(comparator.compare(right, keys.get(idx - 1)) > 0);
                 if (idx < keys.size() - 1)
