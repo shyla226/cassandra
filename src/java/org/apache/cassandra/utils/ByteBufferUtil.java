@@ -159,6 +159,17 @@ public class ByteBufferUtil
     /**
      * You should almost never use this.  Instead, use the write* methods to avoid copies.
      */
+    public static byte[] getArrayUnsafe(ByteBuffer buffer)
+    {
+        if (buffer.hasArray() && buffer.arrayOffset() == 0)
+        {
+            byte[] array = buffer.array();
+            if (buffer.remaining() == array.length)
+                return array;
+        }
+        return getArray(buffer);
+    }
+
     public static byte[] getArray(ByteBuffer buffer)
     {
         int length = buffer.remaining();
@@ -510,8 +521,17 @@ public class ByteBufferUtil
         };
     }
 
+    /*
+     * Does not modify position or limit of buffer even temporarily
+     * so this is safe even without duplication.
+     */
     public static String bytesToHex(ByteBuffer bytes)
     {
+        if (bytes.hasArray())
+        {
+            return Hex.bytesToHex(bytes.array(), bytes.arrayOffset() + bytes.position(), bytes.remaining());
+        }
+
         final int offset = bytes.position();
         final int size = bytes.remaining();
         final char[] c = new char[size * 2];

@@ -101,7 +101,7 @@ public abstract class CqlOperation<V> extends PredefinedOperation
 
     protected void run(final ClientWrapper client) throws IOException
     {
-        final byte[] key = getKey().array();
+        final byte[] key = ByteBufferUtil.getArrayUnsafe(getKey());
         final List<Object> queryParams = getQueryParameters(key);
         run(client, queryParams, ByteBuffer.wrap(key));
     }
@@ -540,7 +540,7 @@ public abstract class CqlOperation<V> extends PredefinedOperation
                     List<Row> rows = result.all();
                     byte[][] r = new byte[rows.size()][];
                     for (int i = 0 ; i < r.length ; i++)
-                        r[i] = rows.get(i).getBytes(0).array();
+                        r[i] = ByteBufferUtil.getArrayUnsafe(rows.get(i).getBytes(0));
                     return r;
                 }
             };
@@ -560,7 +560,7 @@ public abstract class CqlOperation<V> extends PredefinedOperation
                         ResultMessage.Rows rows = ((ResultMessage.Rows) result);
                         byte[][] r = new byte[rows.result.size()][];
                         for (int i = 0 ; i < r.length ; i++)
-                            r[i] = rows.result.rows.get(i).get(0).array();
+                            r[i] = ByteBufferUtil.getArrayUnsafe(rows.result.rows.get(i).get(0));
                         return r;
                     }
                     return null;
