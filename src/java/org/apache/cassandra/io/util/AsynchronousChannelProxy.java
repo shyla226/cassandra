@@ -41,7 +41,6 @@ import io.netty.channel.epoll.AIOEpollFileChannel;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.channel.unix.FileDescriptor;
 import io.netty.util.concurrent.FastThreadLocal;
-import io.netty.util.internal.InternalThreadLocalMap;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.io.FSReadError;
@@ -291,16 +290,15 @@ public class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousF
      */
     private static class AIOEpollBatchedChannelProxy extends AsynchronousChannelProxy
     {
+        private static final FastThreadLocal<AIOContext.Batch<ByteBuffer>> batch = new FastThreadLocal<>();
         private final boolean vectored;
         private final AIOEpollFileChannel epollChannel;
-        private FastThreadLocal<AIOContext.Batch<ByteBuffer>> batch;
 
         private AIOEpollBatchedChannelProxy(AsynchronousChannelProxy inner, boolean vectored)
         {
             super(inner);
             this.vectored = vectored;
             this.epollChannel = (AIOEpollFileChannel) inner.channel;
-            this.batch = new FastThreadLocal<>();
         }
 
         @Override
