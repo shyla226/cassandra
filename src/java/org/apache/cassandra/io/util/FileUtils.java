@@ -1101,13 +1101,14 @@ public final class FileUtils
     static String cpuIdVendorId(String cpuidLine) throws IOException
     {
         int[] registers = cpuIdParse(cpuidLine);
-        ByteBuffer bb = ByteBuffer.allocate(12);
+        byte[] bytes = new byte[12];
+        ByteBuffer bb = ByteBuffer.wrap(bytes);
         bb.order(ByteOrder.LITTLE_ENDIAN);
         // Order for VendorID is EBX, EDX, ECX
         bb.putInt(registers[1]);
         bb.putInt(registers[3]);
         bb.putInt(registers[2]);
-        return new String(bb.array(), StandardCharsets.UTF_8);
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     /**

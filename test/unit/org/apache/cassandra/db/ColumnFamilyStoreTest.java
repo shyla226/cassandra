@@ -22,6 +22,10 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.stream.Collectors;
+
+import javax.management.openmbean.CompositeData;
+import javax.management.openmbean.TabularData;
 
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -47,6 +51,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -61,6 +66,7 @@ public class ColumnFamilyStoreTest
     public static final String KEYSPACE2 = "ColumnFamilyStoreTest2";
     public static final String CF_STANDARD1 = "Standard1";
     public static final String CF_STANDARD2 = "Standard2";
+    public static final String CF_STANDARD3 = "Standard3";
     public static final String CF_SUPER1 = "Super1";
     public static final String CF_SUPER6 = "Super6";
     public static final String CF_INDEX1 = "Indexed1";
@@ -79,6 +85,7 @@ public class ColumnFamilyStoreTest
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD2),
+                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD3, 1, UTF8Type.instance),
                                     SchemaLoader.keysIndexCFMD(KEYSPACE1, CF_INDEX1, true));
                                     // TODO: Fix superCFMD failing on legacy table creation. Seems to be applying composite comparator to partition key
                                     // SchemaLoader.superCFMD(KEYSPACE1, CF_SUPER1, LongType.instance));
@@ -466,5 +473,52 @@ public class ColumnFamilyStoreTest
         List<File> ssTableFiles = new Directories(cfs.metadata()).sstableLister(Directories.OnTxnErr.THROW).listFiles();
         assertNotNull(ssTableFiles);
         assertEquals(0, ssTableFiles.size());
+
+        // necessary to let later tests pass
+        cfs.getTracker().removeUnsafe(Collections.singleton(ssTable));
+    }
+
+    @Test
+    public void testToppartitions() throws Throwable
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD3);
+
+        String sampler = TableMetrics.Sampler.WRITES.name();
+        cfs.beginLocalSampling(sampler, 1024);
+
+        Random r = new Random();
+
+        for (int i = 0; i < 1000; i++)
+        {
+            // CASSANDRA-9241, DB-1825 - If the partition key is contained in a not full used ByteBuffer,
+            // i.e. a pooled or reused ByteBuffer, ColumnFamilyStore.finishLocalSampling() failed before
+            // DB-1825/CASSANDRA-9241 with partition key validation exceptions - e.g. CASSANDRA-13463
+
+            byte[] bytes1 = new byte[1024];
+            r.nextBytes(bytes1);
+            ByteBuffer key1 = ByteBuffer.wrap(bytes1);
+            key1.put("key1".getBytes());
+            key1.flip();
+
+            byte[] bytes2 = new byte[1024];
+            r.nextBytes(bytes2);
+            ByteBuffer key2 = ByteBuffer.wrap(bytes2);
+            key2.put("key2".getBytes());
+            key2.flip();
+
+            new RowUpdateBuilder(cfs.metadata.get(), 0, key1).clustering("Column1").add("val", "asdf").build().applyUnsafe();
+            new RowUpdateBuilder(cfs.metadata.get(), 0, key2).clustering("Column1").add("val", "asdf").build().applyUnsafe();
+        }
+
+        CompositeData sampling = cfs.finishLocalSampling(sampler, 10);
+        Long cardinality = (Long) sampling.get("cardinality");
+        assertEquals(Long.valueOf(1L), cardinality);
+        TabularData partitions = (TabularData) sampling.get("partitions");
+        assertEquals(2, partitions.size());
+        List<String> resultKeys = partitions.keySet().stream()
+                                            .map(l -> (String) ((List) l).get(3))
+                                            .sorted(String.CASE_INSENSITIVE_ORDER)
+                                            .collect(Collectors.toList());
+        assertEquals(Arrays.asList("key1", "key2"), resultKeys);
     }
 }
