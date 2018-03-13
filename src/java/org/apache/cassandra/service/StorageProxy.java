@@ -644,8 +644,6 @@ public class StorageProxy implements StorageProxyMBean
         Iterable<InetAddress> endpoints = StorageService.instance.getNaturalAndPendingEndpoints(keyspaceName, token);
         ArrayList<InetAddress> endpointsToHint = new ArrayList<>(Iterables.size(endpoints));
 
-        // local writes can timeout, but cannot be dropped (see LocalMutationRunnable and CASSANDRA-6510),
-        // so there is no need to hint or retry.
         for (InetAddress target : endpoints)
             if (shouldHint(target))
                 endpointsToHint.add(target);
@@ -2179,9 +2177,7 @@ public class StorageProxy implements StorageProxyMBean
 
     public static boolean shouldHint(InetAddress ep)
     {
-        if (ep.equals(FBUtilities.getBroadcastAddress()))
-            return false;
-
+        // Local writes can timeout, so writing hint to local is necessary.
         if (DatabaseDescriptor.hintedHandoffEnabled())
         {
             Set<String> disabledDCs = DatabaseDescriptor.hintedHandoffDisabledDCs();
