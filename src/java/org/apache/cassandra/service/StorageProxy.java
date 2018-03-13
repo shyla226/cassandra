@@ -74,7 +74,8 @@ public class StorageProxy implements StorageProxyMBean
     public static final String MBEAN_NAME = "org.apache.cassandra.db:type=StorageProxy";
     private static final Logger logger = LoggerFactory.getLogger(StorageProxy.class);
 
-    private static final String UNREACHABLE = "UNREACHABLE";
+    // NOTE: Must be public as is is used by BDP (e.g. https://github.com/riptano/bdp/blob/ddcff663a35915f31f2523db4d719cc8fd11b564/dse-core/src/main/java/com/datastax/bdp/util/SchemaTool.java#L322
+    public static final String UNREACHABLE = "UNREACHABLE";
 
     public static final StorageProxy instance = new StorageProxy();
 
@@ -2027,7 +2028,8 @@ public class StorageProxy implements StorageProxyMBean
      * migration id. This is useful for determining if a schema change has propagated through the cluster. Disagreement
      * is assumed if any node fails to respond.
      */
-    private static Map<String, List<String>> describeSchemaVersions()
+    // NOTE: Must be public as is is used by BDP (e.g. https://github.com/riptano/bdp/blob/f78ce29a0b1dd150ba64d10d8972aed8b4292599/dse-graph/src/main/java/com/datastax/bdp/gcore/datastore/CassandraDataStore.java#L274)
+    public static Map<String, List<String>> describeSchemaVersions()
     {
         final String myVersion = Schema.instance.getVersion().toString();
         final Map<InetAddress, UUID> versions = new ConcurrentHashMap<InetAddress, UUID>();
