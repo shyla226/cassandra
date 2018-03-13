@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * An entry in the sstable index file, this is just to group
@@ -47,7 +48,7 @@ public class IndexFileEntry
     public String toString()
     {
         return String.format("[key: %s, indexed: %s, rows: %d]",
-                             key == null ? "null" : new String(key.getKey().array()),
+                             key == null ? "null" : new String(ByteBufferUtil.getArrayUnsafe(key.getKey())),
                              entry == null ? false : entry.isIndexed(),
                              entry == null ? 0 : entry.rowIndexCount());
     }
