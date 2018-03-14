@@ -25,6 +25,8 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 
+import com.google.common.util.concurrent.Uninterruptibles;
+
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageServiceMBean;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
@@ -42,7 +44,7 @@ public class RepairRunner extends JMXNotificationProgressListener
     private final Map<String, String> options;
     private final Condition condition = new SimpleCondition();
 
-    private int cmd;
+    private volatile Integer cmd = null;
     private volatile Exception error;
 
     public RepairRunner(PrintStream out, StorageServiceMBean ssProxy, String keyspace, Map<String, String> options)
@@ -79,6 +81,17 @@ public class RepairRunner extends JMXNotificationProgressListener
     @Override
     public boolean isInterestedIn(String tag)
     {
+        int i = 0;
+        // can only process notifications after it has the repair command ID.
+        while (cmd == null)
+        {
+            if (i++ == 600)
+            {
+                out.println("Did not get repair command ID after 1 minute - repair notifications may be lost.");
+                break;
+            }
+            Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
+        }
         return tag.equals("repair:" + cmd);
     }
 

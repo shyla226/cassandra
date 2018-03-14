@@ -45,13 +45,14 @@ New features
    - An integrated continuous background repair service called NodeSync has been added. NodeSync can be enabled as a
      service on individual nodes. NodeSync is disabled on tables by default. NodeSync can be enabled on a table with a
      configurable deadline deadline_target_sec by altering the NodeSync options on an existing table or providing
-     NodeSync options when creating a table. Traditional anti-entropy repairs will be rejected on tables with NodeSync
-     enabled. NodeSync's target repair rate can be set through the rate_in_kb parameter in the NodeSync section of
-     cassandra.yaml. A new command line tool for cluster-wide management of NodeSync called "nodesync" has been added.
-     It can be used to enable/disable NodeSync on tables, configure NodeSync, manage one-off user validations, or trace
-     NodeSync operation. See "nodesync help" for more information. The NodeSync service on an
+     NodeSync options when creating a table. NodeSync's target repair rate can be set through the rate_in_kb parameter
+     in the NodeSync section of cassandra.yaml. A new command line tool for cluster-wide management of NodeSync called
+     "nodesync" has been added. It can be used to enable/disable NodeSync on tables, configure NodeSync, manage one-off
+     user validations, or trace NodeSync operation. See "nodesync help" for more information. The NodeSync service on an
      individual node can be managed through "nodetool nodesyncservice". A simulator accessible through
      "nodetool nodesyncservice ratesimulator" can help configure NodeSync for your workload.
+   - Tables with NodeSync enabled will be skipped on keyspace-level and node-level legacy repairs. Legacy
+     repairs on individual tables with NodeSync enabled will be rejected.
    - Functions may now be used in the GROUP BY clause of CQL queries, provided the function is 1) applied
      to a single clustering column, 2) monotonic on the clustering column argument, 3) applied to the last clustering
      column of the GROUP BY clause, and 4) excepting the function call, the columns appear in primary key order.
