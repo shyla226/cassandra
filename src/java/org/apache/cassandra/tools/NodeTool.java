@@ -388,7 +388,6 @@ public class NodeTool
         {
             List<String> keyspaces = new ArrayList<>();
 
-
             if (cmdArgs == null || cmdArgs.isEmpty())
             {
                 if (defaultKeyspaceSet == KeyspaceSet.NON_LOCAL_STRATEGY)
