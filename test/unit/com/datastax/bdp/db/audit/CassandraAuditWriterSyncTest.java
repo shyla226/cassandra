@@ -11,6 +11,7 @@ import com.datastax.bdp.db.audit.CassandraAuditWriter.BatchingOptions;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.schema.SchemaConstants;
 
 public class CassandraAuditWriterSyncTest extends CassandraAuditWriterTester
@@ -18,6 +19,9 @@ public class CassandraAuditWriterSyncTest extends CassandraAuditWriterTester
     @BeforeClass
     public static void setup()
     {
+        // We need to used a ByteOrderedPartitioner to keep the order when the test is run at a time causing a partition change.
+        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+
         requireAuthentication();
         DatabaseDescriptor.setPermissionsValidity(9999);
         DatabaseDescriptor.setPermissionsUpdateInterval(9999);
