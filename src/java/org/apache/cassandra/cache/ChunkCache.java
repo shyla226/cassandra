@@ -54,7 +54,6 @@ public class ChunkCache implements CacheSize
 
     public ChunkCache()
     {
-
         // TODO: what'd be an optimal ratio?
         long indexCacheSize = (long) (INDEX_TO_DATA_RATIO * cacheSize);
         this.indexPageCache = new ChunkCacheImpl(metrics, indexCacheSize);
