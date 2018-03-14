@@ -39,6 +39,9 @@ final class AuditLogger implements IAuditLogger
     private static final Logger logger = LoggerFactory.getLogger(AuditLogger.class);
     private static final Pattern obfuscatePasswordPattern = Pattern.compile("(?i)(PASSWORD\\s+(=\\s+)?)'[^']*'");
 
+    static final int MAX_SIZE = Integer.getInteger("dse.audit.bindVariablesFormatter.maxSize", 64 * 1024);
+    static final int MAX_VALUE_SIZE = Integer.getInteger("dse.audit.bindVariablesFormatter.maxValueSize", 16 * 1024);
+
     /**
      * The writer used to log the events
      */
@@ -385,17 +388,23 @@ final class AuditLogger implements IAuditLogger
         return CoreAuditableEventType.UNKNOWN;
     }
 
-    private static StringBuilder appendBindVariables(StringBuilder builder,
-                                                     List<ColumnSpecification> boundNames,
-                                                     List<ByteBuffer> variables)
+    @VisibleForTesting
+    static StringBuilder appendBindVariables(StringBuilder builder,
+                                             List<ColumnSpecification> boundNames,
+                                             List<ByteBuffer> variables)
     {
         if (null == boundNames || boundNames.isEmpty())
             return builder.append("[bind variable values unavailable]");
+
+        int initialLength = builder.length();
 
         builder.append('[');
 
         for (int i = 0, m = variables.size(); i < m; i++)
         {
+            if (builder.length() - initialLength > MAX_SIZE)
+                return builder.append(", ... (capped)]");
+
             if (i != 0)
                 builder.append(',');
 
@@ -403,8 +412,13 @@ final class AuditLogger implements IAuditLogger
             ByteBuffer var = variables.get(i);
 
             builder.append(spec.name)
-                   .append('=')
-                   .append(spec.type.getString(var));
+                   .append('=');
+
+            String value = spec.type.getString(var);
+            if (value.length() <= MAX_VALUE_SIZE)
+                builder.append(value);
+            else
+                builder.append(value, 0, MAX_VALUE_SIZE).append("... (truncated, ").append(value.length() - MAX_VALUE_SIZE).append(" chars omitted)");
         }
         return builder.append(']');
     }
