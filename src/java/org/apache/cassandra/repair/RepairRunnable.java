@@ -182,16 +182,16 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
         ActiveRepairService.instance.recordRepairStatus(cmd, ActiveRepairService.ParentRepairStatus.IN_PROGRESS, ImmutableList.of());
         final TraceState traceState;
         final UUID parentSession = UUIDGen.getTimeUUID();
-        final String tag = "repair:" + cmd;
 
         final AtomicInteger progress = new AtomicInteger();
         final int totalProgress = 4 + options.getRanges().size(); // get valid column families, calculate neighbors, validation, prepare for repair + number of ranges to repair
 
-        String[] columnFamilies = options.getColumnFamilies().toArray(new String[0]);
+        String[] specifiedTables = options.getColumnFamilies().toArray(new String[0]);
+
         Iterable<ColumnFamilyStore> validColumnFamilies;
         try
         {
-            validColumnFamilies = storageService.getValidColumnFamilies(false, false, keyspace, columnFamilies);
+            validColumnFamilies = storageService.getValidColumnFamilies(false, false, keyspace, specifiedTables);
             progress.incrementAndGet();
         }
         catch (IllegalArgumentException | IOException e)
@@ -199,6 +199,29 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
             logger.error("Repair failed:", e);
             fireErrorAndComplete(progress.get(), totalProgress, e.getMessage());
             return;
+        }
+
+        // Fail repair on tables with NodeSync enabled, skip them for keyspace/all-tables repair
+        Collection<ColumnFamilyStore> withNodeSync = getTablesWithNodeSync(validColumnFamilies);
+        if (!withNodeSync.isEmpty())
+        {
+            List<String> tableNames = withNodeSync.stream()
+                                                  .map(t -> String.format("%s.%s", t.keyspace.getName(), t.name))
+                                                  .sorted()
+                                                  .collect(Collectors.toList());
+            if (specifiedTables.length == 0)
+            {
+                String message = String.format("Skipping anti-entropy repair on tables with NodeSync enabled: %s.", tableNames);
+                fireProgressEvent(new ProgressEvent(ProgressEventType.NOTIFICATION, progress.get(), totalProgress, message));
+                logger.debug(message);
+                validColumnFamilies = Iterables.filter(validColumnFamilies, t -> !withNodeSync.contains(t));
+            }
+            else
+            {
+                String message = String.format("Cannot run anti-entropy repair on tables with NodeSync enabled (and NodeSync is enabled on %s)", tableNames);
+                fireErrorAndComplete(progress.get(), totalProgress, message);
+                return;
+            }
         }
 
         final long startTime = System.currentTimeMillis();
@@ -331,6 +354,11 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
         {
             normalRepair(parentSession, startTime, traceState, commonRanges, skippedReplicas, cfnames);
         }
+    }
+
+    private Collection<ColumnFamilyStore> getTablesWithNodeSync(Iterable<ColumnFamilyStore> validTables)
+    {
+        return Sets.newHashSet(Iterables.filter(validTables, t -> t.metadata().params.nodeSync.isEnabled(t.metadata())));
     }
 
     private void normalRepair(UUID parentSession,
