@@ -1,7 +1,9 @@
 3.11.3
+ * Fix Loss of digits when doing CAST from varint/bigint to decimal (CASSANDRA-14170)
  * RateBasedBackPressure unnecessarily invokes a lock on the Guava RateLimiter (CASSANDRA-14163)
  * Fix wildcard GROUP BY queries (CASSANDRA-14209)
 Merged from 3.0:
+ * Don't regenerate bloomfilter and summaries on startup (CASSANDRA-11163)
  * Fix NPE when performing comparison against a null frozen in LWT (CASSANDRA-14087)
  * Log when SSTables are deleted (CASSANDRA-14302)
  * Fix batch commitlog sync regression (CASSANDRA-14292)
