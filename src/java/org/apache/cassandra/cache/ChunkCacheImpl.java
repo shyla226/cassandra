@@ -448,7 +448,6 @@ implements AsyncCacheLoader<ChunkCacheImpl.Key, ChunkCacheImpl.Buffer>, RemovalL
     @Override
     public long weightedSize()
     {
-        System.out.println("weightedSize() = " + weightedSize());
         return cache.synchronous().policy().eviction()
                     .map(policy -> policy.weightedSize().orElseGet(cache.synchronous()::estimatedSize))
                     .orElseGet(cache.synchronous()::estimatedSize);
