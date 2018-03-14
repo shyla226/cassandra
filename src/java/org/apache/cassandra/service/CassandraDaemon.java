@@ -296,6 +296,7 @@ public class CassandraDaemon
             {
                 for (ColumnFamilyStore store : cfs.concatWithIndexes())
                 {
+                    store.logStartupWarnings();
                     store.disableAutoCompaction();
                 }
             }
@@ -477,7 +478,7 @@ public class CassandraDaemon
             logger.info("Computing default TPC core assignments for {} based on ranges {}...", ks.getName(), ranges);
             ks.setDefaultTPCBoundaries(!ranges.isEmpty() ? ranges : StorageService.getStartupTokenRanges(ks));
         }
-        
+
         // Flush the memtables to have future writes use the new boundaries:
         FBUtilities.waitOnFutures(Iterables.concat(Iterables.transform(Keyspace.all(), Keyspace::flush)));
     }

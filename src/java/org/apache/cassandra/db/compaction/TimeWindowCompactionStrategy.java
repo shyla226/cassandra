@@ -46,6 +46,9 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableParams;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.Pair;
 
 import static com.google.common.collect.Iterables.filter;
@@ -414,5 +417,25 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
         return String.format("TimeWindowCompactionStrategy[%s/%s]",
                 cfs.getMinimumCompactionThreshold(),
                 cfs.getMaximumCompactionThreshold());
+    }
+
+    private static boolean isSplitDuringFlushEnabled(Map<String, String> options)
+    {
+        return Boolean.parseBoolean(options.get(TimeWindowCompactionStrategyOptions.SPLIT_DURING_FLUSH));
+    }
+
+    public static String getNodeSyncSplitDuringFlushWarning(String keyspace, String columnFamily)
+    {
+        return String.format("NodeSync is enabled on table %s.%s with TimeWindowCompactionStrategy (TWCS) but the '%s' option is " +
+                             "disabled. We recommend enabling the '%s' option when using TWCS in conjunction with NodeSync to " +
+                             "ensure data repaired by NodeSync is placed in the correct TWCS time window.", keyspace, columnFamily,
+                             TimeWindowCompactionStrategyOptions.SPLIT_DURING_FLUSH, TimeWindowCompactionStrategyOptions.SPLIT_DURING_FLUSH);
+    }
+
+    public static boolean shouldLogNodeSyncSplitDuringFlushWarning(TableMetadata tableMetadata, TableParams tableParams)
+    {
+        return tableParams.compaction.klass().equals(TimeWindowCompactionStrategy.class)
+               && tableParams.nodeSync.isEnabled(tableMetadata)
+               && !isSplitDuringFlushEnabled(tableParams.compaction.options());
     }
 }

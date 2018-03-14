@@ -37,9 +37,11 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.CompactTables;
 import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
+import org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.*;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
@@ -98,6 +100,11 @@ public class CreateTableStatement extends SchemaAlteringStatement implements Tab
     {
         if (params.compaction.klass().equals(DateTieredCompactionStrategy.class))
             DateTieredCompactionStrategy.deprecatedWarning(keyspace(), columnFamily());
+
+        if (TimeWindowCompactionStrategy.shouldLogNodeSyncSplitDuringFlushWarning(toTableMetadata(), params))
+        {
+            ClientWarn.instance.warn(TimeWindowCompactionStrategy.getNodeSyncSplitDuringFlushWarning(keyspace(), columnFamily()));
+        }
 
         return MigrationManager.announceNewTable(toTableMetadata(), isLocalOnly)
                                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))

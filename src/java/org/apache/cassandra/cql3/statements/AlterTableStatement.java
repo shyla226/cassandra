@@ -31,6 +31,8 @@ import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
+import org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy;
+import org.apache.cassandra.db.compaction.TimeWindowCompactionStrategyOptions;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.view.View;
@@ -45,6 +47,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.ViewMetadata;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
@@ -258,14 +261,20 @@ public class AlterTableStatement extends SchemaAlteringStatement implements Tabl
                         return error("Only the " + TableParams.Option.NODESYNC + " option is user-modifiable on system table " + current);
                 }
 
-                TableParams params = attrs.asAlteredTableParams(current.params);
-                if (params.compaction.klass().equals(DateTieredCompactionStrategy.class) &&
+                TableParams newParams = attrs.asAlteredTableParams(current.params);
+                if (newParams.compaction.klass().equals(DateTieredCompactionStrategy.class) &&
                     !current.params.compaction.klass().equals(DateTieredCompactionStrategy.class))
                 {
                     DateTieredCompactionStrategy.deprecatedWarning(keyspace(), columnFamily());
                 }
 
-                if (!Iterables.isEmpty(views) && params.gcGraceSeconds == 0)
+                if (!TimeWindowCompactionStrategy.shouldLogNodeSyncSplitDuringFlushWarning(current, current.params)
+                    && TimeWindowCompactionStrategy.shouldLogNodeSyncSplitDuringFlushWarning(current, newParams))
+                {
+                    ClientWarn.instance.warn(TimeWindowCompactionStrategy.getNodeSyncSplitDuringFlushWarning(keyspace(), columnFamily()));
+                }
+
+                if (!Iterables.isEmpty(views) && newParams.gcGraceSeconds == 0)
                 {
                     return error("Cannot alter gc_grace_seconds of the base table of a " +
                                  "materialized view to 0, since this value is used to TTL " +
@@ -274,10 +283,10 @@ public class AlterTableStatement extends SchemaAlteringStatement implements Tabl
                                  "before being replayed.");
                 }
 
-                if (current.isCounter() && params.defaultTimeToLive > 0)
+                if (current.isCounter() && newParams.defaultTimeToLive > 0)
                     return error("Cannot set default_time_to_live on a table with counters");
 
-                builder.params(params);
+                builder.params(newParams);
 
                 break;
             case RENAME:

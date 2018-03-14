@@ -2865,4 +2865,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                    return mutated;
                                    }, true);
     }
+
+    /**
+     * Prints any startup warning related to this table.
+     * Should only be called once during node initialization.
+     */
+    public void logStartupWarnings()
+    {
+        if (TimeWindowCompactionStrategy.shouldLogNodeSyncSplitDuringFlushWarning(metadata(), metadata().params))
+            logger.warn(TimeWindowCompactionStrategy.getNodeSyncSplitDuringFlushWarning(keyspace.getName(), name));
+    }
 }

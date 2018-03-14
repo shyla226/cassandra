@@ -106,7 +106,8 @@ class Cql3ParsingRuleSet(CqlParsingRuleSet):
         'compaction_window_unit',
         'compaction_window_size',
         'min_threshold',
-        'timestamp_resolution'
+        'timestamp_resolution',
+        'split_during_flush'
     )
 
     @classmethod
