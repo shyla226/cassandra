@@ -41,6 +41,8 @@ import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.service.pager.QueryPager;
+import org.apache.cassandra.utils.TestTimeSource;
+import org.apache.cassandra.utils.TimeSource;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.FlowSubscriber;
 import org.apache.cassandra.utils.flow.FlowSubscription;
@@ -60,6 +62,8 @@ import static org.junit.Assert.*;
  */
 public class NodeSyncTestTools
 {
+    private static final TimeSource CONSTANT_TIME_SOURCE = new TestTimeSource();
+
     private static final IPartitioner PARTITIONER = Murmur3Partitioner.instance;
 
     /**
@@ -201,16 +205,10 @@ public class NodeSyncTestTools
         };
     }
 
-    // Since this method is used in tests and strict equality is checked, millisecond granularity is not always enough
-    // especially on CI, causing tests to fail. Decreasing granularity does not influence test quality but improves stability.
-    private static long now()
-    {
-        return (NodeSyncHelpers.time().currentTimeMillis() / 1000) * 1000;
-    }
-
     private static ValidationInfo vInfo(long daysAgo, ValidationOutcome outcome, Set<InetAddress> missingNodes)
     {
-        return new ValidationInfo(now() - TimeUnit.DAYS.toMillis(daysAgo),
+        // We use a constant time source to make sure multiple calls to this with the same {@link daysAgo} parameter will yield the same startedAt values
+        return new ValidationInfo(CONSTANT_TIME_SOURCE.currentTimeMillis() - TimeUnit.DAYS.toMillis(daysAgo),
                                   outcome,
                                   missingNodes);
     }
