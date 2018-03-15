@@ -498,13 +498,18 @@ public class SinglePartitionReadCommand extends ReadCommand
     {
         SSTableReadMetricsCollector metricsCollector = new SSTableReadMetricsCollector();
 
-        // Pick which thread to run this query on.  We don't want to execute all requests on the same core
-        // since we can have a single client doing all the requests.
+        // Pick which thread to run this query on. We don't want to execute all requests on the same core
+        // since we can have a single client doing all the requests, unless it's a remote read, in which case
+        // we already picked a random core, or an internal read, which we don't want to defer to avoid deadlocks with
+        // non internal reads which depend on it (i.e. for RLAC).
         int localCore = TPC.getCoreId();
         int coreId =  TPC.getNextCore();
         boolean isLocalCore = coreId == localCore;
 
-        if (isLocalCore || readType == TPCTaskType.READ_INTERNAL || readType == TPCTaskType.READ_SECONDARY_INDEX)
+        if (isLocalCore ||
+            readType == TPCTaskType.READ_INTERNAL ||
+            readType == TPCTaskType.READ_REMOTE ||
+            readType == TPCTaskType.READ_SECONDARY_INDEX)
         {
             return queryMemtableAndDisk(cfs, executionController, metricsCollector)
                    .doOnClose(() -> updateMetrics(cfs.metric, metricsCollector));
