@@ -225,6 +225,7 @@ Merged from dse5.0:
  * Wait for remaining tasks to finish on RepairJob after task failure (DB-87)
  * Exponential backoff when hint delivery fails (DB-17)
 Merged from DSE 4.8:
+ * Protect against BigDecimals with large scale (DB-1848)
  * Protect against overflow of local expiration time (DB-1619)
  * Improve live-node-replacement (DB-1327)
  * Allow aggressive expiration of fully expired sstables without timestamp/key overlap checks (DB-902)
