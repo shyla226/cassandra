@@ -4,6 +4,8 @@ DSE 5.1.8
 Merged from dse5.0:
  * Backport CASSANDRA-9241, fix 'nodetool toppartitions' (DB-1825)
  * Ignore lost+found directory on startup checks (DB-1215)
+Merged from DSE 4.8:
+ * Protect against BigDecimals with large scale (DB-1848)
 
 
 DSE 5.1.7
