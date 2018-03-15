@@ -20,11 +20,11 @@ package org.apache.cassandra.concurrent;
 
 /**
  * <p>A message that defines what scheduler and executor to use for handling its related operations.</p>
- * 
+ *
  * <p>For example, for request-response messages, it's possible to execute the request on one executor, the response on
  * another executor, and to defer the execution of another operation related to the message to the specific scheduler
  * (e.g. to defer the commit log allocation for a given mutation after the commit log segment is switched).</p>
- * 
+ *
  * @see org.apache.cassandra.db.Mutation
  */
 public interface SchedulableMessage
@@ -38,12 +38,12 @@ public interface SchedulableMessage
     /**
      * The executor to use for submitting the response runnables of the message. By default, the response
      * executor would be the same as the request executor. For one-way messages, the response executor won't be used.
-     */    
+     */
     default TracingAwareExecutor getResponseExecutor()
     {
         return getRequestExecutor();
     };
-    
+
     /**
      * The executor to use when scheduling miscellaneous stages of the processing.
      */

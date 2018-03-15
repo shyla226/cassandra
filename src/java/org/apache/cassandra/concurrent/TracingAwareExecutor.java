@@ -39,4 +39,13 @@ public interface TracingAwareExecutor
      * @param locals - the thread local value to set in the thread local of the executing thread
      */
     void execute(Runnable runnable, ExecutorLocals locals);
+
+    /**
+     * Return the TPC core id this executor runs on; by default, it's assumed not to run on a TPC core, so this method
+     * needs to be overridden, and users of this method should check if it's a valid core id via {@link TPC#isValidCoreId(int)}.
+     */
+    default int coreId()
+    {
+        return TPC.getNumCores();
+    }
 }

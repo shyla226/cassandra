@@ -217,7 +217,7 @@ public class TPC
      * The {@link EventLoopGroup} holding our internal Thread-Per-Core event loops. That group is re-used to handle
      * I/O tasks through Netty.
      */
-    public static EventLoopGroup eventLoopGroup()
+    public static TPCEventLoopGroup eventLoopGroup()
     {
         return eventLoopGroup;
     }

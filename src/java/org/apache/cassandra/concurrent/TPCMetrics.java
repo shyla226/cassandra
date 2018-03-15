@@ -61,7 +61,9 @@ public interface TPCMetrics extends TPCLimitsMBean
 
     // Backpressure related counters/metrics: track how many pending tasks are counted for backpressure, and how many
     // are delayed due to backpressure being active.
-    public long backpressureCountedTaskCount();
+    public long backpressureCountedLocalTaskCount();
+    public long backpressureCountedRemoteTaskCount();
+    public long backpressureCountedTotalTaskCount();
     public void backpressureDelayedTaskCount(int adjustment);
     public long backpressureDelayedTaskCount();
 

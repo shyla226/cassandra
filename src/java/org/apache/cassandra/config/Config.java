@@ -172,7 +172,7 @@ public class Config
     public volatile int concurrent_materialized_view_builders = 2;
 
     public volatile int tpc_concurrent_requests_limit = 128;
-    public volatile int tpc_pending_requests_limit = 1024;
+    public volatile int tpc_pending_requests_limit = 256;
 
     public volatile int stream_throughput_outbound_megabits_per_sec = 200;
     public volatile int inter_dc_stream_throughput_outbound_megabits_per_sec = 200;

@@ -25,11 +25,11 @@ import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
-import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.monitoring.AbortedOperationException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.utils.FBUtilities;

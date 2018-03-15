@@ -56,9 +56,30 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 {
     private static final String DEBUG_RUNNING_TIME_NAME = "dse.tpc.debug_task_running_time_seconds";
     private static final long DEBUG_RUNNING_TIME_NANOS = TimeUnit.SECONDS.toNanos(Integer.parseInt(System.getProperty(DEBUG_RUNNING_TIME_NAME, "0")));
+
     private static final Logger LOGGER = LoggerFactory.getLogger(EpollTPCEventLoopGroup.class);
 
     // all the values set here are not as well researched as they should be... but the reasoning is in the javadoc
+
+    /**
+     * Disable any TPC backpressure; NOT RECOMMENDED.
+     */
+    private static final boolean DISABLE_BACKPRESSURE = Boolean.parseBoolean(System.getProperty("dse.tpc.disable_backpressure", "false"));
+
+    /**
+     * Remote and global backpressure values are computed as multipliers of {@code tpc_pending_requests_limit}, as follows:
+     * - Remote backpressure has a default multiplier of 5 because it takes into account the fact we need to accommodate
+     *   "RF" remote requests, and 5 is considered a reasonable upper bound; increase this value if you get low throughput,
+     *   reduce if you get too many full GCs.
+     * - Global backpressure multiplier is computed as the max between 10 and the number of cores as we assume
+     *   we don't want any single core to keep more tasks than the total number of cores; increase this value if you get
+     *   too many delayed tasks or dropped messages, reduce if you get too many full GCs.
+     */
+    private static final int REMOTE_BACKPRESSURE_MULTIPLIER = Integer.parseInt(System.getProperty("dse.tpc.remote_backpressure_multiplier",
+                                                                                                   "5"));
+    private static final int GLOBAL_BACKPRESSURE_MULTIPLIER = Integer.parseInt(System.getProperty("dse.tpc.global_backpressure_multiplier",
+                                                                                                   Integer.toString(Math.max(10, DatabaseDescriptor.getTPCCores()))));
+
 
     /**
      * Scheduling granularity below 1us is not productive. Setting this value high however will delay scheduled channel
@@ -124,6 +145,12 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
         //Register these loop threads with the Watcher
         ParkedThreadsMonitor.instance.get().addThreadsToMonitor(new ArrayList<>(eventLoops));
+
+        if (!DISABLE_BACKPRESSURE)
+            LOGGER.info("Enabled TPC backpressure with {} pending requests limit, remote multiplier at {}, global multiplier at {}",
+                        DatabaseDescriptor.getTPCPendingRequestsLimit(), REMOTE_BACKPRESSURE_MULTIPLIER, GLOBAL_BACKPRESSURE_MULTIPLIER);
+        else
+            LOGGER.warn("TPC backpressure is disabled. NOT RECOMMENDED.");
     }
 
     public ImmutableList<? extends TPCEventLoop> eventLoops()
@@ -195,14 +222,19 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         * The max allowed number of pending "backpressured" tasks: no new pending/backpressured tasks will be accepted,
         * to avoid overloading the heap and leave more CPU power to already pending tasks.
         *
-        * Such value is actually made up of two thresholds:
-        * - The "local" threshold is the max number of allowed tasks for "this" core: if such threshold is met,
-        *   only its own tasks will be backpressured.
+        * Such value is actually made up of three thresholds:
+        * - The "local" threshold is the max number of allowed *local* (not marked with feature REMOTE) tasks for
+        *   "this" core: if such threshold is met, only its own *local* tasks will be backpressured.
+        * - The "remote" threshold is the max number of allowed *remote* (marked with feature REMOTE) tasks for
+        *   "this" core: if such threshold is met, only its own *remote* tasks will be backpressured.
         * - The "global" threshold is the max number of allowed tasks for any core: that is, if such threshold is met
         *   by any core, all tasks for all cores will be backpressured until all cores go back below this threshold.
+        *
+        * All such values are currently derived from {@link DatabaseDescriptor#getTPCPendingRequestsLimit()}.
         */
         private static final int LOCAL_BACKPRESSURE_THRESHOLD = DatabaseDescriptor.getTPCPendingRequestsLimit();
-        private static final int GLOBAL_BACKPRESSURE_THRESHOLD = LOCAL_BACKPRESSURE_THRESHOLD * (TPC.getNumCores() / 2);
+        private static final int REMOTE_BACKPRESSURE_THRESHOLD = LOCAL_BACKPRESSURE_THRESHOLD * REMOTE_BACKPRESSURE_MULTIPLIER;
+        private static final int GLOBAL_BACKPRESSURE_THRESHOLD = LOCAL_BACKPRESSURE_THRESHOLD * GLOBAL_BACKPRESSURE_MULTIPLIER;
 
         private SingleCoreEventLoop(EpollTPCEventLoopGroup parent, TPCThread.TPCThreadsCreator executor, AIOContext.Config aio)
         {
@@ -241,19 +273,33 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         }
 
         @Override
-        public boolean shouldBackpressure()
+        public boolean shouldBackpressure(boolean remote)
         {
-            return localBackpressure() || TPCMetrics.globallyBackpressuredCores() > 0;
+            if (DISABLE_BACKPRESSURE)
+                return false;
+
+            if (remote && remoteBackpressure())
+                return true;
+
+            if (!remote && localBackpressure())
+                return true;
+
+            return TPCMetrics.globallyBackpressuredCores() > 0;
         }
 
         private boolean localBackpressure()
         {
-            return metrics.backpressureCountedTaskCount() >= LOCAL_BACKPRESSURE_THRESHOLD;
+            return !DISABLE_BACKPRESSURE && metrics.backpressureCountedLocalTaskCount() >= LOCAL_BACKPRESSURE_THRESHOLD;
+        }
+
+        private boolean remoteBackpressure()
+        {
+            return !DISABLE_BACKPRESSURE && metrics.backpressureCountedRemoteTaskCount() >= REMOTE_BACKPRESSURE_THRESHOLD;
         }
 
         private boolean globalBackpressure()
         {
-            return metrics.backpressureCountedTaskCount() >= GLOBAL_BACKPRESSURE_THRESHOLD;
+            return !DISABLE_BACKPRESSURE && metrics.backpressureCountedTotalTaskCount() >= GLOBAL_BACKPRESSURE_THRESHOLD;
         }
 
         @Override

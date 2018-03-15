@@ -47,11 +47,8 @@ public enum TPCTaskType
     FRAME_DECODE(Features.PENDABLE),
     /** Single-partition read request from local node and directly generated from clients */
     READ_LOCAL(Features.BACKPRESSURED),
-    /** Single-partition read request from remote replica: this can't be backpressured because remote requests come from a different
-     * "channel" (internode communication) than client requests, and more specifically, client requests can be made async
-     * via frame decoding (see the FRAME_DECODE type), while remote requests are always executed straight away, hence
-     * the latter could starve the former */
-    READ_REMOTE(Features.PENDABLE),
+    /** Single-partition read request from remote replica */
+    READ_REMOTE(Features.BACKPRESSURED | Features.REMOTE),
     /** Read timeout, used to signal read timeout errors */
     READ_TIMEOUT(Features.EXCLUDE_FROM_TOTALS),
     /** Single-partition read request that will be first scheduled on an eventloop */
@@ -62,11 +59,8 @@ public enum TPCTaskType
     READ_RESPONSE("READ_SWITCH_FOR_RESPONSE"),
     /** Partition range read request from local node and directly generated from clients */
     READ_RANGE_LOCAL(Features.BACKPRESSURED),
-    /** Partition range read request from remote replica: this can't be backpressured because remote requests come from a different
-     * "channel" (internode communication) than client requests, and more specifically, client requests can be made async
-     * via frame decoding (see the FRAME_DECODE type), while remote requests are always executed straight away, hence
-     * the latter could starve the former */
-    READ_RANGE_REMOTE(Features.PENDABLE),
+    /** Partition range read request from remote replica */
+    READ_RANGE_REMOTE(Features.BACKPRESSURED | Features.REMOTE),
     /** Partition range read originating from NodeSync**/
     READ_RANGE_NODESYNC(Features.PENDABLE),
     /** Range reads to internal tables **/
@@ -81,11 +75,8 @@ public enum TPCTaskType
     READ_DISK_ASYNC(Features.EXTERNAL_QUEUE | Features.ALWAYS_ENQUEUE | Features.PRIORITY),
     /** Write request from local node and directly generated from clients */
     WRITE_LOCAL(Features.BACKPRESSURED),
-    /** Write request from remote replica: this can't be backpressured because remote requests come from a different
-     * "channel" (internode communication) than client requests, and more specifically, client requests can be made async
-     * via frame decoding (see the FRAME_DECODE type), while remote requests are always executed straight away, hence
-     * the latter could starve the former */
-    WRITE_REMOTE(Features.PENDABLE),
+    /** Write request from remote replica */
+    WRITE_REMOTE(Features.BACKPRESSURED | Features.REMOTE),
     /** Writes to internal tables **/
     WRITE_INTERNAL(Features.ALWAYS_COUNT),
     /** Write response, not always counted */
@@ -161,6 +152,7 @@ public enum TPCTaskType
         static final int EXCLUDE_FROM_TOTALS = TPCTaskType.EXCLUDE_FROM_TOTALS;
         static final int ALWAYS_ENQUEUE = TPCTaskType.ALWAYS_ENQUEUE;
         static final int PRIORITY = TPCTaskType.PRIORITY;
+        static final int REMOTE = TPCTaskType.REMOTE;
     }
 
     private static final int PENDABLE = 1;
@@ -170,6 +162,7 @@ public enum TPCTaskType
     private static final int BACKPRESSURED = 16;
     private static final int PRIORITY = 32;
     private static final int ALWAYS_ENQUEUE = 64;
+    private static final int REMOTE = 128;
 
     private final int flags;
 
@@ -237,6 +230,14 @@ public enum TPCTaskType
     public final boolean alwaysEnqueue()
     {
         return (flags & ALWAYS_ENQUEUE) != 0;
+    }
+
+    /**
+     * Whether this task represents a remote (from replica) operation (i.e. a remote write).
+     */
+    public final boolean remote()
+    {
+        return (flags & REMOTE) != 0;
     }
 
     /**
