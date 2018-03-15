@@ -7,6 +7,8 @@ DSE 5.0.13
  * Fix how duplicated Tombstones in legacy layout within the same clustering are handled (DB-1745)
  * Avoid NPE when providing invalid number of arguments for token function (DB-855)
  * Fetch/query no columns in priming connections to avoid errors if system.local columns are changed (DB-1708)
+Merged from DSE 4.8:
+ * Protect against BigDecimals with large scale (DB-1848)
 
 
 DSE 5.0.12
