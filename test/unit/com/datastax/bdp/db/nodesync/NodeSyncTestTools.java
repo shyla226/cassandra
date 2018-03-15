@@ -14,7 +14,6 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
@@ -202,9 +201,16 @@ public class NodeSyncTestTools
         };
     }
 
+    // Since this method is used in tests and strict equality is checked, millisecond granularity is not always enough
+    // especially on CI, causing tests to fail. Decreasing granularity does not influence test quality but improves stability.
+    private static long now()
+    {
+        return (NodeSyncHelpers.time().currentTimeMillis() / 1000) * 1000;
+    }
+
     private static ValidationInfo vInfo(long daysAgo, ValidationOutcome outcome, Set<InetAddress> missingNodes)
     {
-        return new ValidationInfo(NodeSyncHelpers.time().currentTimeMillis() - TimeUnit.DAYS.toMillis(daysAgo),
+        return new ValidationInfo(now() - TimeUnit.DAYS.toMillis(daysAgo),
                                   outcome,
                                   missingNodes);
     }
