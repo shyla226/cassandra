@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.cql3;
 
+import static org.junit.Assert.*;
+
 import java.util.*;
 
 import io.reactivex.*;
@@ -397,6 +399,33 @@ public class ViewFilteringTest extends CQLTester
         assertRowsIgnoringOrder(execute("SELECT * FROM mv_test2"));
         assertRowsIgnoringOrder(execute("SELECT * FROM mv_test3"), row(1, 1));
         assertRowsIgnoringOrder(execute("SELECT * FROM mv_test4"));
+    }
+
+    @Test
+    public void testViewBuildWithFiltering() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v1 int, v2 int, v3 int, PRIMARY KEY(k, c))");
+
+        execute("USE " + keyspace());
+        executeNet(protocolVersion, "USE " + keyspace());
+
+        for (int i = 0; i < 500; i++)
+            updateView("INSERT into %s (k,c,v1,v2,v3)VALUES(?,?,?,?,?)", 0, i, i / 200, i, i);
+
+        // i < 200 and i >= 400 will be filtered
+        createView("mv1", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND c IS NOT NULL AND v1 = 1"
+                + " PRIMARY KEY (k, c, v1)");
+        
+        BatchlogManager.instance.forceBatchlogReplay();
+
+        // verify base
+        for (int i = 0; i < 500; i++)
+            assertRows(execute("SELECT * FROM %s where k = 0 AND c = ?", i), row(0, i, i / 200, i, i));
+
+        // verify mv
+        assertEquals(200, execute("select * from mv1").size());
+        for (int i = 200; i < 400; i++)
+            assertRows(execute("SELECT * FROM mv1 where k = 0 AND c = ?", i), row(0, i, i / 200, i, i));
     }
 
     @Test

@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.net.DroppingResponseException;
 import org.apache.cassandra.schema.TableId;
@@ -69,7 +70,9 @@ public class ViewManager
 {
     private static final Logger logger = LoggerFactory.getLogger(ViewManager.class);
 
-    private static final Striped<Semaphore> SEMAPHORES = Striped.lazyWeakSemaphore(TPC.getNumCores() * 1024, 1);
+    private static final int LOCK_STRIPES = Integer.getInteger(Config.PROPERTY_PREFIX + "view.lock_stripes",
+                                                               TPC.getNumCores() * 1024 * 4);
+    private static final Striped<Semaphore> SEMAPHORES = Striped.lazyWeakSemaphore(LOCK_STRIPES, 1);
     private static final ConcurrentMap<Semaphore, Pair<Long, ExecutableLock>> LOCKS = new ConcurrentHashMap<>();
     private static final AtomicLong LOCK_ID_GEN = new AtomicLong();
 

@@ -688,13 +688,11 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         List<MutationAndEndpoints> mutationsAndEndpoints = new ArrayList<>(mutations.size());
-        Set<Mutation> nonLocalMutations = new HashSet<>(mutations);
+        List<Mutation> nonLocalMutations = new ArrayList<>(mutations.size());
         Token baseToken = StorageService.instance.getTokenMetadata().partitioner.getToken(dataKey);
 
         //Since the base -> view replication is 1:1 we only need to store the BL locally
-        final List<InetAddress> batchlogEndpoints = Collections.singletonList(FBUtilities.getBroadcastAddress());
-        AsyncLatch cleanupLatch = new AsyncLatch(mutations.size(), () -> asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID));
-
+        int latchCount = 0;
 
         ArrayList<Completable> completables = new ArrayList<>(mutations.size() + 1);
 
@@ -719,15 +717,15 @@ public class StorageProxy implements StorageProxyMBean
             if (endpoint.equals(FBUtilities.getBroadcastAddress()) && endpoints.pendingCount() == 0 && StorageService.instance.isJoined())
             {
                 completables.add(mutation.applyAsync(writeCommitLog, true)
-                                         .doFinally(() -> cleanupLatch.countDown())
-                                         .doOnError(exc -> logger.error("Error applying local view update to keyspace {}: {}", mutation.getKeyspaceName(), mutation)));
-
-                nonLocalMutations.remove(mutation);
-
+                                         .doOnError(exc -> logger.error("Error applying local view update to keyspace {}: {}",
+                                                                        mutation.getKeyspaceName(),
+                                                                        mutation)));
             }
             else
             {
                 mutationsAndEndpoints.add(new MutationAndEndpoints(mutation, endpoints));
+                nonLocalMutations.add(mutation);
+                latchCount++;
             }
         }
 
@@ -745,7 +743,9 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         assert batchlogCompletable != null;
-
+        AsyncLatch cleanupLatch = new AsyncLatch(latchCount,
+                                                 () -> asyncRemoveFromBatchlog(Collections.singletonList(FBUtilities.getBroadcastAddress()),
+                                                                               batchUUID));
         // Creates write handlers: each mutation must be acknowledged to clean the batchlog.
         // We also need to update view metrics.
         Consumer<Response<EmptyPayload>> onReplicaResponse = r ->

@@ -18,7 +18,8 @@
 package org.apache.cassandra.db.view;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
@@ -26,6 +27,10 @@ import com.google.common.collect.PeekingIterator;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.flow.Flow;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
@@ -38,7 +43,7 @@ import org.apache.cassandra.db.marshal.CompositeType;
  * on a single partition only).
  *
  * This class is used by passing the updates made to the base table to
- * {@link #addBaseTableUpdate} and calling {@link #generateViewUpdates} once all updates have
+ * {@link #createViewUpdates(Row, Row)}  once all updates have
  * been handled to get the resulting view mutations.
  */
 public class ViewUpdateGenerator
@@ -52,8 +57,6 @@ public class ViewUpdateGenerator
 
     private final TableMetadata viewMetadata;
     private final boolean baseEnforceStrictLiveness;
-
-    private final Map<DecoratedKey, PartitionUpdate> updates = new HashMap<>();
 
     // Reused internally to build a new entry
     private final ByteBuffer[] currentViewEntryPartitionKey;
@@ -82,7 +85,9 @@ public class ViewUpdateGenerator
      * @param nowInSec the current time in seconds. Used to decide if data are live or not
      * and as base reference for new deletions.
      */
-    public ViewUpdateGenerator(View view, DecoratedKey basePartitionKey, int nowInSec)
+    public ViewUpdateGenerator(View view,
+                               DecoratedKey basePartitionKey,
+                               int nowInSec)
     {
         this.view = view;
         this.nowInSec = nowInSec;
@@ -91,9 +96,7 @@ public class ViewUpdateGenerator
         this.baseEnforceStrictLiveness = baseMetadata.enforceStrictLiveness();
         this.baseDecoratedKey = basePartitionKey;
         this.basePartitionKey = extractKeyComponents(basePartitionKey, baseMetadata.partitionKeyType);
-
         this.viewMetadata = Schema.instance.getTableMetadata(view.getDefinition().metadata.id);
-
         this.currentViewEntryPartitionKey = new ByteBuffer[viewMetadata.partitionKeyColumns().size()];
         this.currentViewEntryBuilder = Row.Builder.sorted();
     }
@@ -106,52 +109,37 @@ public class ViewUpdateGenerator
     }
 
     /**
-     * Adds to this generator the updates to be made to the view given a base table row
-     * before and after an update.
+     * Create updates to be made to the view given a base table row
+     * before and after an update. NOTE: this is not thread-safe
      *
      * @param existingBaseRow the base table row as it is before an update.
      * @param mergedBaseRow the base table row after the update is applied (note that
      * this is not just the new update, but rather the resulting row).
      */
-    public void addBaseTableUpdate(Row existingBaseRow, Row mergedBaseRow)
+    protected Flow<PartitionUpdate> createViewUpdates(Row existingBaseRow, Row mergedBaseRow)
     {
+        Flow<PartitionUpdate> flowableViewUpdates;
         switch (updateAction(existingBaseRow, mergedBaseRow))
         {
             case NONE:
-                return;
+                flowableViewUpdates = Flow.empty();
+                break;
             case NEW_ENTRY:
-                createEntry(mergedBaseRow);
-                return;
+                flowableViewUpdates = createEntry(mergedBaseRow);
+                break;
             case DELETE_OLD:
-                deleteOldEntry(existingBaseRow, mergedBaseRow);
-                return;
+                flowableViewUpdates = deleteOldEntry(existingBaseRow, mergedBaseRow);
+                break;
             case UPDATE_EXISTING:
-                updateEntry(existingBaseRow, mergedBaseRow);
-                return;
+                flowableViewUpdates = updateEntry(existingBaseRow, mergedBaseRow);
+                break;
             case SWITCH_ENTRY:
-                createEntry(mergedBaseRow);
-                deleteOldEntry(existingBaseRow, mergedBaseRow);
-                return;
+                flowableViewUpdates = Flow.concat(createEntry(mergedBaseRow), deleteOldEntry(existingBaseRow, mergedBaseRow));
+                break;
+            default:
+                throw new AssertionError();
         }
-    }
-
-    /**
-     * Returns the updates that needs to be done to the view given the base table updates
-     * passed to {@link #addBaseTableUpdate}.
-     *
-     * @return the updates to do to the view.
-     */
-    public Collection<PartitionUpdate> generateViewUpdates()
-    {
-        return updates.values();
-    }
-
-    /**
-     * Clears the current state so that the generator may be reused.
-     */
-    public void clear()
-    {
-        updates.clear();
+        return flowableViewUpdates;
     }
 
     /**
@@ -216,7 +204,7 @@ public class ViewUpdateGenerator
              : UpdateAction.SWITCH_ENTRY;
     }
 
-    private boolean matchesViewFilter(Row baseRow)
+    private Flow<Boolean> matchesViewFilter(Row baseRow)
     {
         return view.matchesViewFilter(baseDecoratedKey, baseRow, nowInSec);
     }
@@ -231,28 +219,29 @@ public class ViewUpdateGenerator
      * <p>
      * This method checks that the base row does match the view filter before applying it.
      */
-    private void createEntry(Row baseRow)
+    private Flow<PartitionUpdate> createEntry(Row baseRow)
     {
         // Before create a new entry, make sure it matches the view filter
-        if (!matchesViewFilter(baseRow))
-            return;
+        return matchesViewFilter(baseRow).skippingMap(f -> {
+            if (!f)
+                return null;
 
-        startNewUpdate(baseRow);
-        currentViewEntryBuilder.addPrimaryKeyLivenessInfo(computeLivenessInfoForEntry(baseRow));
-        currentViewEntryBuilder.addRowDeletion(baseRow.deletion());
+            startNewUpdate(baseRow);
+            currentViewEntryBuilder.addPrimaryKeyLivenessInfo(computeLivenessInfoForEntry(baseRow));
+            currentViewEntryBuilder.addRowDeletion(baseRow.deletion());
 
-        for (ColumnData data : baseRow)
-        {
-            ColumnMetadata viewColumn = view.getViewColumn(data.column());
-            // If that base table column is not denormalized in the view, we had nothing to do.
-            // Alose, if it's part of the view PK it's already been taken into account in the clustering.
-            if (viewColumn == null || viewColumn.isPrimaryKeyColumn())
-                continue;
+            for (ColumnData data : baseRow)
+            {
+                ColumnMetadata viewColumn = view.getViewColumn(data.column());
+                // If that base table column is not denormalized in the view, we had nothing to do.
+                // Alose, if it's part of the view PK it's already been taken into account in the clustering.
+                if (viewColumn == null || viewColumn.isPrimaryKeyColumn())
+                    continue;
 
-            addColumnData(viewColumn, data);
-        }
-
-        submitUpdate();
+                addColumnData(viewColumn, data);
+            }
+            return submitUpdate();
+        });
     }
 
     /**
@@ -263,21 +252,26 @@ public class ViewUpdateGenerator
      * This method checks that the base row (before and after) does match the view filter before
      * applying anything.
      */
-    private void updateEntry(Row existingBaseRow, Row mergedBaseRow)
+    private Flow<PartitionUpdate> updateEntry(Row existingBaseRow, Row mergedBaseRow)
     {
         // While we know existingBaseRow and mergedBaseRow are corresponding to the same view entry,
         // they may not match the view filter.
-        if (!matchesViewFilter(existingBaseRow))
-        {
-            createEntry(mergedBaseRow);
-            return;
-        }
-        if (!matchesViewFilter(mergedBaseRow))
-        {
-            deleteOldEntryInternal(existingBaseRow, mergedBaseRow);
-            return;
-        }
 
+        return matchesViewFilter(existingBaseRow).flatMap(f -> {
+            if (!f)
+                return createEntry(mergedBaseRow);
+
+            return matchesViewFilter(mergedBaseRow).skippingMap(s -> {
+                if (!s)
+                    return deleteOldEntryInternal(existingBaseRow, mergedBaseRow);
+
+                return updateEntryInternal(existingBaseRow, mergedBaseRow);
+            });
+        });
+    }
+
+    private PartitionUpdate updateEntryInternal(Row existingBaseRow, Row mergedBaseRow)
+    {
         startNewUpdate(mergedBaseRow);
 
         // In theory, it may be the PK liveness and row deletion hasn't been change by the update
@@ -287,7 +281,7 @@ public class ViewUpdateGenerator
         currentViewEntryBuilder.addRowDeletion(mergedBaseRow.deletion());
 
         addDifferentCells(existingBaseRow, mergedBaseRow);
-        submitUpdate();
+        return submitUpdate();
     }
 
     private void addDifferentCells(Row existingBaseRow, Row mergedBaseRow)
@@ -380,23 +374,24 @@ public class ViewUpdateGenerator
      * <p>
      * This method checks that the base row does match the view filter before bothering.
      */
-    private void deleteOldEntry(Row existingBaseRow, Row mergedBaseRow)
+    private Flow<PartitionUpdate> deleteOldEntry(Row existingBaseRow, Row mergedBaseRow)
     {
         // Before deleting an old entry, make sure it was matching the view filter (otherwise there is nothing to delete)
-        if (!matchesViewFilter(existingBaseRow))
-            return;
-
-        deleteOldEntryInternal(existingBaseRow, mergedBaseRow);
+        return matchesViewFilter(existingBaseRow).skippingMap(f -> {
+            if (!f)
+                return null;
+            return deleteOldEntryInternal(existingBaseRow, mergedBaseRow);
+        });
     }
 
-    private void deleteOldEntryInternal(Row existingBaseRow, Row mergedBaseRow)
+    private PartitionUpdate deleteOldEntryInternal(Row existingBaseRow, Row mergedBaseRow)
     {
         startNewUpdate(existingBaseRow);
         long timestamp = computeTimestampForEntryDeletion(existingBaseRow, mergedBaseRow);
         long rowDeletion = mergedBaseRow.deletion().time().markedForDeleteAt();
         assert timestamp >= rowDeletion;
-        
-        // If computed deletion timestamp greater than row deletion, it must be coming from 
+
+        // If computed deletion timestamp greater than row deletion, it must be coming from
         //  1. non-pk base column used in view pk, or
         //  2. unselected base column
         //  any case, we need to use it as expired livenessInfo
@@ -416,7 +411,7 @@ public class ViewUpdateGenerator
         currentViewEntryBuilder.addRowDeletion(mergedBaseRow.deletion());
 
         addDifferentCells(existingBaseRow, mergedBaseRow);
-        submitUpdate();
+        return submitUpdate();
     }
 
     /**
@@ -557,26 +552,19 @@ public class ViewUpdateGenerator
      * Finish building the currently updated view entry and add it to the other built
      * updates.
      */
-    private void submitUpdate()
+    private PartitionUpdate submitUpdate()
     {
         Row row = currentViewEntryBuilder.build();
         // I'm not sure we can reach there is there is nothing is updated, but adding an empty row breaks things
         // and it costs us nothing to be prudent here.
         if (row.isEmpty())
-            return;
+            return null;
 
         DecoratedKey partitionKey = makeCurrentPartitionKey();
-        PartitionUpdate update = updates.get(partitionKey);
-        if (update == null)
-        {
-            // We can't really know which columns of the view will be updated nor how many row will be updated for this key
-            // so we rely on hopefully sane defaults.
-            update = new PartitionUpdate(viewMetadata, partitionKey, viewMetadata.regularAndStaticColumns(), 4);
-            updates.put(partitionKey, update);
-        }
+        PartitionUpdate update = new PartitionUpdate(viewMetadata, partitionKey, viewMetadata.regularAndStaticColumns(), 4);
         update.add(row);
+        return update;
     }
-
     private DecoratedKey makeCurrentPartitionKey()
     {
         ByteBuffer rawKey = viewMetadata.partitionKeyColumns().size() == 1
