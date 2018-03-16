@@ -1,4 +1,5 @@
 DSE 5.0.13
+ * Make sstableloader use cassandra.config.loader instead of hardcoded YamlConfigurationLoader (DB-1750)
  * Backport CASSANDRA-9241, fix 'nodetool toppartitions' (DB-1825)
  * Ignore lost+found directory on startup checks (DB-1215)
  * Fix NPE via QueryProcessor.resultify (DB-1739)

@@ -140,10 +140,7 @@ public class DatabaseDescriptor
     @VisibleForTesting
     public static Config loadConfig() throws ConfigurationException
     {
-        String loaderClass = System.getProperty("cassandra.config.loader");
-        ConfigurationLoader loader = loaderClass == null
-                                   ? new YamlConfigurationLoader()
-                                   : FBUtilities.<ConfigurationLoader>construct(loaderClass, "configuration loading");
+        ConfigurationLoader loader = ConfigurationLoader.create();
         Config config = loader.loadConfig();
 
         if (!hasLoggedConfig)
