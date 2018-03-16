@@ -99,13 +99,11 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
 
         // We're rebuilding everything from what's on disk, so we read everything, consider that as new updates
         // and pretend that there is nothing pre-existing.
-        UnfilteredRowIterator empty = UnfilteredRowIterators.noRowsIterator(baseCfs.metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, false);
-
         try (UnfilteredRowIterator data = UnfilteredPartitionIterators.getOnlyElement(command.executeForTests(), command))
         {
             Iterator<Collection<Mutation>> mutations = baseCfs.keyspace.viewManager
                                                        .forTable(baseCfs.metadata.id)
-                                                       .generateViewUpdates(Collections.singleton(view), data, empty, nowInSec, true);
+                                                       .generateViewUpdates(Collections.singleton(view), data, nowInSec);
 
             AtomicLong noBase = new AtomicLong(Long.MAX_VALUE);
             mutations.forEachRemaining(m -> StorageProxy.mutateMV(key.getKey(), m, true, noBase, System.nanoTime()).blockingAwait());

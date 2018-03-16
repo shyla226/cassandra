@@ -24,6 +24,8 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterables;
 
+import io.reactivex.Single;
+
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
@@ -38,7 +40,7 @@ import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.FBUtilities;
-
+import org.apache.cassandra.utils.flow.Flow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -153,12 +155,15 @@ public class View
      * @param nowInSec the current time in seconds (to decide what is live and what isn't).
      * @return {@code true} if {@code baseRow} matches the view filters, {@code false} otherwise.
      */
-    //TODO Make this non-blocking (DB-1036)
-    public boolean matchesViewFilter(DecoratedKey partitionKey, Row baseRow, int nowInSec)
+    public Flow<Boolean> matchesViewFilter(DecoratedKey partitionKey, Row baseRow, int nowInSec)
     {
-        return getReadQuery().selectsClustering(partitionKey, baseRow.clustering())
-               && TPCUtils.blockingGet(getSelectStatement().rowFilterForInternalCalls().isSatisfiedBy(baseCfs.metadata(), partitionKey, baseRow, nowInSec)
-                                                           .mapToRxSingle());
+        if (!getReadQuery().selectsClustering(partitionKey, baseRow.clustering()))
+            return Flow.just(false);
+        return getSelectStatement().rowFilterForInternalCalls()
+                                   .isSatisfiedBy(baseCfs.metadata(),
+                                                  partitionKey,
+                                                  baseRow,
+                                                  nowInSec);
     }
 
     /**
