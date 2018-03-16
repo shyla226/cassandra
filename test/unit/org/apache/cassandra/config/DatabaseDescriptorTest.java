@@ -26,6 +26,7 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.util.Arrays;
 import java.util.Collection;
+import java.net.URL;
 import java.util.Enumeration;
 
 import org.junit.BeforeClass;
@@ -70,6 +71,11 @@ public class DatabaseDescriptorTest
 
     public static class TestLoader implements ConfigurationLoader
     {
+        public Config loadConfig(URL url) throws ConfigurationException
+        {
+            return loadConfig();
+        }
+
         public Config loadConfig() throws ConfigurationException
         {
             Config testConfig = new Config();
