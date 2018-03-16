@@ -364,7 +364,7 @@ public class LoaderOptions
                     {
                         errorMsg("Config file not found", options);
                     }
-                    config = new YamlConfigurationLoader().loadConfig(configFile.toURI().toURL());
+                    config =  ConfigurationLoader.create().loadConfig(configFile.toURI().toURL());
                 }
                 else
                 {

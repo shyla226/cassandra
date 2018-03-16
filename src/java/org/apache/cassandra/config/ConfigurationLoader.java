@@ -17,10 +17,26 @@
  */
 package org.apache.cassandra.config;
 
+import java.net.URL;
+
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.utils.FBUtilities;
 
 public interface ConfigurationLoader
 {
+    /**
+     * Creates a ConfigurationLoader instance based on the value of "cassandra.config.loader" system property.
+     * When no value is present in "cassandra.config.loader" property, it creates a {@link YamlConfigurationLoader} instance.
+     * @return ConfigurationLoader instance
+     * @throws ConfigurationException if the provided class cannot be constructed.
+     */
+    public static ConfigurationLoader create() throws ConfigurationException
+    {
+        String loaderClass = System.getProperty("cassandra.config.loader");
+        return loaderClass == null ? new YamlConfigurationLoader()
+                                   : FBUtilities.<ConfigurationLoader>construct(loaderClass, "configuration loading");
+    }
+
     /**
      * Loads a {@link Config} object to use to configure a node.
      *
@@ -28,4 +44,13 @@ public interface ConfigurationLoader
      * @throws ConfigurationException if the configuration cannot be properly loaded.
      */
     Config loadConfig() throws ConfigurationException;
+
+    /**
+     * Loads a {@link Config} object to use to configure a node.
+     *
+     * @param url configuration location.
+     * @return the {@link Config} to use.
+     * @throws ConfigurationException if the configuration cannot be properly loaded.
+     */
+    Config loadConfig(URL url) throws ConfigurationException;
 }
