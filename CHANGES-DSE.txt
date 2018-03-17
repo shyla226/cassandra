@@ -142,6 +142,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no internal DB ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no internal DB ticket)
 Merged from dse5.0:
+ * Fix AssertionError in ThrottledUnfilteredIterator due to empty UnfilteredRowIterator (DB-1859)
  * Make sstableloader use cassandra.config.loader instead of hardcoded YamlConfigurationLoader (DB-1750)
  * Backport CASSANDRA-9241, fix 'nodetool toppartitions' (DB-1825)
  * Ignore lost+found directory on startup checks (DB-1215)
