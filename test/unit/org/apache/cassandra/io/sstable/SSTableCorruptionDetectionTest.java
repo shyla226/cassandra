@@ -50,13 +50,14 @@ import org.apache.cassandra.schema.*;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableCorruptionDetectionTest.class);
 
     private static final int numberOfPks = 1000;
-    private static final int numberOfRuns = 6; //AIO is too hard on the CI disks
+    private static final int numberOfRuns = 100;
     private static final int valueSize = 512 * 1024;
     // Set corruption size larger or in comparable size to value size, otherwise
     // chance for corruption to land in the middle of value is quite high.
@@ -157,8 +158,6 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
     {
         RandomAccessFile raf = new RandomAccessFile(ssTableReader.getFilename(), "rw");
 
-        int corruptedCounter = 0;
-
         int fileLength = (int)raf.length(); // in current test, it does fit into int
         for (int i = 0; i < numberOfRuns; i++)
         {
@@ -174,9 +173,11 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
             }
             catch (CorruptSSTableException t)
             {
-                corruptedCounter++;
+                FileUtils.closeQuietly(raf);
+                // Corruption detected, exit.
+                return;
             }
-            finally
+            catch (Throwable t)
             {
                 if (ChunkCache.instance != null)
                     ChunkCache.instance.invalidateFile(ssTableReader.getFilename());
@@ -185,8 +186,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
             }
         }
 
-        assertTrue(corruptedCounter > 0);
-        FileUtils.closeQuietly(raf);
+        fail("Corruption was not detected");
     }
 
     private Consumer<SSTableReader> sstableScanner()
