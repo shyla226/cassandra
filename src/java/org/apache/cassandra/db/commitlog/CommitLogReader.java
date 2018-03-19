@@ -86,7 +86,10 @@ public class CommitLogReader
             CommitLogDescriptor.readHeader(reader, DatabaseDescriptor.getEncryptionContext());
             int end = reader.readInt();
             long filecrc = reader.readInt() & 0xffffffffL;
-            return end == 0 && filecrc == 0;
+            // Even if the section markers are 0, we can still have (unflushed) information in this file.
+            // Check the size of the first mutation.
+            int mutationSize = reader.readInt();
+            return end == 0 && filecrc == 0 && mutationSize == LEGACY_END_OF_SEGMENT_MARKER;
         }
     }
 
