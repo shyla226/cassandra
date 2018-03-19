@@ -75,6 +75,7 @@ import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.exceptions.CassandraException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
@@ -717,41 +718,60 @@ public class SelectStatement implements CQLStatement, TableStatement
 
         void retrieveMultiplePages(PagingState pagingState, ResultBuilder builder)
         {
-            taskStartMillis = System.currentTimeMillis();
+            try
+            {
+                taskStartMillis = System.currentTimeMillis();
 
-            // update the metrics with how long we were waiting since scheduling this task
-            ContinuousPagingService.metrics.waitingTime.addNano(System.nanoTime() - schedulingTimeNanos);
+                // update the metrics with how long we were waiting since scheduling this task
+                ContinuousPagingService.metrics.waitingTime.addNano(System.nanoTime() - schedulingTimeNanos);
 
-            if (logger.isTraceEnabled())
-                logger.trace("{} - retrieving multiple pages with paging state {}",
-                             statement.table, pagingState);
+                if (logger.isTraceEnabled())
+                    logger.trace("{} - retrieving multiple pages with paging state {}",
+                                 statement.table, pagingState);
 
-            assert pager == null;
-            assert !builder.isCompleted();
+                assert pager == null;
+                assert !builder.isCompleted();
 
-            pager = Pager.forNormalQuery(statement.getPager(query, pagingState, options.getProtocolVersion()), paramsBuilder);
+                pager = Pager.forNormalQuery(statement.getPager(query, pagingState, options.getProtocolVersion()), paramsBuilder);
 
-            // non-local queries span only one page at a time in SP, and each page is monitored starting from
-            // queryStartNanoTime and will fail once RPC read timeout has elapsed, so we must use System.nanoTime()
-            // instead of queryStartNanoTime for distributed queries
-            // local queries, on the other hand, are not monitored against the RPC timeout and we want to record
-            // the entire query duration in the metrics, so we should not reset queryStartNanoTime, further we
-            // should query all available data, not just page size rows
-            PageSize pageSize = isLocalQuery ? PageSize.rowsSize(pager.maxRemaining()) : this.pageSize;
-            long queryStart = isLocalQuery ? queryStartNanos : System.nanoTime();
+                // non-local queries span only one page at a time in SP, and each page is monitored starting from
+                // queryStartNanoTime and will fail once RPC read timeout has elapsed, so we must use System.nanoTime()
+                // instead of queryStartNanoTime for distributed queries
+                // local queries, on the other hand, are not monitored against the RPC timeout and we want to record
+                // the entire query duration in the metrics, so we should not reset queryStartNanoTime, further we
+                // should query all available data, not just page size rows
+                PageSize pageSize = isLocalQuery ? PageSize.rowsSize(pager.maxRemaining()) : this.pageSize;
+                long queryStart = isLocalQuery ? queryStartNanos : System.nanoTime();
 
-            Flow<FlowablePartition> page = pager.fetchPage(pageSize, queryStart);
+                Flow<FlowablePartition> page = pager.fetchPage(pageSize, queryStart);
 
-            page.takeUntil(builder::isCompleted)
-                .flatMap(partition -> statement.processPartition(partition, options, builder, query.nowInSec()))
-                .reduceToFuture(builder, (b, v) -> b)
-                .whenComplete((bldr, error) ->
-                        {
-                            if (error == null)
-                                maybeReschedule(bldr);
-                            else
-                                handleError(error, builder); // bldr is null!
-                        });
+                page.takeUntil(builder::isCompleted)
+                    .flatMap(partition -> statement.processPartition(partition, options, builder, query.nowInSec()))
+                    .reduceToFuture(builder, (b, v) -> b)
+                    .whenComplete((bldr, error) ->
+                                  {
+                                      if (error == null)
+                                          maybeReschedule(bldr);
+                                      else
+                                          handleError(error, builder); // bldr is null!
+                                  });
+            }
+            catch (Throwable err)
+            {
+                JVMStabilityInspector.inspectThrowable(err);
+                if (err instanceof CassandraException)
+                {
+                    // pager.fetchPage() can throw expected exceptions such as RequestValidation or RequestExecution
+                    // exceptions, e.g. if called during bootstrap
+                    logger.debug("Failed to execute continuous paging session {}", builder, err);
+                }
+                else
+                {
+                    logger.error("Failed to execute continuous paging session {}", builder, err);
+                }
+
+                builder.complete(err);
+            }
         }
 
         private void handleError(Throwable error, ResultBuilder builder)
@@ -816,16 +836,26 @@ public class SelectStatement implements CQLStatement, TableStatement
 
         public void schedule(PagingState pagingState, ResultBuilder builder)
         {
-            if (logger.isTraceEnabled())
-                logger.trace("{} - scheduling retrieving of multiple pages with paging state {}",
-                             statement.table, pagingState);
+            try
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("{} - scheduling retrieving of multiple pages with paging state {}",
+                                 statement.table, pagingState);
 
-            // the pager will be recreated when retrieveMultiplePages executes, set it to null because in the local
-            // case the pager depends on the execution controller, which will be released when this method returns
-            pager = null;
+                // the pager will be recreated when retrieveMultiplePages executes, set it to null because in the local
+                // case the pager depends on the execution controller, which will be released when this method returns
+                pager = null;
 
-            schedulingTimeNanos = System.nanoTime();
-            schedule(() -> retrieveMultiplePages(pagingState, builder));
+                schedulingTimeNanos = System.nanoTime();
+                schedule(() -> retrieveMultiplePages(pagingState, builder));
+            }
+            catch (Throwable err)
+            {
+                JVMStabilityInspector.inspectThrowable(err);
+                logger.error("Failed to schedule continuous paging session {}", builder, err);
+
+                builder.complete(err);
+            }
         }
 
         public int coreId()
