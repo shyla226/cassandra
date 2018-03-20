@@ -191,7 +191,7 @@ abstract class NodeSyncHelpers
                        .filter(s -> s.metadata().params.nodeSync.isEnabled(s.metadata()));
     }
 
-    private static boolean isReplicated(Keyspace keyspace)
+    static boolean isReplicated(Keyspace keyspace)
     {
         return keyspace.getReplicationStrategy().getReplicationFactor() > 1 && !localRanges(keyspace.getName()).isEmpty();
     }

@@ -629,18 +629,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         if (ks == null)
             return;
 
-        if (ks.getReplicationStrategy().getReplicationFactor() <= 1)
-        {
-            Set<TableMetadata> removed = new HashSet<>();
-            ks.getColumnFamilyStores().forEach(s -> {
-                if (removeContinuous(s.metadata()))
-                    removed.add(s.metadata());
-            });
-            if (!removed.isEmpty())
-                logger.info("Stopping NodeSync validations on tables {} because keyspace {} is not replicated anymore",
-                            removed, keyspace);
-        }
-        else
+        if (NodeSyncHelpers.isReplicated(ks))
         {
             addAllContinuous(NodeSyncHelpers.nodeSyncEnabledTables(ks)).thenAccept(tables -> {
                 if (!tables.isEmpty())
@@ -650,7 +639,20 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
                     // been increased.
                     logger.info("Starting NodeSync validations on tables {} following increase of the replication factor on {}",
                                 tables, keyspace);
+
+                maybeUpdateLocalRanges();
             });
+        }
+        else
+        {
+            Set<TableMetadata> removed = new HashSet<>();
+            ks.getColumnFamilyStores().forEach(s -> {
+                if (removeContinuous(s.metadata()))
+                    removed.add(s.metadata());
+            });
+            if (!removed.isEmpty())
+                logger.info("Stopping NodeSync validations on tables {} because keyspace {} is not replicated anymore",
+                            removed, keyspace);
         }
     }
 
