@@ -344,6 +344,19 @@ JVM_OPTS="$JVM_OPTS -Ddse.system_memory_in_mb=$system_memory_in_mb"
 # Disable Agrona bounds check for extra performance
 JVM_OPTS="$JVM_OPTS -Dagrona.disable.bounds.checks=TRUE"
 
+# Add the jHiccup javaagent when it's enabled
+# Set $DSE_ENABLE_JHICCUP=true in order to enable jHiccup
+# $CASSANDRA_HOME/logs/jhiccup.hlog is the default log file location.
+# Setting $DSE_JHICCUP_OPTIONS overwrites the default config values for jHiccup,
+# use ',' as a separator to avoid bash quotes evaluation problems.
+if [ "x$DSE_ENABLE_JHICCUP" != "x" ]; then
+    if [ "x$DSE_JHICCUP_OPTIONS" == "x" ]; then
+        DSE_JHICCUP_OPTIONS="-l,$CASSANDRA_HOME/logs/jhiccup.hlog"
+    fi
+    JHICCUP_AGENT=(-javaagent:$CASSANDRA_HOME/lib/jHiccup-2.0.8.jar="$DSE_JHICCUP_OPTIONS")
+    JVM_OPTS="$JVM_OPTS ${JHICCUP_AGENT=[@]}"
+fi
+
 if [ "x$MX4J_ADDRESS" != "x" ]; then
     if [[ "$MX4J_ADDRESS" == \-Dmx4jaddress* ]]; then
         # Backward compatible with the older style #13578
