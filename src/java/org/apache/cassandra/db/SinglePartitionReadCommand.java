@@ -184,6 +184,41 @@ public class SinglePartitionReadCommand extends ReadCommand
      * @param limits the limits to use for the query.
      * @param partitionKey the partition key for the partition to query.
      * @param clusteringIndexFilter the clustering index filter to use for the query.
+     * @param taskType TPC task type
+     *
+     * @return a newly created read command.
+     */
+    public static SinglePartitionReadCommand create(TableMetadata metadata,
+                                                    int nowInSec,
+                                                    ColumnFilter columnFilter,
+                                                    RowFilter rowFilter,
+                                                    DataLimits limits,
+                                                    DecoratedKey partitionKey,
+                                                    ClusteringIndexFilter clusteringIndexFilter,
+                                                    TPCTaskType taskType)
+    {
+        return new SinglePartitionReadCommand(null,
+                                              metadata,
+                                              nowInSec,
+                                              columnFilter,
+                                              rowFilter,
+                                              limits,
+                                              partitionKey,
+                                              clusteringIndexFilter,
+                                              null,
+                                              taskType);
+    }
+
+    /**
+     * Creates a new read command on a single partition.
+     *
+     * @param metadata the table to query.
+     * @param nowInSec the time in seconds to use are "now" for this query.
+     * @param columnFilter the column filter to use for the query.
+     * @param rowFilter the row filter to use for the query.
+     * @param limits the limits to use for the query.
+     * @param partitionKey the partition key for the partition to query.
+     * @param clusteringIndexFilter the clustering index filter to use for the query.
      *
      * @return a newly created read command.
      */
@@ -469,7 +504,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         int coreId =  TPC.getNextCore();
         boolean isLocalCore = coreId == localCore;
 
-        if (isLocalCore || readType == TPCTaskType.READ_INTERNAL)
+        if (isLocalCore || readType == TPCTaskType.READ_INTERNAL || readType == TPCTaskType.READ_SECONDARY_INDEX)
         {
             return queryMemtableAndDisk(cfs, executionController, metricsCollector)
                    .doOnClose(() -> updateMetrics(cfs.metric, metricsCollector));

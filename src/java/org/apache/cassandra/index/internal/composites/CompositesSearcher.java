@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import io.reactivex.Completable;
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
@@ -97,7 +98,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
                                                                                        DataLimits.NONE,
                                                                                        partitionKey,
                                                                                        filter,
-                                                                                       null);
+                                                                                       TPCTaskType.READ_SECONDARY_INDEX);
                 Flow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
 
                 return partition.map(p -> filterStaleEntries(p,
