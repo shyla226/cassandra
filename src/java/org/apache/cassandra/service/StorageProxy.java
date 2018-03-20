@@ -33,6 +33,7 @@ import javax.management.ObjectName;
 import com.google.common.cache.CacheLoader;
 import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
+import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.reactivex.Completable;
@@ -509,11 +510,7 @@ public class StorageProxy implements StorageProxyMBean
         checkHintOverload(endpoints);
 
         if (shouldHint)
-        {
-            Collection<InetAddress> endpointsToHint = Collections2.filter(endpoints.dead(), e -> shouldHint(e));
-            if (!endpointsToHint.isEmpty())
-                submitHint(mutation, endpointsToHint, null);
-        }
+            maybeSubmitHint(mutation, endpoints.dead(), null);
 
         WriteHandler.Builder builder = WriteHandler.builder(endpoints, consistencyLevel, WriteType.SIMPLE, queryStartNanoTime, TPC.bestTPCTimer())
                                                    .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel());
@@ -642,13 +639,8 @@ public class StorageProxy implements StorageProxyMBean
         Token token = mutation.key().getToken();
 
         Iterable<InetAddress> endpoints = StorageService.instance.getNaturalAndPendingEndpoints(keyspaceName, token);
-        ArrayList<InetAddress> endpointsToHint = new ArrayList<>(Iterables.size(endpoints));
 
-        for (InetAddress target : endpoints)
-            if (shouldHint(target))
-                endpointsToHint.add(target);
-
-        submitHint(mutation, endpointsToHint, null);
+        maybeSubmitHint(mutation, endpoints, null);
     }
 
     public boolean appliesLocally(Mutation mutation)
@@ -1067,9 +1059,7 @@ public class StorageProxy implements StorageProxyMBean
             // the current version, but it's just an optimization and we're ok not optimizing for mixed-version clusters.
             Mutation.rawSerializers.get(EncodingVersion.last()).serializedBuffer(mutation);
 
-            Collection<InetAddress> endpointsToHint = Collections2.filter(targets.dead(), StorageProxy::shouldHint);
-            if (!endpointsToHint.isEmpty())
-                submitHint(mutation, endpointsToHint, handler);
+            maybeSubmitHint(mutation, targets.dead(), handler);
 
             MessagingService.instance().send(messageDefinition.newForwardingDispatcher(targets.live(), DatabaseDescriptor.getLocalDataCenter(), mutation),
                                              handler);
@@ -2306,33 +2296,41 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    public static Future<Void> submitHint(Mutation mutation, InetAddress target, WriteHandler handler)
+    public static Future<Void> maybeSubmitHint(Mutation mutation, InetAddress target, WriteHandler handler)
     {
-        return submitHint(mutation, Collections.singleton(target), handler);
+        return maybeSubmitHint(mutation, Collections.singleton(target), handler);
     }
 
-    public static Future<Void> submitHint(Mutation mutation,
-                                          Collection<InetAddress> targets,
-                                          WriteHandler handler)
+    public static Future<Void> maybeSubmitHint(Mutation mutation,
+                                               Iterable<InetAddress> candidates,
+                                               WriteHandler handler)
     {
-        return submitHint(targets, Completable.defer(() ->
-        {
-            Set<InetAddress> validTargets = new HashSet<>(targets.size());
-            Set<UUID> hostIds = new HashSet<>(targets.size());
-            for (InetAddress target : targets)
+        int cap = (candidates instanceof Collection)
+                  ? Math.min(8, (int)(((Collection)candidates).size() / 0.75f + 1))
+                  : 8;
+
+        Set<InetAddress> targets = new HashSet<>(cap);
+        Set<UUID> hostIds = new HashSet<>(cap);
+        for (InetAddress target : candidates)
+            if (shouldHint(target))
             {
                 UUID hostId = StorageService.instance.getHostIdForEndpoint(target);
                 if (hostId != null)
                 {
+                    targets.add(target);
                     hostIds.add(hostId);
-                    validTargets.add(target);
                 }
                 else
                     logger.debug("Discarding hint for endpoint not part of ring: {}", target);
             }
-            logger.trace("Adding hints for {}", validTargets);
+        if (targets.isEmpty())
+            return Futures.immediateFuture(null);
+
+        return submitHint(targets, Completable.defer(() ->
+        {
+            logger.trace("Adding hints for {}", targets);
             HintsService.instance.write(hostIds, Hint.create(mutation, System.currentTimeMillis()));
-            validTargets.forEach(HintsService.instance.metrics::incrCreatedHints);
+            targets.forEach(HintsService.instance.metrics::incrCreatedHints);
             // Notify the handler only for CL == ANY
             if (handler != null && handler.consistencyLevel() == ConsistencyLevel.ANY)
                 handler.onLocalResponse();
@@ -2340,7 +2338,7 @@ public class StorageProxy implements StorageProxyMBean
         }));
     }
 
-    static Future<Void> submitHint(Collection<InetAddress> targets, Completable hintsCompletable)
+    private static Future<Void> submitHint(Collection<InetAddress> targets, Completable hintsCompletable)
     {
         StorageMetrics.totalHintsInProgress.inc(targets.size());
         for (InetAddress target : targets)

@@ -202,13 +202,7 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
             if (consistencyLevel == ConsistencyLevel.ANY)
                 return this;
 
-            return onTimeout(host ->
-            {
-                if (!StorageProxy.shouldHint(host))
-                    return;
-
-                StorageProxy.submitHint(mutation, host, null);
-            });
+            return onTimeout(host -> StorageProxy.maybeSubmitHint(mutation, host, null));
         }
 
         /**
@@ -223,13 +217,7 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
          */
         public Builder hintOnFailure(Mutation mutation)
         {
-            return onFailure(response ->
-            {
-                if (!StorageProxy.shouldHint(response.from()))
-                    return;
-
-                StorageProxy.submitHint(mutation, response.from(), null);
-            });
+            return onFailure(response -> StorageProxy.maybeSubmitHint(mutation, response.from(), null));
         }
 
         public Builder blockFor(int blockFor)
