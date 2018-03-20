@@ -1,4 +1,5 @@
 DSE 5.0.13
+ * Fix error in MVs referencing a function with uppercase letters on its name (DB-1874)
  * Improve replace fail messages when a replace is retried before QUARANTINE_DELAY (DB-1776)
  * Delay closing connection when nodes are removed to allow inflight commands to complete (DB-1721)
  * Harden txn log files against exceptions when adding records and improve log messages (DB-1732)
