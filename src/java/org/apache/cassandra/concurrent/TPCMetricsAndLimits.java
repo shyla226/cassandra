@@ -39,9 +39,10 @@ public class TPCMetricsAndLimits implements TPCMetrics
     }
     private final TaskStats[] stats;
 
-    AtomicLong externallyCountedTasks = new AtomicLong();
-    AtomicLong backpressureCountedTasks = new AtomicLong();
-    LongAdder backpressureDelayedTasks = new LongAdder();
+    final AtomicLong externallyCountedTasks = new AtomicLong();
+    final AtomicLong backpressureCountedLocalTasks = new AtomicLong();
+    final AtomicLong backpressureCountedRemoteTasks = new AtomicLong();
+    final LongAdder backpressureDelayedTasks = new LongAdder();
 
     // This max value is based on queues size in EpollTPCEventLoopGroup: this kind of hidden dependency is not great
     // design-wise and we can refactor later, let's not shoot ourselves in the feet for now.
@@ -101,8 +102,10 @@ public class TPCMetricsAndLimits implements TPCMetrics
     {
         TaskStats stat = getTaskStats(stage);
         stat.pendingTasks.add(adjustment);
-        if (stage.backpressured())
-            backpressureCountedTasks.addAndGet(adjustment);
+        if (stage.backpressured() && stage.remote())
+            backpressureCountedRemoteTasks.addAndGet(adjustment);
+        else if (stage.backpressured())
+            backpressureCountedLocalTasks.addAndGet(adjustment);
     }
 
     public void blocked(TPCTaskType stage)
@@ -141,19 +144,26 @@ public class TPCMetricsAndLimits implements TPCMetrics
         return stat.blockedTasks.longValue();
     }
 
-    @Override
-    public long backpressureCountedTaskCount()
+    public long backpressureCountedLocalTaskCount()
     {
-        return backpressureCountedTasks.get();
+        return backpressureCountedLocalTasks.get();
     }
 
-    @Override
+    public long backpressureCountedRemoteTaskCount()
+    {
+        return backpressureCountedRemoteTasks.get();
+    }
+
+    public long backpressureCountedTotalTaskCount()
+    {
+        return backpressureCountedLocalTasks.get() + backpressureCountedRemoteTasks.get();
+    }
+
     public void backpressureDelayedTaskCount(int adjustment)
     {
         backpressureDelayedTasks.add(adjustment);
     }
 
-    @Override
     public long backpressureDelayedTaskCount()
     {
         return backpressureDelayedTasks.longValue();

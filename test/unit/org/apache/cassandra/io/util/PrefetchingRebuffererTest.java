@@ -186,7 +186,8 @@ public class PrefetchingRebuffererTest
         }
         catch (Rebufferer.NotInCacheException ex)
         {
-            ex.accept(() -> completed.countDown(),
+            ex.accept(this.getClass(),
+                      () -> completed.countDown(),
                       throwable -> { completed.countDown(); error.set(throwable); return null; },
                       scheduler);
         }

@@ -149,7 +149,7 @@ public class TPCTotalMetrics
 
     private long getBackpressureCountedTotal()
     {
-        return metrics.backpressureCountedTaskCount();
+        return metrics.backpressureCountedTotalTaskCount();
     }
 
     private long getBackpressureDelayedTotal()

@@ -18,11 +18,27 @@
 
 package org.apache.cassandra.concurrent;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 /**
  * Interface for recoding TPC thread metrics.
  */
 public interface TPCMetrics extends TPCLimitsMBean
 {
+    // Globally backpressured cores counter
+
+    static final AtomicInteger globallyBackpressuredCores = new AtomicInteger();
+
+    public static void globallyBackpressuredCores(int adjustment)
+    {
+        globallyBackpressuredCores.addAndGet(adjustment);
+    }
+
+    public static int globallyBackpressuredCores()
+    {
+        return globallyBackpressuredCores.get();
+    }
+
     // Task notifications
 
     // This will be called from the scheduling thread, possibly concurrently.
@@ -45,7 +61,9 @@ public interface TPCMetrics extends TPCLimitsMBean
 
     // Backpressure related counters/metrics: track how many pending tasks are counted for backpressure, and how many
     // are delayed due to backpressure being active.
-    public long backpressureCountedTaskCount();
+    public long backpressureCountedLocalTaskCount();
+    public long backpressureCountedRemoteTaskCount();
+    public long backpressureCountedTotalTaskCount();
     public void backpressureDelayedTaskCount(int adjustment);
     public long backpressureDelayedTaskCount();
 

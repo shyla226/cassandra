@@ -126,7 +126,7 @@ public class PrefetchingRebufferer extends WrappingRebufferer
             }
         }
 
-        throw new NotInCacheException(fut.thenAccept(BufferHolder::release), channel().filePath, position);
+        throw new NotInCacheException(channel(), fut.thenAccept(BufferHolder::release), channel().filePath, position);
     }
 
     @Override
@@ -250,7 +250,6 @@ public class PrefetchingRebufferer extends WrappingRebufferer
     {
         queue.forEach(PrefetchedEntry::release);
         queue.clear();
-
     }
 
     /**

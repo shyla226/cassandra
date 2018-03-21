@@ -142,6 +142,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             catch (Throwable t)
             {
                 if (TPCUtils.isWouldBlockException(t))
+                {
                     TPC.ioScheduler().execute(() -> {
                         try
                         {
@@ -152,6 +153,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                             error(tt, uncompressed, ret, bufferHandle);
                         }
                     }, TPCTaskType.READ_DISK_ASYNC);
+                }
                 else
                     error(t, uncompressed, ret, bufferHandle);
             }
@@ -238,7 +240,8 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
                     // Pass control outside the try..finally block as we don't want to catch processing exceptions.
                     bufferHandle.recycle();
-                    futureBuffer.complete(uncompressed);
+                    if (!futureBuffer.complete(uncompressed))
+                        logger.warn("Failed to complete read from {}, already timed out.", channel.filePath);
                 }
 
                 public void failed(Throwable t, ByteBuffer attachment)

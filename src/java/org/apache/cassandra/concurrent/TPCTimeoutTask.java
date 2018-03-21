@@ -66,6 +66,11 @@ public class TPCTimeoutTask<T> implements Runnable
         }
     }
 
+    public boolean isDisposed()
+    {
+        return disposable.isDisposed();
+    }
+
     public T getValue()
     {
         return valueRef.get();

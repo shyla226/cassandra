@@ -213,7 +213,7 @@ class AsyncPartitionReader
         }
     }
 
-    private static void readWithRetry(Reader reader, NotInCacheException retryException, TPCScheduler onReadyExecutor)
+    private void readWithRetry(Reader reader, NotInCacheException retryException, TPCScheduler onReadyExecutor)
     {
         boolean isRetry = retryException != null;
         try
@@ -223,7 +223,8 @@ class AsyncPartitionReader
         catch (NotInCacheException e)
         {
             // Retry the request once data is in the cache
-            e.accept(() -> readWithRetry(reader, e, onReadyExecutor),
+            e.accept(this.getClass(),
+                     () -> readWithRetry(reader, e, onReadyExecutor),
                      (t) ->
                      {
                          // Calling completeExceptionally() wraps the original exception into a CompletionException even

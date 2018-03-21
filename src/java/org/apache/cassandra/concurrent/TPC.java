@@ -82,6 +82,8 @@ public class TPC
                                           && Aio.isAvailable() && USE_EPOLL &&
                                           (Boolean.parseBoolean(System.getProperty("dse.io.aio.force", "false")) || DatabaseDescriptor.assumeDataDirectoriesOnSSD());
 
+    public static final int READ_ASYNC_TIMEOUT_MILLIS = Integer.valueOf(System.getProperty("dse.tpc.read_async_timeout_millis", "2000"));
+
     public static final AioCoordinator aioCoordinator = new AioCoordinator(NUM_CORES,
                                                                            USE_AIO ? DatabaseDescriptor.getTPCIOCores() : 0,
                                                                            DatabaseDescriptor.getIOGlobalQueueDepth());
@@ -215,7 +217,7 @@ public class TPC
      * The {@link EventLoopGroup} holding our internal Thread-Per-Core event loops. That group is re-used to handle
      * I/O tasks through Netty.
      */
-    public static EventLoopGroup eventLoopGroup()
+    public static TPCEventLoopGroup eventLoopGroup()
     {
         return eventLoopGroup;
     }

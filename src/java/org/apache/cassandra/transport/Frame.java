@@ -391,7 +391,7 @@ public class Frame
         {
             // If backpressure is not supported by the message type, or the queue is empty and we shouldn't backpressure
             // (due to not hitting the limit), execute synchronously by directly adding the frame to the output list:
-            if (!frame.header.type.supportsBackpressure || (!eventLoop.shouldBackpressure() && frames.isEmpty()))
+            if (!frame.header.type.supportsBackpressure || (!eventLoop.shouldBackpressure(false) && frames.isEmpty()))
                 out.add(frame);
             // Otherwise execute async:
             else
@@ -413,7 +413,7 @@ public class Frame
         {
             // Consume frames and pass them to the next handler in the channel pipeline:
             int processed = 0;
-            while (!frames.isEmpty() && !eventLoop.shouldBackpressure())
+            while (!frames.isEmpty() && !eventLoop.shouldBackpressure(false))
             {
                 Pair<ChannelHandlerContext, Frame> contextAndFrame = frames.poll();
                 if (contextAndFrame.left.channel().isActive())

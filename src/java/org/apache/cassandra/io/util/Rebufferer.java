@@ -20,6 +20,7 @@ package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import org.slf4j.Logger;
@@ -28,8 +29,10 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCRunnable;
 import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPCTimeoutTask;
 
 /**
  * Rebufferer for reading data by a RandomAccessReader.
@@ -104,11 +107,13 @@ public interface Rebufferer extends ReaderFileProxy
                 logger.warn("NotInCacheException DEBUG is ON, performance will be impacted!!!");
         }
 
+        private final AsynchronousChannelProxy channel;
         private final CompletableFuture<Void> cacheReady;
 
-        public NotInCacheException(CompletableFuture<Void> cacheReady, String path, long position)
+        public NotInCacheException(AsynchronousChannelProxy channel, CompletableFuture<Void> cacheReady, String path, long position)
         {
             super("Requested data (" + path + "@" + position +") is not in cache.");
+            this.channel = channel;
             this.cacheReady = cacheReady;
         }
 
@@ -124,11 +129,12 @@ public interface Rebufferer extends ReaderFileProxy
 
         /**
          * Handles callbacks for async buffers
+         * @param caller the class generating the exception
          * @param onReady will be run if completable future is ready
          * @param onError will be run if the buffer errored
          * @param scheduler the TPC executor to schedule on
          */
-        public void accept(Runnable onReady, Function<Throwable, Void> onError, TPCScheduler scheduler)
+        public void accept(Class caller, Runnable onReady, Function<Throwable, Void> onError, TPCScheduler scheduler)
         {
             //Registers a callback to be issued when the async buffer is ready
             assert cacheReady != null;
@@ -139,23 +145,29 @@ public interface Rebufferer extends ReaderFileProxy
             }
             else
             {
-                //Track the ThreadLocals
                 TPCRunnable wrappedOnReady = TPCRunnable.wrap(onReady, ExecutorLocals.create(), TPCTaskType.READ_DISK_ASYNC, scheduler);
-                cacheReady.whenComplete((ignored, error) ->
+                TPCTimeoutTask<TimeoutPayload> timeout = new TPCTimeoutTask<>(new TimeoutPayload(channel, cacheReady));
+                timeout.submit(payload ->
                 {
+                    AsyncReadTimeoutException ex = new AsyncReadTimeoutException(payload.channel, caller);
+                    payload.cacheReady.completeExceptionally(ex);
+                }, TPC.READ_ASYNC_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+                cacheReady.whenComplete((ignored, ex) ->
+                {
+                    timeout.dispose();
                     try
                     {
-                        if (error == null)
+                        if (ex == null)
                             scheduler.execute(wrappedOnReady);
                     }
                     catch(Throwable t)
                     {
-                        error = t;
+                        ex = t;
                     }
-                    if (error != null)
+                    if (ex != null)
                     {
                         wrappedOnReady.cancelled();
-                        onError.apply(error);
+                        onError.apply(ex);
                     }
                 });
             }
@@ -164,6 +176,18 @@ public interface Rebufferer extends ReaderFileProxy
         public String toString()
         {
             return "NotInCache " + cacheReady;
+        }
+
+        private static class TimeoutPayload
+        {
+            public final AsynchronousChannelProxy channel;
+            public final CompletableFuture<Void> cacheReady;
+
+            public TimeoutPayload(AsynchronousChannelProxy channel, CompletableFuture<Void> cacheReady)
+            {
+                this.channel = channel;
+                this.cacheReady = cacheReady;
+            }
         }
     }
 

@@ -43,12 +43,14 @@ public interface TPCEventLoop extends EventLoop
     boolean canExecuteImmediately(TPCTaskType runnable);
 
     /**
-     * Returns true if the event loop should signal backpressure because overloaded, false otherwise.
+     * Returns true if the event loop should signal backpressure upon submission of a given task, false otherwise.
      * <p>
      * It is up to the implementor to properly define what "overloading" means, and the default implementation just
      * assumes no overloading/backpressure at all.
+     *
+     * @param remote If the submitted task is remote (coming from a replica) or local (coming from a client).
      */
-    default public boolean shouldBackpressure()
+    default public boolean shouldBackpressure(boolean remote)
     {
         return false;
     }

@@ -56,9 +56,30 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 {
     private static final String DEBUG_RUNNING_TIME_NAME = "dse.tpc.debug_task_running_time_seconds";
     private static final long DEBUG_RUNNING_TIME_NANOS = TimeUnit.SECONDS.toNanos(Integer.parseInt(System.getProperty(DEBUG_RUNNING_TIME_NAME, "0")));
+
     private static final Logger LOGGER = LoggerFactory.getLogger(EpollTPCEventLoopGroup.class);
 
     // all the values set here are not as well researched as they should be... but the reasoning is in the javadoc
+
+    /**
+     * Disable any TPC backpressure; NOT RECOMMENDED.
+     */
+    private static final boolean DISABLE_BACKPRESSURE = Boolean.parseBoolean(System.getProperty("dse.tpc.disable_backpressure", "false"));
+
+    /**
+     * Remote and global backpressure values are computed as multipliers of {@code tpc_pending_requests_limit}, as follows:
+     * - Remote backpressure has a default multiplier of 5 because it takes into account the fact we need to accommodate
+     *   "RF" remote requests, and 5 is considered a reasonable upper bound; increase this value if you get low throughput,
+     *   reduce if you get too many full GCs.
+     * - Global backpressure multiplier is computed as the max between 10 and the number of cores as we assume
+     *   we don't want any single core to keep more tasks than the total number of cores; increase this value if you get
+     *   too many delayed tasks or dropped messages, reduce if you get too many full GCs.
+     */
+    private static final int REMOTE_BACKPRESSURE_MULTIPLIER = Integer.parseInt(System.getProperty("dse.tpc.remote_backpressure_multiplier",
+                                                                                                   "5"));
+    private static final int GLOBAL_BACKPRESSURE_MULTIPLIER = Integer.parseInt(System.getProperty("dse.tpc.global_backpressure_multiplier",
+                                                                                                   Integer.toString(Math.max(10, DatabaseDescriptor.getTPCCores()))));
+
 
     /**
      * Scheduling granularity below 1us is not productive. Setting this value high however will delay scheduled channel
@@ -124,6 +145,12 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
         //Register these loop threads with the Watcher
         ParkedThreadsMonitor.instance.get().addThreadsToMonitor(new ArrayList<>(eventLoops));
+
+        if (!DISABLE_BACKPRESSURE)
+            LOGGER.info("Enabled TPC backpressure with {} pending requests limit, remote multiplier at {}, global multiplier at {}",
+                        DatabaseDescriptor.getTPCPendingRequestsLimit(), REMOTE_BACKPRESSURE_MULTIPLIER, GLOBAL_BACKPRESSURE_MULTIPLIER);
+        else
+            LOGGER.warn("TPC backpressure is disabled. NOT RECOMMENDED.");
     }
 
     public ImmutableList<? extends TPCEventLoop> eventLoops()
@@ -188,11 +215,26 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         /** for schedule check throttling */
         private long lastScheduledCheckTime = lastEpollCheckTime;
 
+        /** for tracking backpressure */
+        private boolean hasGlobalBackpressure;
+
        /**
-        * The max allowed number of pending "backpressured" tasks: no new such tasks will be accepted , to avoid
-        * overloading the heap and leave more CPU power to already pending tasks.
+        * The max allowed number of pending "backpressured" tasks: no new pending/backpressured tasks will be accepted,
+        * to avoid overloading the heap and leave more CPU power to already pending tasks.
+        *
+        * Such value is actually made up of three thresholds:
+        * - The "local" threshold is the max number of allowed *local* (not marked with feature REMOTE) tasks for
+        *   "this" core: if such threshold is met, only its own *local* tasks will be backpressured.
+        * - The "remote" threshold is the max number of allowed *remote* (marked with feature REMOTE) tasks for
+        *   "this" core: if such threshold is met, only its own *remote* tasks will be backpressured.
+        * - The "global" threshold is the max number of allowed tasks for any core: that is, if such threshold is met
+        *   by any core, all tasks for all cores will be backpressured until all cores go back below this threshold.
+        *
+        * All such values are currently derived from {@link DatabaseDescriptor#getTPCPendingRequestsLimit()}.
         */
-        private static final int MAX_PENDING = DatabaseDescriptor.getTPCPendingRequestsLimit();
+        private static final int LOCAL_BACKPRESSURE_THRESHOLD = DatabaseDescriptor.getTPCPendingRequestsLimit();
+        private static final int REMOTE_BACKPRESSURE_THRESHOLD = LOCAL_BACKPRESSURE_THRESHOLD * REMOTE_BACKPRESSURE_MULTIPLIER;
+        private static final int GLOBAL_BACKPRESSURE_THRESHOLD = LOCAL_BACKPRESSURE_THRESHOLD * GLOBAL_BACKPRESSURE_MULTIPLIER;
 
         private SingleCoreEventLoop(EpollTPCEventLoopGroup parent, TPCThread.TPCThreadsCreator executor, AIOContext.Config aio)
         {
@@ -231,9 +273,33 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         }
 
         @Override
-        public boolean shouldBackpressure()
+        public boolean shouldBackpressure(boolean remote)
         {
-            return metrics.backpressureCountedTaskCount() >= MAX_PENDING;
+            if (DISABLE_BACKPRESSURE)
+                return false;
+
+            if (remote && remoteBackpressure())
+                return true;
+
+            if (!remote && localBackpressure())
+                return true;
+
+            return TPCMetrics.globallyBackpressuredCores() > 0;
+        }
+
+        private boolean localBackpressure()
+        {
+            return !DISABLE_BACKPRESSURE && metrics.backpressureCountedLocalTaskCount() >= LOCAL_BACKPRESSURE_THRESHOLD;
+        }
+
+        private boolean remoteBackpressure()
+        {
+            return !DISABLE_BACKPRESSURE && metrics.backpressureCountedRemoteTaskCount() >= REMOTE_BACKPRESSURE_THRESHOLD;
+        }
+
+        private boolean globalBackpressure()
+        {
+            return !DISABLE_BACKPRESSURE && metrics.backpressureCountedTotalTaskCount() >= GLOBAL_BACKPRESSURE_THRESHOLD;
         }
 
         @Override
@@ -293,7 +359,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         @Override
         public boolean canExecuteImmediately(TPCTaskType taskType)
         {
-            if (coreId() != TPC.getCoreId())
+            if (coreId() != TPC.getCoreId() || taskType.alwaysEnqueue())
                 return false;
             if (!taskType.pendable())
                 return true;
@@ -350,32 +416,43 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         @Override
         protected void addTask(Runnable task)
         {
-            if (task instanceof TPCRunnable)
+            try
             {
-                TPCRunnable tpc = (TPCRunnable) task;
-                if (tpc.hasPriority() && priorityQueue.relaxedOffer(tpc))
-                    return;
-                else if (tpc.isPendable())
+                if (task instanceof TPCRunnable)
                 {
-                    // If we already have something in the pending queue, this task should not jump it.
-                    if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(tpc, metrics.maxQueueSize()))
+                    TPCRunnable tpc = (TPCRunnable) task;
+                    if (tpc.hasPriority() && priorityQueue.relaxedOffer(tpc))
                         return;
+                    else if (tpc.isPendable())
+                    {
+                        // If we already have something in the pending queue, this task should not jump it.
+                        if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(tpc, metrics.maxQueueSize()))
+                            return;
 
-                    if (pendingQueue.relaxedOffer(tpc))
-                    {
-                        tpc.setPending();
-                        return;
-                    }
-                    else
-                    {
-                        tpc.blocked();
-                        reject(task);
+                        if (pendingQueue.relaxedOffer(tpc))
+                        {
+                            tpc.setPending();
+                            return;
+                        }
+                        else
+                        {
+                            tpc.blocked();
+                            reject(task);
+                        }
                     }
                 }
-            }
 
-            if (!queue.relaxedOffer(task))
-                reject(task);
+                if (!queue.relaxedOffer(task))
+                    reject(task);
+                }
+            finally
+            {
+                if (metrics != null && !hasGlobalBackpressure && globalBackpressure())
+                {
+                    hasGlobalBackpressure = true;
+                    TPCMetrics.globallyBackpressuredCores(1);
+                }
+            }
         }
 
         /**
@@ -647,27 +724,38 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
 
         private int transferFromPendingTasks()
         {
-            int processed = 0;
-            final int maxQueueSize = metrics.maxQueueSize();
-            final MpscArrayQueue<TPCRunnable> pendingQueue = this.pendingQueue;
-            TPCRunnable tpc;
-            while (queue.size() < maxQueueSize && (tpc = pendingQueue.relaxedPeek()) != null)
+            try
             {
-                // despite the size check this can fail as size will grow due to concurrent offers. In theory
-                // relaxedOffer allows for spurius offer fails which are not related to being full, but that's
-                // not the case for MpscArrayQueue.
-                if (queue.relaxedOffer(tpc))
+                int processed = 0;
+                final int maxQueueSize = metrics.maxQueueSize();
+                final MpscArrayQueue<TPCRunnable> pendingQueue = this.pendingQueue;
+                TPCRunnable tpc;
+                while (queue.size() < maxQueueSize && (tpc = pendingQueue.relaxedPeek()) != null)
                 {
-                    ++processed;
-                    pendingQueue.relaxedPoll();
-                    tpc.unsetPending();
+                    // despite the size check this can fail as size will grow due to concurrent offers. In theory
+                    // relaxedOffer allows for spurius offer fails which are not related to being full, but that's
+                    // not the case for MpscArrayQueue.
+                    if (queue.relaxedOffer(tpc))
+                    {
+                        ++processed;
+                        pendingQueue.relaxedPoll();
+                        tpc.unsetPending();
+                    }
+                    else
+                    {
+                        break;
+                    }
                 }
-                else
+                return processed;
+            }
+            finally
+            {
+                if (metrics != null && hasGlobalBackpressure && !globalBackpressure())
                 {
-                    break;
+                    hasGlobalBackpressure = false;
+                    TPCMetrics.globallyBackpressuredCores(-1);
                 }
             }
-            return processed;
         }
 
         private int runScheduledTasks(long nanoTimeSinceStartup)

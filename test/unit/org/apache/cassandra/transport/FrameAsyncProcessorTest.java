@@ -50,7 +50,7 @@ public class FrameAsyncProcessorTest
     public void testSyncProcessingIfEventLoopShouldNotBackpressure()
     {
         TPCEventLoop eventLoop = Mockito.mock(TPCEventLoop.class);
-        Mockito.when(eventLoop.shouldBackpressure()).thenReturn(false);
+        Mockito.when(eventLoop.shouldBackpressure(false)).thenReturn(false);
         Frame.AsyncProcessor processor = new Frame.AsyncProcessor(eventLoop);
 
         // Use a type supporting backpressure and verify sync execution due to the event loop not supporting it:
@@ -64,7 +64,7 @@ public class FrameAsyncProcessorTest
     public void testSyncProcessingIfNotSupportedByType()
     {
         TPCEventLoop eventLoop = Mockito.mock(TPCEventLoop.class);
-        Mockito.when(eventLoop.shouldBackpressure()).thenReturn(true);
+        Mockito.when(eventLoop.shouldBackpressure(false)).thenReturn(true);
         Frame.AsyncProcessor processor = new Frame.AsyncProcessor(eventLoop);
 
         // Use a type not supporting backpressure and verify sync execution even if the event loop supports it:
@@ -78,7 +78,7 @@ public class FrameAsyncProcessorTest
     public void testAsyncProcessing()
     {
         TPCEventLoop eventLoop = Mockito.mock(TPCEventLoop.class);
-        Mockito.when(eventLoop.shouldBackpressure()).thenReturn(true);
+        Mockito.when(eventLoop.shouldBackpressure(false)).thenReturn(true);
         Frame.AsyncProcessor processor = new Frame.AsyncProcessor(eventLoop);
 
         // Verify async processing:
@@ -92,7 +92,7 @@ public class FrameAsyncProcessorTest
         Mockito.reset(eventLoop);
 
         // Now make the event loop return false: it should still do async because the frames queue is not empty:
-        Mockito.when(eventLoop.shouldBackpressure()).thenReturn(false);
+        Mockito.when(eventLoop.shouldBackpressure(false)).thenReturn(false);
         frame = createFrame(Message.Type.QUERY);
         out = new LinkedList();
         processor.maybeDoAsync(Mockito.mock(ChannelHandlerContext.class), frame, out);
@@ -101,7 +101,7 @@ public class FrameAsyncProcessorTest
         Mockito.verify(eventLoop, Mockito.never()).execute(Mockito.any());
 
         // Finally verify if the message type doesn't support backpressure we do sync regardless if we did async before:
-        Mockito.when(eventLoop.shouldBackpressure()).thenReturn(true);
+        Mockito.when(eventLoop.shouldBackpressure(false)).thenReturn(true);
         frame = createFrame(Message.Type.AUTHENTICATE);
         out = new LinkedList();
         processor.maybeDoAsync(Mockito.mock(ChannelHandlerContext.class), frame, out);
@@ -122,7 +122,7 @@ public class FrameAsyncProcessorTest
         ArgumentCaptor<TPCRunnable> capturedTask = ArgumentCaptor.forClass(TPCRunnable.class);
 
         // Async processing will schedule a task on the event loop, which we capure here:
-        Mockito.when(eventLoop.shouldBackpressure()).thenReturn(true);
+        Mockito.when(eventLoop.shouldBackpressure(false)).thenReturn(true);
         Frame frame = createFrame(Message.Type.QUERY);
         List out = new LinkedList();
         processor.maybeDoAsync(context, frame, out);
@@ -130,7 +130,7 @@ public class FrameAsyncProcessorTest
         Mockito.verify(eventLoop).execute(capturedTask.capture());
 
         // Get the captured task and run it: this will consume the queue and pass the contained frame to the context.
-        Mockito.when(eventLoop.shouldBackpressure()).thenReturn(false);
+        Mockito.when(eventLoop.shouldBackpressure(false)).thenReturn(false);
         capturedTask.getValue().run();
         Mockito.verify(context).fireChannelRead(Mockito.same(frame));
     }
@@ -149,7 +149,7 @@ public class FrameAsyncProcessorTest
         ArgumentCaptor<TPCRunnable> capturedTask = ArgumentCaptor.forClass(TPCRunnable.class);
 
         // Async processing will schedule a task on the event loop, which we capure here:
-        Mockito.when(eventLoop.shouldBackpressure()).thenReturn(true);
+        Mockito.when(eventLoop.shouldBackpressure(false)).thenReturn(true);
         Frame frame = createFrame(Message.Type.QUERY);
         List out = new LinkedList();
         processor.maybeDoAsync(context, frame, out);
@@ -157,7 +157,7 @@ public class FrameAsyncProcessorTest
         Mockito.verify(eventLoop).execute(capturedTask.capture());
 
         // Get the captured task and run it: this will consume the queue but not pass the contained frame to the context.
-        Mockito.when(eventLoop.shouldBackpressure()).thenReturn(false);
+        Mockito.when(eventLoop.shouldBackpressure(false)).thenReturn(false);
         capturedTask.getValue().run();
         Mockito.verify(eventLoop, Mockito.times(1)).execute(Mockito.anyObject());
         Mockito.verify(context, Mockito.never()).fireChannelRead(Mockito.anyObject());
@@ -177,7 +177,7 @@ public class FrameAsyncProcessorTest
         ArgumentCaptor<TPCRunnable> capturedTask = ArgumentCaptor.forClass(TPCRunnable.class);
 
         // Async processing will schedule a task on the event loop, which we capure here:
-        Mockito.when(eventLoop.shouldBackpressure()).thenReturn(true);
+        Mockito.when(eventLoop.shouldBackpressure(false)).thenReturn(true);
         Frame frame = createFrame(Message.Type.QUERY);
         List out = new LinkedList();
         processor.maybeDoAsync(context, frame, out);
@@ -185,7 +185,7 @@ public class FrameAsyncProcessorTest
         Mockito.verify(eventLoop).execute(capturedTask.capture());
 
         // Get the captured task and run it: this will not consume the queue due to backpressure still on:
-        Mockito.when(eventLoop.shouldBackpressure()).thenReturn(true);
+        Mockito.when(eventLoop.shouldBackpressure(false)).thenReturn(true);
         capturedTask.getValue().run();
         Mockito.verify(eventLoop, Mockito.times(2)).execute(Mockito.anyObject());
         Mockito.verify(context, Mockito.never()).fireChannelRead(Mockito.anyObject());

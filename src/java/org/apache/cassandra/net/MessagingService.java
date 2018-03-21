@@ -28,6 +28,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -49,6 +50,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCEventLoop;
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
@@ -805,7 +808,7 @@ public final class MessagingService implements MessagingServiceMBean
             // For now the only case that we intentionally target with this is rejecting the MessageDeliveryTask by the
             // event loop. If anything else triggers this log, we should make sure that it didn't fall through the
             // cracks by chance while it was meant to be handled by another component.
-            logger.error("{} while receiving {} message from {}", t.getClass().getCanonicalName(), message.verb(), message.from());
+            logger.error("{} while receiving {} from {}, caused by: {}", t.getClass().getCanonicalName(), message.verb(), message.from(), t.getMessage());
             logger.trace("Stacktrace: ", t);
             if (message.isRequest() && !message.verb().isOneWay())
             {
@@ -818,7 +821,45 @@ public final class MessagingService implements MessagingServiceMBean
 
     private <P, Q> void receiveRequestInternal(Request<P, Q> request, ExecutorLocals locals)
     {
-        request.requestExecutor().execute(  MessageDeliveryTask.forRequest(request), locals);
+        // This method might block, so let's be sure it doesn't run on a TPC thread.
+        assert !TPC.isTPCThread();
+
+        TracingAwareExecutor executor = request.requestExecutor();
+        int coreId = executor.coreId();
+        if (request.verb.supportsBackPressure() && TPC.isValidCoreId(coreId))
+        {
+            try
+            {
+                // Retry until there's backpressure and 1/4th of this request timeout has elapsed: we do not want to
+                // retry too much to avoid stalling (and expiring) other incoming messages.
+                TPCEventLoop eventLoop = TPC.eventLoopGroup().eventLoops().get(coreId);
+                long retryTimeCapInMillis = request.operationStartMillis() + (request.timeoutMillis() / 4);
+
+                // The retry mechanism is implemented via the TPCTimer in the {@link #checkBackpressure(TPCEventLoop , CompletableFuture , long )}
+                // method: we do not directly await and loop here as that would probably be an additional context switch
+                // (that is, the TPCTimer will probably run anyway).
+                CompletableFuture<RejectedExecutionException> backpressure = new CompletableFuture<>();
+                checkTPCBackpressure(eventLoop, backpressure, retryTimeCapInMillis);
+                RejectedExecutionException rejected = backpressure.get();
+                if (rejected != null)
+                    throw rejected;
+            }
+            catch(RejectedExecutionException ex)
+            {
+                throw ex;
+            }
+            catch(InterruptedException ex)
+            {
+                // Interrupted, let's proceed with execution...
+                Thread.currentThread().interrupt();
+            }
+            catch(Throwable ex)
+            {
+                // Unexpected, let's rethrow...
+                throw new IllegalStateException(ex);
+            }
+        }
+        executor.execute(MessageDeliveryTask.forRequest(request), locals);
     }
 
     private <Q> void receiveResponseInternal(Response<Q> response, ExecutorLocals locals)
@@ -828,6 +869,17 @@ public final class MessagingService implements MessagingServiceMBean
         // Ignore expired callback info (we already logged in getRegisteredCallback)
         if (info != null)
             info.responseExecutor.execute(MessageDeliveryTask.forResponse(response), locals);
+    }
+
+    private void checkTPCBackpressure(TPCEventLoop eventLoop, CompletableFuture<RejectedExecutionException> backpressure, long retryTimeCapInMillis)
+    {
+        boolean shouldBackpressure = eventLoop.shouldBackpressure(true);
+        if (shouldBackpressure && ApproximateTime.currentTimeMillis() < retryTimeCapInMillis - 100)
+            TPC.bestTPCTimer().onTimeout(() -> checkTPCBackpressure(eventLoop, backpressure, retryTimeCapInMillis), 100, TimeUnit.MILLISECONDS);
+        else if (shouldBackpressure)
+            backpressure.complete(new RejectedExecutionException("Too many pending remote requests!"));
+        else
+            backpressure.complete(null);
     }
 
     // Only required by legacy serialization. Can inline in following method when we get rid of that.

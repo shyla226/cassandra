@@ -156,7 +156,18 @@ public abstract class StagedScheduler extends Scheduler
     private TracingAwareExecutor makeExecutor(TPCTaskType type)
     {
         // Because this executor explicitly specifies locals that need to be set, we always wrap the runnable.
-        return (runnable, locals) -> execute(TPCRunnable.wrap(runnable, locals, type, metricsCoreId()));
+        return new TracingAwareExecutor()
+        {
+            public void execute(Runnable runnable, ExecutorLocals locals)
+            {
+                StagedScheduler.this.execute(TPCRunnable.wrap(runnable, locals, type, metricsCoreId()));
+            }
+
+            public int coreId()
+            {
+                return metricsCoreId();
+            }
+        };
     }
 
     /**
@@ -175,7 +186,7 @@ public abstract class StagedScheduler extends Scheduler
          * Shows whether the runnable has progressed - either by having started running, or by getting cancelled.
          */
         private final AtomicBoolean hasProgressed;
-        
+
         TPCAwareDisposeTask(Runnable runnable, Worker w)
         {
             this.runnable = runnable;
