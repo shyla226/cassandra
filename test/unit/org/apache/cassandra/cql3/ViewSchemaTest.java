@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.cql3;
 
+import static org.junit.Assert.assertTrue;
+
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
@@ -39,6 +41,9 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ColumnFamilyStoreCQLHelper;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.serializers.SimpleDateSerializer;
 import org.apache.cassandra.serializers.TimeSerializer;
@@ -692,5 +697,82 @@ public class ViewSchemaTest extends CQLTester
                              "CREATE MATERIALIZED VIEW " + keyspace() + ".mv AS SELECT * FROM %s "
                                      + "WHERE b IS NOT NULL AND c IS NOT NULL AND a IS NOT NULL "
                                      + "AND d = 1 PRIMARY KEY (c, b, a)");
+    }
+
+    @Test
+    public void testViewMetadataCQLNotIncludeAllColumn() throws Throwable
+    {
+        String createBase = "CREATE TABLE IF NOT EXISTS %s (" +
+                "pk1 int," +
+                "pk2 int," +
+                "ck1 int," +
+                "ck2 int," +
+                "reg1 int," +
+                "reg2 list<int>," +
+                "reg3 int," +
+                "PRIMARY KEY ((pk1, pk2), ck1, ck2)) WITH " +
+                "CLUSTERING ORDER BY (ck1 ASC, ck2 DESC);";
+
+        String createView = "CREATE MATERIALIZED VIEW IF NOT EXISTS %s AS SELECT pk1,pk2,ck1,ck2,reg1,reg2 FROM %%s "
+                + "WHERE pk2 = 1 AND pk1 IS NOT NULL AND ck2 IS NOT NULL AND ck1 IS NOT NULL PRIMARY KEY((pk2, pk1), ck2, ck1)";
+
+        String expectedViewSnapshot = "CREATE MATERIALIZED VIEW IF NOT EXISTS %s.%s AS SELECT ck1, ck2, pk1, pk2, reg1, reg2 FROM %s.%s\n" +
+                "\tWHERE pk2 = 1 AND pk1 IS NOT NULL AND ck2 IS NOT NULL AND ck1 IS NOT NULL\n" +
+                "\tPRIMARY KEY ((pk2, pk1), ck2, ck1)\n" +
+                "\tWITH ID = %s\n" +
+                "\tAND CLUSTERING ORDER BY (ck2 DESC, ck1 ASC)";
+
+        testViewMetadataCQL(createBase,
+                            createView,
+                            expectedViewSnapshot);
+    }
+
+    @Test
+    public void testViewMetadataCQLIncludeAllColumn() throws Throwable
+    {
+        String createBase = "CREATE TABLE IF NOT EXISTS %s (" +
+                "pk1 int," +
+                "pk2 int," +
+                "ck1 int," +
+                "ck2 int," +
+                "reg1 int," +
+                "reg2 list<int>," +
+                "reg3 int," +
+                "PRIMARY KEY ((pk1, pk2), ck1, ck2)) WITH " +
+                "CLUSTERING ORDER BY (ck1 ASC, ck2 DESC);";
+
+        String createView = "CREATE MATERIALIZED VIEW IF NOT EXISTS %s AS SELECT * FROM %%s "
+                + "WHERE pk2 = 1 AND pk1 IS NOT NULL AND ck2 IS NOT NULL AND ck1 IS NOT NULL PRIMARY KEY((pk2, pk1), ck2, ck1)";
+
+        String expectedViewSnapshot = "CREATE MATERIALIZED VIEW IF NOT EXISTS %s.%s AS SELECT * FROM %s.%s\n" +
+                "\tWHERE pk2 = 1 AND pk1 IS NOT NULL AND ck2 IS NOT NULL AND ck1 IS NOT NULL\n" +
+                "\tPRIMARY KEY ((pk2, pk1), ck2, ck1)\n" +
+                "\tWITH ID = %s\n" +
+                "\tAND CLUSTERING ORDER BY (ck2 DESC, ck1 ASC)";
+
+        testViewMetadataCQL(createBase,
+                            createView,
+                            expectedViewSnapshot);
+    }
+
+    private void testViewMetadataCQL(String createBase, String createView, String viewSnapshotSchema) throws Throwable
+    {
+        String base = createTable(createBase);
+
+        execute("USE " + keyspace());
+        executeNet(protocolVersion, "USE " + keyspace());
+
+        String view = "mv";
+        createView(view, createView);
+
+        ColumnFamilyStore mv = Keyspace.open(keyspace()).getColumnFamilyStore(view);
+
+        assertTrue(ColumnFamilyStoreCQLHelper.getTableMetadataAsCQL(mv.metadata(), true)
+                                             .startsWith(String.format(viewSnapshotSchema,
+                                                                       keyspace(),
+                                                                       view,
+                                                                       keyspace(),
+                                                                       base,
+                                                                       mv.metadata.id)));
     }
 }

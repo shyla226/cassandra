@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.atomic.*;
 import java.util.function.*;
-
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 
@@ -100,6 +99,112 @@ public class ColumnFamilyStoreCQLHelper
             sb.append("\n(this should not be used to reproduce this schema)\n\n");
         }
 
+        List<ColumnMetadata> clusteringColumns = getClusteringColumns(metadata);
+
+        if (metadata.isView())
+        {
+            sb.append(getViewMetadataAsCQL(metadata, includeDroppedColumns));
+        }
+        else
+        {
+            sb.append(getBaseTableMetadataAsCQL(metadata, includeDroppedColumns));
+        }
+
+        sb.append("WITH ");
+
+        sb.append("ID = ").append(metadata.id).append("\n\tAND ");
+
+        if (metadata.isCompactTable())
+            sb.append("COMPACT STORAGE\n\tAND ");
+
+        if (clusteringColumns.size() > 0)
+        {
+            sb.append("CLUSTERING ORDER BY (");
+
+            Consumer<StringBuilder> cOrderCommaAppender = commaAppender(" ");
+            for (ColumnMetadata cd : clusteringColumns)
+            {
+                cOrderCommaAppender.accept(sb);
+                sb.append(cd.name.toCQLString()).append(' ').append(cd.clusteringOrder().toString());
+            }
+            sb.append(")\n\tAND ");
+        }
+
+        sb.append(toCQL(metadata.params));
+        sb.append(";");
+
+        if (!isCqlCompatible(metadata))
+        {
+            sb.append("\n*/");
+        }
+        return sb.toString();
+    }
+
+    private static String getViewMetadataAsCQL(TableMetadata metadata, boolean includeDroppedColumns)
+    {
+        assert metadata.isView();
+        KeyspaceMetadata keyspaceMetadata = Schema.instance.getKeyspaceMetadata(metadata.keyspace);
+        assert keyspaceMetadata != null;
+        ViewMetadata viewMetadata = keyspaceMetadata.views.get(metadata.name).orElse(null);
+        assert viewMetadata != null;
+
+        List<ColumnMetadata> partitionKeyColumns = metadata.partitionKeyColumns();
+        List<ColumnMetadata> clusteringColumns = getClusteringColumns(metadata);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("CREATE MATERIALIZED VIEW IF NOT EXISTS ").append(metadata.toString()).append(" AS SELECT ");
+
+        if (viewMetadata.includeAllColumns)
+        {
+            sb.append("*");
+        }
+        else
+        {
+            boolean isFirst = true;
+            List<ColumnMetadata> columns = new ArrayList<>(metadata.columns());
+            columns.sort(Comparator.comparing((c -> c.name.toString())));
+            for (ColumnMetadata column : columns) {
+                if (!isFirst)
+                    sb.append(", ");
+                sb.append(column.name.toString());
+                isFirst = false;
+            }
+        }
+        sb.append(" FROM ").append(viewMetadata.keyspace).append(".").append(viewMetadata.baseTableName).append("\n\t");
+        sb.append("WHERE ").append(viewMetadata.whereClause).append("\n\t");
+
+        if (clusteringColumns.size() > 0 || partitionKeyColumns.size() > 1)
+        {
+            sb.append("PRIMARY KEY (");
+            if (partitionKeyColumns.size() > 1)
+            {
+                sb.append("(");
+                Consumer<StringBuilder> pkCommaAppender = commaAppender(" ");
+                for (ColumnMetadata cfd : partitionKeyColumns)
+                {
+                    pkCommaAppender.accept(sb);
+                    sb.append(cfd.name.toCQLString());
+                }
+                sb.append(")");
+            }
+            else
+            {
+                sb.append(partitionKeyColumns.get(0).name.toCQLString());
+            }
+
+            for (ColumnMetadata cfd : metadata.clusteringColumns())
+                sb.append(", ").append(cfd.name.toCQLString());
+
+            sb.append(')');
+        }
+        sb.append("\n\t");
+        return sb.toString();
+    }
+
+    @VisibleForTesting
+    public static String getBaseTableMetadataAsCQL(TableMetadata metadata, boolean includeDroppedColumns)
+    {
+        StringBuilder sb = new StringBuilder();
         sb.append("CREATE TABLE IF NOT EXISTS ");
         sb.append(metadata.toString()).append(" (");
 
@@ -169,36 +274,8 @@ public class ColumnFamilyStoreCQLHelper
             sb.append(')');
         }
         sb.append(")\n\t");
-        sb.append("WITH ");
-
-        sb.append("ID = ").append(metadata.id).append("\n\tAND ");
-
-        if (metadata.isCompactTable())
-            sb.append("COMPACT STORAGE\n\tAND ");
-
-        if (clusteringColumns.size() > 0)
-        {
-            sb.append("CLUSTERING ORDER BY (");
-
-            Consumer<StringBuilder> cOrderCommaAppender = commaAppender(" ");
-            for (ColumnMetadata cd : clusteringColumns)
-            {
-                cOrderCommaAppender.accept(sb);
-                sb.append(cd.name.toCQLString()).append(' ').append(cd.clusteringOrder().toString());
-            }
-            sb.append(")\n\tAND ");
-        }
-
-        sb.append(toCQL(metadata.params));
-        sb.append(";");
-
-        if (!isCqlCompatible(metadata))
-        {
-            sb.append("\n*/");
-        }
         return sb.toString();
     }
-
     /**
      * Build a CQL String representation of User Types used in the given Column Family.
      *
