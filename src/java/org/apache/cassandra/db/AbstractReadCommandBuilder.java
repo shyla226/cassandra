@@ -23,6 +23,7 @@ import java.util.*;
 
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -52,11 +53,19 @@ public abstract class AbstractReadCommandBuilder<T extends ReadCommand>
 
     private NavigableSet<Clustering> clusterings;
 
+    protected boolean isInternal;
+
     // Use Util.cmd() instead of this ctor directly
     AbstractReadCommandBuilder(ColumnFamilyStore cfs)
     {
         this.cfs = cfs;
         this.nowInSeconds = FBUtilities.nowInSeconds();
+    }
+
+    public AbstractReadCommandBuilder<T> internal()
+    {
+        isInternal = true;
+        return this;
     }
 
     public AbstractReadCommandBuilder<T> withNowInSeconds(int nowInSec)
@@ -121,7 +130,7 @@ public abstract class AbstractReadCommandBuilder<T extends ReadCommand>
         this.rowLimit = newLimit;
         return this;
     }
-    
+
     public AbstractReadCommandBuilder<T> withPartitionLimit(int newLimit)
     {
         this.partitionLimit = newLimit;
@@ -226,10 +235,10 @@ public abstract class AbstractReadCommandBuilder<T extends ReadCommand>
             limits = DataLimits.cqlLimits(rowLimit);
         else if (partitionLimit >= 0)
             limits = DataLimits.cqlLimits(DataLimits.NO_ROWS_LIMIT, partitionLimit);
-            
+
         if (pagingLimit != null)
             limits = limits.forPaging(pagingLimit);
-        
+
         return limits;
     }
 
@@ -248,7 +257,9 @@ public abstract class AbstractReadCommandBuilder<T extends ReadCommand>
         @Override
         public SinglePartitionReadCommand build()
         {
-            return SinglePartitionReadCommand.create(cfs.metadata(), nowInSeconds, makeColumnFilter(), filter, makeLimits(), partitionKey, makeFilter());
+            return isInternal ?
+                   SinglePartitionReadCommand.create(cfs.metadata(), nowInSeconds, makeColumnFilter(), filter, makeLimits(), partitionKey, makeFilter(), TPCTaskType.READ_INTERNAL) :
+                   SinglePartitionReadCommand.create(cfs.metadata(), nowInSeconds, makeColumnFilter(), filter, makeLimits(), partitionKey, makeFilter());
         }
     }
 
@@ -329,7 +340,9 @@ public abstract class AbstractReadCommandBuilder<T extends ReadCommand>
             else
                 bounds = new ExcludingBounds<>(start, end);
 
-            return PartitionRangeReadCommand.create(cfs.metadata(), nowInSeconds, makeColumnFilter(), filter, makeLimits(), new DataRange(bounds, makeFilter()));
+            return isInternal ?
+                PartitionRangeReadCommand.create(cfs.metadata(), nowInSeconds, makeColumnFilter(), filter, makeLimits(), new DataRange(bounds, makeFilter()), TPCTaskType.READ_RANGE_INTERNAL) :
+                PartitionRangeReadCommand.create(cfs.metadata(), nowInSeconds, makeColumnFilter(), filter, makeLimits(), new DataRange(bounds, makeFilter()));
         }
 
         static DecoratedKey makeKey(TableMetadata metadata, Object... partitionKey)

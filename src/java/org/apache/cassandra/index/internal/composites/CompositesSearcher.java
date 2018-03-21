@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import io.reactivex.Completable;
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
@@ -91,14 +90,13 @@ public class CompositesSearcher extends CassandraIndexSearcher
 
                 // Query the gathered index hits. We still need to filter stale hits from the resulting query.
                 ClusteringIndexNamesFilter filter = new ClusteringIndexNamesFilter(clusterings.build(), false);
-                SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.create(index.baseCfs.metadata(),
+                SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.createForIndex(index.baseCfs.metadata(),
                                                                                        command.nowInSec(),
                                                                                        command.columnFilter(),
                                                                                        command.rowFilter(),
                                                                                        DataLimits.NONE,
                                                                                        partitionKey,
-                                                                                       filter,
-                                                                                       TPCTaskType.READ_SECONDARY_INDEX);
+                                                                                       filter);
                 Flow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
 
                 return partition.map(p -> filterStaleEntries(p,

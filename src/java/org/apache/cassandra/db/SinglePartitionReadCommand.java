@@ -173,7 +173,6 @@ public class SinglePartitionReadCommand extends ReadCommand
                                               indexMetadata,
                                               TPCTaskType.READ_LOCAL);
     }
-
     /**
      * Creates a new read command on a single partition.
      *
@@ -184,7 +183,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * @param limits the limits to use for the query.
      * @param partitionKey the partition key for the partition to query.
      * @param clusteringIndexFilter the clustering index filter to use for the query.
-     * @param taskType TPC task type
+     * @param taskType TPC task type.
      *
      * @return a newly created read command.
      */
@@ -205,7 +204,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                               limits,
                                               partitionKey,
                                               clusteringIndexFilter,
-                                              null,
+                                              findIndex(metadata, rowFilter),
                                               taskType);
     }
 
@@ -258,6 +257,39 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                     ClusteringIndexFilter filter)
     {
         return create(metadata, nowInSec, columnFilter, RowFilter.NONE, DataLimits.NONE, key, filter);
+    }
+
+    /**
+     * Creates a new read command on a single partition to use for 2i queries.
+     *
+     * @param metadata the table to query.
+     * @param nowInSec the time in seconds to use are "now" for this query.
+     * @param columnFilter the column filter to use for the query.
+     * @param rowFilter the row filter to use for the query.
+     * @param limits the limits to use for the query.
+     * @param partitionKey the partition key for the partition to query.
+     * @param clusteringIndexFilter the clustering index filter to use for the query.
+     *
+     * @return a newly created read command.
+     */
+    public static SinglePartitionReadCommand createForIndex(TableMetadata metadata,
+                                                    int nowInSec,
+                                                    ColumnFilter columnFilter,
+                                                    RowFilter rowFilter,
+                                                    DataLimits limits,
+                                                    DecoratedKey partitionKey,
+                                                    ClusteringIndexFilter clusteringIndexFilter)
+    {
+        return new SinglePartitionReadCommand(null,
+                                              metadata,
+                                              nowInSec,
+                                              columnFilter,
+                                              rowFilter,
+                                              limits,
+                                              partitionKey,
+                                              clusteringIndexFilter,
+                                              null,
+                                              TPCTaskType.READ_SECONDARY_INDEX);
     }
 
     /**
