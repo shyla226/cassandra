@@ -92,13 +92,12 @@ jvmver=`echo "$java_ver_output" | grep '[openjdk|java] version' | awk -F'"' 'NR=
 JVM_VERSION=${jvmver%_*}
 JVM_PATCH_VERSION=${jvmver#*_}
 
-if [ "$JVM_VERSION" \< "1.8" ] ; then
-    echo "Cassandra 3.0 and later require Java 8u40 or later."
+if [ "$JVM_VERSION" \< "1.8" ] || [ "$JVM_VERSION" \> "1.8.2" ] ; then
+    echo "Cassandra 3.0 and later require Java 8 update 40 or later. Java $JVM_VERSION is not supported."
     exit 1;
 fi
-
-if [ "$JVM_VERSION" \< "1.8" ] && [ "$JVM_PATCH_VERSION" -lt 40 ] ; then
-    echo "Cassandra 3.0 and later require Java 8u40 or later."
+if [ "$JVM_PATCH_VERSION" -lt 40 ] ; then
+    echo "Cassandra 3.0 and later require Java 8 update 40 or later. Java 8 update $JVM_PATCH_VERSION is not supported."
     exit 1;
 fi
 

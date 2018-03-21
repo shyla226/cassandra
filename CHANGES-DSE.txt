@@ -3,6 +3,7 @@ DSE 5.1.8
  * Read connection ssl option from cqlshrc (DB-1800)
  * Fix SASI AND/OR semantics for StandardAnalyzer (DB-548)
 Merged from dse5.0:
+ * Fix JVM startup check (DB-1882)
  * Fix materialized view schema backup as table (DB-1828)
  * Init timestamp with Long.MIN_VALUE instead of -1 (DB-1823)
  * Fix AssertionError in ThrottledUnfilteredIterator due to empty UnfilteredRowIterator (DB-1859)
