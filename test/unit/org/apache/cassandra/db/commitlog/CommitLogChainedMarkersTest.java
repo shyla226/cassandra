@@ -29,6 +29,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.apache.cassandra.utils.BytemanUtil;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -54,6 +55,11 @@ import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 @RunWith(BMUnitRunner.class)
 public class CommitLogChainedMarkersTest
 {
+    static
+    {
+        BytemanUtil.randomizeBytemanPort();
+    }
+    
     private static final String KEYSPACE1 = "CommitLogTest";
     private static final String STANDARD1 = "CommitLogChainedMarkersTest";
 
