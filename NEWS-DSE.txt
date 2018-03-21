@@ -109,6 +109,7 @@ Operations
 
 Upgrading
 ---------
+   - The minimum required Java version has changed from Java 8u40 in DSE 5.0 & 5.1 to Java 8u151
    - The ITrigger interface has been modified from "augment" to "augmentNonBlocking" for non-blocking
      internal architecture. Updated trigger implementations will need to be provided on upgraded nodes.
    - Removed support for directly setting JMX remote port via the com.sun.management.jmxremote.port
