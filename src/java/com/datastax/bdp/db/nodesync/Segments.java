@@ -310,6 +310,18 @@ class Segments
     }
 
     /**
+     * Generate segments with updated table metadata
+     *
+     * @param segments existing segments
+     * @param table new table metadata
+     * @return
+     */
+    static Segments updateTable(Segments segments, TableMetadata table )
+    {
+        return new Segments(table, segments.localRanges, segments.depth, segments.ranges, segments.maxToken, segments.comparator);
+    }
+
+    /**
      * The (estimated) number of segments the iterator from {@link #generate} will generate.
      * <p>
      * It's called an estimate because there is theoretically rare cases where ranges may not be splittable beyond

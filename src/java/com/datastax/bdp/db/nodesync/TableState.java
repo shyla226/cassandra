@@ -121,7 +121,7 @@ public class TableState
     private static final Logger logger = LoggerFactory.getLogger(TableState.class);
 
     private final NodeSyncService service;
-    private final TableMetadata table;
+    private volatile TableMetadata table;
 
     private volatile StateHolder stateHolder;
     private final Version version = new Version();
@@ -212,6 +212,48 @@ public class TableState
     }
 
     /**
+     * Updates the state so that it uses the provided altered metadata for future segments and proposals.
+     */
+    void onTableUpdate(TableMetadata alteredTable)
+    {
+        // Cheap check outside the lock; we'll check again inside it.
+        if (alteredTable == this.table)
+            return;
+
+        lock.writeLock().lock();
+        try
+        {
+            if (alteredTable == this.table)
+                return;
+
+            long newDeadline = deadline();
+
+            this.table = alteredTable;
+            stateHolder.updateTable(table);
+
+            if (stateHolder.deadlineTargetMs != newDeadline)
+            {
+                logger.debug("Updating NodeSync state and deadline target for {} following table update", table);
+                tracing().trace("Updating deadline from {} to {} for {}",
+                                Units.toString(stateHolder.deadlineTargetMs, TimeUnit.MILLISECONDS),
+                                Units.toString(newDeadline, TimeUnit.MILLISECONDS),
+                                table);
+                stateHolder.updateDeadline(newDeadline);
+            }
+            else
+            {
+                logger.debug("Updating NodeSync state for {} following table update", table);
+            }
+            // invalidated not activated proposals
+            version.priority++;
+        }
+        finally
+        {
+            lock.writeLock().unlock();
+        }
+    }
+
+    /**
      * Updates the state so that it uses the provided depth for its segments. If the state already uses this depth, this
      * is a no-op.
      */
@@ -276,36 +318,6 @@ public class TableState
                             stateHolder.segments.localRanges(), localRanges, table, stateHolder.size, newStateHolder.size);
             stateHolder = newStateHolder;
             version.major++;
-        }
-        finally
-        {
-            lock.writeLock().unlock();
-        }
-    }
-
-    /**
-     * Should be called when the table of which this is the state is updated: it will perform any task necessary to
-     * account for potential changes to the NodeSync parameters.
-     */
-    void onTableUpdate()
-    {
-        long deadline = deadline();
-        // Cheap check outside the lock.
-        if (deadline == stateHolder.deadlineTargetMs)
-            return;
-
-        lock.writeLock().lock();
-        try
-        {
-            if (deadline == stateHolder.deadlineTargetMs)
-                return;
-
-            logger.debug("Updating NodeSync deadline target for {} following table update", table);
-            tracing().trace("Updating deadline from {} to {} for {}",
-                            Units.toString(stateHolder.deadlineTargetMs, TimeUnit.MILLISECONDS),
-                            Units.toString(deadline, TimeUnit.MILLISECONDS),
-                            table);
-            stateHolder.updateDeadline(deadline);
         }
         finally
         {
@@ -441,9 +453,9 @@ public class TableState
         // need it so as to ensure it stay stable in calls like nextSegmentToValidate(). Besides, we access it a lot
         // (since it's part of the priority computation) so having it isn't a bad idea performance-wise as well.
         private long deadlineTargetMs;
+        private Segments segments;
 
         private final int size;
-        private final Segments segments;
         private final long[] lastValidations;
         private final long[] lastSuccessfulValidations;
 
@@ -589,6 +601,11 @@ public class TableState
             List<NodeSyncRecord> records = statusTable().nodeSyncRecords(table, toLoad);
             for (int i = 0; i < size; i++)
                 update(i, NodeSyncRecord.consolidate(segments.get(i), records));
+        }
+
+        private void updateTable(TableMetadata table)
+        {
+            segments = Segments.updateTable(segments, table);
         }
 
         private void updateDeadline(long newDeadlineTargetMs)

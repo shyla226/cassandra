@@ -198,7 +198,7 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
     }
 
     /**
-     * Add the provided table ot the list of continuously validated tables. This is a no-op if the table is already
+     * Add the provided table to the list of continuously validated tables. This is a no-op if the table is already
      * continuously validated.
      * <p>
      * As doing so will generally require loading the initial state of the table from the distributed system table, this
@@ -684,12 +684,15 @@ class ValidationScheduler extends SchemaChangeListener implements IEndpointLifec
         // present one are no-ops...
         if (NodeSyncHelpers.isNodeSyncEnabled(store))
         {
-            addContinuous(metadata).thenAcceptAsync(previous -> {
+            CompletableFuture.runAsync(() -> {
+                // Update NodeSync in-memory snapshot of tablemetadata and it will be used for new generated proposals.
+                // Without new metadata, deadline target will not be updated and validation will not include new columns.
+                // If NodeSync is newly enabled here, the onTableUpdate(metadata) is a no-op
+                state.getOrLoad(metadata).onTableUpdate(metadata);
+            }, eventExecutor).thenCompose(v -> addContinuous(metadata)).thenAccept(previous -> {
                 if (previous == null)
                     logger.info("Starting NodeSync validations on table {}: it has been enabled with ALTER TABLE", metadata);
-                else
-                    previous.state.onTableUpdate();
-            }, eventExecutor);
+            });
         }
         else
         {

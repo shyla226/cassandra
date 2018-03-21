@@ -19,6 +19,7 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
@@ -37,6 +38,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -71,6 +73,7 @@ import org.apache.cassandra.utils.versioning.Versioned;
 public class ColumnFilter
 {
     private static final Logger logger = LoggerFactory.getLogger(ColumnFilter.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     public static final Versioned<ReadVersion, Serializer> serializers = ReadVersion.versioned(Serializer::new);
 
@@ -203,7 +206,7 @@ public class ColumnFilter
     {
         if (fetchType == FetchType.ALL_COLUMNS && !fetched.includes(partitionColumns))
         {
-            logger.info("Columns mismatch: `{}` does not include `{}`, falling back to the original set of columns.", fetched, partitionColumns);
+            noSpamLogger.info("Columns mismatch: `{}` does not include `{}`, falling back to the original set of columns.", fetched, partitionColumns);
 
             // if fetched doesn't contain all the columns that we may be asked to filter, then we cannot
             // optimize based on fetchType == ALL but we need to fall back to checking if the column
