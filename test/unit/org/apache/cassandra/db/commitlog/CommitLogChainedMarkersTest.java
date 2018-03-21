@@ -91,6 +91,12 @@ public class CommitLogChainedMarkersTest
     action = "return")
     public void replayCommitLogWithoutFlushing() throws IOException
     {
+        if (CommitLog.instance.configuration.useCompression() || CommitLog.instance.configuration.useEncryption())
+        {
+            System.out.println("Test does not make sense with commit log compression.");
+            return;
+        }
+
         byte[] entropy = new byte[1024];
         new Random().nextBytes(entropy);
         final Mutation m = new RowUpdateBuilder(cfs1.metadata.get(), 0, "k")
