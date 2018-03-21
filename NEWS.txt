@@ -51,9 +51,11 @@ Upgrading
       disabled by default and can be enabled via the -Dcassandra.gpfs.enable_pfs_compatibility_mode=true startup
       flag.
 
+
 DSE 5.1.6
 =========
-=======
+
+
 3.11.3
 =====
 
@@ -117,9 +119,7 @@ New features
       completely backwad-compatible; hint files withouot this component will not be counted.
       All new hint files will be created with this component. See DB-853 for more details.
 
-<<<<<<< HEAD
-Compact Storage (only when upgrading from 5.1.5 or any version lower than 5.0.12)
-=======
+
 DSE 5.0.10
 ==========
 
