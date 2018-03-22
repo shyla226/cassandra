@@ -124,7 +124,7 @@ public class DynamicEndpointSnitchTest
             // however, with an even timings distribution (we consider the 90-percentile), "badness" is not considered,
             // so nodes are returned in subsnitch order
             setScores(dsnitch, 9, hosts, 10, 10, 10);
-            order = Arrays.asList(host1, host2, host3, host4);
+            order = Arrays.asList(host4, host1, host2, host3);
             assertEquals(order, dsnitch.getSortedListByProximity(self, Arrays.asList(host1, host2, host3, host4)));
         }
         finally
