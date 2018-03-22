@@ -84,7 +84,7 @@ public class LogReplicaSet implements AutoCloseable
 
     Throwable syncDirectory(Throwable accumulate)
     {
-        return Throwables.perform(accumulate, replicas().stream().map(s -> s::syncDirectory));
+        return replicas().stream().map(LogReplica::syncDirectory).reduce(accumulate, (e1, e2) -> Throwables.merge(e1, e2));
     }
 
     Throwable delete(Throwable accumulate)
@@ -177,7 +177,7 @@ public class LogReplicaSet implements AutoCloseable
             if (record.isFinal() && i != (maxNumLines - 1))
             { // too many final records
                 logger.error("Found too many lines for {}, giving up", record.fileName());
-                setError(record, "This record should have been the last one in all replicas");
+                setError(record, "This record should have been the last one in all file replicas");
                 return false;
             }
         }
@@ -207,13 +207,28 @@ public class LogReplicaSet implements AutoCloseable
      */
     void append(LogRecord record)
     {
-        Throwable err = Throwables.perform(null, replicas().stream().map(r -> () -> r.append(record)));
+        Throwable err = null;
+        int failed = 0;
+        for (LogReplica replica : replicas())
+        {
+            try
+            {
+                replica.append(record);
+            }
+            catch (Throwable t)
+            {
+                logger.warn("Failed to add record to a replica: {}", t.getMessage());
+                err = Throwables.merge(err, t);
+                failed++;
+            }
+        }
+
         if (err != null)
         {
-            if (!record.isFinal() || err.getSuppressed().length == replicas().size() -1)
+            if (!record.isFinal() || failed == replicas().size())
                 Throwables.maybeFail(err);
 
-            logger.error("Failed to add record '{}' to some replicas '{}'", record, this);
+            logger.error("Failed to add record '{}' to some replicas '{}'", record, this, err);
         }
     }
 
