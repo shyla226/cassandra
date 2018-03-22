@@ -29,7 +29,7 @@ public abstract class AbstractReaderFileProxy implements ReaderFileProxy
     {
         this.channel = channel;
         this.fileLength = fileLength >= 0 ? fileLength : channel.size();
-        this.sectorSize = FileUtils.mountPointForDirectory(channel.filePath).sectorSize;
+        this.sectorSize = FileUtils.MountPoint.mountPointForDirectory(channel.filePath).sectorSize;
 
         assert Integer.bitCount(sectorSize) == 1 : String.format("Sector size %d must be a power of two", sectorSize);
     }

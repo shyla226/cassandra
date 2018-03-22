@@ -1012,7 +1012,7 @@ public class StartupChecks
         if (!FBUtilities.isLinux)
             return;
 
-        if (FileUtils.dirToPartitions.isEmpty())
+        if (!FileUtils.MountPoint.hasMountPoints())
             throw new StartupException(StartupException.ERR_WRONG_DISK_STATE,
                                        "Could not detect disk partitions on Linux");
 
@@ -1040,7 +1040,7 @@ public class StartupChecks
 
     private static void checkMountpoint(Logger logger, String type, String directory) throws StartupException
     {
-        FileUtils.MountPoint mountpoint = FileUtils.mountPointForDirectory(directory);
+        FileUtils.MountPoint mountpoint = FileUtils.MountPoint.mountPointForDirectory(directory);
         if (mountpoint == FileUtils.MountPoint.DEFAULT)
         {
             logger.warn("Could not detect mountpoint for directory {} {}", type, directory);

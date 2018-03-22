@@ -234,7 +234,7 @@ public class FileUtilsTest
                                                               "nvme0n1p2",
                                                               "ext4"));
 
-        Map<Path, FileUtils.MountPoint> mounts = FileUtils.getDiskPartitions(new StringReader(procMounts));
+        Map<Path, FileUtils.MountPoint> mounts = FileUtils.MountPoint.getDiskPartitions(new StringReader(procMounts));
         ArrayList<Map.Entry<Path, FileUtils.MountPoint>> mountsList = new ArrayList<>(mounts.entrySet());
         ArrayList<Map.Entry<Path, FileUtils.MountPoint>> expectedList = new ArrayList<>(expected.entrySet());
         assertEquals(expectedList, mountsList);

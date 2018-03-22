@@ -42,14 +42,9 @@ import org.slf4j.LoggerFactory;
 import sun.nio.ch.DirectBuffer;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.io.FSError;
-import org.apache.cassandra.io.FSErrorHandler;
-import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.*;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.utils.*;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
@@ -67,7 +62,6 @@ public final class FileUtils
     private static final DecimalFormat df = new DecimalFormat("#.##");
     public static final boolean isCleanerAvailable;
     private static final AtomicReference<Optional<FSErrorHandler>> fsErrorHandler = new AtomicReference<>(Optional.empty());
-    public static Map<Path, MountPoint> dirToPartitions = getDiskPartitions();
 
     static String[] CPUID_COMMANDLINE = { "cpuid", "-1", "-r" };
 
@@ -627,69 +621,91 @@ public final class FileUtils
         fsErrorHandler.getAndSet(Optional.ofNullable(handler));
     }
 
-    public static MountPoint mountPointForDirectory(String dir)
-    {
-        if (dirToPartitions.isEmpty())
-            return MountPoint.DEFAULT; // a dummy mount-point for non linux partitions
-
-        try
-        {
-            Path path = Paths.get(dir).toAbsolutePath();
-            for (Map.Entry<Path, MountPoint> entry : dirToPartitions.entrySet())
-            {
-                if (path.startsWith(entry.getKey()))
-                {
-                    return entry.getValue();
-                }
-            }
-
-            logger.debug("Could not find mount-point for {}", dir);
-            return MountPoint.DEFAULT;
-        }
-        catch (Throwable t)
-        {
-            logger.debug("Failed to detect mount point for directory {}: {}", dir, t.getMessage());
-            return MountPoint.DEFAULT;
-        }
-    }
-
-    /**
-     * Lists the physical disk devices the data directories are on.
-     * This only works on Linux.
-     * @throws IOException
-     */
-    private static Map<Path, MountPoint> getDiskPartitions()
-    {
-        if (!FBUtilities.isLinux)
-            return Collections.emptyMap();
-
-        try
-        {
-            try (Reader source = new InputStreamReader(new FileInputStream("/proc/mounts"), "UTF-8"))
-            {
-                return getDiskPartitions(source);
-            }
-        }
-        catch (Throwable t)
-        {
-            logger.error("Failed to retrieve disk partitions", t);
-            return Collections.emptyMap();
-        }
-    }
-
     public static class MountPoint
     {
         // the default sector size applies to all devices on Linux but only takes effect if logical_block_size does not exist
         // or for platforms other than Linux
-        private final static Supplier<String> defaultSectorSize = () -> System.getProperty("dse.io.default.sector.size", "512");
+        private static final Supplier<String> defaultSectorSize = () -> System.getProperty("dse.io.default.sector.size", "512");
 
-        public final static MountPoint DEFAULT = new MountPoint(Paths.get(".").getRoot(), "unknown", "unknown", true, Integer.parseInt(defaultSectorSize.get()));
+        public static final MountPoint DEFAULT = new MountPoint(Paths.get(".").getRoot(), "unknown", "unknown", true, Integer.parseInt(defaultSectorSize.get()));
+
+        private static final Map<Path, MountPoint> mountPoints = getDiskPartitions();
 
         public final Path mountpoint;
         public final String device;
         public final String fstype;
         public final boolean onSSD;
         public final int sectorSize;
+
+        /**
+         * Lists the physical disk devices the data directories are on.
+         * This only works on Linux.
+         */
+        private static Map<Path, MountPoint> getDiskPartitions()
+        {
+            if (!FBUtilities.isLinux)
+                return Collections.emptyMap();
+
+            try
+            {
+                try (Reader source = new InputStreamReader(new FileInputStream("/proc/mounts"), "UTF-8"))
+                {
+                    return getDiskPartitions(source);
+                }
+            }
+            catch (Throwable t)
+            {
+                logger.error("Failed to retrieve disk partitions", t);
+                return Collections.emptyMap();
+            }
+        }
+
+        @VisibleForTesting
+        static Map<Path, MountPoint> getDiskPartitions(Reader source) throws IOException
+        {
+            assert FBUtilities.isLinux;
+
+            Map<Path, MountPoint> dirToDisk = new TreeMap<>((a,b) ->
+                                                            {
+                                                                int cmp = -Integer.compare(a.getNameCount(), b.getNameCount());
+                                                                if (cmp != 0)
+                                                                    return cmp;
+                                                                return a.toString().compareTo(b.toString());
+                                                            });
+            try (BufferedReader bufferedReader =  new BufferedReader(source))
+            {
+                String line;
+                while ((line = bufferedReader.readLine()) != null)
+                {
+                    String[] parts = line.split(" +");
+                    if (parts.length <= 2)
+                        continue;
+
+                    String partition =  parts[0];
+
+                    String fstype = parts[2];
+
+                    if (!checkRamdisk(fstype) && partition.indexOf('/') == -1)
+                        // this _should_ be a Linux internal thing (sysfs, procfs, tmpfs, cgroup, whatever)
+                        continue;
+
+                    if (partition.startsWith("/dev/"))
+                    {
+                        // we need the full disk partition name here and look up the device later
+                        // possible patterns:
+                        //   /dev/sdb23
+                        //   /dev/nvme0n1p2
+                        partition = partition.substring("/dev/".length());
+                    }
+
+                    // /home, /dev/sda
+                    Path mp = Paths.get(parts[1]);
+                    dirToDisk.put(mp, new MountPoint(mp, partition, fstype));
+                }
+            }
+
+            return dirToDisk;
+        }
 
         MountPoint(Path mountpoint, String device, String fstype) throws IOException
         {
@@ -800,6 +816,37 @@ public final class FileUtils
             return Integer.parseInt(Files.lines(logical_block_size).findFirst().orElseGet(defaultSectorSize));
         }
 
+        public static MountPoint mountPointForDirectory(String dir)
+        {
+            if (mountPoints.isEmpty())
+                return DEFAULT; // a dummy mount-point for non linux partitions
+
+            try
+            {
+                Path path = Paths.get(dir).toAbsolutePath();
+                for (Map.Entry<Path, MountPoint> entry : mountPoints.entrySet())
+                {
+                    if (path.startsWith(entry.getKey()))
+                    {
+                        return entry.getValue();
+                    }
+                }
+
+                logger.debug("Could not find mount-point for {}", dir);
+                return DEFAULT;
+            }
+            catch (Throwable t)
+            {
+                logger.debug("Failed to detect mount point for directory {}: {}", dir, t.getMessage());
+                return DEFAULT;
+            }
+        }
+
+        public static boolean hasMountPoints()
+        {
+            return !mountPoints.isEmpty();
+        }
+
         @Override
         public String toString()
         {
@@ -829,53 +876,6 @@ public final class FileUtils
 
             return Objects.hash(mountpoint, device, fstype, onSSD, sectorSize);
         }
-    }
-
-    @VisibleForTesting
-    public static Map<Path, MountPoint> getDiskPartitions(Reader source) throws IOException
-    {
-        assert FBUtilities.isLinux;
-
-        Map<Path, MountPoint> dirToDisk = new TreeMap<>((a,b) ->
-                                                    {
-                                                        int cmp = -Integer.compare(a.getNameCount(), b.getNameCount());
-                                                        if (cmp != 0)
-                                                            return cmp;
-                                                        return a.toString().compareTo(b.toString());
-                                                    });
-        try (BufferedReader bufferedReader =  new BufferedReader(source))
-        {
-            String line;
-            while ((line = bufferedReader.readLine()) != null)
-            {
-                String[] parts = line.split(" +");
-                if (parts.length <= 2)
-                    continue;
-
-                String partition =  parts[0];
-
-                String fstype = parts[2];
-
-                if (!checkRamdisk(fstype) && partition.indexOf('/') == -1)
-                    // this _should_ be a Linux internal thing (sysfs, procfs, tmpfs, cgroup, whatever)
-                    continue;
-
-                if (partition.startsWith("/dev/"))
-                {
-                    // we need the full disk partition name here and look up the device later
-                    // possible patterns:
-                    //   /dev/sdb23
-                    //   /dev/nvme0n1p2
-                    partition = partition.substring("/dev/".length());
-                }
-
-                // /home, /dev/sda
-                Path mp = Paths.get(parts[1]);
-                dirToDisk.put(mp, new MountPoint(mp, partition, fstype));
-            }
-        }
-
-        return dirToDisk;
     }
 
     private static boolean checkRamdisk(String fstype)
