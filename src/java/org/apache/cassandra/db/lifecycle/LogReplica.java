@@ -23,6 +23,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.NativeLibrary;
 
@@ -39,6 +42,8 @@ import org.apache.cassandra.utils.NativeLibrary;
  */
 final class LogReplica implements AutoCloseable
 {
+    private static final Logger logger = LoggerFactory.getLogger(LogReplica.class);
+
     private final File file;
     private int directoryDescriptor;
     private final Map<String, String> errors = new HashMap<>();
@@ -87,19 +92,29 @@ final class LogReplica implements AutoCloseable
         // If the file did not exist before appending the first
         // line, then sync the directory as well since now it must exist
         if (!existed)
-            syncDirectory();
+            syncDirectory(); // won't throw, error only logged
     }
 
-    void syncDirectory()
+    Throwable syncDirectory()
     {
-        if (directoryDescriptor >= 0)
-            NativeLibrary.trySync(directoryDescriptor);
+        try
+        {
+            if (directoryDescriptor >= 0)
+                NativeLibrary.trySync(directoryDescriptor);
+
+            return null;
+        }
+        catch (Throwable err)
+        {
+            logger.warn("Failed to sync directory: {}", err.getMessage());
+            return err;
+        }
     }
 
     void delete()
     {
         LogTransaction.delete(file);
-        syncDirectory();
+        syncDirectory(); // won't throw, error only logged
     }
 
     boolean exists()
