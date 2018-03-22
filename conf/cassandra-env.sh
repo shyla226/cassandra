@@ -109,11 +109,11 @@ JVM_VERSION=${jvmver%_*}
 JVM_PATCH_VERSION=${jvmver#*_}
 
 if [ "$JVM_VERSION" \< "1.8" ] || [ "$JVM_VERSION" \> "1.8.2" ] ; then
-    echo "DSE 6.0 requires Java 8 update 152 or later. Java $JVM_VERSION is not supported."
+    echo "DSE 6.0 requires Java 8 update 151 or later. Java $JVM_VERSION is not supported."
     exit 1;
 fi
-if [ "$JVM_PATCH_VERSION" -lt 152 ] ; then
-    echo "DSE 6.0 requires Java 8 update 152 or later. Java 8 update $JVM_PATCH_VERSION is not supported."
+if [ "$JVM_PATCH_VERSION" -lt 151 ] ; then
+    echo "DSE 6.0 requires Java 8 update 151 or later. Java 8 update $JVM_PATCH_VERSION is not supported."
     exit 1;
 fi
 
