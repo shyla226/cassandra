@@ -26,8 +26,6 @@ import java.util.NavigableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
@@ -38,7 +36,6 @@ import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.utils.btree.BTreeSet;
-import org.apache.cassandra.utils.flow.Threads;
 
 public abstract class CassandraIndexSearcher implements Index.Searcher
 {
@@ -71,7 +68,7 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
         ClusteringIndexFilter filter = makeIndexFilter(command);
         ColumnFamilyStore indexCfs = index.getBackingTable().get();
         TableMetadata indexMetadata = indexCfs.metadata();
-        return SinglePartitionReadCommand.create(indexMetadata, command.nowInSec(), ColumnFilter.all(indexMetadata), RowFilter.NONE, DataLimits.NONE, indexKey, filter, TPCTaskType.READ_SECONDARY_INDEX)
+        return SinglePartitionReadCommand.createForIndex(indexMetadata, command.nowInSec(), ColumnFilter.all(indexMetadata), RowFilter.NONE, DataLimits.NONE, indexKey, filter)
                                          .queryStorage(indexCfs, executionController.indexReadController());
     }
 

@@ -19,7 +19,6 @@ package org.apache.cassandra.index.internal.keys;
 
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -61,14 +60,13 @@ public class KeysSearcher extends CassandraIndexSearcher
                        return Flow.<FlowableUnfilteredPartition>empty();
 
                    ColumnFilter extendedFilter = getExtendedFilter(command.columnFilter());
-                   SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.create(index.baseCfs.metadata(),
+                   SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.createForIndex(index.baseCfs.metadata(),
                                                                                           command.nowInSec(),
                                                                                           extendedFilter,
                                                                                           command.rowFilter(),
                                                                                           DataLimits.NONE,
                                                                                           key,
-                                                                                          command.clusteringIndexFilter(key),
-                                                                                          TPCTaskType.READ_SECONDARY_INDEX);
+                                                                                          command.clusteringIndexFilter(key));
 
                    Flow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
                    return partition.skippingMap(p -> filterIfStale(p,

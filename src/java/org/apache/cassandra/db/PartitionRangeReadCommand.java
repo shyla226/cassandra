@@ -125,7 +125,7 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              IndexMetadata index,
                                              StagedScheduler scheduler)
     {
-        return new PartitionRangeReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index, scheduler, TPCTaskType.READ_RANGE_LOCAL);
+        return new PartitionRangeReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index, scheduler, readType);
     }
 
     public static PartitionRangeReadCommand create(TableMetadata metadata,
@@ -133,7 +133,8 @@ public class PartitionRangeReadCommand extends ReadCommand
                                                    ColumnFilter columnFilter,
                                                    RowFilter rowFilter,
                                                    DataLimits limits,
-                                                   DataRange dataRange)
+                                                   DataRange dataRange,
+                                                   TPCTaskType readType)
     {
         return new PartitionRangeReadCommand(null,
                                              metadata,
@@ -144,7 +145,23 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              dataRange,
                                              findIndex(metadata, rowFilter),
                                              null,
-                                             TPCTaskType.READ_RANGE_LOCAL);
+                                             readType);
+    }
+
+    public static PartitionRangeReadCommand create(TableMetadata metadata,
+                                                   int nowInSec,
+                                                   ColumnFilter columnFilter,
+                                                   RowFilter rowFilter,
+                                                   DataLimits limits,
+                                                   DataRange dataRange)
+    {
+        return create(metadata,
+                      nowInSec,
+                      columnFilter,
+                      rowFilter,
+                      limits,
+                      dataRange,
+                      TPCTaskType.READ_RANGE_LOCAL);
     }
 
     /**

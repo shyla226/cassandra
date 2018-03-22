@@ -20,14 +20,11 @@ package org.apache.cassandra.index.internal.composites;
 
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.Slices;
-import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.rows.FlowablePartition;
@@ -69,14 +66,13 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
 
             // If the index is on a static column, we just need to do a full read on the partition.
             // Note that we want to re-use the command.columnFilter() in case of future change.
-            dataCmd = SinglePartitionReadCommand.create(index.baseCfs.metadata(),
+            dataCmd = SinglePartitionReadCommand.createForIndex(index.baseCfs.metadata(),
                                                         command.nowInSec(),
                                                         command.columnFilter(),
                                                         RowFilter.NONE,
                                                         DataLimits.NONE,
                                                         partitionKey,
-                                                        command.clusteringIndexFilter(partitionKey),
-                                                        TPCTaskType.READ_SECONDARY_INDEX);
+                                                        command.clusteringIndexFilter(partitionKey));
 
             Flow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
             return partition.skippingMap(p -> filterStaleEntry(p,
