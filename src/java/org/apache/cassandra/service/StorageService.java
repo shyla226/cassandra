@@ -152,6 +152,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public volatile VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(tokenMetadata.partitioner);
 
+    private volatile boolean bootstrapSafeToReplyEchos = false;
     private volatile boolean isShutdown = false;
     private final List<Runnable> preShutdownHooks = new ArrayList<>();
     private final List<Runnable> postShutdownHooks = new ArrayList<>();
@@ -167,6 +168,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public boolean isShutdown()
     {
         return isShutdown;
+    }
+
+    public boolean isSafeToReplyEchos()
+    {
+        return initialized || bootstrapSafeToReplyEchos;
     }
 
     public Collection<Range<Token>> getLocalRanges(String keyspaceName)
@@ -911,6 +917,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             int generation = TPCUtils.blockingGet(SystemKeyspace.incrementAndGetGeneration());
             Gossiper.instance.start(generation, appStates); // needed for node-ring gathering.
             gossipActive = true;
+            if (shouldBootstrap())
+                bootstrapSafeToReplyEchos = true;
             // Technically we should clean this up in a finally block, but if prepareToJoin() throws unexpectedly, we
             // would have bigger problems, as node initialization would be seriousy affected.
             MessagingService.instance().removeInterceptor(gossiperInitGuard);

@@ -29,7 +29,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.net.DroppedMessages;
 import org.apache.cassandra.net.DroppingResponseException;
 import org.apache.cassandra.net.EmptyPayload;
@@ -289,7 +288,7 @@ public class GossipVerbs extends VerbGroup<GossipVerbs.GossipVersion>
         @Override
         public void handleSync(InetAddress from, EmptyPayload message)
         {
-            if (!SystemKeyspace.bootstrapInProgress() && !StorageService.instance.isInitialized())
+            if (!StorageService.instance.isSafeToReplyEchos())
                 throw new DroppingResponseException();
         }
     }
