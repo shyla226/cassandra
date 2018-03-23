@@ -378,6 +378,7 @@ class ValidationExecutor implements Validator.PageProcessingListener
         {
             // Since the validator has been created, cancel() it so anyone waiting on it's completion future gets notified
             validator.cancel("NodeSync has been shutdown");
+            returnValidationPermit();
             return;
         }
 

@@ -4818,6 +4818,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             setMode(Mode.DRAINING, "starting drain process", !isFinalShutdown);
 
             CompletableFuture<Boolean> nodeSyncStopFuture = nodeSyncService.disableAsync(false);
+            waitForNodeSyncShutdown(nodeSyncStopFuture);
             BatchlogManager.instance.shutdown();
             HintsService.instance.pauseDispatch();
 
@@ -4836,8 +4837,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "flushing column families", false);
-
-            waitForNodeSyncShutdown(nodeSyncStopFuture);
 
             // disable autocompaction - we don't want to start any new compactions while we are draining
             for (Keyspace keyspace : Keyspace.all())
