@@ -1724,6 +1724,19 @@ public class DatabaseDescriptor
                          getTruncateRpcTimeout());
     }
 
+    /**
+     * @return the maximum configured {read, write, range, truncate, misc} timeout
+     */
+    public static long getMaxRpcTimeout()
+    {
+        return Longs.max(getRpcTimeout(),
+                         getReadRpcTimeout(),
+                         getRangeRpcTimeout(),
+                         getWriteRpcTimeout(),
+                         getCounterWriteRpcTimeout(),
+                         getTruncateRpcTimeout());
+    }
+
     public static double getPhiConvictThreshold()
     {
         return conf.phi_convict_threshold;
