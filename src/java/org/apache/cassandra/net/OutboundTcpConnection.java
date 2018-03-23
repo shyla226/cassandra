@@ -218,7 +218,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
 
     void closeSocket(boolean destroyThread)
     {
-        logger.debug("Enqueuing socket close for {}", poolReference.endPoint());
+        logger.debug("Enqueuing socket close for {} with backlog size: {}", poolReference.endPoint(), backlog.size());
         isStopped = destroyThread; // Exit loop to stop the thread
         backlog.clear();
         // in the "destroyThread = true" case, enqueuing the sentinel is important mostly to unblock the backlog.take()

@@ -44,8 +44,10 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.dht.IPartitioner;
@@ -441,9 +443,33 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         unreachableEndpoints.remove(endpoint);
         MessagingService.instance().resetVersion(endpoint);
         quarantineEndpoint(endpoint);
-        MessagingService.instance().destroyConnectionPool(endpoint);
+        destroyMessagingConnection(endpoint);
+
         if (logger.isDebugEnabled())
             logger.debug("removing endpoint {}", endpoint);
+    }
+
+    private void destroyMessagingConnection(InetAddress endpoint)
+    {
+        // Make sure all in-flight messages are sent and responded before clearing messaging backlog which causes
+        // timeout, SEE DB-1721
+        long delay = Long.getLong(Config.PROPERTY_PREFIX + "messaging_destroy_delay_in_ms",
+                                  DatabaseDescriptor.getMaxRpcTimeout());
+        if (delay <= 0) // opt out
+            MessagingService.instance().destroyConnectionPool(endpoint);
+        else
+            ScheduledExecutors.optionalTasks.schedule(() -> {
+                if (!liveEndpoints.contains(endpoint) && !unreachableEndpoints.containsKey(endpoint)) // in case it
+                                                                                                      // comes back
+                {
+                    logger.info("Destroying messaging connection to {} due to endpoint being removed from cluster",
+                                endpoint);
+                    MessagingService.instance().destroyConnectionPool(endpoint);
+                }
+                else
+                    logger.info("Not destroying messaging connection to {} due to endpoint starting to gossip again",
+                                endpoint);
+            }, delay, TimeUnit.MILLISECONDS);
     }
 
     /**
