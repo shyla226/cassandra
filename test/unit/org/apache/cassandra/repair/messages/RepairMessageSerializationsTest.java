@@ -167,6 +167,7 @@ public class RepairMessageSerializationsTest
         ));
         SyncComplete msg = new SyncComplete(buildRepairJobDesc(), new NodePair(src, dst), true, summaries);
         serializeRoundTrip(msg, SyncComplete.serializers.get(RepairVersion.OSS_40));
+        serializeRoundTrip(msg, SyncComplete.serializers.get(RepairVersion.DSE_60));
     }
 
     @Test
@@ -175,6 +176,7 @@ public class RepairMessageSerializationsTest
         PrepareMessage msg = new PrepareMessage(UUID.randomUUID(), new ArrayList<TableId>() {{add(TableId.generate());}},
                                                 buildTokenRanges(), true, 100000L, PreviewKind.NONE);
         serializeRoundTrip(msg, PrepareMessage.serializers.get(RepairVersion.OSS_40));
+        serializeRoundTrip(msg, PrepareMessage.serializers.get(RepairVersion.DSE_60));
     }
 
     @Test

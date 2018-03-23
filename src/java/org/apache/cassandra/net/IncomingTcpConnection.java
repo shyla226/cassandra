@@ -93,7 +93,10 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
             if (MessagingVersion.from(protocolVersion) == null)
                 throw new UnsupportedOperationException(String.format("Unable to read obsolete message version %s; "
                                                                       + "The earliest version supported is %s",
-                                                                      protocolVersion, MessagingVersion.values()[0]));
+                                                                      protocolVersion.handshakeVersion, MessagingVersion.values()[0]));
+            if (MessagingVersion.from(protocolVersion) == MessagingVersion.OSS_40)
+                throw new UnsupportedOperationException(String.format("Received messaging version %d (OSS C* 4.0) is not supported. Terminating connection.",
+                                                                      protocolVersion.handshakeVersion));
 
             receiveMessages();
         }

@@ -503,11 +503,11 @@ public class CommitLog implements CommitLogMBean
                 //$FALL-THROUGH$
             case stop_commit:
                 JVMStabilityInspector.inspectThrowable(t);
-                logger.error(String.format("%s. Commit disk failure policy is %s; terminating thread", message, policy), t);
+                logger.error("{}. Commit disk failure policy is {}; terminating thread", message, policy, t);
                 return false;
             case ignore:
                 JVMStabilityInspector.inspectThrowable(t);
-                logger.error(String.format("%s. Commit disk failure policy is %s; ignoring", message, policy), t);
+                logger.error("{}. Commit disk failure policy is {}; ignoring", message, policy, t);
                 return true;
             default:
                 throw new AssertionError(DatabaseDescriptor.getCommitFailurePolicy());

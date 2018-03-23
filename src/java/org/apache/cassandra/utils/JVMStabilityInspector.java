@@ -81,6 +81,10 @@ public final class JVMStabilityInspector
             throw (OutOfMemoryError) t;
         }
 
+        if (t instanceof LinkageError)
+            // Anything that's wrong with the class files, dependency jars and also static initializers that fail.
+            isUnstable = true;
+
         if (DatabaseDescriptor.getDiskFailurePolicy() == Config.DiskFailurePolicy.die)
             if (t instanceof FSError || t instanceof CorruptSSTableException)
                 isUnstable = true;

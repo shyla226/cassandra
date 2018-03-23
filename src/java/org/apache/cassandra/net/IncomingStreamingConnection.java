@@ -65,7 +65,10 @@ public class IncomingStreamingConnection extends Thread implements Closeable
             // we can't do anything with a wrong-version stream connection, so drop it.
             if (streamVersion == null)
                 throw new IOException(String.format("Received stream using protocol version %d (my version %d). Terminating connection",
-                                                    version.handshakeVersion, StreamMessage.CURRENT_VERSION.handshakeVersion));
+                                                    version.handshakeVersion, StreamMessage.CURRENT_VERSION.protocolVersion.handshakeVersion));
+            if (streamVersion == StreamMessage.StreamVersion.OSS_40)
+                throw new IOException(String.format("Received stream using protocol version %d (OSS C* 4.0) is not supported. Terminating connection.",
+                                                    version.handshakeVersion));
 
             DataInputPlus input = new DataInputStreamPlus(socket.getInputStream());
             StreamInitMessage init = StreamInitMessage.serializers.get(streamVersion).deserialize(input);

@@ -25,6 +25,7 @@ import java.util.EnumSet;
 import java.util.Map;
 
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
@@ -138,6 +139,7 @@ public class MetadataSerializerTest
     }
 
     @Test
+    @Ignore // sstable format version 'na' disabled in DSE 6.0
     public void testNaReadNa() throws IOException
     {
         testOldReadsNew("na", "na");
@@ -171,10 +173,16 @@ public class MetadataSerializerTest
     }
 
     @Test
-    public void pendingRepairCompatibility()
+    public void pendingRepairCompatibility_mc()
     {
         Version mc = BigFormat.instance.getVersion("mc");
         assertFalse(mc.hasPendingRepair());
+    }
+
+    @Test
+    @Ignore // sstable format 'na' not available in DSE 6.0
+    public void pendingRepairCompatibility_na()
+    {
         Version na = BigFormat.instance.getVersion("na");
         assertTrue(na.hasPendingRepair());
     }

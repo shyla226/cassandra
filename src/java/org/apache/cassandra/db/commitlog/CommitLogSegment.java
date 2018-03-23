@@ -58,6 +58,7 @@ public abstract class CommitLogSegment
     private final static long idBase;
 
     private CDCState cdcState = CDCState.PERMITTED;
+
     public enum CDCState
     {
         PERMITTED,
@@ -77,6 +78,14 @@ public abstract class CommitLogSegment
                 maxId = Math.max(CommitLogDescriptor.fromFileName(file.getName()).id, maxId);
         }
         replayLimitId = idBase = Math.max(System.currentTimeMillis(), maxId + 1);
+    }
+
+    public static void staticInit()
+    {
+        // Dummy method to get this class initialized
+        //
+        // The static initialized above can fail if we have invalid files in the commit log directory -
+        // or files written using an unsupported CL version.
     }
 
     // The commit log entry overhead in bytes (int: length + int: head checksum + int: tail checksum)

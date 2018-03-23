@@ -109,6 +109,13 @@ public abstract class AbstractCommitLogSegmentManager
 
     void start()
     {
+        // Do NOT remove this calll as it initializes the CommitLogSegment class, which scans the commit log directory.
+        // Scanning would silently fail, and commit logs not work, if there are unsupported files.
+        // In theory, the error handling in the 'catch(Throwable)' clause should be enough, but during startup it is
+        // not. as the call to 'StorageService.instance.stopTransportsAsync()' in 'CommitLog.handleCommitError' does
+        // not return.
+        CommitLogSegment.staticInit();
+
         // The run loop for the manager thread
         Runnable runnable = new WrappedRunnable()
         {
@@ -119,7 +126,8 @@ public abstract class AbstractCommitLogSegmentManager
                     try
                     {
                         logger.debug("No segments in reserve; creating a fresh one");
-                       CommitLogSegment prev = availableSegment .getAndSet( createSegment());assert prev == null : "Only management thread can construct segments.";
+                        CommitLogSegment prev = availableSegment.getAndSet(createSegment());
+                        assert prev == null : "Only management thread can construct segments.";
                         if (shutdown)
                         {
                             // If shutdown() started and finished during segment creation, we are now left with a

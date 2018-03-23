@@ -144,7 +144,14 @@ public class BigFormat implements SSTableFormat
     // we always incremented the major version.
     static class BigVersion extends Version
     {
-        public static final String current_version = "na";
+        public static final String current_version = "mc";
+        // OSS version 'na' has been intentionally disabled as OSS C* 4.0 was not released when DSE 6.0
+        // was released and therefore the sstable version 'na' could still change.
+        // By setting 'current_version = "mc"' all newer sstable versions, including 'na', are considered
+        // incompatible.
+        // It _might_ be safe to enable it later... maybe...
+        // public static final String current_version = "na";
+
         public static final String earliest_supported_version = "ma";
 
         // ma (3.0.0): swap bf hash order
@@ -153,6 +160,7 @@ public class BigFormat implements SSTableFormat
         // mc (3.0.8, 3.9): commit log intervals included
 
         // na (4.0.0): uncompressed chunks, pending repair session, checksummed sstable metadata file
+        // ^^ UNSUPPORTED IN DSE 6.0 as OSS C* 4.0 has not been released
         //
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 

@@ -61,7 +61,8 @@ public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
          * When adding support to multiple versions make sure to add the
          * previously supported version to {@link MessagingVersion}
          */
-        OSS_40(BoundsVersion.OSS_30, StreamMessage.StreamVersion.OSS_40); // Adds session summary to repair messages
+        OSS_40(BoundsVersion.OSS_30, StreamMessage.StreamVersion.OSS_40), // Adds session summary to repair messages
+        DSE_60(BoundsVersion.OSS_30, StreamMessage.StreamVersion.DSE_60); // Adds session summary to repair messages
 
         public final BoundsVersion boundsVersion;
         public final StreamMessage.StreamVersion streamVersion;

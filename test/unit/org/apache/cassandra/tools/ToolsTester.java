@@ -287,6 +287,7 @@ public abstract class ToolsTester
     {
         File dataDir = new File("build/test/cassandra/data");
         copySSTables("ma", dataDir);
+        copySSTables("mc", dataDir);
         copySSTables("na", dataDir);
         copySSTables("aa", dataDir);
         return dataDir;

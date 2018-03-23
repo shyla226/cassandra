@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.net;
 
+import java.util.Objects;
+
 public class ProtocolVersion implements Comparable<ProtocolVersion>
 {
     public final boolean isDSE;
@@ -51,13 +53,13 @@ public class ProtocolVersion implements Comparable<ProtocolVersion>
         this.handshakeVersion = handshakeVersion;
     }
 
-    static ProtocolVersion oss(int version)
+    public static ProtocolVersion oss(int version)
     {
         assert version < 256;
         return new ProtocolVersion(false, version, version << 8, version);
     }
 
-    static ProtocolVersion dse(int version)
+    public static ProtocolVersion dse(int version)
     {
         assert version < 256;
         return new ProtocolVersion(true, version, (version << 24) | (0xFF << 8), version << 8);
@@ -85,7 +87,7 @@ public class ProtocolVersion implements Comparable<ProtocolVersion>
      * @param isStream whether the connection is used for streaming.
      * @return the protocol connection header corresponding to this version.
      */
-    int makeProtocolHeader(boolean compressionEnabled, boolean isStream)
+    public int makeProtocolHeader(boolean compressionEnabled, boolean isStream)
     {
         int header = rawHeader;
         if (compressionEnabled)
@@ -109,6 +111,19 @@ public class ProtocolVersion implements Comparable<ProtocolVersion>
     public int compareTo(ProtocolVersion protocolVersion)
     {
         return Integer.compare(this.handshakeVersion, protocolVersion.handshakeVersion);
+    }
+
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ProtocolVersion that = (ProtocolVersion) o;
+        return handshakeVersion == that.handshakeVersion;
+    }
+
+    public int hashCode()
+    {
+        return Objects.hash(handshakeVersion);
     }
 
     @Override

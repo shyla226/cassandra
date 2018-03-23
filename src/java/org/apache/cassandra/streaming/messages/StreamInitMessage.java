@@ -121,14 +121,7 @@ public class StreamInitMessage
      */
     public ByteBuffer createMessage(boolean compress, StreamVersion version)
     {
-        int header = 0;
-        // set compression bit.
-        if (compress)
-            header |= 4;
-        // set streaming bit
-        header |= 8;
-        // Setting up the version bit
-        header |= (version.handshakeVersion << 8);
+        int header = version.protocolVersion.makeProtocolHeader(compress, true);
 
         byte[] bytes;
         try

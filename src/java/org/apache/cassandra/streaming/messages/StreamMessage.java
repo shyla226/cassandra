@@ -30,6 +30,9 @@ import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.utils.versioning.Version;
 import org.apache.cassandra.utils.versioning.Versioned;
 
+import static org.apache.cassandra.net.ProtocolVersion.dse;
+import static org.apache.cassandra.net.ProtocolVersion.oss;
+
 /**
  * StreamMessage is an abstract base class that every messages in streaming protocol inherit.
  *
@@ -40,15 +43,16 @@ public abstract class StreamMessage
     /** Streaming protocol version */
     public enum StreamVersion implements Version<StreamVersion>
     {
-        OSS_30(4, BoundsVersion.OSS_30),
-        OSS_40(5, BoundsVersion.OSS_30); // Adds maxCompressionLength to CompressionParams serialization
+        OSS_30(oss(4), BoundsVersion.OSS_30),
+        OSS_40(oss(5), BoundsVersion.OSS_30), // Adds maxCompressionLength to CompressionParams serialization
+        DSE_60(dse(1), BoundsVersion.OSS_30); // Adds maxCompressionLength to CompressionParams serialization
 
-        public final int handshakeVersion;
+        public final ProtocolVersion protocolVersion;
         public final BoundsVersion boundsVersion;
 
-        StreamVersion(int handshakeVersion, BoundsVersion boundsVersion)
+        StreamVersion(ProtocolVersion protocolVersion, BoundsVersion boundsVersion)
         {
-            this.handshakeVersion = handshakeVersion;
+            this.protocolVersion = protocolVersion;
             this.boundsVersion = boundsVersion;
         }
 
@@ -56,7 +60,7 @@ public abstract class StreamMessage
         {
             for (StreamVersion version : values())
             {
-                if (version.handshakeVersion == protocolVersion.handshakeVersion)
+                if (version.protocolVersion.equals(protocolVersion))
                     return version;
             }
             return null;

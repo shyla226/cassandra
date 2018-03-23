@@ -53,6 +53,18 @@ public class MessagingVersionTest
     }
 
     @Test
+    public void testDSE_60IsSupportedByRepair()
+    {
+        RepairVerbs repairVerbs = new RepairVerbs(Verbs.Group.REPAIR);
+        assertEquals(PrepareMessage.serializers.get(RepairVerbs.RepairVersion.DSE_60), MessagingVersion.DSE_60.serializer(repairVerbs.PREPARE).requestSerializer);
+        assertEquals(ValidationRequest.serializers.get(RepairVerbs.RepairVersion.DSE_60), MessagingVersion.DSE_60.serializer(repairVerbs.VALIDATION_REQUEST).requestSerializer);
+        assertEquals(ValidationComplete.serializers.get(RepairVerbs.RepairVersion.DSE_60), MessagingVersion.DSE_60.serializer(repairVerbs.VALIDATION_COMPLETE).requestSerializer);
+        assertEquals(SyncRequest.serializers.get(RepairVerbs.RepairVersion.DSE_60), MessagingVersion.DSE_60.serializer(repairVerbs.SYNC_REQUEST).requestSerializer);
+        assertEquals(SyncComplete.serializers.get(RepairVerbs.RepairVersion.DSE_60), MessagingVersion.DSE_60.serializer(repairVerbs.SYNC_COMPLETE).requestSerializer);
+        assertEquals(CleanupMessage.serializers.get(RepairVerbs.RepairVersion.DSE_60), MessagingVersion.DSE_60.serializer(repairVerbs.CLEANUP).requestSerializer);
+    }
+
+    @Test
     public void testOSS_30VersionIsNotSupportedByRepair()
     {
         RepairVerbs repairVerbs = new RepairVerbs(Verbs.Group.REPAIR);

@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.tools;
 
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -60,9 +61,20 @@ public class SSTableExportTest extends ToolsTester
         assertServerNotLoaded();
     }
 
+    @Test
+    public void testSSTableExport_Legacy3x() throws Exception
+    {
+        runTool(0, "org.apache.cassandra.tools.SSTableExport", findOneSSTable("legacy_sstables", "legacy_mc_simple"));
+        assertNoUnexpectedThreadsStarted(null, OPTIONAL_THREADS_WITH_SCHEMA);
+        assertSchemaNotLoaded();
+        assertCLSMNotLoaded();
+        assertSystemKSNotLoaded();
+        assertServerNotLoaded();
+    }
 
     @Test
-    public void testSSTableExport_Legacy() throws Exception
+    @Ignore // sstable format 'na' not available in DSE 6.0
+    public void testSSTableExport_Legacy40() throws Exception
     {
         runTool(0, "org.apache.cassandra.tools.SSTableExport", findOneSSTable("legacy_sstables", "legacy_na_simple"));
         assertNoUnexpectedThreadsStarted(null, OPTIONAL_THREADS_WITH_SCHEMA);

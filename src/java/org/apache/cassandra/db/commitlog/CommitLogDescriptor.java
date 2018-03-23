@@ -52,7 +52,11 @@ public class CommitLogDescriptor
     public enum CommitLogVersion implements Version<CommitLogVersion>
     {
         OSS_30(6, EncodingVersion.OSS_30),
-        OSS_40(7, EncodingVersion.OSS_30);
+        // OSS commit log version 7 has been intentionally disabled as OSS C* 4.0 was not released when DSE 6.0
+        // was released and therefore CL version 7 could still change.
+        // It _might_ be safe to enable it later... maybe...
+        // OSS_40(7, EncodingVersion.OSS_30),
+        DSE_60(600, EncodingVersion.OSS_30);
 
         final int code;
         final EncodingVersion encodingVersion;
@@ -87,7 +91,7 @@ public class CommitLogDescriptor
      * Increment this number if there is a changes in the commit log disc layout or {@link EncodingVersion} changes.
      */
     @VisibleForTesting
-    public static final CommitLogVersion current_version = CommitLogVersion.OSS_40;
+    public static final CommitLogVersion current_version = CommitLogVersion.DSE_60;
 
     final CommitLogVersion version;
     public final long id;
