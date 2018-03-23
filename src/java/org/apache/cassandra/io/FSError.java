@@ -19,15 +19,22 @@ package org.apache.cassandra.io;
 
 import java.io.File;
 import java.io.IOError;
+import java.util.Optional;
 
 public abstract class FSError extends IOError
 {
-    public final File path;
+    public final Optional<File> path;
 
     public FSError(Throwable cause, File path)
     {
         super(cause);
-        this.path = path;
+        this.path = Optional.of(path);
+    }
+
+    public FSError(Throwable cause)
+    {
+        super(cause);
+        this.path = Optional.empty();
     }
 
     /**

@@ -24,16 +24,15 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.io.FSError;
-import org.apache.cassandra.io.sstable.CorruptSSTableException;
 
 /**
  * Responsible for deciding whether to kill the JVM if it gets in an "unstable" state (think OOM).
@@ -43,62 +42,98 @@ public final class JVMStabilityInspector
     private static final Logger logger = LoggerFactory.getLogger(JVMStabilityInspector.class);
     private static Killer killer = new Killer();
     private static final List<Pair<Thread, Runnable>> shutdownHooks = new ArrayList<>(1);
-    private static Object lock = new Object();
-    private static boolean printingHeapHistogram;
+    private static AtomicBoolean printingHeapHistogram = new AtomicBoolean(false);
+    private static ErrorHandler diskHandler;
+    private static ErrorHandler globalHandler = new GlobalHandler();
 
     private JVMStabilityInspector() {}
 
-    /**
-     * Certain Throwables and Exceptions represent "Die" conditions for the server.
-     * This recursively checks the input Throwable's cause hierarchy until null.
-     * @param t
-     *      The Throwable to check for server-stop conditions
-     */
-    public static void inspectThrowable(Throwable t)
+    public static void setFSErrorHandler(ErrorHandler handler)
     {
-        boolean isUnstable = false;
+        diskHandler = handler;
+    }
 
-        if (t instanceof OutOfMemoryError)
+    /**
+     * Inspects the error recursively for disk and global errors.
+     */
+    public static void inspectThrowable(Throwable error)
+    {
+        inspectThrowable(error, diskHandler, globalHandler);
+    }
+
+    /**
+     * Inspect the error recursively by applying the specified handler first, and the global handler afterwards.
+     * The handler passed-in can be null, which means that only the global handler will be applied, this can be
+     * used for the cases where the disk failure handler should not be applied.
+     */
+    public static void inspectThrowable(Throwable error, @Nullable ErrorHandler handler)
+    {
+        inspectThrowable(error, handler, globalHandler);
+    }
+
+    /**
+     * Inspect the error recursively until it finds a handler that has handled the error.
+     * @param error
+     * @param handlers
+     */
+    public static void inspectThrowable(Throwable error, ErrorHandler ... handlers)
+    {
+        while (error != null)
         {
-            if (printHeapHistogramOnOutOfMemoryError())
+            for (ErrorHandler handler : handlers)
             {
-                // We want to avoid printing multiple time the heap histogram if multiple OOM errors happen in a short
-                // time span.
-                synchronized(lock)
-                {
-                    if (printingHeapHistogram)
-                        return;
-                    printingHeapHistogram = true;
-                }
-                HeapUtils.logHeapHistogram();
+                if (handler != null)
+                    handler.handleError(error);
             }
 
-            logger.error("OutOfMemory error letting the JVM handle the error:", t);
-
-            removeShutdownHooks();
-            // We let the JVM handle the error. The startup checks should have warned the user if it did not configure
-            // the JVM behavior in case of OOM (CASSANDRA-13006).
-            throw (OutOfMemoryError) t;
+            error = error.getCause();
         }
+    }
 
-        if (t instanceof LinkageError)
-            // Anything that's wrong with the class files, dependency jars and also static initializers that fail.
-            isUnstable = true;
+    /**
+     * A global error handler to handle certain Throwables and Exceptions that represent "Die"
+     * conditions for the server.
+      */
+    private static class GlobalHandler implements ErrorHandler
+    {
+        @Override
+        public void handleError(Throwable t)
+        {
+            boolean isUnstable = false;
+            if (logger.isTraceEnabled())
+                logger.trace("Inspecting {}/{}", t.getClass(), t.getMessage(), t);
 
-        if (DatabaseDescriptor.getDiskFailurePolicy() == Config.DiskFailurePolicy.die)
-            if (t instanceof FSError || t instanceof CorruptSSTableException)
+            if (t instanceof OutOfMemoryError)
+            {
+                if (printHeapHistogramOnOutOfMemoryError())
+                {
+                    // We want to avoid printing multiple time the heap histogram if multiple OOM errors happen in a short time span.
+                    if (printingHeapHistogram.compareAndSet(false, true))
+                        HeapUtils.logHeapHistogram();
+                    else
+                        return; // TODO - previous behavior, is it correct to suppress the exception?
+                }
+
+                logger.error("OutOfMemory error letting the JVM handle the error:", t);
+
+                removeShutdownHooks();
+                // We let the JVM handle the error. The startup checks should have warned the user if it did not configure
+                // the JVM behavior in case of OOM (CASSANDRA-13006).
+                throw (OutOfMemoryError) t;
+            }
+
+            if (t instanceof LinkageError)
+                // Anything that's wrong with the class files, dependency jars and also static initializers that fail.
                 isUnstable = true;
 
-        // Check for file handle exhaustion
-        if (t instanceof FileNotFoundException || t instanceof SocketException)
-            if (t.getMessage().contains("Too many open files"))
-                isUnstable = true;
+            // Check for file handle exhaustion
+            if (t instanceof FileNotFoundException || t instanceof SocketException)
+                if (t.getMessage().contains("Too many open files"))
+                    isUnstable = true;
 
-        if (isUnstable)
-            killer.killCurrentJVM(t);
-
-        if (t.getCause() != null)
-            inspectThrowable(t.getCause());
+            if (isUnstable)
+                killer.killCurrentJVM(t);
+        }
     }
 
     /**
@@ -116,19 +151,6 @@ public final class JVMStabilityInspector
             return true;
 
         return Boolean.parseBoolean(property);
-    }
-
-    public static void inspectCommitLogThrowable(Throwable t, boolean startupCompleted)
-    {
-        if (!startupCompleted)
-        {
-            logger.error("Exiting due to error while processing commit log during initialization.", t);
-            killer.killCurrentJVM(t, true);
-        }
-        else if (DatabaseDescriptor.getCommitFailurePolicy() == Config.CommitFailurePolicy.die)
-            killer.killCurrentJVM(t);
-        else
-            inspectThrowable(t);
     }
 
     public static void killCurrentJVM(Throwable t, boolean quiet)
@@ -165,6 +187,12 @@ public final class JVMStabilityInspector
         Killer oldKiller = JVMStabilityInspector.killer;
         JVMStabilityInspector.killer = newKiller;
         return oldKiller;
+    }
+
+    @VisibleForTesting
+    public static Killer killer()
+    {
+        return killer;
     }
 
     public static void removeShutdownHooks()

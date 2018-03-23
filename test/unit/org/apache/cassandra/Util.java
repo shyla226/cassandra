@@ -21,6 +21,7 @@ package org.apache.cassandra;
 
 import java.io.Closeable;
 import java.io.EOFException;
+import java.io.File;
 import java.io.IOError;
 import java.lang.reflect.Field;
 import java.net.InetAddress;
@@ -695,6 +696,15 @@ public class Util
             // Expected -- marked all directories as unwritable
         }
         return () -> BlacklistedDirectories.clearUnwritableUnsafe();
+    }
+
+    public static boolean getDirectoriesWriteable(ColumnFamilyStore cfs)
+    {
+        boolean ret = true;
+        for (File dir : cfs.getDirectories().getCFDirectories())
+            ret &= !BlacklistedDirectories.isUnwritable(dir);
+
+        return ret;
     }
 
     public static PagingState makeSomePagingState(ProtocolVersion protocolVersion)

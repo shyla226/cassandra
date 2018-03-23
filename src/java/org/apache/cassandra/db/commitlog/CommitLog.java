@@ -40,6 +40,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
+import org.apache.cassandra.utils.ErrorHandler;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
@@ -492,26 +493,38 @@ public class CommitLog implements CommitLogMBean
     @VisibleForTesting
     public static boolean handleCommitError(String message, Throwable t)
     {
-        Config.CommitFailurePolicy policy = DatabaseDescriptor.getCommitFailurePolicy();
-        switch (policy)
+        class Handler implements ErrorHandler
         {
-            // Needed here for unit tests to not fail on default assertion
-            case die:
-                JVMStabilityInspector.killCurrentJVM(t, false);
-            case stop:
-                StorageService.instance.stopTransportsAsync();
-                //$FALL-THROUGH$
-            case stop_commit:
-                JVMStabilityInspector.inspectThrowable(t);
-                logger.error("{}. Commit disk failure policy is {}; terminating thread", message, policy, t);
-                return false;
-            case ignore:
-                JVMStabilityInspector.inspectThrowable(t);
-                logger.error("{}. Commit disk failure policy is {}; ignoring", message, policy, t);
-                return true;
-            default:
-                throw new AssertionError(DatabaseDescriptor.getCommitFailurePolicy());
+            private boolean ignored;
+
+            public void handleError(Throwable error)
+            {
+                Config.CommitFailurePolicy policy = DatabaseDescriptor.getCommitFailurePolicy();
+                switch (policy)
+                {
+                    // Needed here for unit tests to not fail on default assertion
+                    case die:
+                        JVMStabilityInspector.killCurrentJVM(t, false);
+                    case stop:
+                        StorageService.instance.stopTransportsAsync();
+                        //$FALL-THROUGH$
+                    case stop_commit:
+                        logger.error(String.format("%s. Commit disk failure policy is %s; terminating thread", message, policy), t);
+                        ignored = false;
+                        break;
+                    case ignore:
+                        logger.error(String.format("%s. Commit disk failure policy is %s; ignoring", message, policy), t);
+                        ignored = true;
+                        break;
+                    default:
+                        throw new AssertionError(policy);
+                }
+            }
         }
+
+        Handler handler = new Handler();
+        JVMStabilityInspector.inspectThrowable(t, handler);
+        return handler.ignored;
     }
 
     public static final class Configuration

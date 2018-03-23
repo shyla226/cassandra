@@ -91,6 +91,9 @@ public class CassandraDaemon
             }
         });
         logger = LoggerFactory.getLogger(CassandraDaemon.class);
+
+        JVMStabilityInspector.setFSErrorHandler(new DefaultFSErrorHandler());
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> CassandraDaemon.defaultExceptionHandler.accept(t, e));
     }
 
     static public BiConsumer<Thread, Throwable> defaultExceptionHandler = new BiConsumer<Thread, Throwable>()
@@ -151,7 +154,7 @@ public class CassandraDaemon
     static final CassandraDaemon instance = new CassandraDaemon();
 
     @VisibleForTesting
-    NativeTransportService nativeTransportService;
+    public NativeTransportService nativeTransportService;
     private JMXConnectorServer jmxServer;
 
     private final boolean runManaged;
@@ -186,8 +189,6 @@ public class CassandraDaemon
      */
     protected void setup()
     {
-        FileUtils.setFSErrorHandler(new DefaultFSErrorHandler());
-
         // Delete any failed snapshot deletions on Windows - see CASSANDRA-9658
         if (FBUtilities.isWindows)
             WindowsFailedSnapshotTracker.deleteOldSnapshots();
@@ -223,14 +224,6 @@ public class CassandraDaemon
                                                  }));
 
         SystemKeyspace.beginStartupBlocking();
-
-        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler()
-        {
-            public void uncaughtException(Thread t, Throwable e)
-            {
-                defaultExceptionHandler.accept(t, e);
-            }
-        });
 
         // Populate token metadata before flushing, for token-aware sstable partitioning (#6696)
         StorageService.instance.populateTokenMetadata();

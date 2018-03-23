@@ -16,15 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.io;
-
-import org.apache.cassandra.io.sstable.CorruptSSTableException;
+package org.apache.cassandra.utils;
 
 /**
  * Interface for handling file system errors.
  */
-public interface FSErrorHandler
+public interface ErrorHandler
 {
-    void handleCorruptSSTable(CorruptSSTableException e);
-    void handleFSError(FSError e);
+    /**
+     * Handle the given error with any appropriate action.
+     *
+     * @param error - error to handle
+     */
+    void handleError(Throwable error);
 }

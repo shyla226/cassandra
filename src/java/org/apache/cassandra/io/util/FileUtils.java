@@ -30,7 +30,6 @@ import java.nio.file.attribute.FileStoreAttributeView;
 import java.text.DecimalFormat;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -61,7 +60,6 @@ public final class FileUtils
 
     private static final DecimalFormat df = new DecimalFormat("#.##");
     public static final boolean isCleanerAvailable;
-    private static final AtomicReference<Optional<FSErrorHandler>> fsErrorHandler = new AtomicReference<>(Optional.empty());
 
     static String[] CPUID_COMMANDLINE = { "cpuid", "-1", "-r" };
 
@@ -489,12 +487,12 @@ public final class FileUtils
 
     public static void handleCorruptSSTable(CorruptSSTableException e)
     {
-        fsErrorHandler.get().ifPresent(handler -> handler.handleCorruptSSTable(e));
+        JVMStabilityInspector.inspectThrowable(e);
     }
 
     public static void handleFSError(FSError e)
     {
-        fsErrorHandler.get().ifPresent(handler -> handler.handleFSError(e));
+        JVMStabilityInspector.inspectThrowable(e);
     }
 
     /**
@@ -591,7 +589,7 @@ public final class FileUtils
         }
         catch (IOException ex)
         {
-            throw new RuntimeException(ex);
+            throw new FSWriteError(ex, file);
         }
     }
 
@@ -614,11 +612,6 @@ public final class FileUtils
 
             throw new RuntimeException(ex);
         }
-    }
-
-    public static void setFSErrorHandler(FSErrorHandler handler)
-    {
-        fsErrorHandler.getAndSet(Optional.ofNullable(handler));
     }
 
     public static class MountPoint

@@ -46,6 +46,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.service.DefaultFSErrorHandler;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
 
 import static org.junit.Assert.assertEquals;
@@ -69,7 +70,7 @@ public class DirectoriesTest
     {
         DatabaseDescriptor.daemonInitialization();
 
-        FileUtils.setFSErrorHandler(new DefaultFSErrorHandler());
+        JVMStabilityInspector.setFSErrorHandler(new DefaultFSErrorHandler());
 
         for (String table : TABLES)
         {

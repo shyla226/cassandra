@@ -27,32 +27,41 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BlacklistedDirectories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.io.FSError;
-import org.apache.cassandra.io.FSErrorHandler;
+import org.apache.cassandra.utils.ErrorHandler;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
-public class DefaultFSErrorHandler implements FSErrorHandler
+public class DefaultFSErrorHandler implements ErrorHandler
 {
     private static final Logger logger = LoggerFactory.getLogger(DefaultFSErrorHandler.class);
 
     @Override
-    public void handleCorruptSSTable(CorruptSSTableException e)
+    public void handleError(Throwable error)
+    {
+        if (error instanceof FSError)
+            handleFSError((FSError) error);
+        else if (error instanceof CorruptSSTableException)
+            handleCorruptSSTable((CorruptSSTableException) error);
+    }
+
+    private void handleCorruptSSTable(CorruptSSTableException e)
     {
         if (!StorageService.instance.isDaemonSetupCompleted())
             handleStartupFSError(e);
 
-        JVMStabilityInspector.inspectThrowable(e);
         switch (DatabaseDescriptor.getDiskFailurePolicy())
         {
             case stop_paranoid:
                 StorageService.instance.stopTransportsAsync();
                 break;
+            case die:
+                JVMStabilityInspector.killCurrentJVM(e, false);
+                break;
         }
     }
 
-    @Override
-    public void handleFSError(FSError e)
+    private void handleFSError(FSError e)
     {
         if (!StorageService.instance.isDaemonSetupCompleted())
             handleStartupFSError(e);
@@ -64,17 +73,20 @@ public class DefaultFSErrorHandler implements FSErrorHandler
                 StorageService.instance.stopTransportsAsync();
                 break;
             case best_effort:
-                // for both read and write errors mark the path as unwritable.
-                BlacklistedDirectories.maybeMarkUnwritable(e.path);
-                if (e instanceof FSReadError)
+                // for both read and write errors mark the path as unwritable, if available
+                if (e.path.isPresent())
                 {
-                    File directory = BlacklistedDirectories.maybeMarkUnreadable(e.path);
-                    if (directory != null)
-                        Keyspace.removeUnreadableSSTables(directory);
+                    BlacklistedDirectories.maybeMarkUnwritable(e.path.get());
+                    if (e instanceof FSReadError)
+                    {
+                        File directory = BlacklistedDirectories.maybeMarkUnreadable(e.path.get());
+                        if (directory != null)
+                            Keyspace.removeUnreadableSSTables(directory);
+                    }
                 }
                 break;
             case ignore:
-                // already logged, so left nothing to do
+                logger.error("Ignoring file system error {}/{} as per ignore disk failure policy", e.getClass(), e.getMessage());
                 break;
             case die:
                 JVMStabilityInspector.killCurrentJVM(e, false);

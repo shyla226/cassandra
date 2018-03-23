@@ -31,9 +31,14 @@ public class FSReadError extends FSError
         this(cause, new File(path));
     }
 
+    public FSReadError(Throwable cause)
+    {
+        super(cause);
+    }
+
     @Override
     public String toString()
     {
-        return "FSReadError in " + path;
+        return path.isPresent() ? "FSReadError in " + path.get() : "FSReadError in unspecified location";
     }
 }

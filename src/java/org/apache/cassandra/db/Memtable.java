@@ -783,7 +783,7 @@ public class Memtable implements Comparable<Memtable>
 
                 // exclude directory if its total writeSize does not fit to data directory
                 if (flushLocation.getAvailableSpace() < estimatedSize)
-                    throw new FSDiskFullWriteError(new IOException("Insufficient disk space to write " + estimatedSize + " bytes"), "");
+                    throw new FSDiskFullWriteError(new IOException("Insufficient disk space to write " + estimatedSize + " bytes"));
 
                 writer = createFlushWriter(txn, cfs.newSSTableDescriptor(flushTableDir), columns, stats);
             }

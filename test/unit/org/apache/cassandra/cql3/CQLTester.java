@@ -249,13 +249,9 @@ public abstract class CQLTester
                 throw new RuntimeException(e);
             }
 
-            Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler()
-            {
-                public void uncaughtException(Thread t, Throwable e)
-                {
-                    logger.error("Fatal exception in thread " + t, e);
-                }
-            });
+            // Some tests, e.g. OutOfSpaceTest, require the default handler installed by CassandraDaemon.
+            if (Thread.getDefaultUncaughtExceptionHandler() == null)
+                Thread.setDefaultUncaughtExceptionHandler((t, e) -> logger.error("Fatal exception in thread " + t, e));
 
             ThreadAwareSecurityManager.install();
 
@@ -997,7 +993,12 @@ public abstract class CQLTester
 
     protected TableMetadata currentTableMetadata()
     {
-        return tableMetadata(KEYSPACE, currentTable());
+        return currentTableMetadata(KEYSPACE);
+    }
+
+    protected TableMetadata currentTableMetadata(String keyspace)
+    {
+        return tableMetadata(keyspace, currentTable());
     }
 
     protected TableMetadata tableMetadata(String ks, String name)

@@ -20,14 +20,14 @@ package org.apache.cassandra.io;
 
 public class FSDiskFullWriteError extends FSWriteError
 {
-    public FSDiskFullWriteError(Throwable cause, String path)
+    public FSDiskFullWriteError(Throwable cause)
     {
-        super(cause, path);
+        super(cause);
     }
 
     @Override
     public String toString()
     {
-        return "FSDiskFullWriteError in " + path;
+        return "FSDiskFullWriteError";
     }
 }

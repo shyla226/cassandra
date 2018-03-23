@@ -27,6 +27,7 @@ import org.junit.Test;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.FSReadError;
+import org.apache.cassandra.service.DefaultFSErrorHandler;
 
 import static java.util.Arrays.asList;
 import static org.junit.Assert.assertFalse;
@@ -39,6 +40,7 @@ public class JVMStabilityInspectorTest
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
+        JVMStabilityInspector.setFSErrorHandler(new DefaultFSErrorHandler());
     }
 
     @Test
@@ -57,12 +59,12 @@ public class JVMStabilityInspectorTest
 
             DatabaseDescriptor.setDiskFailurePolicy(Config.DiskFailurePolicy.die);
             killerForTests.reset();
-            JVMStabilityInspector.inspectThrowable(new FSReadError(new IOException(), "blah"));
+            JVMStabilityInspector.inspectThrowable(new FSReadError(new IOException()));
             assertTrue(killerForTests.wasKilled());
 
             DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.die);
             killerForTests.reset();
-            JVMStabilityInspector.inspectCommitLogThrowable(new Throwable(), true);
+            JVMStabilityInspector.inspectThrowable(new Throwable(), getCommitLogErrorHandler(true));
             assertTrue(killerForTests.wasKilled());
 
             killerForTests.reset();
@@ -116,12 +118,22 @@ public class JVMStabilityInspectorTest
             assertTrue(killerForTests.wasKilled());
 
             killerForTests.reset();
-            JVMStabilityInspector.inspectCommitLogThrowable(new FileNotFoundException("Too many open files"), true);
+            JVMStabilityInspector.inspectThrowable(new FileNotFoundException("Too many open files"), getCommitLogErrorHandler(true));
             assertTrue(killerForTests.wasKilled());
         }
         finally
         {
             JVMStabilityInspector.replaceKiller(originalKiller);
         }
+    }
+
+    private static ErrorHandler getCommitLogErrorHandler(boolean startupCompleted)
+    {
+        return t -> {
+            if (!startupCompleted)
+                JVMStabilityInspector.killCurrentJVM(t, true);
+            else if (DatabaseDescriptor.getCommitFailurePolicy() == Config.CommitFailurePolicy.die)
+                JVMStabilityInspector.killCurrentJVM(t, false);
+        };
     }
 }

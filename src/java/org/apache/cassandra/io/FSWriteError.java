@@ -31,9 +31,14 @@ public class FSWriteError extends FSError
         this(cause, new File(path));
     }
 
+    public FSWriteError(Throwable cause)
+    {
+        super(cause);
+    }
+
     @Override
     public String toString()
     {
-        return "FSWriteError in " + path;
+        return path.isPresent() ? "FSWriteError in " + path.get() : "FSWriteError in unspecified location";
     }
 }

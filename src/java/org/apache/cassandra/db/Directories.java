@@ -328,7 +328,7 @@ public class Directories
     {
         File location = getLocationForDisk(getWriteableLocation(writeSize));
         if (location == null)
-            throw new FSWriteError(new IOException("No configured data directory contains enough space to write " + writeSize + " bytes"), "");
+            throw new FSWriteError(new IOException("No configured data directory contains enough space to write " + writeSize + " bytes"));
         return location;
     }
 
@@ -395,9 +395,9 @@ public class Directories
 
         if (candidates.isEmpty())
             if (tooBig)
-                throw new FSDiskFullWriteError(new IOException("Insufficient disk space to write " + writeSize + " bytes"), "");
+                throw new FSDiskFullWriteError(new IOException("Insufficient disk space to write " + writeSize + " bytes"));
             else
-                throw new FSWriteError(new IOException("All configured data directories have been blacklisted as unwritable for erroring out"), "");
+                throw new FSWriteError(new IOException("All configured data directories have been blacklisted as unwritable for erroring out"));
 
         // shortcut for single data directory systems
         if (candidates.size() == 1)

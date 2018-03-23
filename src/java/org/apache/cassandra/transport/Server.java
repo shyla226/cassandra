@@ -103,7 +103,7 @@ public class Server implements CassandraDaemon.Server
         if (isRunning.compareAndSet(true, false))
             return close();
 
-        return CompletableFuture.completedFuture(null);
+        return connectionTracker.closeFuture;
     }
 
     public boolean isRunning()
@@ -115,6 +115,8 @@ public class Server implements CassandraDaemon.Server
     {
         if(isRunning())
             return;
+
+        connectionTracker.reset();
 
         // Configure the server.
         ServerBootstrap bootstrap = new ServerBootstrap()
@@ -235,6 +237,9 @@ public class Server implements CassandraDaemon.Server
         // on all the requests in-flight, see closeAll
         private volatile BlockingQueue<CompletableFuture<?>> inFlightRequestsFutures = null;
 
+        // this is completed when the connection tracker is closed
+        private volatile CompletableFuture closeFuture = new CompletableFuture();
+
         public ConnectionTracker()
         {
             for (Event.Type type : Event.Type.values())
@@ -289,8 +294,12 @@ public class Server implements CassandraDaemon.Server
             if (logger.isTraceEnabled())
                 logger.trace("Closing all channels");
 
+
             if (allChannels.isEmpty())
-                return CompletableFuture.completedFuture(null);
+            {
+                closeFuture.complete(null);
+                return closeFuture;
+            }
 
             assert inFlightRequestsFutures == null : "closeAll should only be called once";
 
@@ -300,10 +309,25 @@ public class Server implements CassandraDaemon.Server
             // to tackle as part of this patch
             inFlightRequestsFutures = new LinkedBlockingDeque<>();
 
-            CompletableFuture channelsFuture = new CompletableFuture();
-            allChannels.close().addListener(future -> channelsFuture.complete(null));
+            allChannels.close()
+                       .addListener(future ->
+                                    CompletableFuture.allOf(inFlightRequestsFutures.toArray(new CompletableFuture<?>[0]))
+                                                     .whenComplete((res, err) -> {
+                                                         if (err == null)
+                                                             closeFuture.complete(null);
+                                                         else
+                                                             closeFuture.completeExceptionally(err);
+                                                     }));
 
-            return channelsFuture.thenCompose(result -> CompletableFuture.allOf(inFlightRequestsFutures.toArray(new CompletableFuture<?>[0])));
+            return closeFuture;
+        }
+
+        public void reset()
+        {
+            assert allChannels.isEmpty();
+
+            closeFuture = new CompletableFuture();
+            inFlightRequestsFutures = null;
         }
 
         int getConnectedClients()
