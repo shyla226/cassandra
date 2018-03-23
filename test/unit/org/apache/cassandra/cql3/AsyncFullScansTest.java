@@ -99,7 +99,11 @@ public class AsyncFullScansTest extends CQLTester
                  }
                  catch (Throwable err)
                  {
-                     error.compareAndSet(null, err);
+                     // It is possible to get loo long a chain of NotInCacheExceptions due to our interception
+                     // of the cache. If that happens, ignore the error.
+                     if (!com.google.common.base.Throwables.getRootCause(err)
+                                                           .getMessage().contains("Too many NotInCacheExceptions"))
+                         error.compareAndSet(null, err);
                  }
                  finally
                  {
