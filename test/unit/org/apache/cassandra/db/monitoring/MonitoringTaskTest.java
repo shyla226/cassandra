@@ -286,9 +286,9 @@ public class MonitoringTaskTest
 
         for (int i = 0; i < opCount; i++)
         {
-            executorService.submit(() ->
-                operations.add(monitor(UUID.randomUUID().toString(), false))
-            );
+            executorService.submit(() -> {
+                operations.add(monitor(UUID.randomUUID().toString(), false));
+            });
         }
 
         executorService.shutdown();
@@ -320,7 +320,6 @@ public class MonitoringTaskTest
         try
         {
             ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
-            final CountDownLatch finished = new CountDownLatch(numThreads);
 
             for (int i = 0; i < numThreads; i++)
             {
@@ -344,15 +343,11 @@ public class MonitoringTaskTest
                         e.printStackTrace();
                         fail("Unexpected exception");
                     }
-                    finally
-                    {
-                        finished.countDown();
-                    }
                 });
             }
 
-            finished.await();
-            assertEquals(0, executorService.shutdownNow().size());
+            executorService.shutdown();
+            assertTrue(executorService.awaitTermination(30, TimeUnit.SECONDS));
 
             List<String> failedOperations = MonitoringTask.instance.getFailedOperations();
             assertEquals(numExpectedOperations, failedOperations.size());
@@ -369,27 +364,21 @@ public class MonitoringTaskTest
     public void testMultipleThreadsSameNameFailed() throws InterruptedException
     {
         final int threadCount = 50;
-        final List<Monitor> operations = new ArrayList<>(threadCount);
+        final List<Monitor> operations = Collections.synchronizedList(new ArrayList<>(threadCount));
         ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
-        final CountDownLatch finished = new CountDownLatch(threadCount);
 
         for (int i = 0; i < threadCount; i++)
         {
             executorService.submit(() -> {
-                try
-                {
-                    Monitor operation = monitor("Test testMultipleThreadsSameName failed", false);
-                    operations.add(operation);
-                }
-                finally
-                {
-                    finished.countDown();
-                }
+                Monitor operation = monitor("Test testMultipleThreadsSameName failed", false);
+                operations.add(operation);
             });
         }
 
-        finished.await();
-        assertEquals(0, executorService.shutdownNow().size());
+
+        executorService.shutdown();
+        assertTrue(executorService.awaitTermination(30, TimeUnit.SECONDS));
+        assertEquals(operations.size(), threadCount);
 
         waitForOperationsToComplete(operations);
         assertEquals(1, MonitoringTask.instance.getFailedOperations().size());
@@ -399,27 +388,20 @@ public class MonitoringTaskTest
     public void testMultipleThreadsSameNameSlow() throws InterruptedException
     {
         final int threadCount = 50;
-        final List<Monitor> operations = new ArrayList<>(threadCount);
+        final List<Monitor> operations = Collections.synchronizedList(new ArrayList<>(threadCount));
         ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
-        final CountDownLatch finished = new CountDownLatch(threadCount);
 
         for (int i = 0; i < threadCount; i++)
         {
             executorService.submit(() -> {
-                try
-                {
-                    Monitor operation = monitor("Test testMultipleThreadsSameName slow", false);
-                    operations.add(operation);
-                }
-                finally
-                {
-                    finished.countDown();
-                }
+                Monitor operation = monitor("Test testMultipleThreadsSameName slow", false);
+                operations.add(operation);
             });
         }
 
-        finished.await();
-        assertEquals(0, executorService.shutdownNow().size());
+        executorService.shutdown();
+        assertTrue(executorService.awaitTermination(30, TimeUnit.SECONDS));
+        assertEquals(operations.size(), threadCount);
 
         waitForOperationsToBeReportedAsSlow(operations);
         operations.forEach(Monitor::complete);
@@ -431,28 +413,21 @@ public class MonitoringTaskTest
     public void testMultipleThreadsNoFailedOps() throws InterruptedException
     {
         final int threadCount = 50;
-        final List<Monitor> operations = new ArrayList<>(threadCount);
+        final List<Monitor> operations = Collections.synchronizedList(new ArrayList<>(threadCount));
         ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
-        final CountDownLatch finished = new CountDownLatch(threadCount);
 
         for (int i = 0; i < threadCount; i++)
         {
             executorService.submit(() -> {
-                try
-                {
-                    Monitor operation = monitor("Test thread " + Thread.currentThread().getName(), false);
-                    operations.add(operation);
-                    operation.complete();
-                }
-                finally
-                {
-                    finished.countDown();
-                }
+                Monitor operation = monitor("Test thread " + Thread.currentThread().getName(), false);
+                operations.add(operation);
+                operation.complete();
             });
         }
 
-        finished.await();
-        assertEquals(0, executorService.shutdownNow().size());
+        executorService.shutdown();
+        assertTrue(executorService.awaitTermination(30, TimeUnit.SECONDS));
+        assertEquals(operations.size(), threadCount);
 
         waitForOperationsToComplete(operations);
         assertEquals(0, MonitoringTask.instance.getFailedOperations().size());
