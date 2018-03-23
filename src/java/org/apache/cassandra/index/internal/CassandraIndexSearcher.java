@@ -22,10 +22,13 @@ package org.apache.cassandra.index.internal;
 
 import java.nio.ByteBuffer;
 import java.util.NavigableSet;
+import java.util.function.Function;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
@@ -40,6 +43,9 @@ import org.apache.cassandra.utils.btree.BTreeSet;
 public abstract class CassandraIndexSearcher implements Index.Searcher
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraIndexSearcher.class);
+    private static final Function<Completable, Completable> defaultDecorator = (x) -> x;
+    // Decorator for testing purposes for asynchronous deletes
+    protected static Function<Completable, Completable> deleteDecorator = defaultDecorator;
 
     private final RowFilter.Expression expression;
     protected final CassandraIndex index;
@@ -180,4 +186,16 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
                                                                             FlowablePartition indexHits,
                                                                             ReadCommand command,
                                                                             ReadExecutionController executionController);
+
+    @VisibleForTesting
+    public static void setDeleteDecorator(Function<Completable, Completable> newFn)
+    {
+        deleteDecorator = newFn;
+    }
+
+    @VisibleForTesting
+    public static void resetDeleteDecorator()
+    {
+        deleteDecorator = defaultDecorator;
+    }
 }

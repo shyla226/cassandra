@@ -24,11 +24,15 @@ import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.index.internal.CassandraIndexSearcher;
 import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
@@ -61,6 +65,7 @@ public class SecondaryIndexTest
     public static final String WITH_COMPOSITE_INDEX = "WithCompositeIndex";
     public static final String WITH_KEYS_INDEX = "WithKeysIndex";
     public static final String COMPOSITE_INDEX_TO_BE_ADDED = "CompositeIndexToBeAdded";
+    private static AtomicInteger pendingIndexRemovals = new AtomicInteger(0);
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -79,6 +84,17 @@ public class SecondaryIndexTest
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(WITH_COMPOSITE_INDEX).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(COMPOSITE_INDEX_TO_BE_ADDED).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(WITH_KEYS_INDEX).truncateBlocking();
+
+        CassandraIndexSearcher.setDeleteDecorator((c) -> {
+            pendingIndexRemovals.incrementAndGet();
+            return c.doOnComplete(pendingIndexRemovals::decrementAndGet);
+        });
+    }
+
+    @After
+    public void after()
+    {
+        CassandraIndexSearcher.resetDeleteDecorator();
     }
 
     //@Test
@@ -190,7 +206,7 @@ public class SecondaryIndexTest
     }
 
     @Test
-    public void testCompositeIndexDeletions() throws IOException
+    public void testCompositeIndexDeletions() throws Throwable
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(WITH_COMPOSITE_INDEX);
         ByteBuffer bBB = ByteBufferUtil.bytes("birthdate");
@@ -235,7 +251,7 @@ public class SecondaryIndexTest
     }
 
     @Test
-    public void testCompositeIndexUpdate() throws IOException
+    public void testCompositeIndexUpdate() throws Throwable
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(WITH_COMPOSITE_INDEX);
@@ -528,16 +544,25 @@ public class SecondaryIndexTest
         assertIndexedCount(cfs, ByteBufferUtil.bytes("birthdate"), 1l, 10);
     }
 
-    private void assertIndexedNone(ColumnFamilyStore cfs, ByteBuffer col, Object val)
+    private void assertIndexedNone(ColumnFamilyStore cfs, ByteBuffer col, Object val) throws InterruptedException
     {
         assertIndexedCount(cfs, col, val, 0);
     }
-    private void assertIndexedOne(ColumnFamilyStore cfs, ByteBuffer col, Object val)
+    private void assertIndexedOne(ColumnFamilyStore cfs, ByteBuffer col, Object val) throws InterruptedException
     {
         assertIndexedCount(cfs, col, val, 1);
     }
-    private void assertIndexedCount(ColumnFamilyStore cfs, ByteBuffer col, Object val, int count)
+    private void assertIndexedCount(ColumnFamilyStore cfs, ByteBuffer col, Object val, int count) throws InterruptedException
     {
+        long start = System.currentTimeMillis();
+        // Wait for asynchronous removal tasks
+        while (pendingIndexRemovals.get() != 0)
+        {
+            Thread.sleep(100);
+            if (System.currentTimeMillis() - start > TimeUnit.SECONDS.toMillis(10))
+                new TimeoutException("Timed out while waiting for pending " + pendingIndexRemovals.get() + " index tasks to complete.");
+        }
+
         ColumnMetadata cdef = cfs.metadata().getColumn(col);
 
         ReadCommand rc = Util.cmd(cfs).filterOn(cdef.name.toString(), Operator.EQ, ((AbstractType) cdef.cellValueType()).decompose(val)).build();

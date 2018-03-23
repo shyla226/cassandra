@@ -185,14 +185,14 @@ public class CompositesSearcher extends CassandraIndexSearcher
             public void onFinal(Unfiltered next)
             {
                 super.onFinal(next);
-                deleteAllEntries(staleEntries, writeOp, nowInSec).subscribe();
+                deleteDecorator.apply(deleteAllEntries(staleEntries, writeOp, nowInSec)).subscribe();
             }
 
             @Override
             public void onComplete()
             {
                 super.onComplete();
-                deleteAllEntries(staleEntries, writeOp, nowInSec).subscribe();
+                deleteDecorator.apply(deleteAllEntries(staleEntries, writeOp, nowInSec)).subscribe();
             }
         }
 

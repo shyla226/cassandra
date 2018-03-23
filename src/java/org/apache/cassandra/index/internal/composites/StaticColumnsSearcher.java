@@ -104,10 +104,10 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
 
         if (stale || index.isStale(dataIter.staticRow(), indexValue, nowInSec))
         {
-            index.deleteStaleEntry(entry.indexValue,
-                                   entry.indexClustering,
-                                   new DeletionTime(entry.timestamp, nowInSec),
-                                   writeOp).subscribe();    // We don't need to wait for completion.
+            deleteDecorator.apply(index.deleteStaleEntry(entry.indexValue,
+                                                         entry.indexClustering,
+                                                         new DeletionTime(entry.timestamp, nowInSec),
+                                                         writeOp)).subscribe();    // We don't need to wait for completion.
             return null;  // tpc TODO was empty partition. why?
         }
 

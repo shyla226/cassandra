@@ -100,11 +100,11 @@ public class KeysSearcher extends CassandraIndexSearcher
             return partition;
 
         // Index is stale, remove the index entry and ignore
-        index.deleteStaleEntry(index.getIndexCfs().decorateKey(indexedValue),
-                               makeIndexClustering(partition.header().partitionKey.getKey(), Clustering.EMPTY),
-                               new DeletionTime(indexHit.primaryKeyLivenessInfo().timestamp(), nowInSec),
-                               writeOp)
-             .subscribe();    // We don't need to wait for the deletion to complete, and we don't care too much if it fails.
+        deleteDecorator.apply(index.deleteStaleEntry(index.getIndexCfs().decorateKey(indexedValue),
+                                                     makeIndexClustering(partition.header().partitionKey.getKey(), Clustering.EMPTY),
+                                                     new DeletionTime(indexHit.primaryKeyLivenessInfo().timestamp(), nowInSec),
+                                                     writeOp))
+                       .subscribe(); // We don't need to wait for the deletion to complete, and we don't care too much if it fails.
 
         return null;
     }
