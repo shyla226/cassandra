@@ -619,8 +619,14 @@ public final class FileUtils
         // the default sector size applies to all devices on Linux but only takes effect if logical_block_size does not exist
         // or for platforms other than Linux
         private static final Supplier<String> defaultSectorSize = () -> System.getProperty("dse.io.default.sector.size", "512");
+        private static final Supplier<String> defaultIOQueueDepth = () -> System.getProperty("dse.io.default.queue.depth", "128");
 
-        public static final MountPoint DEFAULT = new MountPoint(Paths.get(".").getRoot(), "unknown", "unknown", true, Integer.parseInt(defaultSectorSize.get()));
+        public static final MountPoint DEFAULT = new MountPoint(Paths.get(".").getRoot(),
+                                                                "unknown",
+                                                                "unknown",
+                                                                true,
+                                                                Integer.parseInt(defaultSectorSize.get()),
+                                                                Integer.parseInt(defaultIOQueueDepth.get()));
 
         private static final Map<Path, MountPoint> mountPoints = getDiskPartitions();
 
@@ -629,6 +635,7 @@ public final class FileUtils
         public final String fstype;
         public final boolean onSSD;
         public final int sectorSize;
+        public final int ioQueueDepth;
 
         /**
          * Lists the physical disk devices the data directories are on.
@@ -709,16 +716,18 @@ public final class FileUtils
         {
             this(mountpoint, device, fstype,
                  checkRamdisk(fstype) ? true : isPartitionOnSSD(queueFolder),
-                 checkRamdisk(fstype) ? DEFAULT.sectorSize : getSectorSize(queueFolder, device));
+                 checkRamdisk(fstype) ? DEFAULT.sectorSize : getSectorSize(queueFolder, device),
+                 checkRamdisk(fstype) ? DEFAULT.ioQueueDepth : getMaxQueueDepth(queueFolder, device));
         }
 
-        private MountPoint(Path mountpoint, String device, String fstype, boolean onSSD, int sectorSize)
+        private MountPoint(Path mountpoint, String device, String fstype, boolean onSSD, int sectorSize, int ioQueueDepth)
         {
             this.mountpoint = mountpoint;
             this.device = device;
             this.fstype = fstype;
             this.onSSD = onSSD;
             this.sectorSize = sectorSize;
+            this.ioQueueDepth = ioQueueDepth;
         }
 
         private static Path getQueueFolder(String device) throws IOException
@@ -809,6 +818,26 @@ public final class FileUtils
             return Integer.parseInt(Files.lines(logical_block_size).findFirst().orElseGet(defaultSectorSize));
         }
 
+        private static int getMaxQueueDepth(Path queue, String device) throws IOException
+        {
+            assert FBUtilities.isLinux;
+
+            if (queue == null)
+            {
+                logger.warn("Could not determine the IO queue depth for {}, assuming {}", device, defaultIOQueueDepth.get());
+                return Integer.parseInt(defaultIOQueueDepth.get());
+            }
+
+            Path logical_block_size = queue.resolve("nr_requests");
+            if (!logical_block_size.toFile().exists())
+            {
+                logger.warn("Could not determine the IO queue depth for {}, assuming {}", device, defaultIOQueueDepth.get());
+                return Integer.parseInt(defaultIOQueueDepth.get());
+            }
+
+            return Integer.parseInt(Files.lines(logical_block_size).findFirst().orElseGet(defaultIOQueueDepth));
+        }
+
         public static MountPoint mountPointForDirectory(String dir)
         {
             if (mountPoints.isEmpty())
@@ -849,6 +878,7 @@ public final class FileUtils
                    ", fstype='" + fstype + '\'' +
                    ", onSSD=" + onSSD +
                    ", sectorSize=" + sectorSize +
+                   ", ioQueueDepth=" + ioQueueDepth +
                    '}';
         }
 
@@ -859,6 +889,7 @@ public final class FileUtils
             MountPoint that = (MountPoint) o;
             return onSSD == that.onSSD &&
                    sectorSize == that.sectorSize &&
+                   ioQueueDepth == that.ioQueueDepth &&
                    Objects.equals(mountpoint, that.mountpoint) &&
                    Objects.equals(device, that.device) &&
                    Objects.equals(fstype, that.fstype);
@@ -867,8 +898,28 @@ public final class FileUtils
         public int hashCode()
         {
 
-            return Objects.hash(mountpoint, device, fstype, onSSD, sectorSize);
+            return Objects.hash(mountpoint, device, fstype, onSSD, sectorSize, ioQueueDepth);
         }
+    }
+
+    /**
+     * Return the minimum IO queue depth supported by the mountpoints.
+     *
+     * Typically this is set to 128, and so all mount points will have
+     * the same value. It is dangerous to exceed the queue depth of a device
+     * because the Linux kernel may block the TPC threads when they submit
+     * async IO operations. Because we currently only support a global value
+     * we have to return the minimum.
+     *
+     * @return the minimum IO queue depth of all mountpoints
+     */
+    public static int getIOGlobalQueueDepth()
+    {
+        return MountPoint.mountPoints.values()
+                                     .stream()
+                                     .map(mountPoint -> mountPoint.ioQueueDepth)
+                                     .reduce(Math::min)
+                                     .orElse(MountPoint.DEFAULT.ioQueueDepth);
     }
 
     private static boolean checkRamdisk(String fstype)

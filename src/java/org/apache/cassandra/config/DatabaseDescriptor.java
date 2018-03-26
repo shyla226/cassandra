@@ -2814,7 +2814,7 @@ public class DatabaseDescriptor
     public static int getIOGlobalQueueDepth()
     {
         return conf == null || conf.io_global_queue_depth == null
-               ? 128
+               ? FileUtils.getIOGlobalQueueDepth()
                : conf.io_global_queue_depth;
     }
 
