@@ -109,13 +109,6 @@ public abstract class AbstractCommitLogSegmentManager
 
     void start()
     {
-        // Do NOT remove this calll as it initializes the CommitLogSegment class, which scans the commit log directory.
-        // Scanning would silently fail, and commit logs not work, if there are unsupported files.
-        // In theory, the error handling in the 'catch(Throwable)' clause should be enough, but during startup it is
-        // not. as the call to 'StorageService.instance.stopTransportsAsync()' in 'CommitLog.handleCommitError' does
-        // not return.
-        CommitLogSegment.staticInit();
-
         // The run loop for the manager thread
         Runnable runnable = new WrappedRunnable()
         {
@@ -150,8 +143,21 @@ public abstract class AbstractCommitLogSegmentManager
                     }
                     catch (Throwable t)
                     {
+                        // This unblocks the main thread waiting on advanceAllocatingFrom(null) at the end
+                        // of the outer method in case we cannot create the very first segment, e.g. due to CLS static
+                        // initialization, which can throw if it finds invalid CL files.
+                        // Unblocking the main thread allows static CL initialization to complete and allows
+                        // startup to terminate with this exception. Note that it will be an
+                        // ExceptionInInitializerError and NoClassDefFoundError, which is not great. Ideally CL
+                        // shouldn't throw during static initialization.
+                        SegmentAdvancer advancer = activeAdvanceRequest.get();
+                        assert advancer != null : "The main thread should have requested the first segment before starting this thread";
+                        if (advancer.oldSegment == null) // the first segment was not created, the main thread must be waiting
+                            advancer.completeExceptionally(t);
+
                         if (!CommitLog.handleCommitError("Failed managing commit log segments", t))
                             return;
+
                         // sleep some arbitrary period to avoid spamming CL
                         Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
 
@@ -168,10 +174,14 @@ public abstract class AbstractCommitLogSegmentManager
         shutdown = false;
         managerThread = NamedThreadFactory.createThread(runnable, "COMMIT-LOG-ALLOCATOR");
         managerThread.setDaemon(true);
-        managerThread.start();
 
-        // for simplicity, ensure the first segment is allocated before continuing
-        advanceAllocatingFrom(null).join();
+        // for simplicity, ensure the first segment is allocated before continuing. Since we will block
+        // on this future we need to make sure we set activeAdvanceRequest before starting the thread so
+        // that in case of exception allocating the first segment we are able to unblock the main thread,
+        // see catch block above (DB-1926)
+        CompletableFuture<Void> fut = advanceAllocatingFrom(null);
+        managerThread.start();
+        fut.join();
     }
 
     private boolean atSegmentBufferLimit()
