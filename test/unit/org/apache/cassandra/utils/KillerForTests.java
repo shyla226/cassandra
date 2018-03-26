@@ -21,7 +21,7 @@ package org.apache.cassandra.utils;
 /**
  * Responsible for stubbing out the System.exit() logic during unit tests.
  */
-public class KillerForTests extends JVMStabilityInspector.Killer
+public class KillerForTests implements JVMKiller
 {
     private boolean killed = false;
     private boolean quiet = false;
@@ -39,7 +39,7 @@ public class KillerForTests extends JVMStabilityInspector.Killer
     }
 
     @Override
-    protected void killCurrentJVM(Throwable t, boolean quiet)
+    public void killJVM(Throwable t, boolean quiet)
     {
         this.killed = true;
         this.quiet = quiet;

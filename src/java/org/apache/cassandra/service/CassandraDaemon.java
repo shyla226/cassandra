@@ -53,7 +53,6 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.*;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.tracing.Tracing;
@@ -92,7 +91,6 @@ public class CassandraDaemon
         });
         logger = LoggerFactory.getLogger(CassandraDaemon.class);
 
-        JVMStabilityInspector.setFSErrorHandler(new DefaultFSErrorHandler());
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> CassandraDaemon.defaultExceptionHandler.accept(t, e));
     }
 
@@ -495,6 +493,7 @@ public class CassandraDaemon
     @VisibleForTesting
     public void completeSetup()
     {
+        StorageService.instance.installDiskErrorHandler();
         setupCompleted = true;
     }
 

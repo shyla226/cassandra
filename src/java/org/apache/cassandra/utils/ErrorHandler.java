@@ -19,7 +19,9 @@
 package org.apache.cassandra.utils;
 
 /**
- * Interface for handling file system errors.
+ * Interface for handling errors. {@link JVMStabilityInspector} implements and
+ * owns a global error handler for errors that might impact the JVM. Other systems
+ * such as the commit log or disk io systems may install additional error handlers.
  */
 public interface ErrorHandler
 {

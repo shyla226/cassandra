@@ -243,6 +243,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public final NodeSyncService nodeSyncService = new NodeSyncService();
 
+    public void installDiskErrorHandler()
+    {
+        JVMStabilityInspector.setDiskErrorHandler(new DefaultDiskErrorHandler(JVMStabilityInspector.killer(), this));
+    }
+
     private void setBootstrapStateBlocking(SystemKeyspace.BootstrapState state)
     {
         TPCUtils.blockingAwait(SystemKeyspace.setBootstrapState(state));

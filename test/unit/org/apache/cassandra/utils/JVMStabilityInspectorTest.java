@@ -27,7 +27,7 @@ import org.junit.Test;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.service.DefaultFSErrorHandler;
+import org.apache.cassandra.service.StorageService;
 
 import static java.util.Arrays.asList;
 import static org.junit.Assert.assertFalse;
@@ -40,14 +40,14 @@ public class JVMStabilityInspectorTest
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        JVMStabilityInspector.setFSErrorHandler(new DefaultFSErrorHandler());
+        StorageService.instance.installDiskErrorHandler();
     }
 
     @Test
     public void testKill()
     {
         KillerForTests killerForTests = new KillerForTests();
-        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
+        JVMKiller originalKiller = replaceKiller(killerForTests);
 
         Config.DiskFailurePolicy oldPolicy = DatabaseDescriptor.getDiskFailurePolicy();
         Config.CommitFailurePolicy oldCommitPolicy = DatabaseDescriptor.getCommitFailurePolicy();
@@ -73,7 +73,7 @@ public class JVMStabilityInspectorTest
         }
         finally
         {
-            JVMStabilityInspector.replaceKiller(originalKiller);
+            replaceKiller(originalKiller);
             DatabaseDescriptor.setDiskFailurePolicy(oldPolicy);
             DatabaseDescriptor.setCommitFailurePolicy(oldCommitPolicy);
         }
@@ -101,7 +101,7 @@ public class JVMStabilityInspectorTest
     public void fileHandleTest()
     {
         KillerForTests killerForTests = new KillerForTests();
-        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
+        JVMKiller originalKiller = replaceKiller(killerForTests);
 
         try
         {
@@ -123,17 +123,24 @@ public class JVMStabilityInspectorTest
         }
         finally
         {
-            JVMStabilityInspector.replaceKiller(originalKiller);
+            replaceKiller(originalKiller);
         }
+    }
+
+    private static JVMKiller replaceKiller(JVMKiller killer)
+    {
+        JVMKiller ret = JVMStabilityInspector.replaceKiller(killer);
+        StorageService.instance.installDiskErrorHandler();
+        return ret;
     }
 
     private static ErrorHandler getCommitLogErrorHandler(boolean startupCompleted)
     {
         return t -> {
             if (!startupCompleted)
-                JVMStabilityInspector.killCurrentJVM(t, true);
+                JVMStabilityInspector.killJVM(t, true);
             else if (DatabaseDescriptor.getCommitFailurePolicy() == Config.CommitFailurePolicy.die)
-                JVMStabilityInspector.killCurrentJVM(t, false);
+                JVMStabilityInspector.killJVM(t, false);
         };
     }
 }

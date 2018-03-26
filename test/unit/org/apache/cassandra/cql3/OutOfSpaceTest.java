@@ -46,6 +46,7 @@ import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.BytemanUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 import org.jboss.byteman.contrib.bmunit.BMRule;
@@ -184,7 +185,7 @@ public class OutOfSpaceTest extends CQLTester
         makeTable();
 
         KillerForTests killerForTests = new KillerForTests();
-        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
+        JVMKiller originalKiller = replaceKiller(killerForTests);
         DiskFailurePolicy oldPolicy = DatabaseDescriptor.getDiskFailurePolicy();
         Closeable blackListDirectory =  failureReason == WriteFailureReason.UNWRITABLE
                                         ? Util.markDirectoriesUnwriteable(getCurrentColumnFamilyStore(KEYSPACE_PER_TEST))
@@ -201,7 +202,7 @@ public class OutOfSpaceTest extends CQLTester
                 blackListDirectory.close(); // restore directory as non-blacklisted
 
             DatabaseDescriptor.setDiskFailurePolicy(oldPolicy);
-            JVMStabilityInspector.replaceKiller(originalKiller);
+            replaceKiller(originalKiller);
         }
 
         if (policy == DiskFailurePolicy.ignore)
@@ -297,7 +298,7 @@ public class OutOfSpaceTest extends CQLTester
         flush(KEYSPACE_PER_TEST);
 
         KillerForTests killerForTests = new KillerForTests();
-        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
+        JVMKiller originalKiller = replaceKiller(killerForTests);
         DiskFailurePolicy oldPolicy = DatabaseDescriptor.getDiskFailurePolicy();
         Closeable blackListDirectory = failureReason == WriteFailureReason.UNWRITABLE
                                        ? Util.markDirectoriesUnwriteable(getCurrentColumnFamilyStore(KEYSPACE_PER_TEST))
@@ -340,11 +341,18 @@ public class OutOfSpaceTest extends CQLTester
                 blackListDirectory.close(); // restore directory as non black-listed
 
             DatabaseDescriptor.setDiskFailurePolicy(oldPolicy);
-            JVMStabilityInspector.replaceKiller(originalKiller);
+            replaceKiller(originalKiller);
         }
 
         if (policy == DiskFailurePolicy.ignore)
             compact(KEYSPACE_PER_TEST); //next compact should succeed
+    }
+
+    private static JVMKiller replaceKiller(JVMKiller killer)
+    {
+        JVMKiller ret = JVMStabilityInspector.replaceKiller(killer);
+        StorageService.instance.installDiskErrorHandler();
+        return ret;
     }
 
     private void makeTable() throws Throwable

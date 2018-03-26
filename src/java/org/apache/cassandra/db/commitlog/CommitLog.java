@@ -504,7 +504,7 @@ public class CommitLog implements CommitLogMBean
                 {
                     // Needed here for unit tests to not fail on default assertion
                     case die:
-                        JVMStabilityInspector.killCurrentJVM(t, false);
+                        JVMStabilityInspector.killJVM(t, false);
                     case stop:
                         StorageService.instance.stopTransportsAsync();
                         //$FALL-THROUGH$

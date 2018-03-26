@@ -40,17 +40,17 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 public final class JVMStabilityInspector
 {
     private static final Logger logger = LoggerFactory.getLogger(JVMStabilityInspector.class);
-    private static Killer killer = new Killer();
+    private static JVMKiller killer = new Killer();
     private static final List<Pair<Thread, Runnable>> shutdownHooks = new ArrayList<>(1);
     private static AtomicBoolean printingHeapHistogram = new AtomicBoolean(false);
-    private static ErrorHandler diskHandler;
+    private static volatile ErrorHandler diskHandler = new StartupDiskErrorHandler(killer);
     private static ErrorHandler globalHandler = new GlobalHandler();
 
     private JVMStabilityInspector() {}
 
-    public static void setFSErrorHandler(ErrorHandler handler)
+    public static void setDiskErrorHandler(ErrorHandler errorHandler)
     {
-        diskHandler = handler;
+        diskHandler = errorHandler;
     }
 
     /**
@@ -132,7 +132,7 @@ public final class JVMStabilityInspector
                     isUnstable = true;
 
             if (isUnstable)
-                killer.killCurrentJVM(t);
+                killer.killJVM(t);
         }
     }
 
@@ -153,9 +153,9 @@ public final class JVMStabilityInspector
         return Boolean.parseBoolean(property);
     }
 
-    public static void killCurrentJVM(Throwable t, boolean quiet)
+    public static void killJVM(Throwable t, boolean quiet)
     {
-        killer.killCurrentJVM(t, quiet);
+        killer.killJVM(t, quiet);
     }
 
     public static void userFunctionTimeout(Throwable t)
@@ -164,10 +164,10 @@ public final class JVMStabilityInspector
         {
             case die:
                 // policy to give 250ms grace time to
-                ScheduledExecutors.nonPeriodicTasks.schedule(() -> killer.killCurrentJVM(t), 250, TimeUnit.MILLISECONDS);
+                ScheduledExecutors.nonPeriodicTasks.schedule(() -> killer.killJVM(t), 250, TimeUnit.MILLISECONDS);
                 break;
             case die_immediate:
-                killer.killCurrentJVM(t);
+                killer.killJVM(t);
                 break;
             case ignore:
                 logger.error(t.getMessage());
@@ -182,15 +182,14 @@ public final class JVMStabilityInspector
     }
 
     @VisibleForTesting
-    public static Killer replaceKiller(Killer newKiller)
+    public static JVMKiller replaceKiller(JVMKiller newKiller)
     {
-        Killer oldKiller = JVMStabilityInspector.killer;
+        JVMKiller oldKiller = JVMStabilityInspector.killer;
         JVMStabilityInspector.killer = newKiller;
         return oldKiller;
     }
 
-    @VisibleForTesting
-    public static Killer killer()
+    public static JVMKiller killer()
     {
         return killer;
     }
@@ -211,23 +210,12 @@ public final class JVMStabilityInspector
         shutdownHooks.clear();
     }
 
-    @VisibleForTesting
-    public static class Killer
+    private static class Killer implements JVMKiller
     {
         private final AtomicBoolean killing = new AtomicBoolean();
 
-        /**
-        * Certain situations represent "Die" conditions for the server, and if so, the reason is logged and the current JVM is killed.
-        *
-        * @param t
-        *      The Throwable to log before killing the current JVM
-        */
-        protected void killCurrentJVM(Throwable t)
-        {
-            killCurrentJVM(t, false);
-        }
-
-        protected void killCurrentJVM(Throwable t, boolean quiet)
+        @Override
+        public void killJVM(Throwable t, boolean quiet)
         {
             if (!quiet)
             {

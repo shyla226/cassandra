@@ -34,7 +34,6 @@ import org.jctools.maps.NonBlockingHashSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -49,9 +48,7 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.flow.RxThreads;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.WrappedRunnable;
 
 public class CommitLogReplayer implements CommitLogReadHandler
 {
@@ -411,7 +408,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
                          "commit log replay problems, specify -D" + IGNORE_REPLAY_ERRORS_PROPERTY + "=true " +
                          "on the command line");
             Throwable t = new CommitLogReplayException(exception.getMessage(), exception);
-            JVMStabilityInspector.killCurrentJVM(t, false);
+            JVMStabilityInspector.killJVM(t, false);
             // If JVM killer is mocked, we should't fall into the infinite loop
             throw new RuntimeException("JVM killed");
         }

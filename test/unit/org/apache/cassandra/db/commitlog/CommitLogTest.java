@@ -62,6 +62,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
 import org.apache.cassandra.utils.Hex;
+import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 import org.apache.cassandra.utils.Pair;
@@ -83,7 +84,7 @@ public abstract class CommitLogTest
     private static final String STANDARD1 = "Standard1";
     private static final String STANDARD2 = "Standard2";
 
-    private static JVMStabilityInspector.Killer oldKiller;
+    private static JVMKiller oldKiller;
     private static KillerForTests testKiller;
 
     public CommitLogTest(ParameterizedClass commitLogCompression, EncryptionContext encryptionContext)
