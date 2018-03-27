@@ -15,8 +15,10 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.SystemTimeSource;
@@ -100,7 +102,10 @@ abstract class NodeSyncHelpers
 
     private static long defaultTableSizeProvider(ColumnFamilyStore t)
     {
-        return t.getMemtablesLiveSize() + t.metric.liveDiskSpaceUsed.getCount();
+        long onDiskDataSize = 0;
+        for (SSTableReader sstable : t.getSSTables(SSTableSet.CANONICAL))
+            onDiskDataSize += sstable.uncompressedLength();
+        return t.getMemtablesLiveSize() + onDiskDataSize;
     }
 
     static long segmentSizeTarget()
