@@ -523,7 +523,7 @@ memtable_allocation_type: heap_buffers
 # and flush size and frequency. More is not better you just need enough flush writers
 # to never stall waiting for flushing to free memory.
 #
-memtable_flush_writers: 2
+memtable_flush_writers: 4
 
 # Total space to use for change-data-capture logs on disk.
 #

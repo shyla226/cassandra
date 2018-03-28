@@ -683,12 +683,13 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
                 do
                 {
                     Runnable p = priorityQueue.relaxedPoll();
-                    Runnable q = queue.relaxedPoll();
                     if (p != null)
                     {
                         p.run();
                         ++processed;
                     }
+                    // don't deque until the priority task has run successfully
+                    Runnable q = queue.relaxedPoll();
                     if (q != null)
                     {
                         q.run();
