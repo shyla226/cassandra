@@ -26,12 +26,14 @@ import java.nio.file.*;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -39,6 +41,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.datastax.bdp.db.util.CGroups;
+import io.netty.channel.epoll.Aio;
+import io.netty.channel.epoll.Epoll;
 import io.netty.channel.unix.FileDescriptor;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
@@ -58,6 +62,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.JavaUtils;
 import org.apache.cassandra.utils.SigarLibrary;
@@ -551,6 +556,8 @@ public class StartupChecks
                         FBUtilities.OPERATING_SYSTEM, url, warning);
     };
 
+    static String[] LIBAIO_INSTALLED_CMD = { "/bin/sh", "-c", "ldconfig -p | grep libaio | wc -l"};
+
     /**
      * If (true) AIO isn't available/enabled (possibly only on some data directory due to not supporting O_DIRECT),
      * performance is going to be rather bad so we warn the user about it.
@@ -571,8 +578,8 @@ public class StartupChecks
             if (!Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true")))
                 logger.warn("EPoll has been manually disabled (through the 'cassandra.native.epoll.enabled' system property). "
                             + "This may result in subpar performance.");
-            else
-                logger.warn("EPoll doesn't seem to be available: this may result in subpar performance.");
+            else  // Means !Epoll.isAvailable()
+                warnOnEpollUnavailable(logger);
         }
         else if (DatabaseDescriptor.assumeDataDirectoriesOnSSD())
         {
@@ -590,7 +597,7 @@ public class StartupChecks
                     logger.warn("Asynchronous I/O has been manually disabled (through the 'dse.io.aio.enabled' system property). "
                                 + "This may result in subpar performance.");
                 else // Means !Aio.isAvailable()
-                    logger.warn("Asynchronous I/O doesn't seem to be available: this may result in subpar performance.");
+                    warnOnAIOUnavailable(logger);
             }
         }
         else
@@ -603,6 +610,48 @@ public class StartupChecks
                             + " despite not using SSDs; please note that this is not the recommended configuration.");
         }
     };
+
+    private static void warnOnAIOUnavailable(Logger logger)
+    {
+        assert !Aio.isAvailable();
+        warnOnNettyComponentUnavailable("Asynchronous I/O", Aio.unavailabilityCause(), logger);
+    }
+
+    private static void warnOnEpollUnavailable(Logger logger)
+    {
+        assert !Epoll.isAvailable();
+        warnOnNettyComponentUnavailable("Epoll", Epoll.unavailabilityCause(), logger);
+    }
+
+    private static void warnOnNettyComponentUnavailable(String component, Throwable cause, Logger logger)
+    {
+        cause = cause == null
+                ? new UnknownError(String.format("%s unavailable due to unknown cause", component))
+                : Throwables.getRootCause(cause);
+
+        boolean libaioInstalled = libaioIsInstalled(logger);
+        logger.warn("{} doesn't seem to be available: this may result in subpar performance. Libaio {} to be installed.",
+                    component,
+                    libaioInstalled ? "appears" : "doesn't appear",
+                    cause);
+    }
+
+    private static boolean libaioIsInstalled(Logger logger)
+    {
+        if (!FBUtilities.isLinux)
+            return false; // LIBAIO_INSTALLED_CMD is a Linux command
+
+        try
+        {
+            return Integer.parseInt(FBUtilities.execBlocking(LIBAIO_INSTALLED_CMD, 1, TimeUnit.SECONDS).trim()) > 0;
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.warn("Could not determine if libaio is installed: {}/{}", t.getClass().getName(), t.getMessage());
+            return false;
+        }
+    }
 
     private static void warnOnDataDirNotSupportingODirect(Logger logger)
     {

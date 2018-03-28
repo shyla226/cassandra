@@ -22,6 +22,7 @@ import java.lang.reflect.Field;
 import java.math.BigInteger;
 import java.net.*;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.regex.Matcher;
@@ -1208,5 +1209,59 @@ public class FBUtilities
                 return cpuIds.cardinality();
             }
         }
+    }
+
+    /**
+     * Executes the specified command in a separate process. Waits for the process to complete
+     * and returns the entire standard output as a string.
+     *
+     * This method should only be used for executing shell commands
+     * that return a small output. This method will also block the calling thread.
+     *
+     * @param cmd - the command to execute
+     * @param timeout - the maximum time to wait for the command to complete
+     * @param timeUnit - the time unit for the timeout
+     *
+     * @return - the command standard output
+     * @throws RuntimeException if the program cannot be executed or does not complete within the specified timeout
+     */
+    public static String execBlocking(String[] cmd, int timeout, TimeUnit timeUnit)
+    {
+        try
+        {
+            Process proc = Runtime.getRuntime().exec(cmd);
+            if (!proc.waitFor(timeout, timeUnit))
+            {
+                String out = toString(proc.getInputStream());
+                proc.destroy();
+                throw new RuntimeException(String.format("<%s> did not terminate within %d %s. Partial output:\n%s",
+                                                         cmd, timeout, timeUnit.name().toLowerCase(), out));
+            }
+
+            if (proc.exitValue() != 0)
+            {
+                throw new RuntimeException(String.format("<%s> failed with error code %d:\n%s",
+                                                         cmd, proc.exitValue(), toString(proc.getErrorStream())));
+            }
+
+            return toString(proc.getInputStream());
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static String toString(InputStream in) throws IOException
+    {
+        byte[] buf = new byte[in.available()];
+        for (int p = 0; p < buf.length; )
+        {
+            int rd = in.read(buf, p, buf.length - p);
+            if (rd < 0)
+                break;
+            p += rd;
+        }
+        return new String(buf, StandardCharsets.UTF_8);
     }
 }

@@ -1,3 +1,6 @@
+DSE 6.0.1:
+ * Improve user warnings on startup when libaio package is not installed (DB-1917)
+
 DSE 6.0.0:
  * Thread-Per-Core rearchitecture (DB-28)
  * NodeSync (Continuous background repair) (DB-6)

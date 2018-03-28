@@ -887,28 +887,7 @@ public final class FileUtils
         if (!FBUtilities.isLinux)
             return null;
 
-        return detectVirtualization(() ->
-                                    {
-                                        try
-                                        {
-                                            Process proc = Runtime.getRuntime().exec(CPUID_COMMANDLINE);
-                                            proc.waitFor(1, TimeUnit.SECONDS);
-                                            InputStream in = proc.getInputStream();
-                                            byte[] buf = new byte[in.available()];
-                                            for (int p = 0; p < buf.length; )
-                                            {
-                                                int rd = in.read(buf, p, buf.length - p);
-                                                if (rd < 0)
-                                                    break;
-                                                p += rd;
-                                            }
-                                            return new String(buf, StandardCharsets.UTF_8);
-                                        }
-                                        catch (Exception e)
-                                        {
-                                            throw new RuntimeException(e);
-                                        }
-                                    },
+        return detectVirtualization(() -> FBUtilities.execBlocking(CPUID_COMMANDLINE, 1, TimeUnit.SECONDS),
                                     () ->
                                     {
                                         File hypervisorCaps = new File("/sys/hypervisor/properties/capabilities");

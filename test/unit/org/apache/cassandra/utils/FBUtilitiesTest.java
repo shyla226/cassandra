@@ -47,8 +47,10 @@ import org.apache.cassandra.dht.*;
 
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.service.StartupChecks;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 
 public class FBUtilitiesTest
@@ -240,5 +242,23 @@ public class FBUtilitiesTest
         }
 
         executor.shutdown();
+    }
+
+    @Test
+    public void testExecCommandLibaioInstalled()
+    {
+        if (!FBUtilities.isLinux)
+            return;
+
+        String[] LIBAIO_INSTALLED_CMD = { "/bin/sh", "-c", "ldconfig -p | grep libaio | wc -l"};
+        String ret = FBUtilities.execBlocking(LIBAIO_INSTALLED_CMD, 5, TimeUnit.SECONDS).trim();
+        Integer.parseInt(ret); // if this doesn't throw then the output was read correctly as it should be a number
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testExecCommandFailed()
+    {
+        String[] WRONG_CMD = { "crazy", "-cmd"};
+        FBUtilities.execBlocking(WRONG_CMD, 1, TimeUnit.SECONDS);
     }
 }
