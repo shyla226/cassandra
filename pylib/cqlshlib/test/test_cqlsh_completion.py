@@ -22,6 +22,8 @@ from __future__ import with_statement
 import re
 from .basecase import BaseTestCase, cqlsh
 from .cassconnect import testrun_cqlsh
+from .run_cqlsh import TimeoutError
+import time
 import unittest
 import sys
 
@@ -48,6 +50,24 @@ class CqlshCompletionCase(BaseTestCase):
     def tearDown(self):
         self.cqlsh_runner.__exit__(None, None, None)
 
+    def _reset_and_wait_for_prompt(self):
+        """
+        We send a CTRL-C to interrupt readline/raw_input and restart our loop, getting a new
+        prompt with clear input. Because the Python readline bindings print the prompt before entering the select,
+        we sleep to increase the chance that we've properly gotten to the select before sending a CTRL-C, in case
+        we call this twice in rapid succession. In case this sleep is not sufficient, we grant a single retry. The
+        only situation in which this won't work is if cqlsh takes more than 10 seconds between printing the prompt and
+        entering the select, which is such an extreme case that it doesn't hurt to know. See DB-1949 for more
+        information.
+        """
+        try:
+            time.sleep(0.05)
+            self.cqlsh.send(CTRL_C)
+            self.cqlsh.read_to_next_prompt()
+        except TimeoutError:
+            self.cqlsh.send(CTRL_C)
+            self.cqlsh.read_to_next_prompt()
+
     def _get_completions(self, inputstring, split_completed_lines=True):
         """
         Get results of tab completion in cqlsh. Returns a bare string if a
@@ -72,8 +92,7 @@ class CqlshCompletionCase(BaseTestCase):
         if choice_output == BEL:
             choice_output = ''
 
-        self.cqlsh.send(CTRL_C)  # cancel any current line
-        self.cqlsh.read_to_next_prompt()
+        self._reset_and_wait_for_prompt()
 
         choice_lines = choice_output.splitlines()
         if choice_lines:
@@ -132,8 +151,7 @@ class CqlshCompletionCase(BaseTestCase):
                                        other_choices_ok=other_choices_ok,
                                        split_completed_lines=split_completed_lines)
         finally:
-            self.cqlsh.send(CTRL_C)  # cancel any current line
-            self.cqlsh.read_to_next_prompt()
+            self._reset_and_wait_for_prompt()
 
     def strategies(self):
         return self.module.CqlRuleSet.replication_strategies
