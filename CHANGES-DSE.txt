@@ -3,6 +3,7 @@ DSE 5.1.8
  * Read connection ssl option from cqlshrc (DB-1800)
  * Fix SASI AND/OR semantics for StandardAnalyzer (DB-548)
 Merged from dse5.0:
+ * Improve replace fail messages when a replace is retried before QUARANTINE_DELAY (DB-1776)
  * Delay closing connection when nodes are removed to allow inflight commands to complete (DB-1721)
  * Harden txn log files against exceptions when adding records and improve log messages (DB-1732)
  * Fix JVM startup check (DB-1882)

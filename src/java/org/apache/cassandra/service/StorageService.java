@@ -1050,13 +1050,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             {
                 if (!isReplacingSameAddress())
                 {
+                    final String FAILED_REPLACE_MSG = String.format("If this node failed replace recently, wait at least %ds before starting a new " +
+                                                                    "replace operation.", TimeUnit.MILLISECONDS.toSeconds(Gossiper.QUARANTINE_DELAY));
+
                     // collect all (previous) endpoints for the bootstrap tokens
                     Set<InetAddress> previousAddresses = new HashSet<>();
                     for (Token token : bootstrapTokens)
                     {
                         InetAddress existing = tokenMetadata.getEndpoint(token);
                         if (existing == null)
-                            throw new UnsupportedOperationException("Cannot replace token " + token + " which does not exist!");
+                            throw new UnsupportedOperationException("Cannot replace token " + token + " which does not exist! " + FAILED_REPLACE_MSG);
                         previousAddresses.add(existing);
                     }
 
@@ -1090,9 +1093,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                             if (nanoTimeNodeUpdatedOffset - updateTimestamp < 0)
                             {
                                 // Use a separate log message to (hopefully) not screw up existing dtests
-                                logger.error("Cannot replace a live node {}. Endpoint state changed since {} (nanotime={})",
-                                             existing, new Date(timeSleepOffset), updateTimestamp);
-                                throw new UnsupportedOperationException("Cannot replace a live node... ");
+                                logger.error("Cannot replace a live node {}. Endpoint state changed since {} (nanotime={}). {}",
+                                             existing, new Date(timeSleepOffset), updateTimestamp, FAILED_REPLACE_MSG);
+                                throw new UnsupportedOperationException("Cannot replace a live node... " + FAILED_REPLACE_MSG);
                             }
                         }
                     } while (System.currentTimeMillis() < timeEnd);
