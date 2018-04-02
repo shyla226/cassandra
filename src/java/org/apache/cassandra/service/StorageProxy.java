@@ -730,7 +730,7 @@ public class StorageProxy implements StorageProxyMBean
 
         // no remote view mutation
         if (mutationsAndEndpoints.isEmpty())
-            return Completable.concat(completables)
+            return Completable.merge(completables)
                               .doFinally(() -> viewWriteMetrics.addNano(System.nanoTime() - startTime));
 
         Completable batchlogCompletable = null;
@@ -772,8 +772,8 @@ public class StorageProxy implements StorageProxyMBean
         completables.add(batchlogCompletable.doOnComplete(() -> {
             writeBatchedMutations(mutationsAndEndpoints, handlers, Verbs.WRITES.VIEW_WRITE);
         }));
-
-        return Completable.concat(completables)
+        // local updates can run parallel with batchlogCompletable
+        return Completable.merge(completables)
                           .doFinally(() -> viewWriteMetrics.addNano(System.nanoTime() - startTime));
     }
 
