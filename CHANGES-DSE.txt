@@ -99,6 +99,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no internal DB ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no internal DB ticket)
 Merged from dse5.0:
+ * Fix error in MVs referencing a function with uppercase letters on its name (DB-1874)
  * Delay closing connection when nodes are removed to allow inflight commands to complete (DB-1721)
  * Harden txn log files against exceptions when adding records and improve log messages (DB-1732)
  * Fix materialized view schema backup as table (DB-1828)
