@@ -45,7 +45,7 @@ public abstract class MemtablePool
     // so that your handler will be called if memory is released concurrently.
     public AtomicReference<CompletableFuture<Void>> releaseFuture = new AtomicReference<>(new CompletableFuture<>());
 
-    MemtablePool(long maxOnHeapMemory, long maxOffHeapMemory, float cleanThreshold, Runnable cleaner)
+    MemtablePool(long maxOnHeapMemory, long maxOffHeapMemory, double cleanThreshold, Runnable cleaner)
     {
         this.onHeap = getSubPool(maxOnHeapMemory, cleanThreshold);
         this.offHeap = getSubPool(maxOffHeapMemory, cleanThreshold);
@@ -56,7 +56,7 @@ public abstract class MemtablePool
             this.cleaner.start();
     }
 
-    SubPool getSubPool(long limit, float cleanThreshold)
+    SubPool getSubPool(long limit, double cleanThreshold)
     {
         return new SubPool(limit, cleanThreshold);
     }
@@ -75,7 +75,7 @@ public abstract class MemtablePool
         public final long limit;
 
         // ratio of used to spare (both excluding 'reclaiming') at which to trigger a clean
-        public final float cleanThreshold;
+        public final double cleanThreshold;
 
         // total bytes allocated and reclaiming
         volatile long allocated;
@@ -84,7 +84,7 @@ public abstract class MemtablePool
         // a cache of the calculation determining at what allocation threshold we should next clean
         volatile long nextClean;
 
-        public SubPool(long limit, float cleanThreshold)
+        public SubPool(long limit, double cleanThreshold)
         {
             this.limit = limit;
             this.cleanThreshold = cleanThreshold;

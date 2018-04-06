@@ -51,7 +51,6 @@ public class NativeAllocator extends MemtableAllocator
 
     private Region currentRegion = null;
     private Collection<Region> regions = new LinkedList<>();
-    private final EnsureOnHeap.CloneToHeap cloneToHeap = new EnsureOnHeap.CloneToHeap();
 
     private final int coreId;
 
@@ -96,9 +95,9 @@ public class NativeAllocator extends MemtableAllocator
         return new NativeDecoratedKey(key.getToken(), this, key.getKey());
     }
 
-    public EnsureOnHeap ensureOnHeap()
+    public boolean onHeapOnly()
     {
-        return cloneToHeap;
+        return false;
     }
 
     public long allocate(int size)

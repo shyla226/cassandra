@@ -39,6 +39,7 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
+import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.HeapAllocator;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 
@@ -53,24 +54,25 @@ import org.apache.cassandra.utils.memory.MemtableAllocator;
 public class AtomicBTreePartition extends AbstractBTreePartition
 {
     public static final long EMPTY_SIZE = ObjectSizes.measure(new AtomicBTreePartition(null,
-            DatabaseDescriptor.getPartitioner().decorateKey(ByteBuffer.allocate(1)),
-            null));
+            DatabaseDescriptor.getPartitioner().decorateKey(ByteBuffer.allocate(1))));
 
     private final static Logger logger = LoggerFactory.getLogger(AtomicBTreePartition.class);
-
-    private final MemtableAllocator allocator;
 
     private volatile Holder ref;
 
     private final TableMetadataRef metadata;
 
-    public AtomicBTreePartition(TableMetadataRef metadata, DecoratedKey partitionKey, MemtableAllocator allocator)
+    public AtomicBTreePartition(TableMetadataRef metadata, DecoratedKey partitionKey)
     {
         // involved in potential bug? partition columns may be a subset if we alter columns while it's in memtable
+        this(metadata, partitionKey, EMPTY);
+    }
+
+    private AtomicBTreePartition(TableMetadataRef metadata, DecoratedKey partitionKey, Holder ref)
+    {
         super(partitionKey);
         this.metadata = metadata;
-        this.allocator = allocator;
-        this.ref = EMPTY;
+        this.ref = ref;
     }
 
     public TableMetadata metadata()
@@ -103,7 +105,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
      * @return an array containing first the difference in size seen after merging the updates, and second the minimum
      * time detla between updates and the update itself.
      */
-    public Single<AddResult> addAllWithSizeDelta(final PartitionUpdate update, UpdateTransaction indexer)
+    public Single<AddResult> addAllWithSizeDelta(final PartitionUpdate update, UpdateTransaction indexer, MemtableAllocator allocator)
     {
         RowUpdater updater = new RowUpdater(this, allocator, indexer);
         try
@@ -148,64 +150,77 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         }
     }
 
-    @Override
-    public DeletionInfo deletionInfo()
+    public AtomicBTreePartition ensureOnHeap(MemtableAllocator allocator)
     {
-        return allocator.ensureOnHeap().applyToDeletionInfo(super.deletionInfo());
+        return allocator.onHeapOnly() ? this : new AtomicBTreePartitionOnHeap(this, new EnsureOnHeap());
     }
 
-    @Override
-    public Row staticRow()
+    /**
+     * An snapshot of the current AtomicBTreePartition data, copied on heap when retrieved.
+     */
+    private static final class AtomicBTreePartitionOnHeap extends AtomicBTreePartition
     {
-        return allocator.ensureOnHeap().applyToStatic(super.staticRow());
-    }
+        private final EnsureOnHeap ensureOnHeap;
 
-    @Override
-    public DecoratedKey partitionKey()
-    {
-        return allocator.ensureOnHeap().applyToPartitionKey(super.partitionKey());
-    }
+        private AtomicBTreePartitionOnHeap(AtomicBTreePartition inner, EnsureOnHeap ensureOnHeap)
+        {
+            super(inner.metadata, ensureOnHeap.applyToPartitionKey(inner.partitionKey()), inner.ref);
+            this.ensureOnHeap = ensureOnHeap;
+        }
 
-    @Override
-    public Row getRow(Clustering clustering)
-    {
-        return allocator.ensureOnHeap().applyToRow(super.getRow(clustering));
-    }
+        @Override
+        public DeletionInfo deletionInfo()
+        {
+            return ensureOnHeap.applyToDeletionInfo(super.deletionInfo());
+        }
 
-    @Override
-    public Row lastRow()
-    {
-        return allocator.ensureOnHeap().applyToRow(super.lastRow());
-    }
+        @Override
+        public Row staticRow()
+        {
+            return ensureOnHeap.applyToStatic(super.staticRow());
+        }
 
-    @Override
-    public SearchIterator<Clustering, Row> searchIterator(ColumnFilter columns, boolean reversed)
-    {
-        return allocator.ensureOnHeap().applyToPartition(super.searchIterator(columns, reversed));
-    }
+        @Override
+        public Row getRow(Clustering clustering)
+        {
+            return ensureOnHeap.applyToRow(super.getRow(clustering));
+        }
 
-    @Override
-    public UnfilteredRowIterator unfilteredIterator(ColumnFilter selection, Slices slices, boolean reversed)
-    {
-        return allocator.ensureOnHeap().applyToPartition(super.unfilteredIterator(selection, slices, reversed));
-    }
+        @Override
+        public Row lastRow()
+        {
+            return ensureOnHeap.applyToRow(super.lastRow());
+        }
 
-    @Override
-    public UnfilteredRowIterator unfilteredIterator()
-    {
-        return allocator.ensureOnHeap().applyToPartition(super.unfilteredIterator());
-    }
+        @Override
+        public SearchIterator<Clustering, Row> searchIterator(ColumnFilter columns, boolean reversed)
+        {
+            return ensureOnHeap.applyToPartition(super.searchIterator(columns, reversed));
+        }
 
-    @Override
-    public UnfilteredRowIterator unfilteredIterator(Holder current, ColumnFilter selection, Slices slices, boolean reversed)
-    {
-        return allocator.ensureOnHeap().applyToPartition(super.unfilteredIterator(current, selection, slices, reversed));
-    }
+        @Override
+        public UnfilteredRowIterator unfilteredIterator(ColumnFilter selection, Slices slices, boolean reversed)
+        {
+            return ensureOnHeap.applyToPartition(super.unfilteredIterator(selection, slices, reversed));
+        }
 
-    @Override
-    public Iterator<Row> iterator()
-    {
-        return allocator.ensureOnHeap().applyToPartition(super.iterator());
+        @Override
+        public UnfilteredRowIterator unfilteredIterator()
+        {
+            return ensureOnHeap.applyToPartition(super.unfilteredIterator());
+        }
+
+        @Override
+        public UnfilteredRowIterator unfilteredIterator(Holder current, ColumnFilter selection, Slices slices, boolean reversed)
+        {
+            return ensureOnHeap.applyToPartition(super.unfilteredIterator(current, selection, slices, reversed));
+        }
+
+        @Override
+        public Iterator<Row> iterator()
+        {
+            return ensureOnHeap.applyToPartition(super.iterator());
+        }
     }
 
     public Holder holder()

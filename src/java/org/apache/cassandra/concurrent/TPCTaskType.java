@@ -85,6 +85,8 @@ public enum TPCTaskType
     WRITE_DEFRAGMENT(Features.PENDABLE),
     /** Switching thread to write in memtable when not already on the correct thread */
     WRITE_MEMTABLE("WRITE_SWITCH_FOR_MEMTABLE"),
+    /** An event posted on the IO scheduler to flush a memtable*/
+    FLUSH_MEMTABLE,
     /** Write request is waiting for the commit log segment to switch */
     WRITE_POST_COMMIT_LOG_SEGMENT("WRITE_AWAIT_COMMITLOG_SEGMENT", Features.EXTERNAL_QUEUE),
     /** Write request is waiting for commit log to sync to disk */

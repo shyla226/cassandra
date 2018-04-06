@@ -427,18 +427,18 @@ seed_provider:
 # memtable_heap_space_in_mb: 2048
 # memtable_offheap_space_in_mb: 2048
 
-# memtable_cleanup_threshold is deprecated. The default calculation
-# is the only reasonable choice. See the comments on  memtable_flush_writers
-# for more information.
-#
 # Ratio of occupied non-flushing memtable size to total permitted size
 # that will trigger a flush of the largest memtable. Larger mct will
-# mean larger flushes and hence less compaction, but also less concurrent
-# flush activity which can make it difficult to keep your disks fed
-# under heavy write load.
+# mean larger flushes and hence less compaction.
 #
-# memtable_cleanup_threshold defaults to 1 / (memtable_flush_writers + 1)
-# memtable_cleanup_threshold: 0.34
+# memtable_cleanup_threshold: 0.6
+
+# Maximum sizes for a single memtable, on and off heap. These values indicate the maximum size in mb
+# that a memtable can grow to. Beyond these values, it will be flushed. Set these values to zero to
+# disable this behavior. When these values are not set, by default they will be set to 1 / 5 of
+# memtable_heap_space_in_mb and memtable_offheap_space_in_mb respectively.
+# memtable_max_single_heap_size_mb: 500
+# memtable_max_single_offheap_size_mb: 500
 
 # Specify the way Cassandra allocates and manages memtable memory.
 # Options are:

@@ -53,7 +53,6 @@ public class SlabAllocator extends MemtableBufferAllocator
     // this queue is used to keep references to off-heap allocated regions so that we can free them when we are discarded
     private final Collection<Region> offHeapRegions = new LinkedList<>();
     private final boolean allocateOnHeapOnly;
-    private final EnsureOnHeap ensureOnHeap;
 
     private final int coreId;
 
@@ -63,12 +62,11 @@ public class SlabAllocator extends MemtableBufferAllocator
         assert TPC.isValidCoreId(coreId) || coreId == -1;   // -1 is used for estimateRowOverhead and testing
         this.coreId = coreId;
         this.allocateOnHeapOnly = allocateOnHeapOnly;
-        this.ensureOnHeap = allocateOnHeapOnly ? new EnsureOnHeap.NoOp() : new EnsureOnHeap.CloneToHeap();
     }
 
-    public EnsureOnHeap ensureOnHeap()
+    public boolean onHeapOnly()
     {
-        return ensureOnHeap;
+        return allocateOnHeapOnly;
     }
 
     public ByteBuffer allocate(int size)

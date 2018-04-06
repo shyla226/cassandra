@@ -30,147 +30,87 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.utils.SearchIterator;
 
-public abstract class EnsureOnHeap extends Transformation
+public class EnsureOnHeap extends Transformation
 {
-    public abstract DecoratedKey applyToPartitionKey(DecoratedKey key);
-    public abstract UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition);
-    public abstract SearchIterator<Clustering, Row> applyToPartition(SearchIterator<Clustering, Row> partition);
-    public abstract Iterator<Row> applyToPartition(Iterator<Row> partition);
-    public abstract DeletionInfo applyToDeletionInfo(DeletionInfo deletionInfo);
-    public abstract Row applyToRow(Row row);
-    public abstract Row applyToStatic(Row row);
-    public abstract RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker);
-
-    static class CloneToHeap extends EnsureOnHeap
+    protected BaseRowIterator<?> applyToPartition(BaseRowIterator partition)
     {
-        protected BaseRowIterator<?> applyToPartition(BaseRowIterator partition)
-        {
-            return partition instanceof UnfilteredRowIterator
-                   ? Transformation.apply((UnfilteredRowIterator) partition, this)
-                   : Transformation.apply((RowIterator) partition, this);
-        }
-
-        public DecoratedKey applyToPartitionKey(DecoratedKey key)
-        {
-            return new BufferDecoratedKey(key.getToken(), HeapAllocator.instance.clone(key.getKey()));
-        }
-
-        public Row applyToRow(Row row)
-        {
-            // If current "row" is Rows.EMPTY_STATIC_ROW, don't copy it again, as "copied_empty_static_row" != EMPTY_STATIC_ROW
-            if (row == null || row == Rows.EMPTY_STATIC_ROW)
-                return row;
-            return Rows.copy(row, HeapAllocator.instance.cloningRowBuilder(row.size())).build();
-        }
-
-        public Row applyToStatic(Row row)
-        {
-            if (row == Rows.EMPTY_STATIC_ROW)
-                return row;
-            return applyToRow(row);
-        }
-
-        public RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
-        {
-            return marker.copy(HeapAllocator.instance);
-        }
-
-        public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
-        {
-            return Transformation.apply(partition, this);
-        }
-
-        public SearchIterator<Clustering, Row> applyToPartition(SearchIterator<Clustering, Row> partition)
-        {
-            return new SearchIterator<Clustering, Row>()
-            {
-                public Row next(Clustering key)
-                {
-                    return applyToRow(partition.next(key));
-                }
-
-                public void rewind()
-                {
-                    throw new UnsupportedOperationException();
-                }
-
-                public int indexOfCurrent()
-                {
-                    throw new UnsupportedOperationException();
-                }
-            };
-        }
-
-        public Iterator<Row> applyToPartition(Iterator<Row> partition)
-        {
-            return new Iterator<Row>()
-            {
-                public boolean hasNext()
-                {
-                    return partition.hasNext();
-                }
-                public Row next()
-                {
-                    return applyToRow(partition.next());
-                }
-                public void remove()
-                {
-                    partition.remove();
-                }
-            };
-        }
-
-        public DeletionInfo applyToDeletionInfo(DeletionInfo deletionInfo)
-        {
-            return deletionInfo.copy(HeapAllocator.instance);
-        }
+        return partition instanceof UnfilteredRowIterator
+               ? Transformation.apply((UnfilteredRowIterator) partition, this)
+               : Transformation.apply((RowIterator) partition, this);
     }
 
-    static class NoOp extends EnsureOnHeap
+    public DecoratedKey applyToPartitionKey(DecoratedKey key)
     {
-        protected BaseRowIterator<?> applyToPartition(BaseRowIterator partition)
-        {
-            return partition;
-        }
+        return new BufferDecoratedKey(key.getToken(), HeapAllocator.instance.clone(key.getKey()));
+    }
 
-        public DecoratedKey applyToPartitionKey(DecoratedKey key)
-        {
-            return key;
-        }
-
-        public Row applyToRow(Row row)
-        {
+    public Row applyToRow(Row row)
+    {
+        // If current "row" is Rows.EMPTY_STATIC_ROW, don't copy it again, as "copied_empty_static_row" != EMPTY_STATIC_ROW
+        if (row == null || row == Rows.EMPTY_STATIC_ROW)
             return row;
-        }
+        return Rows.copy(row, HeapAllocator.instance.cloningRowBuilder(row.size())).build();
+    }
 
-        public Row applyToStatic(Row row)
-        {
+    public Row applyToStatic(Row row)
+    {
+        if (row == Rows.EMPTY_STATIC_ROW)
             return row;
-        }
+        return applyToRow(row);
+    }
 
-        public RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
-        {
-            return marker;
-        }
+    public RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
+    {
+        return marker.copy(HeapAllocator.instance);
+    }
 
-        public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
-        {
-            return partition;
-        }
+    public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
+    {
+        return Transformation.apply(partition, this);
+    }
 
-        public SearchIterator<Clustering, Row> applyToPartition(SearchIterator<Clustering, Row> partition)
+    public SearchIterator<Clustering, Row> applyToPartition(SearchIterator<Clustering, Row> partition)
+    {
+        return new SearchIterator<Clustering, Row>()
         {
-            return partition;
-        }
+            public Row next(Clustering key)
+            {
+                return applyToRow(partition.next(key));
+            }
 
-        public Iterator<Row> applyToPartition(Iterator<Row> partition)
-        {
-            return partition;
-        }
+            public void rewind()
+            {
+                throw new UnsupportedOperationException();
+            }
 
-        public DeletionInfo applyToDeletionInfo(DeletionInfo deletionInfo)
+            public int indexOfCurrent()
+            {
+                throw new UnsupportedOperationException();
+            }
+        };
+    }
+
+    public Iterator<Row> applyToPartition(Iterator<Row> partition)
+    {
+        return new Iterator<Row>()
         {
-            return deletionInfo;
-        }
+            public boolean hasNext()
+            {
+                return partition.hasNext();
+            }
+            public Row next()
+            {
+                return applyToRow(partition.next());
+            }
+            public void remove()
+            {
+                partition.remove();
+            }
+        };
+    }
+
+    public DeletionInfo applyToDeletionInfo(DeletionInfo deletionInfo)
+    {
+        return deletionInfo.copy(HeapAllocator.instance);
     }
 }

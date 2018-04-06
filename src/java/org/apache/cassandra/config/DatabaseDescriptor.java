@@ -442,11 +442,24 @@ public class DatabaseDescriptor
             conf.memtable_heap_space_in_mb = (int) (Runtime.getRuntime().maxMemory() / (4 * 1048576));
         if (conf.memtable_heap_space_in_mb <= 0)
             throw new ConfigurationException("memtable_heap_space_in_mb must be positive, but was " + conf.memtable_heap_space_in_mb, false);
-        logger.info("Global memtable on-heap threshold is enabled at {}MB", conf.memtable_heap_space_in_mb);
+
+        logger.info("Global memtable on-heap threshold is enabled at {} MiB", conf.memtable_heap_space_in_mb);
         if (conf.memtable_offheap_space_in_mb == 0)
             logger.info("Global memtable off-heap threshold is disabled, HeapAllocator will be used instead");
         else
-            logger.info("Global memtable off-heap threshold is enabled at {}MB", conf.memtable_offheap_space_in_mb);
+            logger.info("Global memtable off-heap threshold is enabled at {} MiB", conf.memtable_offheap_space_in_mb);
+
+        if (conf.memtable_max_single_heap_size_mb == null)
+            conf.memtable_max_single_heap_size_mb = (int)(conf.memtable_heap_space_in_mb / 5.);
+
+        if (conf.memtable_max_single_offheap_size_mb == null)
+            conf.memtable_max_single_offheap_size_mb = (int)(conf.memtable_offheap_space_in_mb / 5.);
+
+        if (conf.memtable_max_single_heap_size_mb > 0 || conf.memtable_max_single_offheap_size_mb > 0)
+            logger.info("Max size for an individual memtable is {} MiB on-heap and {} MiB off-heap",
+                        conf.memtable_max_single_heap_size_mb, conf.memtable_max_single_offheap_size_mb);
+        else
+            logger.info("Max size for an individual memtable is disabled");
 
         checkForLowestAcceptedTimeouts(conf);
 
@@ -577,22 +590,16 @@ public class DatabaseDescriptor
         if (conf.hints_directory.equals(conf.saved_caches_directory))
             throw new ConfigurationException("saved_caches_directory must not be the same as the hints_directory", false);
 
+        // The number of flush writers should depend on the disk type, eventually we should increase the flush writers for NVMEs
+        // and consider having disks supporting different flush writers
         if (conf.memtable_flush_writers == 0)
-        {
-            conf.memtable_flush_writers = 4;
-        }
+            conf.memtable_flush_writers = assumeDataDirectoriesOnSSD() ? 4 : 2;
 
         if (conf.memtable_flush_writers < 1)
             throw new ConfigurationException("memtable_flush_writers must be at least 1, but was " + conf.memtable_flush_writers, false);
 
         if (conf.memtable_cleanup_threshold == null)
-        {
-            conf.memtable_cleanup_threshold = (float) (1.0 / (1 + conf.memtable_flush_writers));
-        }
-        else
-        {
-            logger.warn("memtable_cleanup_threshold has been deprecated and should be removed from cassandra.yaml");
-        }
+            conf.memtable_cleanup_threshold = 0.6;
 
         if (conf.memtable_cleanup_threshold < 0.01f)
             throw new ConfigurationException("memtable_cleanup_threshold must be >= 0.01, but was " + conf.memtable_cleanup_threshold, false);
@@ -600,6 +607,8 @@ public class DatabaseDescriptor
             throw new ConfigurationException("memtable_cleanup_threshold must be <= 0.99, but was " + conf.memtable_cleanup_threshold, false);
         if (conf.memtable_cleanup_threshold < 0.1f)
             logger.warn("memtable_cleanup_threshold is set very low [{}], which may cause performance degradation", conf.memtable_cleanup_threshold);
+
+        logger.info("Using {} memtable flush writers with global cleanup threshold of {}", conf.memtable_flush_writers, conf.memtable_cleanup_threshold);
 
         if (conf.concurrent_compactors == null)
             conf.concurrent_compactors = Math.min(8, Math.max(2, Math.min(FBUtilities.getAvailableProcessors(), conf.data_file_directories.length)));
@@ -2535,9 +2544,19 @@ public class DatabaseDescriptor
         return conf.memtable_allocation_type;
     }
 
-    public static Float getMemtableCleanupThreshold()
+    public static double getMemtableCleanupThreshold()
     {
         return conf.memtable_cleanup_threshold;
+    }
+
+    public static int getMemtableMaxSingleHeapSizeInMb()
+    {
+        return conf.memtable_max_single_heap_size_mb;
+    }
+
+    public static int getMemtableMaxSingleOffHeapSizeInMb()
+    {
+        return conf.memtable_max_single_offheap_size_mb;
     }
 
     public static int getIndexSummaryResizeIntervalInMinutes()

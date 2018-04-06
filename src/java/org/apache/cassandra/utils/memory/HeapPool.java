@@ -20,11 +20,9 @@ package org.apache.cassandra.utils.memory;
 
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.utils.concurrent.OpOrder;
-
 public class HeapPool extends MemtablePool
 {
-    public HeapPool(long maxOnHeapMemory, float cleanupThreshold, Runnable cleaner)
+    public HeapPool(long maxOnHeapMemory, double cleanupThreshold, Runnable cleaner)
     {
         super(maxOnHeapMemory, 0, cleanupThreshold, cleaner);
     }
@@ -36,21 +34,20 @@ public class HeapPool extends MemtablePool
 
     private static class Allocator extends MemtableBufferAllocator
     {
-        private static final EnsureOnHeap ENSURE_NOOP = new EnsureOnHeap.NoOp();
         Allocator(HeapPool pool)
         {
             super(pool.onHeap.newAllocator(), pool.offHeap.newAllocator());
+        }
+
+        public boolean onHeapOnly()
+        {
+            return true;
         }
 
         public ByteBuffer allocate(int size)
         {
             super.onHeap().allocated(size);
             return ByteBuffer.allocate(size);
-        }
-
-        public EnsureOnHeap ensureOnHeap()
-        {
-            return ENSURE_NOOP;
         }
     }
 }

@@ -71,7 +71,7 @@ public abstract class MemtableAllocator
 
     public abstract Row.Builder rowBuilder();
     public abstract DecoratedKey clone(DecoratedKey key);
-    public abstract EnsureOnHeap ensureOnHeap();
+    public abstract boolean onHeapOnly();
 
     public SubAllocator onHeap()
     {
