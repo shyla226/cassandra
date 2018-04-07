@@ -370,25 +370,49 @@ class Validator
         if (previous.isDone())
             return previous == State.CANCELLED;
 
-        lifecycle.cancel(reason);
+        doCancel(reason);
 
-        if (flowFuture != null)
-            flowFuture.cancel(true);
-
-        completionFuture.actuallyCancel();
         return true;
+    }
+
+    private void doCancel(String reason)
+    {
+        try
+        {
+            lifecycle.cancel(reason);
+        }
+        finally
+        {
+            if (flowFuture != null)
+                flowFuture.cancel(true);
+
+            completionFuture.actuallyCancel();
+        }
     }
 
     private void markFinished()
     {
+        if (lifecycle.isInvalid())
+        {
+            cancel("Validation invalidated by either a topology change or a depth decrease. " +
+                    "The segment will be retried.");
+            return;
+        }
         // If we were already done (typically cancelled), do nothing. Mark finished otherwise and proceed.
         if (state.getAndUpdate(s -> s.isDone() ? s : State.FINISHED).isDone())
             return;
-
-        lifecycle.service().updateMetrics(table(), metrics);
-        ValidationInfo info = new ValidationInfo(lifecycle.startTime(), validationOutcome, missingNodes);
-        lifecycle.onCompletion(info, metrics);
-        completionFuture.complete(info);
+        try
+        {
+            lifecycle.service().updateMetrics(table(), metrics);
+            ValidationInfo info = new ValidationInfo(lifecycle.startTime(), validationOutcome, missingNodes);
+            lifecycle.onCompletion(info, metrics);
+            completionFuture.complete(info);
+        }
+        catch (Throwable e)
+        {
+            doCancel("Failed to mark validation finished due to " + e.getMessage());
+            return;
+        }
     }
 
     private void recordPage(ValidationOutcome outcome, PageProcessingListener listener)

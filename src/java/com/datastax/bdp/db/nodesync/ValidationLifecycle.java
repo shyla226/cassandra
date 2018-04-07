@@ -105,10 +105,22 @@ class ValidationLifecycle
         segmentRef.lock();
     }
 
+    /**
+     * InvalidatedNodeSyncStateException can only be thrown when current validation is NOT done, otherwise NodeSync
+     * cannot cancel the Validator
+     */
     private void checkForInvalidation()
     {
         if (segmentRef.isInvalidated())
             throw new InvalidatedNodeSyncStateException();
+    }
+
+    /**
+     * Check if given reference is still valid
+     */
+    protected boolean isInvalid()
+    {
+        return segmentRef.isInvalidated();
     }
 
     /**
@@ -151,8 +163,6 @@ class ValidationLifecycle
      */
     void onCompletion(ValidationInfo info, ValidationMetrics metrics)
     {
-        checkForInvalidation();
-
         tracing.onSegmentCompletion(info.outcome, metrics);
 
         // This will release the lock.
