@@ -10,6 +10,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.FSError;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 
 /**
  * The error handler for disk errors during startup, see {@link JVMStabilityInspector}.
@@ -26,8 +28,11 @@ final class StartupDiskErrorHandler implements ErrorHandler
     }
 
     @Override
-    public void handleError(Throwable t)
+    public void handleError(Throwable error)
     {
+        if (!(error instanceof FSError) && !(error instanceof CorruptSSTableException))
+            return;
+
         switch (DatabaseDescriptor.getDiskFailurePolicy())
         {
             case stop_paranoid:
@@ -35,8 +40,8 @@ final class StartupDiskErrorHandler implements ErrorHandler
             case die:
                 logger.error("Exiting forcefully due to file system exception on startup, disk failure policy \"{}\"",
                              DatabaseDescriptor.getDiskFailurePolicy(),
-                             t);
-                killer.killJVM(t, true);
+                             error);
+                killer.killJVM(error, true);
                 break;
             default:
                 break;
