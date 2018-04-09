@@ -26,6 +26,7 @@ import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.zip.CRC32;
@@ -34,6 +35,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -161,6 +164,23 @@ final class HintsDescriptor
     static boolean isHintFileName(Path path)
     {
         return pattern.matcher(path.getFileName().toString()).matches();
+    }
+
+    static Optional<HintsDescriptor> readFromFileQuietly(Path path)
+    {
+        try (RandomAccessFile raf = new RandomAccessFile(path.toFile(), "r"))
+        {
+            return Optional.of(deserialize(raf));
+        }
+        catch (ChecksumMismatchException e)
+        {
+            throw new FSReadError(e, path.toFile());
+        }
+        catch (IOException e)
+        {
+            logger.error("Failed to deserialize hints descriptor {}", path.toString(), e);
+            return Optional.empty();
+        }
     }
 
     static HintsDescriptor readFromFile(Path path)
@@ -331,7 +351,7 @@ final class HintsDescriptor
     private static void validateCRC(int expected, int actual) throws IOException
     {
         if (expected != actual)
-            throw new IOException("Hints Descriptor CRC Mismatch");
+            throw new ChecksumMismatchException("Hints Descriptor CRC Mismatch");
     }
 
     public static Statistics EMPTY_STATS = new Statistics(0);
