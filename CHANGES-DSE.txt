@@ -1,4 +1,5 @@
 DSE 5.1.9
+ * Upgrade netty to 4.0.54 same as BDP; Avoid log spam for unclean client shutdown (DB-1834)
 Merged from dse5.0:
  * Fix legacy complex range tombstone serialization+deserialization for static and regular columns (DB-1757)
  * Fix error in MVs referencing a function with uppercase letters on its name (DB-1874)
