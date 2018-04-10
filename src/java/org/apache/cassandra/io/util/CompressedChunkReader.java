@@ -197,6 +197,18 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                         compressed.position(alignmentShift);
                         uncompressed.clear();
 
+                        if (shouldCheckCrc())
+                        {
+                            int checksum = (int) ChecksumType.CRC32.of(compressed);
+
+                            //Change the limit to include the checksum
+                            compressed.limit(compressed.capacity());
+                            if (compressed.getInt() != checksum)
+                                throw new CorruptBlockException(channel.filePath(), chunk);
+
+                            compressed.limit(chunk.length + alignmentShift).position(alignmentShift);
+                        }
+
                         //CASSANDRA-10520 adds this threshold where we skip decompressing if
                         //the compression ratio is not enough of a win to be worth it.
                         if (chunk.length < maxCompressedLength)
@@ -215,17 +227,6 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                             uncompressed.put(compressed);
                         }
                         uncompressed.flip();
-
-                        if (shouldCheckCrc())
-                        {
-                            compressed.limit(chunk.length + alignmentShift).position(alignmentShift);
-                            int checksum = (int) ChecksumType.CRC32.of(compressed);
-
-                            //Change the limit to include the checksum
-                            compressed.limit(compressed.capacity());
-                            if (compressed.getInt() != checksum)
-                                throw new CorruptBlockException(channel.filePath(), chunk);
-                        }
 
                     }
                     catch (Throwable t)
@@ -336,6 +337,17 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
                 try
                 {
+                    if (shouldCheckCrc())
+                    {
+                        int checksum = (int) ChecksumType.CRC32.of(compressedChunk);
+
+                        compressedChunk.limit(compressedChunk.capacity());
+                        if (compressedChunk.getInt() != checksum)
+                            throw new CorruptBlockException(channel.filePath(), chunk);
+
+                        compressedChunk.position(chunkOffset).limit(chunkOffset + chunk.length);
+                    }
+
                     if (chunk.length < maxCompressedLength)
                         metadata.compressor().uncompress(compressedChunk, uncompressed);
                     else
@@ -346,17 +358,6 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                     throw new CorruptBlockException(channel.filePath(), chunk, e);
                 }
                 uncompressed.flip();
-
-                if (shouldCheckCrc())
-                {
-                    compressedChunk.position(chunkOffset).limit(chunkOffset + chunk.length);
-
-                    int checksum = (int) ChecksumType.CRC32.of(compressedChunk);
-
-                    compressedChunk.limit(compressedChunk.capacity());
-                    if (compressedChunk.getInt() != checksum)
-                        throw new CorruptBlockException(channel.filePath(), chunk);
-                }
 
                 return uncompressed;
             }

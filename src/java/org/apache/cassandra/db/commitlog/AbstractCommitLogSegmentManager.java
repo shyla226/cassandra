@@ -118,9 +118,10 @@ public abstract class AbstractCommitLogSegmentManager
                 {
                     try
                     {
-                        logger.debug("No segments in reserve; creating a fresh one");
+                        logger.trace("No segments in reserve; creating a fresh one");
                         CommitLogSegment prev = availableSegment.getAndSet(createSegment());
                         assert prev == null : "Only management thread can construct segments.";
+
                         if (shutdown)
                         {
                             // If shutdown() started and finished during segment creation, we are now left with a
