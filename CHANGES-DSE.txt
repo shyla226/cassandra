@@ -26,6 +26,7 @@ DSE 6.0.0:
  * Introduce new STARTUP message parameters to identify clients (DB-1054)
  * Bump default client protocol version from V4 to DSE_V1 (DB-553)
 Merged from dse5.1:
+ * Upgrade netty to 4.0.54 same as BDP; Avoid log spam for unclean client shutdown (DB-1834)
  * Improve replace fail messages when a replace is retried before QUARANTINE_DELAY (DB-1776)
  * Add support again for "" as selectable to select SuperColumns (DB-1599)
  * Read connection ssl option from cqlshrc (DB-1800)

@@ -55,6 +55,7 @@ import org.apache.cassandra.transport.Frame.Header.HeaderFlag;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.utils.Flags;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 /**
  * A message from the CQL binary protocol.
@@ -62,6 +63,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 public abstract class Message
 {
     protected static final Logger logger = LoggerFactory.getLogger(Message.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
 
     /**
      * When we encounter an unexpected IOException we look for these {@link Throwable#getMessage() messages}
@@ -793,34 +795,35 @@ public abstract class Message
                 exception = exception.getCause();
             }
 
-            String message;
+            String message = "Unexpected exception during request; channel = {}";
+            String channelInfo;
             try
             {
-                message = "Unexpected exception during request; channel = " + channel;
+                channelInfo = String.valueOf(channel);
             }
             catch (Exception ignore)
             {
                 // We don't want to make things worse if String.valueOf() throws an exception
-                message = "Unexpected exception during request; channel = <unprintable>";
+                channelInfo = "<unprintable>";
             }
 
             if (!alwaysLogAtError && exception instanceof IOException)
             {
-                if (ioExceptionsAtDebugLevel.contains(exception.getMessage()))
+                if (exception.getMessage() != null && ioExceptionsAtDebugLevel.stream().anyMatch(exception.getMessage()::contains))
                 {
                     // Likely unclean client disconnects
-                    logger.trace(message, exception);
+                    logger.trace(message, channelInfo, exception);
                 }
                 else
                 {
                     // Generally unhandled IO exceptions are network issues, not actual ERRORS
-                    logger.info(message, exception);
+                    noSpamLogger.info(message, channelInfo, exception);
                 }
             }
             else
             {
                 // Anything else is probably a bug in server of client binary protocol handling
-                logger.error(message, exception);
+                logger.error(message, channelInfo, exception);
             }
 
             // We handled the exception.
