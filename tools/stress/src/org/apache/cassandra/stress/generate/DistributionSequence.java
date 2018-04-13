@@ -41,7 +41,7 @@ public class DistributionSequence extends Distribution
     private long nextWithWrap()
     {
         long next = this.next.getAndIncrement();
-        return start + (next % totalCount);
+        return (start + Math.abs(next % totalCount));
     }
 
     @Override
