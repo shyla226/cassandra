@@ -46,6 +46,7 @@ import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.jctools.queues.MpscArrayQueue;
 import sun.misc.Contended;
 
@@ -279,12 +280,37 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
                 return false;
 
             if (remote && remoteBackpressure())
+            {
+                NoSpamLogger.log(LOGGER,
+                                 NoSpamLogger.Level.DEBUG,
+                                 1, TimeUnit.MINUTES,
+                                "Remote TPC backpressure is active with count {}.", metrics.backpressureCountedRemoteTaskCount());
+
                 return true;
+            }
 
             if (!remote && localBackpressure())
-                return true;
+            {
+                NoSpamLogger.log(LOGGER,
+                                 NoSpamLogger.Level.DEBUG,
+                                 1, TimeUnit.MINUTES,
+                                "Local TPC backpressure is active with count {}.", metrics.backpressureCountedLocalTaskCount());
 
-            return TPCMetrics.globallyBackpressuredCores() > 0;
+                return true;
+            }
+
+            int globallyBackpressuredCores = TPCMetrics.globallyBackpressuredCores();
+            if (globallyBackpressuredCores > 0)
+            {
+                NoSpamLogger.log(LOGGER,
+                                 NoSpamLogger.Level.DEBUG,
+                                 1, TimeUnit.MINUTES,
+                                 "Global TPC backpressure is active, thread count is {}.", globallyBackpressuredCores);
+
+                return true;
+            }
+
+            return false;
         }
 
         private boolean localBackpressure()
@@ -416,43 +442,32 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         @Override
         protected void addTask(Runnable task)
         {
-            try
+            if (task instanceof TPCRunnable)
             {
-                if (task instanceof TPCRunnable)
+                TPCRunnable tpc = (TPCRunnable) task;
+                if (tpc.hasPriority() && priorityQueue.relaxedOffer(tpc))
+                    return;
+                else if (tpc.isPendable())
                 {
-                    TPCRunnable tpc = (TPCRunnable) task;
-                    if (tpc.hasPriority() && priorityQueue.relaxedOffer(tpc))
+                    // If we already have something in the pending queue, this task should not jump it.
+                    if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(tpc, metrics.maxQueueSize()))
                         return;
-                    else if (tpc.isPendable())
-                    {
-                        // If we already have something in the pending queue, this task should not jump it.
-                        if (pendingQueue.isEmpty() && queue.offerIfBelowThreshold(tpc, metrics.maxQueueSize()))
-                            return;
 
-                        if (pendingQueue.relaxedOffer(tpc))
-                        {
-                            tpc.setPending();
-                            return;
-                        }
-                        else
-                        {
-                            tpc.blocked();
-                            reject(task);
-                        }
+                    if (pendingQueue.relaxedOffer(tpc))
+                    {
+                        tpc.setPending();
+                        return;
+                    }
+                    else
+                    {
+                        tpc.blocked();
+                        reject(task);
                     }
                 }
-
-                if (!queue.relaxedOffer(task))
-                    reject(task);
-                }
-            finally
-            {
-                if (metrics != null && !hasGlobalBackpressure && globalBackpressure())
-                {
-                    hasGlobalBackpressure = true;
-                    TPCMetrics.globallyBackpressuredCores(1);
-                }
             }
+
+            if (!queue.relaxedOffer(task))
+                reject(task);
         }
 
         /**
@@ -751,11 +766,8 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
             }
             finally
             {
-                if (metrics != null && hasGlobalBackpressure && !globalBackpressure())
-                {
-                    hasGlobalBackpressure = false;
-                    TPCMetrics.globallyBackpressuredCores(-1);
-                }
+                // check if after transferring this batch of pending tasks we need to change global backpressure state:
+                checkGlobalBackpressure();
             }
         }
 
@@ -778,6 +790,17 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
                 ++processed;
             }
             return processed;
+        }
+
+        private void checkGlobalBackpressure()
+        {
+            if (metrics != null)
+            {
+                boolean hadGlobalBackpressure = hasGlobalBackpressure;
+                hasGlobalBackpressure = globalBackpressure();
+                if (hadGlobalBackpressure != hasGlobalBackpressure)
+                    TPCMetrics.globallyBackpressuredCores(hasGlobalBackpressure ? 1 : -1);
+            }
         }
 
         private boolean hasPendingTasks()
