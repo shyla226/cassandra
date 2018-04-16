@@ -766,7 +766,7 @@ public abstract class CassandraIndex implements Index
                          .isDense(indexMetadata.isKeys())
                          .isCompound(!indexMetadata.isKeys())
                          .partitioner(new LocalPartitioner(indexedValueType))
-                         .addPartitionKeyColumn(indexedColumn.name, indexedColumn.type)
+                         .addPartitionKeyColumn(indexedColumn.name, indexedValueType)
                          .addClusteringColumn("partition_key", baseCfsMetadata.partitioner.partitionOrdering());
 
         if (indexMetadata.isKeys())
