@@ -26,18 +26,25 @@ public class EpollTPCEventLoopGroupTest extends WithParkedThreadsMonitorSupport
         DatabaseDescriptor.getRawConfig().tpc_concurrent_requests_limit = 1;
         DatabaseDescriptor.getRawConfig().tpc_pending_requests_limit = 1;
 
-        group = (EpollTPCEventLoopGroup) TPC.eventLoopGroup();
+        if (TPC.eventLoopGroup() instanceof EpollTPCEventLoopGroup)
+            group = (EpollTPCEventLoopGroup) TPC.eventLoopGroup();
     }
 
     @AfterClass
     public static void tearDownClass()
     {
+        if (group == null)
+            return;
+
         group.shutdown();
     }
 
     @Test
     public void testLocalBackpressure() throws InterruptedException
     {
+        if (group == null)
+            return;
+
         TPCEventLoop loop = group.eventLoops().get(0);
 
         CountDownLatch firstTaskProcessed = new CountDownLatch(1);
@@ -75,6 +82,9 @@ public class EpollTPCEventLoopGroupTest extends WithParkedThreadsMonitorSupport
     @Test
     public void testRemoteBackpressure() throws InterruptedException
     {
+        if (group == null)
+            return;
+
         TPCEventLoop loop = group.eventLoops().get(0);
 
         CountDownLatch firstTaskProcessed = new CountDownLatch(1);
@@ -117,6 +127,9 @@ public class EpollTPCEventLoopGroupTest extends WithParkedThreadsMonitorSupport
     @Test
     public void testGlobalBackpressure() throws InterruptedException
     {
+        if (group == null)
+            return;
+
         TPCEventLoop loop1 = group.eventLoops().get(0);
         TPCEventLoop loop2 = group.eventLoops().get(1);
 
