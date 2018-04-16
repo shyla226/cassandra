@@ -385,7 +385,7 @@ public class SSTableReaderTest
         long bloomModified = Files.getLastModifiedTime(bloomPath).toMillis();
         long summaryModified = Files.getLastModifiedTime(summaryPath).toMillis();
 
-        Thread.sleep(TimeUnit.MILLISECONDS.toMillis(10)); // sleep to ensure modified time will be different
+        Thread.sleep(TimeUnit.MILLISECONDS.toMillis(1100)); // sleep to ensure modified time will be different
 
         // Offline tests
         // check that bloomfilter/summary ARE NOT regenerated
@@ -432,7 +432,7 @@ public class SSTableReaderTest
         summaryModified = Files.getLastModifiedTime(summaryPath).toMillis();
         summaryFile.delete();
 
-        Thread.sleep(TimeUnit.MILLISECONDS.toMillis(10)); // sleep to ensure modified time will be different
+        Thread.sleep(TimeUnit.MILLISECONDS.toMillis(1100)); // sleep to ensure modified time will be different
         bloomModified = Files.getLastModifiedTime(bloomPath).toMillis();
 
         target = SSTableReader.open(desc, components, store.metadata);
