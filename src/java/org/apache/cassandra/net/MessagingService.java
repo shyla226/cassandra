@@ -79,6 +79,7 @@ import org.apache.cassandra.utils.concurrent.SimpleCondition;
 public final class MessagingService implements MessagingServiceMBean
 {
     private static final Logger logger = LoggerFactory.getLogger(MessagingService.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1L, TimeUnit.MINUTES);
 
     public static final String MBEAN_NAME = "org.apache.cassandra.net:type=MessagingService";
 
@@ -396,7 +397,18 @@ public final class MessagingService implements MessagingServiceMBean
         if (logger.isTraceEnabled())
             logger.trace("Sending {}", message);
 
-        return getConnection(message).thenAccept(cp -> cp.enqueue(message));
+        return getConnection(message).thenAccept(cp -> {
+            if (!cp.enqueue(message))
+            {
+                noSpamLogger.debug("Failed to send message to {}, the outbound queue rejected it.", message.to());
+                if (message.isRequest())
+                {
+                    CallbackInfo info = getRegisteredCallback(message.id(), true, message.to());
+                    if (info != null)
+                        info.callback.onFailure(((Request) message).respondWithFailure(RequestFailureReason.UNKNOWN));
+                }
+            }
+        });
     }
 
     private <P, Q, M extends Request<P, Q>> void deliverLocallyInternal(M request,

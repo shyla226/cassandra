@@ -27,6 +27,7 @@ import java.nio.channels.Channels;
 import java.nio.channels.WritableByteChannel;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import java.util.zip.Checksum;
@@ -83,6 +84,34 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
 
     public static final int MAX_COALESCED_MESSAGES = 128;
 
+    private static final int SOFT_MAX_QUEUE_SIZE_SMALL = Integer.parseInt(System.getProperty("dse.outbound.connection.small.queue.max", "32768"));
+
+    private static final int SOFT_MAX_QUEUE_SIZE_LARGE = Integer.parseInt(System.getProperty("dse.outbound.connection.large.queue.max", "4096"));
+
+    static
+    {
+        if (SOFT_MAX_QUEUE_SIZE_SMALL <= 128)
+            throw new IllegalStateException("SOFT_MAX_QUEUE_SIZE_SMALL should be at least 128, got: " + Integer.toString(SOFT_MAX_QUEUE_SIZE_SMALL));
+
+        if (SOFT_MAX_QUEUE_SIZE_LARGE <= 32)
+            throw new IllegalStateException("SOFT_MAX_QUEUE_SIZE_LARGE should be at least 32, got: " + Integer.toString(SOFT_MAX_QUEUE_SIZE_LARGE));
+    }
+
+    private static int getMaxBackLogSize(Message.Kind kind)
+    {
+        switch (kind)
+        {
+            case GOSSIP:
+                return Integer.MAX_VALUE;
+            case SMALL:
+                return SOFT_MAX_QUEUE_SIZE_SMALL;
+            case LARGE:
+                return SOFT_MAX_QUEUE_SIZE_LARGE;
+            default:
+                throw new IllegalStateException("Unsupported message kind: " + kind);
+        }
+    }
+
     private static CoalescingStrategy newCoalescingStrategy(String displayName, OutboundTcpConnection owner)
     {
         return CoalescingStrategies.newCoalescingStrategy(DatabaseDescriptor.getOtcCoalescingStrategy(),
@@ -128,6 +157,13 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
     static final int LZ4_HASH_SEED = 0x9747b28c;
 
     private final MessagePassingQueue<QueuedMessage> backlog = new MpscGrowableArrayQueue<>(4096, 1 << 30);
+    private final int maxBackLogSize;
+
+    // the number of messages that have been added to the backlog and not yet sent. Note that this is not exactly
+    // the number in the queue since messages are drained in batches by the coalescing strategies and we do not track
+    // each single message as it is removed from the queue since it would be too expensive to redirect the lambdas.
+    // We also don't use backlog.size() because this would cost us at least 3 volatile long reads, more under contention.
+    private final AtomicInteger numBacklogMessages = new AtomicInteger(0);
 
     private final OutboundTcpConnectionPool poolReference;
 
@@ -142,16 +178,18 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
     private volatile MessagingVersion targetVersion;
     private volatile Message.Serializer messageSerializer;
 
-    public OutboundTcpConnection(OutboundTcpConnectionPool pool, String name)
+    public OutboundTcpConnection(OutboundTcpConnectionPool pool, Message.Kind kind)
     {
-        this(pool, name, false);
+        this(pool, kind.toString(), kind == Message.Kind.GOSSIP, getMaxBackLogSize(kind));
     }
 
-    public OutboundTcpConnection(OutboundTcpConnectionPool pool, String name, boolean isGossip)
+    @VisibleForTesting
+    OutboundTcpConnection(OutboundTcpConnectionPool pool, String name, boolean isGossip, int maxBackLogSize)
     {
         super("MessagingService-Outgoing-" + pool.endPoint() + "-" + name);
         this.poolReference = pool;
         this.isGossip = isGossip;
+        this.maxBackLogSize = maxBackLogSize;
         cs = newCoalescingStrategy(pool.endPoint().getHostAddress(), this);
 
         // We want to use the most precise version we know because while there is version detection on connect(),
@@ -177,17 +215,27 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
         return remoteDC.equals(localDC) || DatabaseDescriptor.getEndpointSnitch().isDefaultDC(remoteDC);
     }
 
-    public void enqueue(Message message)
+    public boolean enqueue(Message message)
     {
-        boolean success = backlog.relaxedOffer(new QueuedMessage(message));
-        assert success;
+        if (message.isDroppable() && numBacklogMessages.get() >= maxBackLogSize)
+            return false;
+
+        boolean ret = backlog.relaxedOffer(new QueuedMessage(message));
+        assert ret : String.format("Dropped a message that should not have been dropped: %s, kind: %s",
+                                   message.toString(), message.kind());
+
+        if (ret) // in case assertions are disabled
+            numBacklogMessages.incrementAndGet();
+
+        return ret;
     }
 
     void closeSocket(boolean destroyThread)
     {
-        logger.debug("Enqueuing socket close for {} with backlog size: {}", poolReference.endPoint(), backlog.size());
+        logger.debug("Enqueuing socket close for {} with backlog size: {}", poolReference.endPoint(), numBacklogMessages);
         isStopped = destroyThread; // Exit loop to stop the thread
-        backlog.clear();
+        int drained = backlog.drain(msg -> {});
+        numBacklogMessages.addAndGet(-drained);
         // in the "destroyThread = true" case, enqueuing the sentinel is important mostly to unblock the backlog.take()
         // (via the CoalescingStrategy) in case there's a data race between this method enqueuing the sentinel
         // and run() clearing the backlog on connection failure.
@@ -248,6 +296,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
             }
 
             int count = currentMsgBufferCount = drainedMessages.size();
+            numBacklogMessages.addAndGet(-count);
 
             //The timestamp of the first message has already been provided to the coalescing strategy
             //so skip logging it.
@@ -273,10 +322,10 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
                     else
                     {
                         // Not connected! Clear out the queue, else gossip messages back up. Update dropped
-                        // statistics accordingly. Hint: The statistics may be slightly too low, if messages
-                        // are added between the calls of backlog.size() and backlog.clear()
-                        dropped.addAndGet(backlog.size());
-                        backlog.clear();
+                        // statistics accordingly.
+                        int drained = backlog.drain(msg -> {});
+                        dropped.addAndGet(drained);
+                        numBacklogMessages.addAndGet(-drained);
                         break inner;
                     }
                 }
@@ -306,7 +355,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
 
     public int getPendingMessages()
     {
-        return backlog.size() + currentMsgBufferCount;
+        return numBacklogMessages.get() + currentMsgBufferCount;
     }
 
     public long getCompletedMesssages()
@@ -378,6 +427,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
                 {
                     boolean accepted = backlog.relaxedOffer(new RetriedQueuedMessage(qm));
                     assert accepted;
+                    numBacklogMessages.incrementAndGet();
                 }
             }
             else
@@ -597,6 +647,16 @@ public class OutboundTcpConnection extends FastThreadLocalThread implements Park
     MessagePassingQueue<QueuedMessage> backlog()
     {
         return backlog;
+    }
+
+    /**
+     * This method is only used for testing the backlog.
+     */
+    @VisibleForTesting
+    void drain(MessagePassingQueue.Consumer<QueuedMessage> consumer, int length)
+    {
+        int drained = backlog.drain(consumer, length);
+        numBacklogMessages.addAndGet(-drained);
     }
 
     /** messages that have not been retried yet */

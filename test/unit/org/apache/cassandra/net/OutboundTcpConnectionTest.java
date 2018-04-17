@@ -23,8 +23,11 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.WrappedBoolean;
 import org.jctools.queues.MessagePassingQueue;
 
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -37,27 +40,39 @@ import java.net.UnknownHostException;
  */
 public class OutboundTcpConnectionTest
 {
-    // A (obviously fake but good enough for this test) Verb that never expires
-    private final static Verb<?, ?> NON_DROPPABLE = new Verb.OneWay<>(null, null);
+    private static long TIMEOUT_MS = 10_000L;
+    private static long DEFAULT_TIMEOUT_MS;
 
-    private final static long TIMEOUT_MS = 10_000L;
+    // A Verb that never expires
+    private static Verb<?, ?> NON_DROPPABLE;
+
     // A Verb with a 10s timeout (we'll fake the current time to expire, so we use a relatively long timeout that guarantee
-    // things won't timeout without us wanting to even on slow CI)
-    private final static Verb<?, ?> DROPPABLE = new Verb.AckedRequest<>(null, p -> TIMEOUT_MS, null);
+    // things won't timeout without us wanting to even on slow CI), because Verb.WRITES.WRITE uses the write rpc timeout we
+    // change it in the test setup
+    private static Verb<?, ?> DROPPABLE;
 
-    static
-    {
-        DatabaseDescriptor.daemonInitialization();
-    }
-    
     /**
      * Make sure our NON_DROPPABLE verb stays that way.
      */
     @BeforeClass
-    public static void assertDroppability()
+    public static void beforeClass()
     {
+        DatabaseDescriptor.daemonInitialization();
+
+        DEFAULT_TIMEOUT_MS = DatabaseDescriptor.getWriteRpcTimeout();
+        DatabaseDescriptor.setWriteRpcTimeout(TIMEOUT_MS);
+
+        NON_DROPPABLE = Verbs.GOSSIP.ACK;
+        DROPPABLE = Verbs.WRITES.WRITE;
+
         if (!NON_DROPPABLE.isOneWay())
             throw new AssertionError("Expected " + NON_DROPPABLE + " to be one-way");
+    }
+
+    @AfterClass
+    public static void afterClass()
+    {
+        DatabaseDescriptor.setWriteRpcTimeout(DEFAULT_TIMEOUT_MS);
     }
 
     private static long currentTime()
@@ -149,6 +164,39 @@ public class OutboundTcpConnectionTest
 
     }
 
+    @Test
+    public void testBacklog() throws UnknownHostException
+    {
+        final int maxQueueSize = 4096;
+        OutboundTcpConnection otc = getOutboundTcpConnectionForLocalhost(maxQueueSize);
+        MessagePassingQueue<OutboundTcpConnection.QueuedMessage> backlog = otc.backlog();
+
+        // the capacity is currently 1 << 30, we check that it is at least 4 times the soft maximum
+        assertTrue(backlog.capacity() > maxQueueSize * 4);
+
+        while (backlog.size() < maxQueueSize)
+            otc.enqueue(msg(NON_DROPPABLE));
+
+        assertEquals(maxQueueSize, backlog.size());
+        assertEquals(maxQueueSize, otc.getPendingMessages());
+        assertFalse(otc.enqueue(msg(DROPPABLE)));
+        assertTrue(otc.enqueue(msg(NON_DROPPABLE)));
+
+        otc.drain(m -> {}, 2);
+        assertTrue(otc.enqueue(msg(DROPPABLE)));
+        assertFalse(otc.enqueue(msg(DROPPABLE)));
+        assertTrue(otc.enqueue(msg(NON_DROPPABLE)));
+
+        otc.drain(m -> {}, otc.getPendingMessages());
+        assertTrue(backlog.isEmpty());
+        assertEquals(0, backlog.size());
+
+        assertTrue(otc.enqueue(msg(DROPPABLE)));
+        assertTrue(otc.enqueue(msg(NON_DROPPABLE)));
+        assertEquals(2, backlog.size());
+        assertEquals(backlog.size(), otc.getPendingMessages());
+    }
+
     private static Message msg(Verb verb)
     {
         return Request.fakeTestRequest(FBUtilities.getBroadcastAddress(), 0, verb, null);
@@ -188,9 +236,14 @@ public class OutboundTcpConnectionTest
 
     private OutboundTcpConnection getOutboundTcpConnectionForLocalhost() throws UnknownHostException
     {
+        return getOutboundTcpConnectionForLocalhost(Integer.MAX_VALUE);
+    }
+
+    private OutboundTcpConnection getOutboundTcpConnectionForLocalhost(int maxQueueSize) throws UnknownHostException
+    {
         InetAddress lo = InetAddress.getByName("127.0.0.1");
         OutboundTcpConnectionPool otcPool = new OutboundTcpConnectionPool(lo, lo, null);
-        OutboundTcpConnection otc = new OutboundTcpConnection(otcPool, "lo-OutboundTcpConnectionTest");
+        OutboundTcpConnection otc = new OutboundTcpConnection(otcPool, "lo-OutboundTcpConnectionTest", false, maxQueueSize);
         return otc;
     }
 }

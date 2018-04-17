@@ -64,7 +64,7 @@ public class OutboundTcpConnectionPool
 
         connectionByKind = new EnumMap<>(Message.Kind.class);
         for (Message.Kind kind : Message.Kind.values())
-            connectionByKind.put(kind, new OutboundTcpConnection(this, kind.toString(), kind == Message.Kind.GOSSIP));
+            connectionByKind.put(kind, new OutboundTcpConnection(this, kind));
 
         this.backPressureState = backPressureState;
     }

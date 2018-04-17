@@ -1,4 +1,5 @@
 DSE 6.0.1:
+ * Prevent OOM due to OutboundTcpConnection backlog by dropping request messages once the queue becomes too large (DB-2001)
  * Fix exception in trace log messages of non-frozen user types (DB-2005)
  * Use the indexed item type as backing table key validator of 2i on collections (DB-1121)
  * Apply view batchlog mutation parallel with local view mutations (DB-1900)

@@ -190,6 +190,11 @@ public abstract class Message<P>
         {
             return 0;
         }
+
+        public boolean isDroppable()
+        { // close sentinels should never be dropped as they could cause the outbound connection loop to never return
+            return false;
+        }
     };
 
     private final InetAddress from;
@@ -406,6 +411,22 @@ public abstract class Message<P>
         // the message in if there is mixed-versions nodes. This doesn't matter in practice though, as the version
         // won't dramatically change the size, which is good enough.
         return messageData.payloadSize > OutboundTcpConnectionPool.LARGE_MESSAGE_THRESHOLD ? Kind.LARGE : Kind.SMALL;
+    }
+
+    /**
+     * @return true if this message can be dropped when the backlog in the output connection gets so large
+     * that it risks impacting memory usage in the node.
+     *
+     * We choose not to drop gossip messages because they could cause operational problems if dropped. We also
+     * choose to drop only requests, since we typically have OOM in the coordinator when the replicas are backpressuring
+     * or suffering from long GC pauses.
+     */
+    public boolean isDroppable()
+    {
+        if (group() == Verbs.GOSSIP)
+            return false;
+
+        return isRequest();
     }
 
     @Override
