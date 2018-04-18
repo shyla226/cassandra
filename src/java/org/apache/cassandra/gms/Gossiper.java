@@ -1555,6 +1555,11 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                                                               TimeUnit.MILLISECONDS);
     }
 
+    public synchronized Map<InetAddress, EndpointState> doShadowRound()
+    {
+        return doShadowRound(Collections.emptySet());
+    }
+
     /**
      * Do a single 'shadow' round of gossip by retrieving endpoint states that will be stored exclusively in the
      * map return value, instead of endpointStateMap.
@@ -1571,16 +1576,21 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
      * caller of {@link Gossiper#doShadowRound()}. Therefor only a single shadow round execution is permitted at
      * the same time.
      *
+     * @param peers Additional peers to try gossiping with.
      * @return endpoint states gathered during shadow round or empty map
      */
-    public synchronized Map<InetAddress, EndpointState> doShadowRound()
+    public synchronized Map<InetAddress, EndpointState> doShadowRound(Set<InetAddress> peers)
     {
         buildSeedsList(seeds);
-        // it may be that the local address is the only entry in the seed
+        // it may be that the local address is the only entry in the seed + peers
         // list in which case, attempting a shadow round is pointless
-        if (seeds.isEmpty())
+        if (seeds.isEmpty() && peers.isEmpty())
             return endpointShadowStateMap;
 
+        boolean isSeed = DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddress());
+        // We double RING_DELAY if we're not a seed to increase chance of successful startup during a full cluster bounce,
+        // giving the seeds a chance to startup before we fail the shadow round
+        int shadowRoundDelay =  isSeed ? StorageService.RING_DELAY : StorageService.RING_DELAY * 2;
         seedsInShadowRound.clear();
         endpointShadowStateMap.clear();
         // send a completely empty syn
@@ -1590,6 +1600,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                                                                gDigests);
 
         inShadowRound = true;
+        boolean includePeers = false;
         int slept = 0;
         try
         {
@@ -1600,6 +1611,14 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                     logger.trace("Sending shadow round GOSSIP DIGEST SYN to seeds {}", seeds);
 
                     MessagingService.instance().send(Verbs.GOSSIP.SYN.newDispatcher(seeds, digestSynMessage));
+
+                    // Send to any peers we already know about, but only if a seed didn't respond.
+                    if (includePeers)
+                    {
+                        logger.trace("Sending shadow round GOSSIP DIGEST SYN to known peers {}", peers);
+                        MessagingService.instance().send(Verbs.GOSSIP.SYN.newDispatcher(peers, digestSynMessage));
+                    }
+                    includePeers = true;
                 }
 
                 Thread.sleep(1000);
@@ -1607,13 +1626,12 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                     break;
 
                 slept += 1000;
-                if (slept > StorageService.RING_DELAY)
+                if (slept > shadowRoundDelay)
                 {
-                    // if we don't consider ourself to be a seed, fail out
-                    if (!DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddress()))
-                        throw new RuntimeException("Unable to gossip with any seeds");
+                    // if we got here no peers could be gossiped to. If we're a seed that's OK, but otherwise we stop. See CASSANDRA-13851
+                    if (!isSeed)
+                        throw new RuntimeException("Unable to gossip with any peers");
 
-                    logger.warn("Unable to gossip with any seeds but continuing since node is in its own seed list");
                     inShadowRound = false;
                     break;
                 }
@@ -1814,6 +1832,9 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         {
             if (!isInShadowRound)
             {
+                if (!seeds.contains(respondent))
+                    logger.warn("Received an ack from {}, who isn't a seed. Ensure your seed list includes a live node. Exiting shadow round",
+                                respondent);
                 logger.debug("Received a regular ack from {}, can now exit shadow round", respondent);
                 // respondent sent back a full ack, so we can exit our shadow round
                 endpointShadowStateMap.putAll(epStateMap);
