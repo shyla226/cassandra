@@ -893,7 +893,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
             else
             {
-                checkForEndpointCollision(localHostId, SystemKeyspace.loadHostIds().keySet());
+                checkForEndpointCollision(localHostId, SystemKeyspace.getHostIds().keySet());
             }
 
             // have to start the gossip service before we can see any info on other nodes.  this is necessary
