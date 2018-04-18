@@ -1582,6 +1582,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     public synchronized Map<InetAddress, EndpointState> doShadowRound(Set<InetAddress> peers)
     {
         buildSeedsList(seeds);
+
         // it may be that the local address is the only entry in the seed + peers
         // list in which case, attempting a shadow round is pointless
         if (seeds.isEmpty() && peers.isEmpty())
