@@ -167,7 +167,6 @@
 
 3.11.3
  * Downgrade log level to trace for CommitLogSegmentManager (CASSANDRA-14370)
- * CQL fromJson(null) throws NullPointerException (CASSANDRA-13891)
  * Serialize empty buffer as empty string for json output format (CASSANDRA-14245)
  * SASI tokenizer for simple delimiter based entries (CASSANDRA-14247)
  * Fix Loss of digits when doing CAST from varint/bigint to decimal (CASSANDRA-14170)
@@ -184,7 +183,10 @@ Merged from 3.0:
  * Log when SSTables are deleted (CASSANDRA-14302)
  * Fully utilise specified compaction threads (CASSANDRA-14210)
  * Pre-create deletion log records to finish compactions quicker (CASSANDRA-12763)
- Merged from 2.1:
+Merged from 2.2:
+ * Fix JSON queries with IN restrictions and ORDER BY clause (CASSANDRA-14286)
+ * CQL fromJson(null) throws NullPointerException (CASSANDRA-13891)
+Merged from 2.1:
  * Check checksum before decompressing data (CASSANDRA-14284)
 
 
