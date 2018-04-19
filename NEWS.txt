@@ -105,6 +105,12 @@ Upgrading
     - nodetool clearsnapshot now required the --all flag to remove all snapshots.
       Previous behavior would delete all snapshots by default.
 
+Deprecation
+-----------
+    - Background read repair has been deprecated. dclocal_read_repair_chance and
+      read_repair_chance table options have been deprecated, and will be removed entirely in 4.0.
+      See CASSANDRA-13910 for details.
+
 3.11.2
 ======
 
