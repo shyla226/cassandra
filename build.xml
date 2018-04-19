@@ -394,6 +394,7 @@
           <dependency groupId="org.codehaus.jackson" artifactId="jackson-mapper-asl" version="1.9.2"/>
           <dependency groupId="com.googlecode.json-simple" artifactId="json-simple" version="1.1"/>
           <dependency groupId="com.github.jbellis" artifactId="jamm" version="0.3.0"/>
+          <dependency groupId="org.jhiccup" artifactId="jHiccup" version="2.0.8"/>
 
           <dependency groupId="org.yaml" artifactId="snakeyaml" version="1.11">
             <exclusion groupId="org.springframework" artifactId="spring"/>
@@ -561,6 +562,7 @@
         <dependency groupId="org.codehaus.jackson" artifactId="jackson-mapper-asl"/>
         <dependency groupId="com.googlecode.json-simple" artifactId="json-simple"/>
         <dependency groupId="com.github.jbellis" artifactId="jamm"/>
+        <dependency groupId="org.jhiccup" artifactId="jHiccup"/>
 
         <dependency groupId="org.yaml" artifactId="snakeyaml">
           <exclusion groupId="org.springframework" artifactId="spring"/>
@@ -808,6 +810,7 @@
 
         <!-- don't need jamm unless running a server in which case it needs to be a -javagent to be used anyway -->
         <dependency groupId="com.github.jbellis" artifactId="jamm"/>
+        <dependency groupId="org.jhiccup" artifactId="jHiccup"/>
 
         <dependency groupId="io.netty" artifactId="netty-all"/>
         <dependency groupId="joda-time" artifactId="joda-time"/>
