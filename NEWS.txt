@@ -151,7 +151,6 @@ Upgrading
       should run repair on the base tables, and subsequently on the views to ensure data affected by CASSANDRA-14251 is correctly
       propagated to all replicas.
 
-
 3.0.16
 =====
 
