@@ -71,5 +71,17 @@ then
     JAVA_AGENT="$JAVA_AGENT -javaagent:$CASSANDRA_HOME/lib/jamm-0.3.0.jar"
 fi
 
+tempdir_base="${TMPDIR-/tmp}/dse"
+mkdir -p "${tempdir_base}"
+instance_tempdir="$(mktemp -p ${tempdir_base} -d -t dse.XXXXXXXXXX)"
+mkdir -p "${instance_tempdir}"
+if [ ! -d "${instance_tempdir}" ] ; then
+    echo "DSE instance temporary directory could not be created (${instance_tempdir} in ${tempdir_base})" > /dev/stderr
+    exit 1
+fi
+mkdir -p "${instance_tempdir}/lni"
+export TMPDIR="${instance_tempdir}"
+JVM_OPTS="$JVM_OPTS -Djava.io.tmpdir=${instance_tempdir} -Djdk.internal.lambda.dumpProxyClasses=${instance_tempdir}/lni"
+
 # Added sigar-bin to the java.library.path CASSANDRA-7838
 JAVA_OPTS="$JAVA_OPTS:-Djava.library.path=$CASSANDRA_HOME/lib/sigar-bin"

@@ -1,21 +1,8 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Please see the included license file for details.
  */
-
 package org.apache.cassandra.utils;
 
 import java.io.File;
@@ -25,24 +12,17 @@ import java.io.InputStream;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.google.common.io.Files;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
-import org.objectweb.asm.Label;
-import org.objectweb.asm.MethodVisitor;
-import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.*;
 
 /**
  * This class is responsible for retrieving a line number from the compiled bytecode for lambdas, named and
@@ -57,31 +37,37 @@ import org.objectweb.asm.Opcodes;
  */
 public final class LineNumberInference
 {
-    public static final Descriptor UNKNOWN_SOURCE = new Descriptor()
-    {
-        public int line()
-        {
-            return -1;
-        }
-
-        public String source()
-        {
-            return "unknown";
-        }
-    };
+    public static final Descriptor UNKNOWN_SOURCE = new Descriptor("", "unknown", -1);
 
     private static final Logger logger = LoggerFactory.getLogger(LineNumberInference.class);
-    private static final Pattern DOT = Pattern.compile(".", Pattern.LITERAL);
-    private static final Pattern SLASH = Pattern.compile("/", Pattern.LITERAL);
     private static final String INIT = "<init>";
     private static final Pattern LAMBDA_PATTERN = Pattern.compile("(.*)\\$\\$(Lambda)\\$(\\d+)/(\\d+)");
     private static final String DUMP_CLASSES = "jdk.internal.lambda.dumpProxyClasses";
-    private final static String tmpDir = Files.createTempDir().getAbsolutePath();
+    private final static String tmpDir;
 
     static
     {
+        String setTmpDir = System.getProperty(DUMP_CLASSES);
+        if (setTmpDir == null)
+        {
+            setTmpDir = Files.createTempDir().getAbsolutePath();
+            // This approach does *NOT* work with Java9 and newer, because the system property has already been
+            // evaluated and since it was not set, no classes are dumped. The evaluation of that property happens
+            // during the initialization of the JVM, it has to be passed on the command line!
+            logger.warn("Lambda line number inference not available");
+            System.setProperty(DUMP_CLASSES, setTmpDir);
+        }
+        else
+        {
+            File dir = new File(setTmpDir);
+            if (!dir.exists())
+                dir.mkdirs();
+            if (!dir.canWrite() || !dir.canRead() || !dir.isDirectory())
+                throw new RuntimeException("Cannot use line number inference using directory " + dir.getAbsolutePath() + " since it's not readable/writable");
+        }
+        tmpDir = setTmpDir;
+
         logger.debug("Saving class files to {}", tmpDir);
-        System.setProperty(DUMP_CLASSES, tmpDir);
     }
 
     // Initialisation is already done in the static context; method is no-op and shouold be used for referencing the class
@@ -90,15 +76,12 @@ public final class LineNumberInference
         // no-op
     }
 
-    // Maps the internal lambda class name to the descriptor
-    final Map<String, Descriptor> mappings;
-    private final LambdaClassVisitor lambdaClassVisitor = new LambdaClassVisitor();
-    private final SimpleClassVisitor simpleClassVisitor = new SimpleClassVisitor();
-    private final ReadWriteLock lock;
-    private final Lock readLock;
-    private final Lock writeLock;
-    private final Path tmpFilePath;
-    private final String lookupRegex;
+    /**
+     * Contains the source descriptors for lambda proxy classes.
+     */
+    private final Map<Class<?>, Descriptor> descriptors;
+
+    private boolean preloaded;
 
     /**
      * Constructor allowing filtering of the classes for which the preloading has to be done. Used to reduce
@@ -106,12 +89,7 @@ public final class LineNumberInference
      */
     public LineNumberInference()
     {
-        mappings = new HashMap<>();
-        lock = new ReentrantReadWriteLock();
-        readLock = lock.readLock();
-        writeLock = lock.writeLock();
-        tmpFilePath = new File(tmpDir).toPath();
-        lookupRegex = tmpFilePath + "\\/(.*)\\.class";
+        descriptors = new ConcurrentHashMap<>();
     }
 
     /**
@@ -122,10 +100,16 @@ public final class LineNumberInference
      */
     public void preloadLambdas()
     {
-        writeLock.lock();
+        if (preloaded)
+            return;
+
+        preloaded = true;
         try
         {
             final PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:**.class");
+
+            Path tmpFilePath = new File(tmpDir).toPath();
+            String lookupRegex = tmpFilePath + "\\/(.*)\\.class";
 
             Collection<File> files = java.nio.file.Files.find(tmpFilePath, 999, (path, attributes) -> matcher.matches(path))
                                                         .map(Path::toFile)
@@ -133,15 +117,22 @@ public final class LineNumberInference
 
             for (File file : files)
             {
-                 String className = slashToDot(file.getAbsolutePath().replaceFirst(lookupRegex, "$1"));
-
-                 // Already processed
-                if (mappings.containsKey(className))
-                    continue;
+                String className = slashToDot(file.getAbsolutePath().replaceFirst(lookupRegex, "$1"));
 
                 try (InputStream in = new FileInputStream(file))
                 {
-                    new ClassReader(in).accept(new FileMappingVisitor(), ClassReader.EXPAND_FRAMES);
+                    LambdaClassVisitor clsVisitor = new LambdaClassVisitor();
+                    new ClassReader(in).accept(clsVisitor, ClassReader.SKIP_FRAMES);
+
+                    try
+                    {
+                        Class<?> klass = Class.forName(className, false, getClass().getClassLoader());
+                        processLambdaImplementationMethod(klass, clsVisitor);
+                    }
+                    catch (ClassNotFoundException cnf)
+                    {
+                        // ignore during preload
+                    }
                 }
                 catch (IOException e)
                 {
@@ -153,10 +144,6 @@ public final class LineNumberInference
         {
             logger.warn("Couldn't load the list of lambdas for rich stack traces.", e);
         }
-        finally
-        {
-            writeLock.unlock();
-        }
     }
 
     /**
@@ -164,89 +151,105 @@ public final class LineNumberInference
      */
     public Descriptor getLine(Class klass)
     {
-        readLock.lock();
-        try
+        Descriptor descriptor = descriptors.get(klass);
+        if (descriptor == null)
         {
-            String klassName = klass.getName().split("/")[0];
-            Descriptor descriptor = mappings.get(klassName);
+            if (maybeProcessClassInternal(klass))
+                descriptor = descriptors.get(klass);
+
             if (descriptor == null)
             {
                 logger.trace("Could not find line information for " + klass);
                 return UNKNOWN_SOURCE;
             }
+        }
 
-            return descriptor;
-        }
-        finally
-        {
-            readLock.unlock();
-        }
+        return descriptor;
     }
 
     /**
      * Loads and extracts the line numbers from the bytecode of the class. In case of lambda instance
      * will load all the lambdas in the file at once.
      */
-    public boolean maybeProcessClass(Class klass)
+    boolean maybeProcessClass(Class klass)
     {
-        writeLock.lock();
         try
         {
+            if (descriptors.containsKey(klass))
+                return false;
+
             return maybeProcessClassInternal(klass);
         }
         catch (Throwable e)
         {
-            logger.warn("Could not process class information for lambda " + klass.getName());
+            descriptors.put(klass, UNKNOWN_SOURCE);
+
+            logger.debug("Could not process class information for lambda {}", klass.getName(), e);
+            logger.warn("Could not process class information for lambda {}", klass.getName());
             return false;
-        }
-        finally
-        {
-            writeLock.unlock();
         }
     }
 
-    private boolean maybeProcessClassInternal(Class klass) throws IOException
+    private boolean maybeProcessClassInternal(Class klass)
     {
         String className = klass.getName();
-        // no need to filter by interface here since we're calling it from the framework level
-        if (LAMBDA_PATTERN.matcher(className).matches())
+        try
         {
-            String parentClass = className.split("/")[0];
-
-            LambdaDescriptor lambdaDescriptor = (LambdaDescriptor) mappings.get(parentClass);
-            if (lambdaDescriptor.line != -1)
-                return false;
-
-            try (InputStream in = klass.getResourceAsStream("/" + lambdaDescriptor.classFilePath + ".class"))
+            // no need to filter by interface here since we're calling it from the framework level
+            if (LAMBDA_PATTERN.matcher(className).matches())
             {
-                lambdaClassVisitor.lambdaDescriptor = lambdaDescriptor;
-                new ClassReader(in).accept(lambdaClassVisitor, ClassReader.SKIP_FRAMES);
-                lambdaClassVisitor.lambdaDescriptor = null;
+                String parentClass = className.split("/")[0];
+
+                // Scan the lambda proxy class to extract the reference to the implementation method.
+                LambdaClassVisitor clsVisitor = new LambdaClassVisitor();
+                try (InputStream in = new FileInputStream(tmpDir + '/' + dotToSlash(parentClass) + ".class"))
+                {
+                    new ClassReader(in).accept(clsVisitor, ClassReader.SKIP_FRAMES);
+                }
+
+                processLambdaImplementationMethod(klass, clsVisitor);
             }
+            else
+            {
+                // Nested classes, unlike lambdas are stored in the separate files and their line information is not
+                // accessible through their enclosing class bytecode
+                try (InputStream in = klass.getResourceAsStream('/' + dotToSlash(className) + ".class"))
+                {
+                    SimpleClassVisitor visitor = new SimpleClassVisitor();
+                    new ClassReader(in).accept(visitor, ClassReader.SKIP_FRAMES);
+                    descriptors.put(klass, visitor.descriptor());
+                }
+            }
+
+            return true;
         }
-        else
+        catch (IOException e)
         {
-            if (mappings.containsKey(className))
-                return false;
-
-            // Nested classes, unlike lambdas are stored in the separate files and their line information is not
-            // accessible through their enclosing class bytecode
-            try (InputStream in = klass.getResourceAsStream("/" + dotToSlash(className) + ".class"))
-            {
-                new ClassReader(in).accept(simpleClassVisitor, ClassReader.SKIP_FRAMES);
-            }
+            throw new RuntimeException("Failed to process class " + className, e);
         }
+    }
 
-        return true;
-     }
+    private void processLambdaImplementationMethod(Class klass, LambdaClassVisitor ref) throws IOException
+    {
+        // Scan the implementation class and inspect the lambda implementation method.
+        String resourceName = '/' + dotToSlash(ref.lambdaClass) + ".class";
+        try (InputStream in = klass.getResourceAsStream(resourceName))
+        {
+            LambdaImplementationVisitor implVisitor = new LambdaImplementationVisitor(klass, ref);
+            new ClassReader(in).accept(implVisitor, ClassReader.SKIP_FRAMES);
+            descriptors.put(klass, implVisitor.descriptor());
+        }
+    }
 
     /**
      * Bytecode Visitor for concrete and abstract classes and interface implementations
      */
-    private class SimpleClassVisitor extends ClassVisitor
+    private static final class SimpleClassVisitor extends ClassVisitor
     {
         private String className;
         private String fileName;
+        private int initLine = -1;
+        private int methodLine = -1;
 
         SimpleClassVisitor()
         {
@@ -261,7 +264,12 @@ public final class LineNumberInference
                           String superName,
                           String[] interfaces)
         {
-            this.className = SLASH.matcher(name).replaceAll(".");
+            this.className = slashToDot(name);
+        }
+
+        public Descriptor descriptor()
+        {
+            return new Descriptor(className, fileName, methodLine != -1 ? methodLine : initLine);
         }
 
         @Override
@@ -273,72 +281,17 @@ public final class LineNumberInference
                 {
                     public void visitLineNumber(int line, Label label)
                     {
-                        mappings.put(className, new ClassDescriptor(className, fileName, line));
+                        initLine = line;
                     }
                 };
             }
-
-            return null;
-        }
-
-        @Override
-        public void visitSource(String fileName, String var2)
-        {
-            this.fileName = fileName;
-        }
-    }
-
-    /**
-     * Bytecode Visitor for class the anonymous / lambda interface implementations
-     */
-    private class LambdaClassVisitor extends ClassVisitor
-    {
-        // Assigned from outside
-        LambdaDescriptor lambdaDescriptor;
-        String fileName;
-
-        LambdaClassVisitor()
-        {
-            super(Opcodes.ASM5);
-        }
-
-        @Override
-        public void visit(int version,
-                          int access,
-                          String name,
-                          String signature,
-                          String superName,
-                          String[] interfaces)
-        {
-        }
-
-        @Override
-        public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions)
-        {
-            // For the abstract classes, the "real" will not be visited, since it's implemented in the other class.
-            // In this situation the best thing we can do is to direct to record the base class constructor line number.
-            if (name.equals(INIT))
-            {
-                return new MethodVisitor(Opcodes.ASM5)
-                {
-                    public void visitLineNumber(int line, Label label)
-                    {
-                        if (lambdaDescriptor.line == -1)
-                            lambdaDescriptor.line = line;
-                    }
-                };
-            }
-
-            // Filter out currently queried method
-            if (!name.equals(lambdaDescriptor.targetMethodRef))
-                return null;
 
             return new MethodVisitor(Opcodes.ASM5)
             {
                 public void visitLineNumber(int line, Label label)
                 {
-                    lambdaDescriptor.line = line;
-                    lambdaDescriptor.sourceFilePath = fileName;
+                    // lower line numbers are synthetic methods
+                    methodLine = Math.max(methodLine, line);
                 }
             };
         }
@@ -355,101 +308,121 @@ public final class LineNumberInference
      * lambda proxy class to the private static method generated, since the runtime only has access to the proxy
      * class and bytecode visitor fetching line numbers only has access to the generated "fake" method.
      */
-    private class FileMappingVisitor extends ClassVisitor
+    private static class LambdaClassVisitor extends ClassVisitor
     {
-        FileMappingVisitor()
+        private String lambdaClass;
+        private String lambdaMethod;
+        private String lambdaMethodSignature;
+
+        LambdaClassVisitor()
         {
             super(Opcodes.ASM5);
         }
 
-        // Name of currently visited lambda
-        private String currentLambda;
-
         @Override
-        public void visit(int version,
-                          int access,
-                          String name,
-                          String signature,
-                          String superName,
-                          String[] interfaces)
+        public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions)
         {
-            this.currentLambda = slashToDot(name);
-        }
-
-        @Override
-        public MethodVisitor visitMethod(int access, String methodName, String desc, String signature, String[] exceptions)
-        {
-            if (methodName.equals(INIT))
+            // For the abstract classes, the "real" will not be visited, since it's implemented in the other class.
+            // In this situation the best thing we can do is to direct to record the base class constructor line number.
+            if (name.equals(INIT))
                 return null;
 
             return new MethodVisitor(Opcodes.ASM5)
             {
-                public void visitMethodInsn(int opcode, String path, String methodRef, String s2, boolean b)
+                public void visitMethodInsn(int opcode, String path, String methodRef, String methodSignature, boolean b)
                 {
-                    mappings.put(currentLambda, new LambdaDescriptor(currentLambda, path, methodRef));
+                    lambdaClass = slashToDot(path);
+                    lambdaMethod = methodRef;
+                    lambdaMethodSignature = methodSignature;
                 }
             };
         }
     }
 
-    private String dotToSlash(String input)
+    /**
+     * Class visitor for the class that implements the lambda method. This is not the lambda class but the class
+     * that declares the lambda.
+     */
+    private static class LambdaImplementationVisitor extends ClassVisitor
     {
-        return DOT.matcher(input).replaceAll("/");
-    }
+        // Assigned from outside
+        private final Class<?> klass;
+        private final LambdaClassVisitor methodReference;
 
-    private String slashToDot(String input)
-    {
-        return SLASH.matcher(input).replaceAll(".");
-    }
+        private int initLine = -1;
+        private int sourceLine = -1;
+        private String sourceFileName;
 
-    public interface Descriptor
-    {
-        public int line();
-        public String source();
-    }
-
-    private static class LambdaDescriptor implements Descriptor
-    {
-        final String className;
-        final String classFilePath;
-        final String targetMethodRef;
-
-        String sourceFilePath = "unknown";
-        int line = -1;
-
-        LambdaDescriptor(String className, String classFilePath, String targetMethodRef)
+        LambdaImplementationVisitor(Class<?> klass, LambdaClassVisitor methodReference)
         {
-            this.className = className;
-            this.classFilePath = classFilePath;
-            this.targetMethodRef = targetMethodRef;
+            super(Opcodes.ASM5);
+            this.klass = klass;
+            this.methodReference = methodReference;
         }
 
-        public String toString()
+        Descriptor descriptor()
         {
-            return "LambdaDescriptor{" +
-                   ", source='" + sourceFilePath + '\'' +
-                   ", line=" + line +
-                   '}';
+            int line = sourceLine != -1 ? sourceLine : initLine;
+            return line != -1 && sourceFileName != null
+                   ? new Descriptor(klass.getName(), sourceFileName, line)
+                   : UNKNOWN_SOURCE;
         }
 
-        public int line()
+        @Override
+        public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions)
         {
-            return line;
+            // For the abstract classes, the "real" will not be visited, since it's implemented in the other class.
+            // In this situation the best thing we can do is to direct to record the base class constructor line number.
+            if (name.equals(INIT))
+            {
+                return new MethodVisitor(Opcodes.ASM5)
+                {
+                    public void visitLineNumber(int line, Label label)
+                    {
+                        if (initLine == -1)
+                            initLine = line;
+                    }
+                };
+            }
+
+            // Filter out currently queried method
+            if (!name.equals(methodReference.lambdaMethod) || !desc.equals(methodReference.lambdaMethodSignature))
+                return null;
+
+            return new MethodVisitor(Opcodes.ASM5)
+            {
+                public void visitLineNumber(int line, Label label)
+                {
+                    if (sourceLine == -1)
+                        sourceLine = line;
+                }
+            };
         }
 
-        public String source()
+        @Override
+        public void visitSource(String fileName, String var2)
         {
-            return sourceFilePath;
+            this.sourceFileName = fileName;
         }
     }
 
-    public static class ClassDescriptor implements Descriptor
+    private static String dotToSlash(String input)
+    {
+        return input.replace('.', '/');
+    }
+
+    private static String slashToDot(String input)
+    {
+        return input.replace('/', '.');
+    }
+
+    public static final class Descriptor
     {
         final String className;
         final String sourceFilePath;
         final int line;
 
-        public ClassDescriptor(String className, String sourceFilePath, int line)
+        Descriptor(String className, String sourceFilePath, int line)
         {
             this.className = className;
             this.sourceFilePath = sourceFilePath;

@@ -31,7 +31,7 @@ import org.junit.Assert;
 public class LineNumberInferenceTest
 {
     @Test
-    public void lineNumbersTest() throws Throwable
+    public void lineNumbersTest()
     {
         LineNumberInference lineNumbers = new LineNumberInference();
 
@@ -44,8 +44,6 @@ public class LineNumberInferenceTest
         Function<Long, String> abstractMethodConcreteClassRef = toFn((new ConcreteStaticClass())::abstractMethodOfStaticClass);
         Function<Long, ConstructorAsReferenceClass> constructorAsReferenceClassFunction = toFn(ConstructorAsReferenceClass::new);
 
-        lineNumbers.preloadLambdas();
-
         List<Class> classes = Arrays.asList(lambda.getClass(), lambda2.getClass(), lambda3.getClass(),
                                             FunInst.class, FunInstStatic.class, AbstractFunInst.class, LineNumbersFn.class,
                                             thisMethodRef.getClass(), methodRef.getClass(), abstractMethodRef.getClass(),
@@ -54,21 +52,21 @@ public class LineNumberInferenceTest
 
         for (Class klass : classes)
         {
-            Assert.assertTrue(lineNumbers.maybeProcessClass(klass));
-            Assert.assertFalse(lineNumbers.maybeProcessClass(klass)); // Make sure that subsequent calls are skipped
+            Assert.assertTrue(klass.getName() + " in " + classes, lineNumbers.maybeProcessClass(klass));
+            Assert.assertFalse(klass.getName() + " in " + classes, lineNumbers.maybeProcessClass(klass)); // Make sure that subsequent calls are skipped
         }
 
-        Assert.assertEquals(lineNumbers.getLine(lambda.getClass()).line(), 38);
-        Assert.assertEquals(lineNumbers.getLine(lambda2.getClass()).line(), 39);
-        Assert.assertEquals(lineNumbers.getLine(lambda3.getClass()).line(), 40);
-        Assert.assertEquals(lineNumbers.getLine(thisMethodRef.getClass()).line(), 82);
-        Assert.assertEquals(lineNumbers.getLine(methodRef.getClass()).line(), 118);
-        Assert.assertEquals(lineNumbers.getLine(abstractMethodRef.getClass()).line(), 114);
-        Assert.assertEquals(lineNumbers.getLine(abstractMethodConcreteClassRef.getClass()).line(), 128);
-        Assert.assertEquals(lineNumbers.getLine(constructorAsReferenceClassFunction.getClass()).line(), 135);
-        Assert.assertEquals(lineNumbers.getLine(FunInst.class).line(), 94);
-        Assert.assertEquals(lineNumbers.getLine(FunInstStatic.class).line(), 102);
-        Assert.assertEquals(lineNumbers.getLine(AbstractFunInst.class).line(), 110);
+        Assert.assertEquals(38, lineNumbers.getLine(lambda.getClass()).line());
+        Assert.assertEquals(39, lineNumbers.getLine(lambda2.getClass()).line());
+        Assert.assertEquals(40, lineNumbers.getLine(lambda3.getClass()).line());
+        Assert.assertEquals(80, lineNumbers.getLine(thisMethodRef.getClass()).line());
+        Assert.assertEquals(116, lineNumbers.getLine(methodRef.getClass()).line());
+        Assert.assertEquals(112, lineNumbers.getLine(abstractMethodRef.getClass()).line());
+        Assert.assertEquals(126, lineNumbers.getLine(abstractMethodConcreteClassRef.getClass()).line());
+        Assert.assertEquals(133, lineNumbers.getLine(constructorAsReferenceClassFunction.getClass()).line());
+        Assert.assertEquals(96, lineNumbers.getLine(FunInst.class).line());
+        Assert.assertEquals(104, lineNumbers.getLine(FunInstStatic.class).line());
+        Assert.assertEquals(108, lineNumbers.getLine(AbstractFunInst.class).line());
     }
 
     private TaggedFunction<Long, String> toFn(TaggedFunction<Long, String> fn)
@@ -79,7 +77,7 @@ public class LineNumberInferenceTest
     // Method to be cast to method reference
     private String methodAsReference(Long l)
     {
-        return Long.toString(l); // Line #82
+        return Long.toString(l); // Line #80
     }
 
     private Function<Long, ConstructorAsReferenceClass> toFn(Function<Long, ConstructorAsReferenceClass> fn)
@@ -87,35 +85,35 @@ public class LineNumberInferenceTest
         return fn;
     }
 
-    public interface TaggedFunction<A, B> extends Function<A, B>
+    interface TaggedFunction<A, B> extends Function<A, B>
     {
     }
 
-    public class FunInst implements Function<Integer, String> // Line #94
-    {
-        public String apply(Integer integer)
-        {
-            return Integer.toString(integer);
-        }
-    }
-
-    public static class FunInstStatic implements Function<Integer, String> // Line #102
+    public class FunInst implements Function<Integer, String>
     {
         public String apply(Integer integer)
         {
-            return Integer.toString(integer);
+            return Integer.toString(integer); // Line #96
         }
     }
 
-    public abstract class AbstractFunInst implements Function<Integer, String> // Line #110
+    public static class FunInstStatic implements Function<Integer, String>
+    {
+        public String apply(Integer integer)
+        {
+            return Integer.toString(integer); // Line #104
+        }
+    }
+
+    abstract class AbstractFunInst implements Function<Integer, String> // Line #108
     {
     }
 
     static abstract class StaticClass
     {
-        public String methodOfStaticClass(Long i)
+        String methodOfStaticClass(Long i)
         {
-            return Long.toString(i); // Line #118
+            return Long.toString(i); // Line #116
         }
 
         public abstract String abstractMethodOfStaticClass(Long i);
@@ -125,14 +123,14 @@ public class LineNumberInferenceTest
     {
         public String abstractMethodOfStaticClass(Long i)
         {
-            return Long.toString(i); // Line #128
+            return Long.toString(i); // Line #126
         }
     }
 
     public static class ConstructorAsReferenceClass
     {
-        public ConstructorAsReferenceClass(Long l)
-        { // Line #135
+        ConstructorAsReferenceClass(Long l)
+        { // Line #133
         }
     }
 }

@@ -31,6 +31,18 @@ jvm.options file.
 
 See CASSANDRA-14092 for more details.
 
+
+DSE 6.0.1
+=========
+
+Upgrading
+---------
+   - Temporary files for DSE will be placed in a "dse" subfolder below TMPDIR (environment variable), which is usually
+     set to /tmp. There will be a new subfolder beneath $TMPDIR/dse for each startup and tools invocation. The location
+     is controlled via cassandra.in.sh. It is safe to delete $TMPDIR/dse while neither DSE nor any tools are running.
+     Both, the TMPDIR environment variable and the Java system property java.io.tmpdir, are configured. (DB-2003)
+
+
 DSE 6.0
 =======
 
