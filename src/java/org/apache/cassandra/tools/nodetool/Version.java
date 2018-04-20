@@ -22,7 +22,7 @@ import io.airlift.airline.Command;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
 
-@Command(name = "version", description = "Print cassandra version")
+@Command(name = "version", description = "Print DSE DB version")
 public class Version extends NodeToolCmd
 {
     @Override

@@ -617,7 +617,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // tests we need to ensure SystemKeyspace has been initialized, so we call it again, which is safe
         SystemKeyspace.finishStartupBlocking();
 
-        logger.info("Cassandra version: {}", FBUtilities.getReleaseVersionString());
+        logger.info("DSE DB version: {}", FBUtilities.getReleaseVersionString());
         logger.info("CQL supported versions: {} (default: {})",
                 StringUtils.join(ClientState.getCQLSupportedVersion(), ", "), ClientState.DEFAULT_CQL_VERSION);
         logger.info("Native protocol supported versions: {} (default: {})",

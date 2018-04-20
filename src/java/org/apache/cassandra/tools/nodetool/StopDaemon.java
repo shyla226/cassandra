@@ -24,7 +24,7 @@ import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
-@Command(name = "stopdaemon", description = "Stop cassandra daemon")
+@Command(name = "stopdaemon", description = "Stop DSE daemon")
 public class StopDaemon extends NodeToolCmd
 {
     @Override

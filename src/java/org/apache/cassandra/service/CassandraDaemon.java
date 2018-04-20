@@ -594,7 +594,7 @@ public class CassandraDaemon
     {
         // On linux, this doesn't entirely shut down Cassandra, just the RPC server.
         // jsvc takes care of taking the rest down
-        logger.info("Cassandra shutting down...");
+        logger.info("DSE shutting down...");
         if (nativeTransportService != null)
             nativeTransportService.destroy();
 

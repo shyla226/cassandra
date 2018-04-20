@@ -625,7 +625,8 @@ class Shell(cmd.Cmd):
         vers['cql'] = self.cql_version
         vers['dist'] = "DSE" if (int(vers['protocol']) & 0x40) == 0x40 else "Native"
         vers['protocolVersion'] = int(vers['protocol']) & 0x3f
-        print "[cqlsh %(shver)s | Cassandra %(build)s | CQL spec %(cql)s | %(dist)s protocol v%(protocolVersion)s]" % vers
+        vers['version_str'] = 'DSE %s' % vers.get('dse') if 'dse' in vers else 'DSE DB %s' % vers.get('build')
+        print "[cqlsh %(shver)s | %(version_str)s | CQL spec %(cql)s | %(dist)s protocol v%(protocolVersion)s]" % vers
 
     def show_session(self, sessionid, partial_session=False):
         print_trace_session(self, self.session, sessionid, partial_session)
@@ -637,6 +638,8 @@ class Shell(cmd.Cmd):
             'protocol': result['native_protocol_version'],
             'cql': result['cql_version'],
         }
+        if result['dse_version']:
+            vers['dse'] = result['dse_version']
         self.connection_versions = vers
 
     def get_keyspace_names(self):
