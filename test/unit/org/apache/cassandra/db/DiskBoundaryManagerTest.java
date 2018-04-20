@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.db;
 
 import java.io.File;
@@ -41,20 +40,22 @@ import static org.junit.Assert.assertSame;
 
 public class DiskBoundaryManagerTest extends CQLTester
 {
-    private static final List<Directories.DataDirectory> DIRS1 = Lists.newArrayList(new Directories.DataDirectory(new File("/tmp/1")),
-                                                                                    new Directories.DataDirectory(new File("/tmp/2")),
-                                                                                    new Directories.DataDirectory(new File("/tmp/3")));
+    private static final String tmp = System.getProperty("java.io.tmpdir");
 
-    private static final List<Directories.DataDirectory> DIRS2 = Lists.newArrayList(new Directories.DataDirectory(new File("/tmp/11")),
-                                                                                    new Directories.DataDirectory(new File("/tmp/22")),
-                                                                                    new Directories.DataDirectory(new File("/tmp/33")),
-                                                                                    new Directories.DataDirectory(new File("/tmp/44")));
+    private static final List<Directories.DataDirectory> DIRS1 = Lists.newArrayList(new Directories.DataDirectory(new File(tmp + "/1")),
+                                                                                    new Directories.DataDirectory(new File(tmp + "/2")),
+                                                                                    new Directories.DataDirectory(new File(tmp + "/3")));
 
-    private static final List<Directories.DataDirectory> DIRS3 = Lists.newArrayList(new Directories.DataDirectory(new File("/tmp/111")),
-                                                                                    new Directories.DataDirectory(new File("/tmp/222")),
-                                                                                    new Directories.DataDirectory(new File("/tmp/333")),
-                                                                                    new Directories.DataDirectory(new File("/tmp/444")),
-                                                                                    new Directories.DataDirectory(new File("/tmp/555")));
+    private static final List<Directories.DataDirectory> DIRS2 = Lists.newArrayList(new Directories.DataDirectory(new File(tmp + "/11")),
+                                                                                    new Directories.DataDirectory(new File(tmp + "/22")),
+                                                                                    new Directories.DataDirectory(new File(tmp + "/33")),
+                                                                                    new Directories.DataDirectory(new File(tmp + "/44")));
+
+    private static final List<Directories.DataDirectory> DIRS3 = Lists.newArrayList(new Directories.DataDirectory(new File(tmp + "/111")),
+                                                                                    new Directories.DataDirectory(new File(tmp + "/222")),
+                                                                                    new Directories.DataDirectory(new File(tmp + "/333")),
+                                                                                    new Directories.DataDirectory(new File(tmp + "/444")),
+                                                                                    new Directories.DataDirectory(new File(tmp + "/555")));
 
     private static final List<List<Directories.DataDirectory>> ALL_DIRS = Arrays.asList(DIRS1, DIRS2, DIRS3);
 
@@ -102,7 +103,7 @@ public class DiskBoundaryManagerTest extends CQLTester
         DiskBoundaries[] oldBoundaries = getAll();
 
         // Blacklist directory from cfDir and from custom2
-        File[] blacklisted = new File[]{new File("/tmp/3"), null, new File("/tmp/444")};
+        File[] blacklisted = new File[]{new File(tmp + "/3"), null, new File(tmp + "/444")};
         BlacklistedDirectories.maybeMarkUnwritable(blacklisted[0]);
         BlacklistedDirectories.maybeMarkUnwritable(blacklisted[2]);
 
