@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.FBUtilities;
 
 
 public class WindowsFailedSnapshotTracker
@@ -48,6 +49,9 @@ public class WindowsFailedSnapshotTracker
 
     public static void deleteOldSnapshots()
     {
+        if (!FBUtilities.isWindows)
+            return;
+
         if (new File(TODELETEFILE).exists())
         {
             try
@@ -101,6 +105,9 @@ public class WindowsFailedSnapshotTracker
 
     public static synchronized void handleFailedSnapshot(File dir)
     {
+        if (!FBUtilities.isWindows)
+            return;
+
         assert _failedSnapshotFile != null : "_failedSnapshotFile not initialized within WindowsFailedSnapshotTracker";
         FileUtils.deleteRecursiveOnExit(dir);
         _failedSnapshotFile.println(dir.toString());
@@ -110,6 +117,9 @@ public class WindowsFailedSnapshotTracker
     @VisibleForTesting
     public static void resetForTests()
     {
+        if (!FBUtilities.isWindows)
+            return;
+
         _failedSnapshotFile.close();
     }
 }
