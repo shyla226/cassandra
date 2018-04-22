@@ -3,6 +3,8 @@ DSE 6.0.1:
  * Apply view batchlog mutation parallel with local view mutations (DB-1900)
  * Improve user warnings on startup when libaio package is not installed (DB-1917)
  * Use same IO queue depth as Linux scheduler and advise against overriding it (DB-1909)
+Merged from dse5.1:
+ * Add getConcurrentCompactors to JMX in order to avoid loading DatabaseDescriptor to check its value in nodetool (DB-1730)
 
 DSE 6.0.0:
  * Thread-Per-Core rearchitecture (DB-28)

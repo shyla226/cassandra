@@ -292,10 +292,9 @@ public class NodeProbe implements AutoCloseable
 
     private void checkJobs(PrintStream out, int jobs)
     {
-        // TODO this should get the configured number of concurrent_compactors via JMX and not using DatabaseDescriptor
-        DatabaseDescriptor.toolInitialization();
-        if (jobs > DatabaseDescriptor.getConcurrentCompactors())
-            out.println(String.format("jobs (%d) is bigger than configured concurrent_compactors (%d) on this host, using at most %d threads", jobs, DatabaseDescriptor.getConcurrentCompactors(), DatabaseDescriptor.getConcurrentCompactors()));
+        int concurrentCompactors = ssProxy.getConcurrentCompactors();
+        if (jobs > concurrentCompactors)
+            out.println(String.format("jobs (%d) is bigger than configured concurrent_compactors (%d), using at most %d threads", jobs, concurrentCompactors, concurrentCompactors));
     }
 
     public void forceKeyspaceCleanup(PrintStream out, int jobs, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
