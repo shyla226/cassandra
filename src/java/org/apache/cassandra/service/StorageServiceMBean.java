@@ -669,6 +669,9 @@ public interface StorageServiceMBean extends NotificationEmitter
     /** Return the PID of the process */
     long getPid();
 
+    /** Return the number of simultaneous compactions */
+    int getConcurrentCompactors();
+
     /**
      * Resume bootstrap streaming when there is failed data streaming.
      *

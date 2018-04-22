@@ -5163,6 +5163,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return NativeLibrary.getProcessID();
     }
 
+    public int getConcurrentCompactors()
+    {
+        return DatabaseDescriptor.getConcurrentCompactors();
+    }
+
     public int forceMarkAllSSTablesAsUnrepaired(String keyspace, String... tables) throws IOException
     {
         int marked = 0;
