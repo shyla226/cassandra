@@ -935,8 +935,8 @@ public final class SchemaKeyspace
             if (!TableMetadata.Flag.isCQLCompatible(TableMetadata.Flag.fromStringSet(flags)))
             {
                 messages += String.format("ALTER TABLE %s.%s DROP COMPACT STORAGE;\n",
-                                          row.getString("keyspace_name"),
-                                          row.getString("table_name"));
+                                          ColumnIdentifier.maybeQuote(row.getString("keyspace_name")),
+                                          ColumnIdentifier.maybeQuote(row.getString("table_name")));
             }
         }
 
@@ -944,9 +944,12 @@ public final class SchemaKeyspace
         {
             throw new StartupException(StartupException.ERR_OUTDATED_SCHEMA,
                                        String.format("Compact Tables are not allowed in Cassandra starting with 4.0 version. " +
-                                                     "In order to migrate off Compact Storage, downgrade to the latest DSE 5.0/5.1, start the " +
-                                                     "node with `-Dcassandra.commitlog.ignorereplayerrors=true` and run the " +
-                                                     "following commands: \n%s",
+                                                     "In order to migrate off Compact Storage, downgrade to the latest DSE 5.0/5.1, " +
+                                                     "start the node with `-Dcassandra.commitlog.ignorereplayerrors=true` " +
+                                                     "passed on the command line or in jvm.options, " +
+                                                     "and run the following commands: \n\n%s\n" +
+                                                     "Then restart the node with the new DSE version " +
+                                                     "without `-Dcassandra.commitlog.ignorereplayerrors=true`.",
                                                      messages));
         }
     }

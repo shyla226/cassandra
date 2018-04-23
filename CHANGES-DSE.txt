@@ -1,4 +1,5 @@
 DSE 6.0.1:
+ * Fix startup error message rejecting COMPACT STORAGE after upgrade (DB-1916)
  * Introduce max memtable size and avoid copy-on-heap when flushing. (DB-1943)
  * Send a final error message when a cont. paging session is cancelled (DB-1798)
  * Prevent OOM due to OutboundTcpConnection backlog by dropping request messages once the queue becomes too large (DB-2001)
