@@ -33,6 +33,7 @@ import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -184,6 +185,11 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         serializer.validate(bytes);
 
         return serializer.toString(serializer.deserialize(bytes));
+    }
+
+    public String getString(CellPath path, ByteBuffer bytes)
+    {
+        throw new IllegalStateException("Must be implemented by sub-classes that return true in isMultiCell");
     }
 
     /** get a byte representation of the given string. */

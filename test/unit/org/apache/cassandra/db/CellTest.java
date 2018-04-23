@@ -42,6 +42,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static java.util.Arrays.*;
+import static org.junit.Assert.*;
 
 public class CellTest
 {
@@ -158,6 +159,11 @@ public class CellTest
         assertValid(BufferCell.expiring(c, 0, 4, Cell.NO_DELETION_TIME, bbs(4)));
 
         c = fakeColumn("c", MapType.getInstance(Int32Type.instance, Int32Type.instance, true));
+
+        // make sure toString doesn't throw
+        String str = BufferCell.live(c, 0, ByteBufferUtil.bytes(4), CellPath.create(ByteBufferUtil.bytes(4))).toString();
+        assertTrue(str, str.contains("c[4]=4"));
+
         // Valid cell path
         assertValid(BufferCell.live(c, 0, ByteBufferUtil.bytes(4), CellPath.create(ByteBufferUtil.bytes(4))));
         // Invalid cell path (int values should be 0 or 4 bytes)
@@ -174,10 +180,15 @@ public class CellTest
                                     asList(f1, f2),
                                     asList(Int32Type.instance, UTF8Type.instance),
                                     true);
-        ColumnMetadata c;
+        ColumnMetadata c = fakeColumn("c", udt);
+
+        // Make sure toString() doesn't throw
+        String str = BufferCell.live(c, 0, bb(1), CellPath.create(bbs(0))).toString();
+        assertTrue(str, str.contains("c{f1:1}"));
+        str = BufferCell.live(c, 0, bb("foo"), CellPath.create(bbs(1))).toString();
+        assertTrue(str, str.contains("c{f2:foo}"));
 
         // Valid cells
-        c = fakeColumn("c", udt);
         assertValid(BufferCell.live(c, 0, bb(1), CellPath.create(bbs(0))));
         assertValid(BufferCell.live(c, 0, bb("foo"), CellPath.create(bbs(1))));
         assertValid(BufferCell.expiring(c, 0, 4, 4, bb(1), CellPath.create(bbs(0))));
@@ -210,6 +221,10 @@ public class CellTest
 
         ColumnMetadata c = fakeColumn("c", udt);
         ByteBuffer val = udt(bb(1), bb("foo"));
+
+        // Make sure toString() doesn't throw
+        String str = BufferCell.live(c, 0, val).toString();
+        assertTrue(str, str.contains("c=1:foo"));
 
         // Valid cells
         assertValid(BufferCell.live(c, 0, val));

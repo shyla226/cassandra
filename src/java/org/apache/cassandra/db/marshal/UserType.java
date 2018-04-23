@@ -107,6 +107,16 @@ public class UserType extends TupleType
     }
 
     @Override
+    public String getString(CellPath path, ByteBuffer bytes)
+    {
+        assert isMultiCell() : "Should only be called when isMultiCell() returns true";
+        int f = Integer.parseInt(nameComparator().getString(path.get(0)));
+        return String.format("{%s:%s}",
+                             fieldName(f),
+                             fieldType(f).getString(bytes));
+    }
+
+    @Override
     public boolean isFreezable()
     {
         return true;

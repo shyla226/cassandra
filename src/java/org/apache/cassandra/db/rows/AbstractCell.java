@@ -27,7 +27,6 @@ import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.HashingUtils;
 import org.apache.cassandra.utils.memory.AbstractAllocator;
@@ -191,15 +190,12 @@ public abstract class AbstractCell extends Cell
             return String.format("[%s=%d ts=%d]", column().name, CounterContext.instance().total(value()), timestamp());
 
         AbstractType<?> type = column().type;
-        if (type instanceof CollectionType && type.isMultiCell())
-        {
-            CollectionType ct = (CollectionType)type;
-            return String.format("[%s[%s]=%s %s]",
+        if (type.isMultiCell())
+            return String.format("[%s%s %s]",
                                  column().name,
-                                 ct.nameComparator().getString(path().get(0)),
-                                 ct.valueComparator().getString(value()),
+                                 type.getString(path(), value()),
                                  livenessInfoString());
-        }
+
         if (isTombstone())
             return String.format("[%s=<tombstone> %s]", column().name, livenessInfoString());
         else

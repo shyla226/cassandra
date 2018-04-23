@@ -94,9 +94,19 @@ public abstract class CollectionType<T> extends AbstractType<T>
         return kind.makeCollectionReceiver(collection, isKey);
     }
 
+    @Override
     public String getString(ByteBuffer bytes)
     {
         return BytesType.instance.getString(bytes);
+    }
+
+    @Override
+    public String getString(CellPath path, ByteBuffer bytes)
+    {
+        assert isMultiCell() : "Should only be called when isMultiCell() returns true";
+        return String.format("[%s]=%s",
+                             nameComparator().getString(path.get(0)),
+                             valueComparator().getString(bytes));
     }
 
     public ByteBuffer fromString(String source)
