@@ -3659,9 +3659,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Map<String, TabularData> snapshotMap = new HashMap<>();
         for (Keyspace keyspace : Keyspace.all())
         {
-            if (SchemaConstants.isLocalSystemKeyspace(keyspace.getName()))
-                continue;
-
             for (ColumnFamilyStore cfStore : keyspace.getColumnFamilyStores())
             {
                 for (Map.Entry<String, Pair<Long, Long>> snapshotDetail : cfStore.getSnapshotDetails().entrySet())
