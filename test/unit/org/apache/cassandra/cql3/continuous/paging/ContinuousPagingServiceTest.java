@@ -3,7 +3,9 @@ package org.apache.cassandra.cql3.continuous.paging;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -38,8 +40,10 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.TestTimeSource;
 import org.apache.cassandra.utils.TimeSource;
+import org.mockito.Mockito;
 
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.when;
 
 public class ContinuousPagingServiceTest
 {
@@ -346,6 +350,33 @@ public class ContinuousPagingServiceTest
         builder.onRowCompleted(Arrays.asList(ByteBufferUtil.bytes("testColumn")), true);
         test.scheduler.runAll();
 
+        Assert.assertEquals(2, test.channel.writeCalls);
+        Assert.assertEquals(2, test.channel.flushCalls);
+        Assert.assertEquals(Message.Type.ERROR, ((Frame) test.channel.writeObjects.get(1)).header.type);
+    }
+
+    @Test
+    public void testErrorIsSentAfterCancel() throws InterruptedException, ExecutionException
+    {
+        TestSpecs test = newTest()
+                         .rowsPerPage(1)
+                         .numNextPages(Integer.MAX_VALUE);
+
+        ResultBuilder builder = test.build();
+
+        // send one page
+        builder.onRowCompleted(Arrays.asList(ByteBufferUtil.bytes("testColumn")), true);
+
+        // cancel the session
+        CompletableFuture<Boolean> res = TPCUtils.toFuture(ContinuousPagingService.cancel(Single.just(test.queryState),
+                                                                                          test.streamId));
+
+        test.scheduler.runAll();
+
+        assertTrue(res.isDone());
+        assertTrue(res.get());
+
+        // check that the page and the final error were sent
         Assert.assertEquals(2, test.channel.writeCalls);
         Assert.assertEquals(2, test.channel.flushCalls);
         Assert.assertEquals(Message.Type.ERROR, ((Frame) test.channel.writeObjects.get(1)).header.type);

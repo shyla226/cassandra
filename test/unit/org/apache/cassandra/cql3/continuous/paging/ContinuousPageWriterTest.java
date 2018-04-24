@@ -72,7 +72,29 @@ public class ContinuousPageWriterTest
         {
             writer.sendPage(makeFrame(Message.Type.QUERY), true);
         }
-        writer.cancel();
+        writer.cancel(makeFrame(Message.Type.ERROR));
+
+        eventLoop.runAll();
+
+        Assert.assertEquals(1, channel.writeCalls);
+        Assert.assertEquals(1, channel.flushCalls);
+        Assert.assertEquals(Message.Type.ERROR, ((Frame) channel.writeObjects.get(0)).header.type);
+    }
+
+    @Test
+    public void testSessionCompletesIfSocketIsClosed()
+    {
+        ContinuousPagingTestStubs.RecordingEventLoop eventLoop = new ContinuousPagingTestStubs.RecordingEventLoop();
+        ContinuousPagingTestStubs.RecordingChannel channel = new ContinuousPagingTestStubs.RecordingChannel(eventLoop);
+        int pages = 5;
+
+        ContinuousPageWriter writer = new ContinuousPageWriter(() -> channel, Integer.MAX_VALUE, pages);
+
+        // the listener is notified on the loop so we must call this before queuing the pages
+        channel.closeFuture.trySuccess();
+
+        for (int i = 0; i < pages; i++)
+            writer.sendPage(makeFrame(Message.Type.QUERY), true);
 
         eventLoop.runAll();
 

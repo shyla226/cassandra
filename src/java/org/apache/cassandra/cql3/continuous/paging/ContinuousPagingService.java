@@ -772,9 +772,16 @@ public class ContinuousPagingService
         public CompletableFuture<Void> cancel()
         {
             if (state.compareAndSet(State.RUNNING, State.CANCEL_REQUESTED))
-                pageWriter.cancel();
+            {
+                Message.Response err = ErrorMessage.fromException(new RuntimeException("Session cancelled by the user"), throwable -> true);
+                pageWriter.cancel(Page.makeFrame(err, err.type.codec, options.getProtocolVersion(), queryState.getStreamId()));
+
+                logger.trace("Continuous paging session {} cancelled by the user", key);
+            }
             else if (logger.isTraceEnabled())
+            {
                 logger.trace("Could not cancel continuous paging session {}, not running ({})", key, state.get());
+            }
 
             return pageWriter.completionFuture();
         }

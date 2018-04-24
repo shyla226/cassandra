@@ -25,6 +25,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
+import javax.annotation.Nullable;
+
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.slf4j.Logger;
@@ -153,10 +155,13 @@ class ContinuousPageWriter
      * will be discarded. This include both pages that are in the internal
      * queue of the writer, as well as any new page submitted through
      * {@link #sendPage}. As such, cancelling twice is a no-op.
+     *
+     * The error specified as the parameter will be sent as the final message, if
+     * the socket is still open and no other error was set in the meantime.
      */
-    public void cancel()
+    public void cancel(Frame error)
     {
-        writer.cancel();
+        writer.cancel(error);
     }
 
     public boolean completed()
@@ -196,17 +201,27 @@ class ContinuousPageWriter
                 // will avoid time-out exceptions in the producer thread
                 if (logger.isTraceEnabled())
                     logger.trace("Socket {} closed by the client", channel);
-                cancel();
+                cancel(null);
             });
         }
 
-        public void cancel()
+        /**
+         * Cancel this session by completing it in such a way that will discard all outstanding
+         * messages. An optional final error can be sent to the client though.
+         *
+         * @param error - an optional error to send to the client as a final message
+         */
+        public void cancel(@Nullable Frame error)
         {
             if (canceled)
                 return;
 
-            logger.trace("Continuous page writer cancelled");
-            canceled = true;
+            logger.trace("Cancelling continuous page writer");
+            canceled = true; // an additional boolean is required to ensure we discard all messages
+
+            if (error != null && !this.error.compareAndSet(null, error))
+                logger.debug("Failed to set final error when cancelling session, another error was already there");
+
             complete();
         }
 

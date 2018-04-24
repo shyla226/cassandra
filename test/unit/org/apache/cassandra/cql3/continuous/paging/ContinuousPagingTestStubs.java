@@ -16,6 +16,7 @@ import io.netty.channel.ChannelMetadata;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.ChannelProgressivePromise;
 import io.netty.channel.ChannelPromise;
+import io.netty.channel.DefaultChannelPromise;
 import io.netty.channel.EventLoop;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
@@ -205,10 +206,12 @@ public class ContinuousPagingTestStubs
         public int writeCalls = 0;
         public List writeObjects = new LinkedList();
         public boolean writable = true;
+        public DefaultChannelPromise closeFuture;
 
         public RecordingChannel(EventLoop eventLoop)
         {
             this.eventLoop = eventLoop;
+            this.closeFuture = new DefaultChannelPromise(this);
         }
 
         @Override
@@ -236,6 +239,12 @@ public class ContinuousPagingTestStubs
         public boolean isWritable()
         {
             return writable;
+        }
+
+        @Override
+        public ChannelFuture closeFuture()
+        {
+            return closeFuture;
         }
 
         public void setEventLoop(TestEventLoop eventLoop)
