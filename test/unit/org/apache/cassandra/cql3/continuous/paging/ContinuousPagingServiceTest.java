@@ -1,3 +1,9 @@
+/*
+ * Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
 package org.apache.cassandra.cql3.continuous.paging;
 
 import java.util.ArrayList;
@@ -40,10 +46,8 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.TestTimeSource;
 import org.apache.cassandra.utils.TimeSource;
-import org.mockito.Mockito;
 
 import static org.junit.Assert.*;
-import static org.mockito.Mockito.when;
 
 public class ContinuousPagingServiceTest
 {

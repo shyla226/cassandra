@@ -1,3 +1,9 @@
+/*
+ * Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
 package org.apache.cassandra.cql3.continuous.paging;
 
 import java.net.SocketAddress;
