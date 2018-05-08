@@ -60,7 +60,7 @@ do
           SSL_ARGS=$(cat $SSL_FILE | tr '\n' ' ')
       fi
       JVM_ARGS="$JVM_ARGS $SSL_ARGS"
-      ARGS="$ARGS $1"
+      ARGS+=("$1")
       ;;
     -D*)
       JVM_ARGS="$JVM_ARGS $1"
