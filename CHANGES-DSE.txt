@@ -1,10 +1,15 @@
-DSE 5.1.9
+DSE 5.1.10
  * Ignore empty Counter cells on digest calculation (DB-1881)
  * Upgrade netty to 4.0.54 same as BDP; Avoid log spam for unclean client shutdown (DB-1834)
 Merged from dse5.0:
+ * Reusing table ID with CREATE TABLE causes failure on restart (DB-2032)
  * Add getConcurrentCompactors to JMX in order to avoid loading DatabaseDescriptor to check its value in nodetool (DB-1730)
  * Fix legacy complex range tombstone serialization+deserialization for static and regular columns (DB-1757)
  * Fix error in MVs referencing a function with uppercase letters on its name (DB-1874)
+
+
+DSE 5.1.9
+  (no changes)
 
 
 DSE 5.1.8

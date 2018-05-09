@@ -643,12 +643,13 @@ public abstract class CQLTester
         return currentTable;
     }
 
-    protected void createTableMayThrow(String query) throws Throwable
+    protected String createTableMayThrow(String query)
     {
         String currentTable = createTableName();
         String fullQuery = formatQuery(query);
         logger.info(fullQuery);
         QueryProcessor.executeOnceInternal(fullQuery);
+        return currentTable;
     }
 
     protected void alterTable(String query)
@@ -658,7 +659,7 @@ public abstract class CQLTester
         schemaChange(fullQuery);
     }
 
-    protected void alterTableMayThrow(String query) throws Throwable
+    protected void alterTableMayThrow(String query)
     {
         String fullQuery = formatQuery(query);
         logger.info(fullQuery);

@@ -18,18 +18,25 @@
  */
 package org.apache.cassandra.schema;
 
+import java.util.UUID;
+
+import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.utils.UUIDGen;
+
 import org.junit.Test;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
 
 public class CreateTableValidationTest extends CQLTester
 {
-    private static final String KEYSPACE1 = "CreateTableValidationTest";
-
     @Test
-    public void testInvalidBloomFilterFPRatio() throws Throwable
+    public void testInvalidBloomFilterFPRatio()
     {
         try
         {
@@ -47,5 +54,32 @@ public class CreateTableValidationTest extends CQLTester
 
         // sanity check
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b int) WITH bloom_filter_fp_chance = 0.1");
+    }
+
+    @Test
+    public void testDuplicateCfId()
+    {
+        UUID id = UUIDGen.getTimeUUID();
+        String table = createTable(String.format("CREATE TABLE %%s (a int PRIMARY KEY, b int) WITH ID = %s", id));
+
+        String t = createTableName();
+        try
+        {
+            QueryProcessor.executeOnceInternal(String.format("CREATE TABLE %s.%s (a int PRIMARY KEY, b int) WITH ID = %s",
+                                                             KEYSPACE_PER_TEST,
+                                                             t,
+                                                             id));
+            fail("CREATE TABLE with existing cf-id must fail");
+        }
+        catch (AlreadyExistsException exc) {
+            assertEquals(KEYSPACE_PER_TEST, exc.ksName);
+            assertEquals(currentTable(), exc.cfName);
+            assertEquals(String.format("ID %s used in CREATE TABLE statement is already used by table %s.%s",
+                                       id, KEYSPACE, table), exc.getMessage());
+        }
+
+        // duplicate cf-id with IF NOT EXISTS should do nothing
+        String table2 = createTableMayThrow(String.format("CREATE TABLE IF NOT EXISTS %%s (a int PRIMARY KEY, b int) WITH ID = %s", id));
+        assertNull(Schema.instance.getCFMetaData(KEYSPACE, table2));
     }
 }

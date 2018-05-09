@@ -88,6 +88,16 @@ public class CreateTableStatement extends SchemaAlteringStatement
     {
         try
         {
+            if (id != null)
+            {
+                CFMetaData cfm = Schema.instance.getCFMetaData(id);
+                if (cfm != null)
+                    throw new AlreadyExistsException(keyspace(),
+                                                     columnFamily(),
+                                                     String.format("ID %s used in CREATE TABLE statement is already used by table %s.%s",
+                                                                   id, cfm.ksName, cfm.cfName));
+            }
+
             if (params.compaction.klass().equals(DateTieredCompactionStrategy.class))
                 DateTieredCompactionStrategy.deprecatedWarning(keyspace(), columnFamily());
 
