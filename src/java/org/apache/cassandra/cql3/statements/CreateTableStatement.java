@@ -98,6 +98,20 @@ public class CreateTableStatement extends SchemaAlteringStatement implements Tab
 
     public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
+        if (id != null)
+        {
+            TableMetadata cfm = Schema.instance.getTableMetadata(id);
+            if (cfm != null)
+            {
+                if (ifNotExists)
+                    return Maybe.empty();
+                throw new AlreadyExistsException(keyspace(),
+                                                 columnFamily(),
+                                                 String.format("ID %s used in CREATE TABLE statement is already used by table %s.%s",
+                                                               id, cfm.keyspace, cfm.name));
+            }
+        }
+
         if (params.compaction.klass().equals(DateTieredCompactionStrategy.class))
             DateTieredCompactionStrategy.deprecatedWarning(keyspace(), columnFamily());
 
