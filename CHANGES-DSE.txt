@@ -1,6 +1,9 @@
-DSE 5.0.14
+DSE 5.0.15
  * Reusing table ID with CREATE TABLE causes failure on restart (DB-2032)
  * Add getConcurrentCompactors to JMX in order to avoid loading DatabaseDescriptor to check its value in nodetool (DB-1730)
+
+
+DSE 5.0.14
  * Fix legacy complex range tombstone serialization+deserialization for static and regular columns (DB-1757)
  * Fix error in MVs referencing a function with uppercase letters on its name (DB-1874)
  * Improve replace fail messages when a replace is retried before QUARANTINE_DELAY (DB-1776)
