@@ -30,6 +30,7 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.FBUtilities;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 

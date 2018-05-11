@@ -35,7 +35,6 @@ import org.junit.After;
 import org.junit.Ignore;
 import org.junit.Test;
 
-import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
