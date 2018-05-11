@@ -527,6 +527,10 @@ public class StressProfile implements Serializable
                         }
                     }
 
+                    if (insert == null)
+                        insert = new HashMap<>();
+                    lowerCase(insert);
+
                     //Non PK Columns
                     StringBuilder sb = new StringBuilder();
                     if (!isKeyOnlyTable)
@@ -595,10 +599,6 @@ public class StressProfile implements Serializable
                         value.delete(value.lastIndexOf(","), value.length());
                         sb.append(") ").append("values(").append(value).append(')');
                     }
-
-                    if (insert == null)
-                        insert = new HashMap<>();
-                    lowerCase(insert);
 
                     partitions = select(settings.insert.batchsize, "partitions", "fixed(1)", insert, OptionDistribution.BUILDER);
                     selectchance = select(settings.insert.selectRatio, "select", "fixed(1)/1", insert, OptionRatioDistribution.BUILDER);
