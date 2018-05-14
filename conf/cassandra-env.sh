@@ -319,11 +319,28 @@ fi
 #MX4J_ADDRESS="-Dmx4jaddress=127.0.0.1"
 #MX4J_PORT="-Dmx4jport=8081"
 
+if [ "x$MX4J_ADDRESS" == "x" ]; then
+    # override default of 0.0.0.0 if no MX4J_ADDRESS is specified
+    MX4J_ADDRESS="127.0.0.1"
+fi
+if [[ "$MX4J_ADDRESS" == \-Dmx4jaddress* ]]; then
+    # Backward compatible with the older style #13578
+    JVM_OPTS="$JVM_OPTS $MX4J_ADDRESS"
+else
+    JVM_OPTS="$JVM_OPTS -Dmx4jaddress=$MX4J_ADDRESS"
+fi
+if [ "x$MX4J_PORT" != "x" ]; then
+    if [[ "$MX4J_PORT" == \-Dmx4jport* ]]; then
+        # Backward compatible with the older style #13578
+        JVM_OPTS="$JVM_OPTS $MX4J_PORT"
+    else
+        JVM_OPTS="$JVM_OPTS -Dmx4jport=$MX4J_PORT"
+    fi
+fi
+
 # Cassandra uses SIGAR to capture OS metrics CASSANDRA-7838
 # for SIGAR we have to set the java.library.path
 # to the location of the native libraries.
 JVM_OPTS="$JVM_OPTS -Djava.library.path=$CASSANDRA_HOME/lib/sigar-bin"
 
-JVM_OPTS="$JVM_OPTS $MX4J_ADDRESS"
-JVM_OPTS="$JVM_OPTS $MX4J_PORT"
 JVM_OPTS="$JVM_OPTS $JVM_EXTRA_OPTS"
