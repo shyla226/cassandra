@@ -60,6 +60,7 @@ import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternalAsync;
+import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
 
 /**
@@ -1027,30 +1028,41 @@ public final class SchemaKeyspace
             }
             catch (MarshalException | MissingColumns | DuplicateException exc)
             {
-                if (!IGNORE_CORRUPTED_SCHEMA_TABLES)
+                if (tableName == null)
                 {
-                    if (tableName == null)
+                    if (IGNORE_CORRUPTED_SCHEMA_TABLES)
+                    {
+                        logger.warn("Skipping table in the keyspace {}, because cassandra.ignore_corrupted_schema_tables is set to true.", keyspaceName);
+                    }
+                    else
+                    {
                         logger.error("Can not decode the table name in {} keyspace. This may be due to the sstable corruption." +
                                      "In order to start Cassandra ignoring this error, run it with -Dcassandra.ignore_corrupted_schema_tables=true", keyspaceName);
-                    else
-                        logger.error("No columns found for table {}.{} in {}.{}.  This may be due to " +
-                                     "corruption or concurrent dropping and altering of a table.  If this table " +
-                                     "is supposed to be dropped, restart cassandra with -Dcassandra.ignore_corrupted_schema_tables=true " +
-                                     "and run the following query: \"DELETE FROM {}.{} WHERE keyspace_name = '{}' AND table_name = '{}';\"." +
-                                     "If the table is not supposed to be dropped, restore {}.{} sstables from backups.",
-                                     keyspaceName, tableName,
-                                     SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS,
-                                     SchemaConstants.SCHEMA_KEYSPACE_NAME, TABLES,
-                                     keyspaceName, tableName,
-                                     SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS);
-                    throw exc;
+                        throw exc;
+                    }
                 }
                 else
                 {
-                    if (tableName == null)
-                        logger.warn("Skipping table in the keyspace {}, because cassandra.ignore_corrupted_schema_tables is set to true.", keyspaceName);
+                    String errorMsg = String.format("No partition columns found for table %s.%s in %s.%s.  This may be due to " +
+                                                    "corruption or concurrent dropping and altering of a table. If this table is supposed " +
+                                                    "to be dropped, {}run the following query to cleanup: " +
+                                                    "\"DELETE FROM %s.%s WHERE keyspace_name = '%s' AND table_name = '%s'; " +
+                                                    "DELETE FROM %s.%s WHERE keyspace_name = '%s' AND table_name = '%s';\" " +
+                                                    "If the table is not supposed to be dropped, restore %s.%s sstables from backups.",
+                                                    keyspaceName, tableName, SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS,
+                                                    SchemaConstants.SCHEMA_KEYSPACE_NAME, TABLES, keyspaceName, tableName,
+                                                    SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS, keyspaceName, tableName,
+                                                    SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS);
+
+                    if (IGNORE_CORRUPTED_SCHEMA_TABLES)
+                    {
+                        logger.warn(errorMsg, "", exc);
+                    }
                     else
-                        logger.warn("Skipping {}.{} table, because cassandra.ignore_corrupted_schema_tables is set to true.", keyspaceName, tableName);
+                    {
+                        logger.error(errorMsg, "restart cassandra with -Dcassandra.ignore_corrupted_schema_tables=true and ");
+                        throw exc;
+                    }
                 }
             }
         }
@@ -1110,6 +1122,10 @@ public final class SchemaKeyspace
 
         List<ColumnMetadata> columns = new ArrayList<>();
         columnRows.forEach(row -> columns.add(createColumnFromRow(row, types)));
+
+        if (columns.stream().noneMatch(ColumnMetadata::isPartitionKey))
+            throw new MissingColumns("No partition key columns found in schema table for " + keyspace + "." + table);
+
         return columns;
     }
 
@@ -1460,7 +1476,8 @@ public final class SchemaKeyspace
                     .collect(toList());
     }
 
-    private static class MissingColumns extends RuntimeException
+    @VisibleForTesting
+    static class MissingColumns extends RuntimeException
     {
         MissingColumns(String message)
         {
