@@ -51,6 +51,7 @@ public class LoaderOptions
     public static final String IGNORE_NODES_OPTION = "ignore";
     public static final String CONNECTIONS_PER_HOST = "connections-per-host";
     public static final String CONFIG_PATH = "conf-path";
+    public static final String DSE_CONFIG_PATH = "dse-conf-path";
     public static final String THROTTLE_MBITS = "throttle";
     public static final String INTER_DC_THROTTLE_MBITS = "inter-dc-throttle";
     public static final String TOOL_NAME = "sstableloader";
@@ -82,6 +83,7 @@ public class LoaderOptions
     public final EncryptionOptions.ServerEncryptionOptions serverEncOptions;
     public final Set<InetAddress> hosts;
     public final Set<InetAddress> ignores;
+    public final URI configFile;
 
     LoaderOptions(Builder builder)
     {
@@ -102,6 +104,7 @@ public class LoaderOptions
         serverEncOptions = builder.serverEncOptions;
         hosts = builder.hosts;
         ignores = builder.ignores;
+        configFile = builder.configFile;
     }
 
     static class Builder
@@ -124,6 +127,7 @@ public class LoaderOptions
         EncryptionOptions.ServerEncryptionOptions serverEncOptions = new EncryptionOptions.ServerEncryptionOptions();
         Set<InetAddress> hosts = new HashSet<>();
         Set<InetAddress> ignores = new HashSet<>();
+        URI configFile;
 
         Builder()
         {
@@ -364,7 +368,8 @@ public class LoaderOptions
                     {
                         errorMsg("Config file not found", options);
                     }
-                    config =  ConfigurationLoader.create().loadConfig(configFile.toURI().toURL());
+                    this.configFile = configFile.toURI();
+                    config = ConfigurationLoader.create().loadConfig(this.configFile.toURL());
                 }
                 else
                 {
@@ -553,7 +558,9 @@ public class LoaderOptions
         options.addOption("alg", SSL_ALGORITHM, "ALGORITHM", "Client SSL: algorithm (default: SunX509)");
         options.addOption("st", SSL_STORE_TYPE, "STORE-TYPE", "Client SSL: type of store");
         options.addOption("ciphers", SSL_CIPHER_SUITES, "CIPHER-SUITES", "Client SSL: comma-separated list of encryption suites to use");
+        // config file options (dse.yaml is only there for DSE)
         options.addOption("f", CONFIG_PATH, "path to config file", "cassandra.yaml file path for streaming throughput and client/server SSL.");
+        options.addOption("df", DSE_CONFIG_PATH, "path to config file", "dse.yaml file path.");
         return options;
     }
 

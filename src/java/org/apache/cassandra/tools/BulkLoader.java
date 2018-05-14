@@ -44,7 +44,17 @@ public class BulkLoader
 {
     public static void main(String args[])
     {
+        // DSE note: cassandra.yaml + dse.yaml have already been loaded and config initialized via
+        // com.datastax.bdp.tools.ShellToolWrapper - i.e. using the sstableloader script in bdp (DSP-16092).
+
         LoaderOptions options = LoaderOptions.builder().parseArgs(args).build();
+
+        if (options.configFile != null)
+        {
+            // Set the location of the c.yaml file to be picked up via DatabaseDescriptor.toolInitialization()
+            System.setProperty("cassandra.config", options.configFile.toString());
+        }
+
         try
         {
             load(options);
