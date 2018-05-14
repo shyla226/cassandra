@@ -344,6 +344,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
             throw new FSReadError(e, getPath());
         }
 
+        bufferOffset = truncateTarget;
         resetBuffer();
     }
 
@@ -357,6 +358,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         try
         {
             fchannel.truncate(toSize);
+            lastFlushOffset = toSize;
         }
         catch (IOException e)
         {
