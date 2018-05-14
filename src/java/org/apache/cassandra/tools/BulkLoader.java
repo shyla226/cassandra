@@ -72,6 +72,7 @@ public class BulkLoader
     private static final String SSL_CIPHER_SUITES = "ssl-ciphers";
     private static final String CONNECTIONS_PER_HOST = "connections-per-host";
     private static final String CONFIG_PATH = "conf-path";
+    private static final String DSE_CONFIG_PATH = "dse-conf-path";
 
     public static void main(String args[])
     {
@@ -625,7 +626,9 @@ public class BulkLoader
             options.addOption("alg", SSL_ALGORITHM, "ALGORITHM", "Client SSL: algorithm (default: SunX509)");
             options.addOption("st", SSL_STORE_TYPE, "STORE-TYPE", "Client SSL: type of store");
             options.addOption("ciphers", SSL_CIPHER_SUITES, "CIPHER-SUITES", "Client SSL: comma-separated list of encryption suites to use");
+            // config file options (dse.yaml is only there for DSE)
             options.addOption("f", CONFIG_PATH, "path to config file", "cassandra.yaml file path for streaming throughput and client/server SSL.");
+            options.addOption("df", DSE_CONFIG_PATH, "path to config file", "dse.yaml file path.");
             return options;
         }
 
