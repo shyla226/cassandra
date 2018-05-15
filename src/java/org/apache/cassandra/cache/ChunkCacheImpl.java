@@ -22,7 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
@@ -104,11 +104,13 @@ implements AsyncCacheLoader<ChunkCacheImpl.Key, ChunkCacheImpl.Buffer>, RemovalL
         }
     }
 
+    private static final AtomicIntegerFieldUpdater<Buffer> referencesUpdater = AtomicIntegerFieldUpdater.newUpdater(Buffer.class, "references");
+
     public class Buffer implements Rebufferer.BufferHolder
     {
         private final ByteBuffer buffer;
         private final Key key;
-        private final AtomicInteger references = new AtomicInteger(1); // Start referenced
+        volatile int references = 1; // Start referenced
 
         public Buffer(Key key, ByteBuffer buffer)
         {
@@ -121,7 +123,7 @@ implements AsyncCacheLoader<ChunkCacheImpl.Key, ChunkCacheImpl.Buffer>, RemovalL
             int refCount;
             do
             {
-                refCount = references.get();
+                refCount = references;
 
                 if (refCount == 0)
                 {
@@ -129,7 +131,7 @@ implements AsyncCacheLoader<ChunkCacheImpl.Key, ChunkCacheImpl.Buffer>, RemovalL
                     return null;
                 }
 
-            } while (!references.compareAndSet(refCount, refCount + 1));
+            } while (!referencesUpdater.compareAndSet(this, refCount, refCount + 1));
 
             return this;
         }
@@ -137,7 +139,7 @@ implements AsyncCacheLoader<ChunkCacheImpl.Key, ChunkCacheImpl.Buffer>, RemovalL
         @Override
         public ByteBuffer buffer()
         {
-            assert references.get() > 0;
+            assert references > 0;
             return buffer.duplicate();
         }
 
@@ -152,7 +154,7 @@ implements AsyncCacheLoader<ChunkCacheImpl.Key, ChunkCacheImpl.Buffer>, RemovalL
         {
             //The read from disk read may be in flight
             //We need to keep this buffer till the async callback has fired
-            if (references.decrementAndGet() == 0)
+            if (referencesUpdater.decrementAndGet(this) == 0)
                 bufferPool.put(buffer);
         }
 
