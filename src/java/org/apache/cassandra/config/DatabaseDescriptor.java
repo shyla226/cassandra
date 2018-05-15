@@ -592,7 +592,7 @@ public class DatabaseDescriptor
 
         // The number of flush writers should depend on the disk type, eventually we should increase the flush writers for NVMEs
         // and consider having disks supporting different flush writers
-        if (conf.memtable_flush_writers == 0)
+        if (conf.memtable_flush_writers == null)
             conf.memtable_flush_writers = assumeDataDirectoriesOnSSD() ? 4 : 2;
 
         if (conf.memtable_flush_writers < 1)

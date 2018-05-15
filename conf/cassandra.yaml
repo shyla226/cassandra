@@ -486,20 +486,16 @@ memtable_allocation_type: heap_buffers
 # metric which should be 0, but will be non-zero if threads are blocked waiting on flushing
 # to free memory.
 #
-# memtable_flush_writers defaults to two for a single data directory.
-# This means that two  memtables can be flushed concurrently to the single data directory.
-# If you have multiple data directories the default is one memtable flushing at a time
-# but the flush will use a thread per data directory so you will get two or more writers.
+# memtable_flush_writers defaults to four for SSDs or two for HDDs. This means that four (or two)
+# memtables can be flushed concurrently to a data directory.
 #
-# Two is generally enough to flush on a fast disk [array] mounted as a single data directory.
-# Adding more flush writers will result in smaller more frequent flushes that introduce more
-# compaction overhead.
+# Four is generally enough to flush on a fast disk mounted as a single data directory.
+# Using more is not necessarily better, you just need enough flush writers to never stall
+# writes due to flushing falling behind. See also memtable_cleanup_threshold,
+# memtable_max_single_heap_size_mb and memtable_max_single_offheap_size_mb to initiate
+# flushing earlier.
 #
-# There is a direct tradeoff between number of memtables that can be flushed concurrently
-# and flush size and frequency. More is not better you just need enough flush writers
-# to never stall waiting for flushing to free memory.
-#
-memtable_flush_writers: 4
+# memtable_flush_writers: 4
 
 # Total space to use for change-data-capture logs on disk.
 #

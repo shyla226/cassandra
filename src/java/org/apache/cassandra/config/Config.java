@@ -118,7 +118,7 @@ public class Config
 
     public volatile double phi_convict_threshold = 8.0;
 
-    public int memtable_flush_writers;
+    public Integer memtable_flush_writers;
     public Integer memtable_heap_space_in_mb;
     public Integer memtable_offheap_space_in_mb;
     public Double memtable_cleanup_threshold;
