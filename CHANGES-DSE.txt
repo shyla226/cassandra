@@ -1,3 +1,6 @@
+ * Fix handling of start bound in legacy paged queries (DB-1984)
+
+
 DSE 5.0.13
  * Fix legacy complex range tombstone serialization+deserialization for static and regular columns (DB-1757)
  * Fix materialized view schema backup as table (DB-1828)
