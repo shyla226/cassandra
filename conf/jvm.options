@@ -46,6 +46,14 @@
 # 100 MB per physical CPU core.
 #-Xmn800M
 
+################
+# NIO SETTINGS #
+################
+
+# Limit maximum cached thread local direct buffer to 1MB to avoid native OOM
+# See https://bugs.openjdk.java.net/browse/JDK-8147468
+-Djdk.nio.maxCachedBufferSize=1048576
+
 ###################################
 # EXPIRATION DATE OVERFLOW POLICY #
 ###################################
