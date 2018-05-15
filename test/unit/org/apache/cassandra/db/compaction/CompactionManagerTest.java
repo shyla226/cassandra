@@ -35,6 +35,7 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.compaction.CompactionInfo.Unit;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.MockSchema;
@@ -297,7 +298,7 @@ public class CompactionManagerTest
 
         public CompactionInfo getCompactionInfo()
         {
-            return new CompactionInfo(cfs.metadata(), type, 0, 0, "%", UUIDGen.getTimeUUID());
+            return new CompactionInfo(cfs.metadata(), type, 0, 0, Unit.BYTES, UUIDGen.getTimeUUID());
         }
     }
 }
