@@ -1,4 +1,5 @@
 3.0.17
+ * Fix progress stats and units in compactionstats (CASSANDRA-12244)
  * Better handle missing partition columns in system_schema.columns (CASSANDRA-14379)
  * Delay hints store excise by write timeout to avoid race with decommission (CASSANDRA-13740)
  * Deprecate background repair and probablistic read_repair_chance table options
@@ -20,6 +21,7 @@
  * Fully utilise specified compaction threads (CASSANDRA-14210)
  * Pre-create deletion log records to finish compactions quicker (CASSANDRA-12763)
 Merged from 2.2:
+ * Incorrect counting of pending messages in OutboundTcpConnection (CASSANDRA-11551)
  * CqlRecordReader no longer quotes the keyspace when connecting, as the java driver will (CASSANDRA-10751)
  * Fix compaction failure caused by reading un-flushed data (CASSANDRA-12743)
  * Fix JSON queries with IN restrictions and ORDER BY clause (CASSANDRA-14286)
