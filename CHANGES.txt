@@ -168,6 +168,7 @@
 
 
 3.11.3
+ * Remove string formatting lines from BufferPool hot path (CASSANDRA-14416)
  * Detect OpenJDK jvm type and architecture (CASSANDRA-12793)
  * Don't use guava collections in the non-system keyspace jmx attributes (CASSANDRA-12271)
  * Allow existing nodes to use all peers in shadow round (CASSANDRA-13851)
@@ -180,6 +181,7 @@
  * RateBasedBackPressure unnecessarily invokes a lock on the Guava RateLimiter (CASSANDRA-14163)
  * Fix wildcard GROUP BY queries (CASSANDRA-14209)
 Merged from 3.0:
+ * Cassandra not starting when using enhanced startup scripts in windows (CASSANDRA-14418)
  * Fix progress stats and units in compactionstats (CASSANDRA-12244)
  * Better handle missing partition columns in system_schema.columns (CASSANDRA-14379)
  * Deprecate background repair and probablistic read_repair_chance table options (CASSANDRA-13910)
