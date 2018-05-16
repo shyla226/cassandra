@@ -349,11 +349,12 @@ JVM_OPTS="$JVM_OPTS -Dagrona.disable.bounds.checks=TRUE"
 # $CASSANDRA_HOME/logs/jhiccup.hlog is the default log file location.
 # Setting $DSE_JHICCUP_OPTIONS overwrites the default config values for jHiccup,
 # use ',' as a separator to avoid bash quotes evaluation problems.
-if [ "x$DSE_ENABLE_JHICCUP" != "x" ]; then
+JHICCUP_ENABLED=$(echo "$DSE_ENABLE_JHICCUP" | awk '{print tolower($0)}')
+if [ "$JHICCUP_ENABLED" = "true" ]; then
     if [ "x$DSE_JHICCUP_OPTIONS" == "x" ]; then
         DSE_JHICCUP_OPTIONS="-l,$CASSANDRA_HOME/logs/jhiccup.hlog"
     fi
-    JHICCUP_AGENT=(-javaagent:$CASSANDRA_HOME/lib/jHiccup-2.0.8.jar="$DSE_JHICCUP_OPTIONS")
+    JHICCUP_AGENT=(-javaagent:$CASSANDRA_HOME/lib/jHiccup-2.0.9.jar="$DSE_JHICCUP_OPTIONS")
     JVM_OPTS="$JVM_OPTS ${JHICCUP_AGENT=[@]}"
 fi
 

@@ -305,6 +305,7 @@
       <!-- define the remote repositories we use -->
       <artifact:remoteRepository id="central"   url="${artifact.remoteRepository.central}"/>
       <artifact:remoteRepository id="apache"    url="${artifact.remoteRepository.apache}"/>
+      <artifact:remoteRepository id="datastax"  url="${artifact.remoteRepository.datastax}"/>
 
       <macrodef name="install">
         <attribute name="pomFile"/>
@@ -394,7 +395,7 @@
           <dependency groupId="org.codehaus.jackson" artifactId="jackson-mapper-asl" version="1.9.2"/>
           <dependency groupId="com.googlecode.json-simple" artifactId="json-simple" version="1.1"/>
           <dependency groupId="com.github.jbellis" artifactId="jamm" version="0.3.0"/>
-          <dependency groupId="org.jhiccup" artifactId="jHiccup" version="2.0.8" scope="system" systemPath="${build.lib}/jHiccup-2.0.8.jar">
+          <dependency groupId="org.jhiccup" artifactId="jHiccup" version="2.0.9">
               <exclusion groupId="org.hdrhistogram" artifactId="HdrHistogram"/>
           </dependency>
 
@@ -857,6 +858,7 @@
                              cacheDependencyRefs="true"
                              dependencyRefsBuildFile="${build.dir}/build-dependencies.xml">
           <remoteRepository refid="central"/>
+          <remoteRepository refid="datastax"/>
       </artifact:dependencies>
       <copy todir="${build.dir.lib}/jars">
           <fileset refid="build-dependency-jars"/>
