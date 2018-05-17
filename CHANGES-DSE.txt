@@ -1,3 +1,8 @@
+DSE 5.1.11
+Merged from dse5.0:
+ * Set MX4J_ADDRESS to 127.0.0.1 if not explicitly set (DB-1950)
+
+
 DSE 5.1.10
  * Ignore empty Counter cells on digest calculation (DB-1881)
  * Upgrade netty to 4.0.54 same as BDP; Avoid log spam for unclean client shutdown (DB-1834)
