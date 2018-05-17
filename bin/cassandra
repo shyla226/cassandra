@@ -62,8 +62,10 @@
 # Be aware that you will be entirely responsible for populating the needed
 # environment variables.
 
-# NB: Developers should be aware that this script should remain compatible with
-# POSIX sh and Solaris sh. This means, in particular, no $(( )) and no $( ).
+if [ -z "$BASH_VERSION" ]; then
+    exec bash "$0" "$@"
+    exit 1  # Will only get here if exec itself fails to run
+fi
 
 # If an include wasn't specified in the environment, then search for one...
 if [ "x$CASSANDRA_INCLUDE" = "x" ]; then

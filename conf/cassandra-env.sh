@@ -330,6 +330,25 @@ JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.password.file=/etc/cassandra/
 #MX4J_ADDRESS="127.0.0.1"
 #MX4J_PORT="8081"
 
+if [ "x$MX4J_ADDRESS" == "x" ]; then
+    # override default of 0.0.0.0 if no MX4J_ADDRESS is specified
+    MX4J_ADDRESS="127.0.0.1"
+fi
+if [[ "$MX4J_ADDRESS" == \-Dmx4jaddress* ]]; then
+    # Backward compatible with the older style #13578
+    JVM_OPTS="$JVM_OPTS $MX4J_ADDRESS"
+else
+    JVM_OPTS="$JVM_OPTS -Dmx4jaddress=$MX4J_ADDRESS"
+fi
+if [ "x$MX4J_PORT" != "x" ]; then
+    if [[ "$MX4J_PORT" == \-Dmx4jport* ]]; then
+        # Backward compatible with the older style #13578
+        JVM_OPTS="$JVM_OPTS $MX4J_PORT"
+    else
+        JVM_OPTS="$JVM_OPTS -Dmx4jport=$MX4J_PORT"
+    fi
+fi
+
 # Cassandra uses SIGAR to capture OS metrics CASSANDRA-7838
 # for SIGAR we have to set the java.library.path
 # to the location of the native libraries.
@@ -342,22 +361,5 @@ JVM_OPTS="$JVM_OPTS -Ddse.system_memory_in_mb=$system_memory_in_mb"
 
 # Disable Agrona bounds check for extra performance
 JVM_OPTS="$JVM_OPTS -Dagrona.disable.bounds.checks=TRUE"
-
-if [ "x$MX4J_ADDRESS" != "x" ]; then
-    if [[ "$MX4J_ADDRESS" == \-Dmx4jaddress* ]]; then
-        # Backward compatible with the older style #13578
-        JVM_OPTS="$JVM_OPTS $MX4J_ADDRESS"
-    else
-        JVM_OPTS="$JVM_OPTS -Dmx4jaddress=$MX4J_ADDRESS"
-    fi
-fi
-if [ "x$MX4J_PORT" != "x" ]; then
-    if [[ "$MX4J_PORT" == \-Dmx4jport* ]]; then
-        # Backward compatible with the older style #13578
-        JVM_OPTS="$JVM_OPTS $MX4J_PORT"
-    else
-        JVM_OPTS="$JVM_OPTS -Dmx4jport=$MX4J_PORT"
-    fi
-fi
 
 JVM_OPTS="$JVM_OPTS $JVM_EXTRA_OPTS"
