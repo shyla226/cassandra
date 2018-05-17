@@ -1,3 +1,8 @@
+DSE 6.0.2:
+Merged from dse5.0:
+ * Set MX4J_ADDRESS to 127.0.0.1 if not explicitly set (DB-1950)
+
+
 DSE 6.0.1:
  * Fix startup error message rejecting COMPACT STORAGE after upgrade (DB-1916)
  * Introduce max memtable size and avoid copy-on-heap when flushing. (DB-1943)
@@ -12,6 +17,7 @@ Merged from dse5.1:
  * Reusing table ID with CREATE TABLE causes failure on restart (DB-2032)
  * Ignore empty Counter cells on digest calculation (DB-1881)
  * Add getConcurrentCompactors to JMX in order to avoid loading DatabaseDescriptor to check its value in nodetool (DB-1730)
+
 
 DSE 6.0.0:
  * Thread-Per-Core rearchitecture (DB-28)
