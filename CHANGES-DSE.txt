@@ -1,9 +1,5 @@
-DSE 6.0.2:
-Merged from dse5.0:
- * Set MX4J_ADDRESS to 127.0.0.1 if not explicitly set (DB-1950)
-
-
 DSE 6.0.1:
+ * Fix binding JMX to any address (DB-2081)
  * Fix startup error message rejecting COMPACT STORAGE after upgrade (DB-1916)
  * Introduce max memtable size and avoid copy-on-heap when flushing. (DB-1943)
  * Send a final error message when a cont. paging session is cancelled (DB-1798)
@@ -14,6 +10,7 @@ DSE 6.0.1:
  * Improve user warnings on startup when libaio package is not installed (DB-1917)
  * Use same IO queue depth as Linux scheduler and advise against overriding it (DB-1909)
 Merged from dse5.1:
+ * Set MX4J_ADDRESS to 127.0.0.1 if not explicitly set (DB-1950)
  * Reusing table ID with CREATE TABLE causes failure on restart (DB-2032)
  * Ignore empty Counter cells on digest calculation (DB-1881)
  * Add getConcurrentCompactors to JMX in order to avoid loading DatabaseDescriptor to check its value in nodetool (DB-1730)
