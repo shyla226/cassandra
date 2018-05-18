@@ -1,5 +1,6 @@
 DSE 5.1.11
 Merged from dse5.0:
+ * Limit max cached direct buffer on NIO to 1MB (DB-2028)
  * Set MX4J_ADDRESS to 127.0.0.1 if not explicitly set (DB-1950)
 
 
