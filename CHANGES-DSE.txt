@@ -10,6 +10,7 @@ DSE 6.0.1:
  * Improve user warnings on startup when libaio package is not installed (DB-1917)
  * Use same IO queue depth as Linux scheduler and advise against overriding it (DB-1909)
 Merged from dse5.1:
+ * Limit max cached direct buffer on NIO to 1MB (DB-2028)
  * Set MX4J_ADDRESS to 127.0.0.1 if not explicitly set (DB-1950)
  * Reusing table ID with CREATE TABLE causes failure on restart (DB-2032)
  * Ignore empty Counter cells on digest calculation (DB-1881)
