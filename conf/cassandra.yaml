@@ -429,16 +429,12 @@ seed_provider:
 
 # Ratio of occupied non-flushing memtable size to total permitted size
 # that will trigger a flush of the largest memtable. Larger mct will
-# mean larger flushes and hence less compaction.
+# mean larger flushes and hence less compaction, but also less concurrent
+# flush activity which can make it difficult to keep your disks fed
+# under heavy write load.
 #
-# memtable_cleanup_threshold: 0.6
-
-# Maximum sizes for a single memtable, on and off heap. These values indicate the maximum size in mb
-# that a memtable can grow to. Beyond these values, it will be flushed. Set these values to zero to
-# disable this behavior. When these values are not set, by default they will be set to 1 / 5 of
-# memtable_heap_space_in_mb and memtable_offheap_space_in_mb respectively.
-# memtable_max_single_heap_size_mb: 500
-# memtable_max_single_offheap_size_mb: 500
+# memtable_cleanup_threshold defaults to 1 / (memtable_flush_writers + 1)
+# memtable_cleanup_threshold: 0.2
 
 # Specify the way Cassandra allocates and manages memtable memory.
 # Options are:
@@ -486,14 +482,18 @@ memtable_allocation_type: heap_buffers
 # metric which should be 0, but will be non-zero if threads are blocked waiting on flushing
 # to free memory.
 #
-# memtable_flush_writers defaults to four for SSDs or two for HDDs. This means that four (or two)
-# memtables can be flushed concurrently to a data directory.
+# memtable_flush_writers defaults to four for a single data directory.
+# This means that four memtables can be flushed concurrently to the single data directory.
+# If you have multiple data directories the default is one memtable flushing at a time
+# but the flush will use a thread per data directory so you will get four or more writers.
 #
-# Four is generally enough to flush on a fast disk mounted as a single data directory.
-# Using more is not necessarily better, you just need enough flush writers to never stall
-# writes due to flushing falling behind. See also memtable_cleanup_threshold,
-# memtable_max_single_heap_size_mb and memtable_max_single_offheap_size_mb to initiate
-# flushing earlier.
+# Four is generally enough to flush on a fast disk [array] mounted as a single data directory.
+# Adding more flush writers will result in smaller more frequent flushes that introduce more
+# compaction overhead.
+#
+# There is a direct tradeoff between number of memtables that can be flushed concurrently
+# and flush size and frequency. More is not better you just need enough flush writers
+# to never stall waiting for flushing to free memory.
 #
 # memtable_flush_writers: 4
 

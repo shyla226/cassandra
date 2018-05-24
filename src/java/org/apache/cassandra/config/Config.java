@@ -118,12 +118,10 @@ public class Config
 
     public volatile double phi_convict_threshold = 8.0;
 
-    public Integer memtable_flush_writers;
+    public int memtable_flush_writers = 0;
     public Integer memtable_heap_space_in_mb;
     public Integer memtable_offheap_space_in_mb;
-    public Double memtable_cleanup_threshold;
-    public Integer memtable_max_single_heap_size_mb;
-    public Integer memtable_max_single_offheap_size_mb;
+    public Double memtable_cleanup_threshold = null;
 
     public int storage_port = 7000;
     public int ssl_storage_port = 7001;

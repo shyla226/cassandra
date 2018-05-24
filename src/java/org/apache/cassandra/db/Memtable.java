@@ -21,8 +21,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -31,7 +29,6 @@ import com.google.common.base.Throwables;
 import org.apache.cassandra.concurrent.TPCTaskType;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCBoundaries;
-import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.flow.Flow;
@@ -78,17 +75,12 @@ import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.apache.cassandra.utils.memory.MemtablePool;
 import org.apache.cassandra.utils.memory.NativePool;
 import org.apache.cassandra.utils.memory.SlabPool;
-import org.apache.cassandra.utils.units.SizeUnit;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 
 public class Memtable implements Comparable<Memtable>
 {
     private static final Logger logger = LoggerFactory.getLogger(Memtable.class);
-
-    // Upon inserting a new update, if we haven't checked the memtable size in the last interval, then check to see if it has reached the maximum size at which it needs flushing
-    public static final long FLUSH_CHECK_INTERVAL_NANOS = TimeUnit.MILLISECONDS.toNanos(Integer.parseInt(System.getProperty("dse.memtable_flush_check_interval_millis",
-                                                                                                                             "100")));
 
     public static final MemtablePool MEMORY_POOL = createMemtableAllocatorPool();
 
@@ -121,14 +113,6 @@ public class Memtable implements Comparable<Memtable>
 
     private static final int ROW_OVERHEAD_HEAP_SIZE = estimateRowOverhead(Integer.parseInt(System.getProperty("cassandra.memtable_row_overhead_computation_step", "100000")));
 
-    private static final long MAX_HEAP_SIZE = DatabaseDescriptor.getMemtableMaxSingleHeapSizeInMb() <= 0
-                                              ? Long.MAX_VALUE
-                                              : SizeUnit.MEGABYTES.toBytes(DatabaseDescriptor.getMemtableMaxSingleHeapSizeInMb());
-    private static final long MAX_OFFHEAP_SIZE = DatabaseDescriptor.getMemtableMaxSingleOffHeapSizeInMb() <= 0
-                                                 ? Long.MAX_VALUE :
-                                                 SizeUnit.MEGABYTES.toBytes(DatabaseDescriptor.getMemtableMaxSingleOffHeapSizeInMb());
-
-
     // the write barrier for directing writes to this memtable during a switch
     private volatile OpOrder.Barrier writeBarrier;
     // the precise upper bound of CommitLogPosition owned by this memtable
@@ -139,9 +123,6 @@ public class Memtable implements Comparable<Memtable>
     // The approximate lower bound by this memtable; must be <= commitLogLowerBound once our predecessor
     // has been finalised, and this is enforced in the ColumnFamilyStore.setCommitLogUpperBound
     private final CommitLogPosition approximateCommitLogLowerBound = CommitLog.instance.getCurrentPosition();
-
-    private final AtomicLong lastInsertSizeCheckTimeNanos;
-    private final AtomicBoolean flushRequested = new AtomicBoolean(false);
 
     public int compareTo(Memtable that)
     {
@@ -183,7 +164,6 @@ public class Memtable implements Comparable<Memtable>
         this.cfs.scheduleFlush();
         this.boundaries = cfs.keyspace.getTPCBoundaries();
         this.subranges = generatePartitionSubranges(boundaries.supportedCores());
-        this.lastInsertSizeCheckTimeNanos = new AtomicLong(ApproximateTime.nanoTime());
     }
 
     // ONLY to be used for testing, to create a mock Memtable
@@ -195,7 +175,6 @@ public class Memtable implements Comparable<Memtable>
         this.cfs = null;
         this.boundaries = TPCBoundaries.NONE;
         this.subranges = generatePartitionSubranges(boundaries.supportedCores());
-        this.lastInsertSizeCheckTimeNanos = new AtomicLong(ApproximateTime.nanoTime());
     }
 
     /**
@@ -386,7 +365,6 @@ public class Memtable implements Comparable<Memtable>
                            .map(p ->
                                 {
                                     partitionMap.update(p.update, p.dataSize);
-                                    maybeFlushIfMaxSizeReached();
                                     return p.colUpdateTimeDelta;
                                 });
         };
@@ -924,40 +902,6 @@ public class Memtable implements Comparable<Memtable>
         {
             writeSortedContents();
             return writer;
-        }
-    }
-
-    private void maybeFlushIfMaxSizeReached()
-    {
-        if (MAX_HEAP_SIZE == Long.MAX_VALUE && MAX_OFFHEAP_SIZE == Long.MAX_VALUE)
-            return;
-
-        long lastCheckedTime = lastInsertSizeCheckTimeNanos.get();
-        long now = ApproximateTime.nanoTime();
-        if (now - lastCheckedTime < Memtable.FLUSH_CHECK_INTERVAL_NANOS)
-            return;
-
-        if (!lastInsertSizeCheckTimeNanos.compareAndSet(lastCheckedTime, now))
-            return;
-
-        long sizeUsedHeap = 0;
-        long sizeUsedOffheap = 0;
-        for (int i = 0; i < subranges.length; i++)
-        {
-            sizeUsedHeap += subranges[i].allocator().onHeap().owns();
-            sizeUsedOffheap += subranges[i].allocator().offHeap().owns();
-        }
-
-        if (sizeUsedHeap < MAX_HEAP_SIZE && sizeUsedOffheap < MAX_OFFHEAP_SIZE)
-            return;
-
-        if (flushRequested.compareAndSet(false, true))
-        {
-            logger.debug("Flushing {} due to max size reached: heap {} >= {} OR off-heap {} >= {}",
-                         cfs,
-                         FBUtilities.prettyPrintMemory(sizeUsedHeap), FBUtilities.prettyPrintMemory(MAX_HEAP_SIZE),
-                         FBUtilities.prettyPrintMemory(sizeUsedOffheap), FBUtilities.prettyPrintMemory(MAX_OFFHEAP_SIZE));
-            TPC.ioScheduler().execute(() -> cfs.switchMemtableIfCurrent(Memtable.this), TPCTaskType.FLUSH_MEMTABLE);
         }
     }
 

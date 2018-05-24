@@ -449,18 +449,6 @@ public class DatabaseDescriptor
         else
             logger.info("Global memtable off-heap threshold is enabled at {} MiB", conf.memtable_offheap_space_in_mb);
 
-        if (conf.memtable_max_single_heap_size_mb == null)
-            conf.memtable_max_single_heap_size_mb = (int)(conf.memtable_heap_space_in_mb / 5.);
-
-        if (conf.memtable_max_single_offheap_size_mb == null)
-            conf.memtable_max_single_offheap_size_mb = (int)(conf.memtable_offheap_space_in_mb / 5.);
-
-        if (conf.memtable_max_single_heap_size_mb > 0 || conf.memtable_max_single_offheap_size_mb > 0)
-            logger.info("Max size for an individual memtable is {} MiB on-heap and {} MiB off-heap",
-                        conf.memtable_max_single_heap_size_mb, conf.memtable_max_single_offheap_size_mb);
-        else
-            logger.info("Max size for an individual memtable is disabled");
-
         checkForLowestAcceptedTimeouts(conf);
 
         if (conf.native_transport_max_frame_size_in_mb <= 0)
@@ -590,16 +578,18 @@ public class DatabaseDescriptor
         if (conf.hints_directory.equals(conf.saved_caches_directory))
             throw new ConfigurationException("saved_caches_directory must not be the same as the hints_directory", false);
 
-        // The number of flush writers should depend on the disk type, eventually we should increase the flush writers for NVMEs
-        // and consider having disks supporting different flush writers
-        if (conf.memtable_flush_writers == null)
-            conf.memtable_flush_writers = assumeDataDirectoriesOnSSD() ? 4 : 2;
+        if (conf.memtable_flush_writers == 0)
+        {
+            conf.memtable_flush_writers = 4;
+        }
 
         if (conf.memtable_flush_writers < 1)
             throw new ConfigurationException("memtable_flush_writers must be at least 1, but was " + conf.memtable_flush_writers, false);
 
         if (conf.memtable_cleanup_threshold == null)
-            conf.memtable_cleanup_threshold = 0.6;
+        {
+            conf.memtable_cleanup_threshold = 1.0 / (1 + conf.memtable_flush_writers);
+        }
 
         if (conf.memtable_cleanup_threshold < 0.01f)
             throw new ConfigurationException("memtable_cleanup_threshold must be >= 0.01, but was " + conf.memtable_cleanup_threshold, false);
@@ -2547,16 +2537,6 @@ public class DatabaseDescriptor
     public static double getMemtableCleanupThreshold()
     {
         return conf.memtable_cleanup_threshold;
-    }
-
-    public static int getMemtableMaxSingleHeapSizeInMb()
-    {
-        return conf.memtable_max_single_heap_size_mb;
-    }
-
-    public static int getMemtableMaxSingleOffHeapSizeInMb()
-    {
-        return conf.memtable_max_single_offheap_size_mb;
     }
 
     public static int getIndexSummaryResizeIntervalInMinutes()
