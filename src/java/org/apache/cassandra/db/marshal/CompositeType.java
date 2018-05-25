@@ -360,6 +360,11 @@ public class CompositeType extends AbstractCompositeType
         return out;
     }
 
+    public Builder builder()
+    {
+        return builder(false);
+    }
+
     public Builder builder(boolean isStatic)
     {
         int capacity = types.size();
