@@ -1,3 +1,7 @@
+HOTFIX
+ * Fix legacy rows with localDeletionTime set to NO_DELETION_TIME due to TTL overflow (DB-2109)
+
+
 DSE 5.0.12
  * Allow skipping commit log replay does not fail on descriptor errors (DB-1650)
  * Protect against overflow of local expiration time (DB-1619)
