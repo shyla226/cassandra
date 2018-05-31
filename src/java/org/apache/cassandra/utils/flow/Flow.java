@@ -64,12 +64,7 @@ public abstract class Flow<T>
 {
     private static final Logger logger = LoggerFactory.getLogger(Flow.class);
 
-    public final static LineNumberInference LINE_NUMBERS;
-    static
-    {
-        LINE_NUMBERS = new LineNumberInference();
-        LINE_NUMBERS.preloadLambdas();
-    }
+    public final static LineNumberInference LINE_NUMBERS = new LineNumberInference();
 
     /**
      * Create a subscription linking the content of the flow with the given subscriber, and request the first item
@@ -2430,6 +2425,7 @@ public abstract class Flow<T>
         }
 
         // Load lambdas before calling `toString` on the object
+        LINE_NUMBERS.preloadLambdas();
         throwable.addSuppressed(new FlowException(tag));
         return throwable;
     }
@@ -2472,9 +2468,14 @@ public abstract class Flow<T>
     {
         LineNumberInference.Descriptor lineNumber;
         if (obj == null)
+        {
             lineNumber = LineNumberInference.UNKNOWN_SOURCE;
+        }
         else
+        {
+            LINE_NUMBERS.maybeProcessClass(obj.getClass());
             lineNumber = LINE_NUMBERS.getLine(obj.getClass());
+        }
 
         return obj + "(" + lineNumber.source() + ":" + lineNumber.line() + ")";
     }

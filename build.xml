@@ -1343,19 +1343,9 @@
                  else="">
         <istrue value="${usejacoco}"/>
       </condition>
-
-      <condition property="fileSep" value=";">
-        <os family="windows"/>
-      </condition>
-      <condition property="fileSep" else=":">
-        <isset property="fileSep"/>
-      </condition>
-      <fail unless="fileSep">Failed to set File Separator. This shouldn't happen.</fail>
-
       <mkdir dir="${build.test.dir}/cassandra"/>
       <mkdir dir="${build.test.dir}/output"/>
       <mkdir dir="${build.test.dir}/output/@{testtag}"/>
-      <mkdir dir="${build.test.dir}/cassandra/tmp${fileSep}@{poffset}/lni"/>
       <junit fork="on" forkmode="@{forkmode}" failureproperty="testfailed" maxmemory="1024m" timeout="@{timeout}">
         <formatter classname="org.apache.cassandra.CassandraXMLJUnitResultFormatter" extension=".xml" usefile="true"/>
         <formatter classname="org.apache.cassandra.CassandraBriefJUnitResultFormatter" usefile="false"/>
@@ -1377,9 +1367,6 @@
         <jvmarg value="-Djava.security.egd=file:/dev/urandom" />
         <jvmarg value="-Dcassandra.testtag=@{testtag}"/>
         <jvmarg value="-Dcassandra.keepBriefBrief=${cassandra.keepBriefBrief}" />
-        <jvmarg value="-Dcassandra.logdir=${build.test.dir}/cassandra/tmp${fileSep}@{poffset}" />
-        <jvmarg value="-Djava.io.tmpdir=${build.test.dir}/cassandra/tmp${fileSep}@{poffset}" />
-        <jvmarg value="-Djdk.internal.lambda.dumpProxyClasses=${build.test.dir}/cassandra/tmp${fileSep}@{poffset}/lni" />
         <optjvmargs/>
         <!-- Uncomment to debug unittest, attach debugger to port 1416 -->
         <!--
@@ -1402,12 +1389,19 @@
         </batchtest>
       </junit>
 
+      <condition property="fileSep" value=";">
+        <os family="windows"/>
+      </condition>
+      <condition property="fileSep" else=":">
+        <isset property="fileSep"/>
+      </condition>
+      <fail unless="fileSep">Failed to set File Separator. This shouldn't happen.</fail>
+
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/commitlog${fileSep}@{poffset}"/>
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/cdc_raw${fileSep}@{poffset}"/>
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/data${fileSep}@{poffset}"/>
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/saved_caches${fileSep}@{poffset}"/>
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/hints${fileSep}@{poffset}"/>
-      <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/tmp${fileSep}@{poffset}"/>
     </sequential>
   </macrodef>
 
