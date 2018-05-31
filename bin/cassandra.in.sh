@@ -73,7 +73,7 @@ fi
 
 tempdir_base="${TMPDIR-/tmp}/dse"
 mkdir -p "${tempdir_base}"
-instance_tempdir="$(mktemp -d ${tempdir_base}/dse.XXXXXXXXX)"
+instance_tempdir="$(mktemp -p ${tempdir_base} -d -t dse.XXXXXXXXXX)"
 mkdir -p "${instance_tempdir}"
 if [ ! -d "${instance_tempdir}" ] ; then
     echo "DSE instance temporary directory could not be created (${instance_tempdir} in ${tempdir_base})" > /dev/stderr
