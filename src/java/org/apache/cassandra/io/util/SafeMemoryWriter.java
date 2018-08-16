@@ -43,9 +43,13 @@ public class SafeMemoryWriter extends DataOutputBuffer
     }
 
     @Override
-    protected void reallocate(long count)
+    protected void expandToFit(long count)
     {
-        long newCapacity = calculateNewSize(count);
+        resizeTo(calculateNewSize(count));
+    }
+
+    private void resizeTo(long newCapacity)
+    {
         if (newCapacity != capacity())
         {
             long position = length();
@@ -63,9 +67,9 @@ public class SafeMemoryWriter extends DataOutputBuffer
         }
     }
 
-    public void setCapacity(long newCapacity)
+    public void trim()
     {
-        reallocate(newCapacity);
+        resizeTo(length());
     }
 
     public void close()
