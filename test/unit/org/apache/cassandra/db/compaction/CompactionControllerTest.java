@@ -77,6 +77,17 @@ public class CompactionControllerTest extends SchemaLoader
     @Test
     public void testMaxPurgeableTimestamp()
     {
+        testMaxPurgeableTimestamp(false);
+    }
+
+    @Test
+    public void testIgnoreOverlaps()
+    {
+        testMaxPurgeableTimestamp(true);
+    }
+
+    public void testMaxPurgeableTimestamp(boolean ignoreOverlaps)
+    {
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF1);
         cfs.truncateBlocking();
@@ -91,9 +102,9 @@ public class CompactionControllerTest extends SchemaLoader
         applyMutation(cfs.metadata(), key, timestamp1);
 
         // check max purgeable timestamp without any sstables
-        try(CompactionController controller = new CompactionController(cfs, null, 0))
+        try(CompactionController controller = new CompactionController(cfs, null, 0, ignoreOverlaps))
         {
-            assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp1); //memtable only
+            assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp1, false); //memtable only
 
             cfs.forceBlockingFlush();
             assertTrue(controller.getPurgeEvaluator(key).test(Long.MAX_VALUE)); //no memtables and no sstables
@@ -106,38 +117,38 @@ public class CompactionControllerTest extends SchemaLoader
         cfs.forceBlockingFlush();
 
         // check max purgeable timestamp when compacting the first sstable with and without a memtable
-        try (CompactionController controller = new CompactionController(cfs, compacting, 0))
+        try (CompactionController controller = new CompactionController(cfs, compacting, 0, ignoreOverlaps))
         {
-            assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp2);
+            assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp2, ignoreOverlaps); // second sstable, only when overlaps are not ignored
 
             applyMutation(cfs.metadata(), key, timestamp3);
 
-            assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp3); //second sstable and second memtable
+            assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp3, false); //second sstable and second memtable
         }
 
         // check max purgeable timestamp again without any sstables but with different insertion orders on the memtable
         cfs.forceBlockingFlush();
 
         //newest to oldest
-        try (CompactionController controller = new CompactionController(cfs, null, 0))
+        try (CompactionController controller = new CompactionController(cfs, null, 0, ignoreOverlaps))
         {
             applyMutation(cfs.metadata(), key, timestamp1);
             applyMutation(cfs.metadata(), key, timestamp2);
             applyMutation(cfs.metadata(), key, timestamp3);
 
-            assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp3); //memtable only
+            assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp3, false); //memtable only
         }
 
         cfs.forceBlockingFlush();
 
         //oldest to newest
-        try (CompactionController controller = new CompactionController(cfs, null, 0))
+        try (CompactionController controller = new CompactionController(cfs, null, 0, ignoreOverlaps))
         {
             applyMutation(cfs.metadata(), key, timestamp3);
             applyMutation(cfs.metadata(), key, timestamp2);
             applyMutation(cfs.metadata(), key, timestamp1);
 
-            assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp3);
+            assertPurgeBoundary(controller.getPurgeEvaluator(key), timestamp3, false); //memtable only
         }
     }
 
@@ -204,9 +215,9 @@ public class CompactionControllerTest extends SchemaLoader
         .applyUnsafe();
     }
 
-    private void assertPurgeBoundary(LongPredicate evaluator, long boundary)
+    private void assertPurgeBoundary(LongPredicate purgeEvaluator, long boundary, boolean shouldPurge)
     {
-        assertFalse(evaluator.test(boundary));
-        assertTrue(evaluator.test(boundary - 1));
+        assertEquals(shouldPurge, purgeEvaluator.test(boundary));
+        assertTrue(purgeEvaluator.test(boundary - 1));
     }
 }

@@ -136,13 +136,13 @@ public class CompactionController implements AutoCloseable
 
     private void refreshOverlaps()
     {
-        if (NEVER_PURGE_TOMBSTONES || ignoreOverlaps())
+        if (NEVER_PURGE_TOMBSTONES)
             return;
 
         if (this.overlappingSSTables != null)
             close();
 
-        if (compacting == null)
+        if (compacting == null || ignoreOverlaps())
             overlappingSSTables = Refs.tryRef(Collections.<SSTableReader>emptyList());
         else
             overlappingSSTables = cfs.getAndReferenceOverlappingLiveSSTables(compacting);

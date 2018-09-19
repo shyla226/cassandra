@@ -1,3 +1,7 @@
+
+ * Initialize overlapIterator to prevent NullPointerException when performing aggressive sstable expiration (DB-2472)
+
+
 DSE 6.0.1:
  * Fix nodesync tool SSL option parsing in the absence of a nodesync-ssl.properties file (DB-2034)
  * Fix binding JMX to any address (DB-2081)
