@@ -119,6 +119,26 @@ that range from:
 * tiered compaction (**T=F**) with high **F** - very high number of sstables, low read efficiency and low write cost,
   moving closer to an unsorted log as **F** increases.
 
+## Differences with STCS and LCS
+
+Note that there are some differences between the tiered flavors of UCS (UCS-tiered) and STCS, and between the leveled flavors of UCS (UCS-leveled) and LCS.
+
+#### UCS-tiered vs STCS
+
+UCS-tiered triggers a compaction when it finds at least **T** sstables on some sharded level and it compacts **all** sstables on that level.<br />
+STCS triggers a compaction when it finds at least `min_threshold` sstables on some bucket and it compacts between `min_threshold` and `max_threshold` sstables from that bucket at a time.
+- STCS does that to help with compaction lagging due to too many writes; UCS-tiered should address that by adapting to the workload and increasing its trigger/fanout factor (**T=F**).
+
+#### UCS-leveled vs LCS
+
+UCS-leveled keeps one sstable per sharded level in the physical sense. So sstables on increasing levels increase in size (by a factor of **o&#x2219;F**, see the **Size based levels** section above).<br />
+LCS keeps one sstable per level in the logical sense - it maintains a sorted run of non-overlapping sstables of small fixed size. So physical sstables on increasing levels increase in number (by a factor of `fanout_size`).
+- LCS does that to reduce space and write amplification; UCS-leveled should address the former by sharding and the latter by adapting to the workload and reducing its fanout factor (**F**) / moving towards UCS-tiered.
+
+UCS-leveled triggers a compaction when it finds a second sstable on some sharded level, it compacts the two sstables on that level, and the result most often ends up on that level too (see the **Size based levels** section above).<br />
+LCS triggers a compaction when the sorted run on some level goes over its target size (as determined by `sstable_size_in_mb` and `fanout_factor`), it compacts enough physical sstables from that level with the overlapping physical sstables from the next level, and the result ends up on the next level.
+- LCS needs to do that to maintain its target ratio between levels and its sorted runs per level. UCS-leveled ends up doing something very similar in effect, which also has the added bonus of structuring sstables so that they can be easily switched to UCS-tiered if needed.
+
 ## Adaptive algorithm
 
 In order to determine the optimal **W** depending on the current workload, the read and write amplifications
@@ -159,7 +179,7 @@ compaction costs will be in the near future.
 
 The partitions read or bytes inserted per second are exponential moving averages over a period of one minute.
 
-The costs for each possible value of W is calculated periodically, by default every 2 minutes. If there exists a W
+The costs for each possible value of W is calculated periodically, by default every 5 minutes. If there exists a W
 with a lower cost for reads and inserts, then W is updated and the strategy will alter its behavior.
 
 ## Configuration
