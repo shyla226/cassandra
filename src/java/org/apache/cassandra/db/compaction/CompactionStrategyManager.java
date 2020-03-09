@@ -520,8 +520,7 @@ class CompactionStrategyManager implements CompactionStrategyContainer
         if (reason == ReloadReason.METADATA_CHANGE && compactionParams.equals(metadataParams))
             return;
 
-        boolean updateDiskBoundaries = reason == ReloadReason.FULL || reason == ReloadReason.DISK_BOUNDARIES_UPDATED;
-        boolean diskBoundariesNeedUpdating = updateDiskBoundaries && (currentBoundaries == null || currentBoundaries.isOutOfDate());
+        boolean diskBoundariesNeedUpdating = currentBoundaries == null || currentBoundaries.isOutOfDate();
         boolean paramsNeedUpdating = !compactionParams.equals(params);
 
         boolean prevEnabledWithJMX = enabled && !params.isEnabled(); // previously enabled over JMX because params and enabled do not agree
@@ -1081,7 +1080,7 @@ class CompactionStrategyManager implements CompactionStrategyContainer
 
     private int getNumTokenPartitions()
     {
-        return partitionSSTablesByTokenRange ? currentBoundaries.directories.size() : 1;
+        return partitionSSTablesByTokenRange && currentBoundaries != null ? currentBoundaries.directories.size() : 1;
     }
 
     @Override
