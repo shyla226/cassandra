@@ -44,12 +44,14 @@ public interface CompactionStrategyContainer extends CompactionStrategy, INotifi
     void disable();
 
     /**
-     * @return true if compaction is enabled
+     * @return {@code true} if compaction is enabled and running; e.g. if autocompaction has been disabled via nodetool
+     *         or JMX, this should return {@code false}, even if the underlying compaction strategy hasn't been paused.
      */
     boolean isEnabled();
 
     /**
-     * @return true if compaction is enabled and running
+     * @return {@code true} if compaction is running, i.e. if the underlying compaction strategy is not currently
+     *         paused or being shut down.
      */
     boolean isActive();
 

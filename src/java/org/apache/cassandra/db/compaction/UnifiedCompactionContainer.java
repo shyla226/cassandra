@@ -59,41 +59,38 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
         strategy = new UnifiedCompactionStrategy(factory, params.options());
         this.enabled = new AtomicBoolean(enabled);
 
-        if (enabled)
-            strategy.startup();
-
         factory.getCompactionLogger().strategyCreated(strategy);
 
         if (strategy.getOptions().isLogAll())
             factory.getCompactionLogger().enable();
         else
             factory.getCompactionLogger().disable();
+
+        startup();
     }
 
     @Override
     public void enable()
     {
         this.enabled.set(true);
-        strategy.resume();
     }
 
     @Override
     public void disable()
     {
         this.enabled.set(false);
-        strategy.pause();
     }
 
     @Override
     public boolean isEnabled()
     {
-        return enabled.get();
+        return enabled.get() && strategy.isActive;
     }
 
     @Override
     public boolean isActive()
     {
-        return isEnabled() && strategy.isActive;
+        return strategy.isActive;
     }
 
     @Override
