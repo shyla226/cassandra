@@ -79,22 +79,27 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
      * Creates 5 buckets with T sorted runs in each using W = 2 and o = 1 (the default)
      */
     @Test
-    public void testUnifiedCompactionStrategy_tiered_four_shards_fiveBuckets_W2()
+    public void testUnifiedCompactionStrategy_tiered_twoShards_fiveBuckets_W2()
     {
         int W = 2; // W = 2 => T = F = 4
         int T = 4;
         int F = 4;
-        long m = 2; // m = 2 MB
+        final long minSstableSizeBytes = 2L << 20; // 2 MB
+        final int numBuckets = 5;
 
         Controller controller = Mockito.mock(Controller.class);
         when(controller.getW(anyInt())).thenReturn(W);
-        when(controller.getMinSstableSizeBytes()).thenReturn(m << 20);
+        when(controller.getMinSstableSizeBytes()).thenReturn(minSstableSizeBytes);
         when(controller.getSurvivalFactor()).thenReturn(1.0);
+        // Calculate the minimum shard size such that the top bucket compactions won't be considered "oversized" and
+        // all will be allowed to run. The calculation below assumes (1) that compactions are considered "oversized"
+        // if they are more than 1/2 of the max shard size; (2) that mockSSTables uses 15% less than the max SSTable
+        // size for that bucket.
+        long topBucketMaxSstableSize = (long) (minSstableSizeBytes * Math.pow(F, numBuckets));
+        long minShardSizeWithoutOversizedCompactions = T * topBucketMaxSstableSize * 2;
+        when(controller.getShardSizeBytes()).thenReturn(minShardSizeWithoutOversizedCompactions);
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
-
-        final int numBuckets = 5;
-        long minSize = m << 20; // MB to bytes
         List<Collection<SSTableReader>> testBuckets = new ArrayList<>(numBuckets * 2);
 
         // The order is repaired false, disk 0, then repaired true, disk 1, one bucket per shard, lowest to highest
@@ -107,7 +112,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
                 {
                     // calculate the max size then mockSSTables will remove 15% to this value,
                     // this assumes o = 1, which is the default
-                    long size = (long) (minSize * Math.pow(F, i + 1));
+                    long size = (long) (minSstableSizeBytes * Math.pow(F, i + 1));
                     List<SSTableReader> sstables = mockSSTables(T,
                                                                 size,
                                                                 0,
@@ -511,7 +516,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
 
     private void testCompactionStatistics(List<Collection<SSTableReader>> compactions, AbstractCompactionStrategy strategy)
     {
-        Set<SSTableReader> sstables = compactions.stream().flatMap(bucket -> bucket.stream()).collect(Collectors.toSet());
+        Set<SSTableReader> sstables = compactions.stream().flatMap(Collection::stream).collect(Collectors.toSet());
         testCompactionStatistics(sstables, compactions, compactions.size(), strategy);
     }
 

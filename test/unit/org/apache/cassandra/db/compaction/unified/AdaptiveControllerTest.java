@@ -70,6 +70,7 @@ public class AdaptiveControllerTest extends ControllerTest
                                       dataSizeGB << 10,
                                       numShards,
                                       sstableSizeMB,
+                                      Controller.DEFAULT_MAX_SPACE_OVERHEAD,
                                       interval,
                                       minW,
                                       maxW,

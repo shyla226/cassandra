@@ -241,6 +241,94 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         }
     }
 
+    @Test
+    public void testOversizedCompactions_limitingTriggered_maxSpaceOverhead1pct()
+    {
+        testLimitOversizedCompactions(true, 0.01);
+    }
+
+    @Test
+    public void testOversizedCompactions_limitingTriggered_maxSpaceOverhead10pct()
+    {
+        testLimitOversizedCompactions(true, 0.1);
+    }
+
+    @Test
+    public void testOversizedCompactions_limitingTriggered_maxSpaceOverhead20pct()
+    {
+        testLimitOversizedCompactions(true, 0.2);
+    }
+
+    @Test
+    public void testOversizedCompactions_limitingTriggered_maxSpaceOverhead50pct()
+    {
+        testLimitOversizedCompactions(true, 0.5);
+    }
+
+    @Test
+    public void testOversizedCompactions_limitingTriggered_maxSpaceOverhead90pct()
+    {
+        testLimitOversizedCompactions(true, 0.9);
+    }
+    @Test
+    public void testOversizedCompactions_limitingNotTriggered()
+    {
+        testLimitOversizedCompactions(false, 1.0);
+    }
+
+    public void testLimitOversizedCompactions(boolean triggerLimiting, double maxSpaceOverhead)
+    {
+        int W = 2; // W = 2 => T = F = 4
+        int T = 4;
+        int F = 4;
+        final long minSstableSizeBytes = 2L << 20; // 2 MB
+        final int numBuckets = 4;
+        final int numShards = 5;
+
+        Controller controller = Mockito.mock(Controller.class);
+        when(controller.getMinSstableSizeBytes()).thenReturn(minSstableSizeBytes);
+        when(controller.getW(anyInt())).thenReturn(W);
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getNumShards()).thenReturn(numShards);
+        when(controller.getMaxSpaceOverhead()).thenReturn(maxSpaceOverhead);
+        // Calculate the minimum shard size such that the top bucket compactions won't be considered "oversized" and
+        // all will be allowed to run. The calculation below assumes (1) that compactions are considered "oversized"
+        // if they are more than 1/2 of the max shard size; (2) that mockSSTables uses 15% less than the max SSTable
+        // size for that bucket.
+        long topBucketMaxSstableSize = (long) (minSstableSizeBytes * Math.pow(F, numBuckets));
+        long topBucketMaxCompactionSize = T * topBucketMaxSstableSize;
+        when(controller.getShardSizeBytes()).thenReturn(triggerLimiting ? topBucketMaxCompactionSize
+                                                                        : topBucketMaxCompactionSize * 2);
+
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+        List<SSTableReader> allSstables = new ArrayList<>();
+
+        for (int i = numBuckets; i > 0; i--)
+        {
+            // Set compactions only in the top bucket of each shard
+            int numSstables = i == numBuckets ? T : T - 1;
+            long size = (long) (minSstableSizeBytes * Math.pow(F, i));
+            // Simulate shards by using different disk indexes
+            for (int j = numShards; j > 0; j--)
+            {
+                List<SSTableReader> sstables = mockSSTables(numSstables,
+                                                            size,
+                                                            0,
+                                                            System.currentTimeMillis(),
+                                                            j - 1,
+                                                            true,
+                                                            null);
+                allSstables.addAll(sstables);
+            }
+        }
+        dataTracker.addInitialSSTables(allSstables);
+
+        int expectedCompactionTasks = triggerLimiting ? (int) (Math.max(Math.floor(numShards * maxSpaceOverhead), 1)) : numShards;
+        // Without limiting oversized compactions kicking in, we expect one compaction per shard, otherwise we expect
+        // a fraction of the number of all shards, proportional to the max allowed space amplification fraction.
+        assertEquals(expectedCompactionTasks, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
+    }
+
     private static final class ArenaSpecs
     {
         private List<SSTableReader> sstables;

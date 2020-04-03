@@ -92,13 +92,14 @@ public class AdaptiveController extends Controller
                               long dataSetSizeMB,
                               int numShards,
                               long minSstableSizeMB,
+                              double maxSpaceOverhead,
                               int intervalSec,
                               int minW,
                               int maxW,
                               double gain,
                               int minCost)
     {
-        super(timeSource, env, survivalFactor, dataSetSizeMB, numShards, minSstableSizeMB);
+        super(timeSource, env, survivalFactor, dataSetSizeMB, numShards, minSstableSizeMB, maxSpaceOverhead);
 
         this.W = W;
         this.intervalSec = intervalSec;
@@ -108,7 +109,7 @@ public class AdaptiveController extends Controller
         this.minCost = minCost;
     }
 
-    static Controller fromOptions(Environment env, double o, long dataSetSizeMB, int numShards, long minSstableSizeMB, Map<String, String> options)
+    static Controller fromOptions(Environment env, double o, long dataSetSizeMB, int numShards, long minSstableSizeMB, double maxSpaceOverhead, Map<String, String> options)
     {
         int W = options.containsKey(STARTING_W) ? Integer.parseInt(options.get(STARTING_W)) : DEFAULT_STARTING_W;
         int minW = options.containsKey(MIN_W) ? Integer.parseInt(options.get(MIN_W)) : DEFAULT_MIN_W;
@@ -129,7 +130,7 @@ public class AdaptiveController extends Controller
         if (minCost <= 0)
             throw new IllegalArgumentException(String.format("Invalid configuration for minCost, it should be positive: %d", minCost));
 
-        return new AdaptiveController(new SystemTimeSource(), env, W, o, dataSetSizeMB, numShards, minSstableSizeMB, intervalSec, minW, maxW, gain, minCost);
+        return new AdaptiveController(new SystemTimeSource(), env, W, o, dataSetSizeMB, numShards, minSstableSizeMB, maxSpaceOverhead, intervalSec, minW, maxW, gain, minCost);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException

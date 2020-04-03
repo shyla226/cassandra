@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -261,11 +262,11 @@ public class BackgroundCompactions implements CompactionObserver
     }
 
     /**
-     * @return the number of compactions currently in progress
+     * @return the compactions currently in progress
      */
-    public int getCompactionsInProgress()
+    public Collection<CompactionPick> getCompactionsInProgress()
     {
-        return compactions.size();
+        return Collections.unmodifiableCollection(compactions.values());
     }
 
     /**
@@ -273,7 +274,7 @@ public class BackgroundCompactions implements CompactionObserver
      */
     public int getTotalCompactions()
     {
-        return getCompactionsInProgress() + getEstimatedRemainingTasks();
+        return compactions.size() + getEstimatedRemainingTasks();
     }
 
     /**

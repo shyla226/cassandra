@@ -740,6 +740,11 @@ public abstract class CompactionAggregate
             this.bucket = bucket;
         }
 
+        public UnifiedCompactionStrategy.Shard getShard()
+        {
+            return shard;
+        }
+
         @Override
         public CompactionAggregateStatistics getStatistics()
         {
@@ -817,7 +822,7 @@ public abstract class CompactionAggregate
         }
     }
 
-    static CompactionAggregate createUnified(Collection<SSTableReader> sstables,
+    static UnifiedAggregate createUnified(Collection<SSTableReader> sstables,
                                              CompactionPick selected,
                                              Iterable<CompactionPick> pending,
                                              UnifiedCompactionStrategy.Shard shard,

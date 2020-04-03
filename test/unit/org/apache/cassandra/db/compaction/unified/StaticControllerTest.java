@@ -61,21 +61,21 @@ public class StaticControllerTest extends ControllerTest
     @Test
     public void testStartShutdown()
     {
-        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB, Controller.DEFAULT_MAX_SPACE_OVERHEAD);
         super.testStartShutdown(controller);
     }
 
     @Test
     public void testShutdownNotStarted()
     {
-        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB, Controller.DEFAULT_MAX_SPACE_OVERHEAD);
         super.testShutdownNotStarted(controller);
     }
 
     @Test(expected = IllegalStateException.class)
     public void testStartAlreadyStarted()
     {
-        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB, Controller.DEFAULT_MAX_SPACE_OVERHEAD);
         super.testStartAlreadyStarted(controller);
     }
 }

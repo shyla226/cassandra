@@ -52,7 +52,8 @@ public class ArenaSelector implements Comparator<SSTableReader>
         this.shardBoundaries = shardBoundaries;
         this.diskBoundaries = diskBoundaries;
 
-        ArrayList<EquivClassSplitter> ret = new ArrayList(2);
+        ArrayList<EquivClassSplitter> ret = new ArrayList<>(2);
+
         ret.add(RepairEquivClassSplitter.INSTANCE);
 
         if (diskBoundaries.getPositions() != null)

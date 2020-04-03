@@ -249,7 +249,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     @Override
     public int getTotalCompactions()
     {
-        return getEstimatedRemainingTasks() + backgroundCompactions.getCompactionsInProgress();
+        return getEstimatedRemainingTasks() + backgroundCompactions.getCompactionsInProgress().size();
     }
 
     /**

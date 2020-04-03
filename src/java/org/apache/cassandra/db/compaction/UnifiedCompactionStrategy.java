@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -310,31 +311,198 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     {
         controller.onStrategyBackgroundTaskRequest();
 
-        Map<Shard, List<Bucket>> shards = getShardsWithBuckets();
-        List<CompactionAggregate> pending = new ArrayList<>(shards.size() * 4); // assumes 4 buckets per shard
-        List<CompactionAggregate> toSubmit = new ArrayList<>(shards.size());
+        final int oversizedLimit = maxConcurrentOversizedCompactions() - runningOversizedCompactionsCount();
+        assert oversizedLimit >= 0;
+        NextAggregates nextAggregates = new NextAggregates(oversizedLimit);
+        
+        for (Map.Entry<Shard, List<Bucket>> entry : getShardsWithBuckets().entrySet())
+            nextAggregates.processShardWithBuckets(entry.getKey(), entry.getValue());
 
-        for (Map.Entry<Shard, List<Bucket>> entry : shards.entrySet())
+        backgroundCompactions.setPending(nextAggregates.getPending());
+        return nextAggregates.getToSubmit();
+    }
+
+    /**
+     * <p>Used for calculating which are the next aggregates for this UCS instance. This class is not thread-safe, and
+     * it actually expects that the monitor for this UCS instance is being held while it is processing.</p>
+     * <p> The next aggregates calculation is complex enough to warrant its own class because for the so-called
+     * "oversized" compactions we want:
+     * <ol>
+     *     <li>to be able to limit how many are running concurrently, in order to control/minimize space amplification;</li>
+     *     <li>to pick the allowed number of compactions at random, in one pass, using reservoir sampling;</li>
+     * </ol></p>
+     */
+    private class NextAggregates
+    {
+        private final Random prng;
+        private final int oversizedLimit;
+        private int oversizedSeen;
+
+        private final List<ShardCandidate> toSubmit;
+        private final List<CompactionAggregate> pending;
+        private final List<CompactionAggregate.UnifiedAggregate> oversized;
+
+        private NextAggregates(int oversizedLimit)
         {
-            boolean submitted = false;
-            for (Bucket bucket : entry.getValue())
+            prng = new Random();
+            assert oversizedLimit >= 0;
+            this.oversizedLimit = oversizedLimit;
+
+            toSubmit = new ArrayList<>();
+            pending = new ArrayList<>();
+            oversized = new ArrayList<>(oversizedLimit);
+        }
+
+        /**
+         * Processes the given shard and its list buckets and extracts candidate compaction aggregates (pending or to
+         * be submitted) from them.
+         *
+         * @param shard The shard that's being processed.
+         * @param buckets The list of buckets for the given shard.
+         */
+        void processShardWithBuckets(Shard shard, List<Bucket> buckets)
+        {
+            ShardCandidate candidateToSubmit = new ShardCandidate();
+            for (Bucket bucket : buckets)
             {
-                CompactionAggregate aggregate = bucket.getCompactionAggregate(entry.getKey());
+                CompactionAggregate.UnifiedAggregate aggregate = bucket.getCompactionAggregate(shard);
+                // TODO Should we allow empty aggregates into the list of pending compactions?
                 pending.add(aggregate);
 
-                if (!submitted && !aggregate.isEmpty())
+                if (aggregate.isEmpty() || candidateToSubmit.regularAggregate != null)
+                    continue;
+
+                if (isOversizedCompaction(aggregate.selected))
                 {
-                    toSubmit.add(aggregate);
-                    submitted = true;
+                    // If we have an oversized compaction in this aggregate, we'll try to fit it into the limit of
+                    // oversized compactions that we can allow. We should additionally try to find an alternative,
+                    // non-oversized compaction for this shard, in case the oversized compaction gets displaced via
+                    // reservoir sampling.
+                    sampleOversizedAggregate(aggregate, candidateToSubmit);
                 }
+                else
+                {
+                    // Otherwise this is a non-oversized compaction that cannot be displaced, so no matter if there's
+                    // an oversized compaction or not for this shard, we can stop searching for further candidates to
+                    // submit.
+                    candidateToSubmit.regularAggregate = aggregate;
+                }
+            }
+            if (candidateToSubmit.oversizedIndex != -1 || candidateToSubmit.regularAggregate != null)
+                toSubmit.add(candidateToSubmit);
+        }
+
+        // Implements reservoir sampling of the oversized compaction aggregates.
+        private void sampleOversizedAggregate(CompactionAggregate.UnifiedAggregate oversizedAggregate,
+                                              ShardCandidate candidateToSubmit)
+        {
+            oversizedSeen++;
+            int index = oversized.size();
+            if (index < oversizedLimit)
+            {
+                oversized.add(oversizedAggregate);
+                candidateToSubmit.oversizedIndex = index;
+                candidateToSubmit.oversizedAggregate = oversizedAggregate;
+                return;
+            }
+
+            assert oversized.size() == oversizedLimit;
+            // The core part of the reservoir sampling - even though we have already reached the sample limit, we might
+            // still replace one of the samples with samples_limit/samples_seen probability.
+            index = prng.nextInt(oversizedSeen);
+            if (index < oversizedLimit)
+            {
+                // We don't need to update anything for the replaced oversized aggregate if we ensure that when we
+                // gather the aggregates to submit we just check whether each oversized index leads to the expected
+                // oversized aggregate.
+                oversized.set(index, oversizedAggregate);
+                candidateToSubmit.oversizedIndex = index;
+                candidateToSubmit.oversizedAggregate = oversizedAggregate;
             }
         }
 
-        // all aggregates are set as pending
-        backgroundCompactions.setPending(pending);
+        /**
+         * Returns the pending compactions for all shards.
+         *
+         * @return a list of all pending compactions, up to one from each bucket of each shard.
+         */
+        List<CompactionAggregate> getPending()
+        {
+            return pending;
+        }
 
-        // but only the first non empty bucket of each shard will be submitted
-        return toSubmit;
+        /**
+         * Returns the compactions to be submitted for this shard. Can contain up to {@code oversizedLimit} "oversized"
+         * compactions.
+         *
+         * @return a list of all compactions to be submitted, up to one from each shard.
+         */
+        List<CompactionAggregate> getToSubmit()
+        {
+            List<CompactionAggregate> result = new ArrayList<>();
+            for (ShardCandidate candidate : toSubmit)
+            {
+                assert candidate != null;
+                if (candidate.oversizedIndex == -1)
+                {
+                    assert candidate.regularAggregate != null;
+                    result.add(candidate.regularAggregate);
+                }
+                else
+                {
+                    assert candidate.oversizedIndex < oversized.size();
+                    // In case there's an index for an oversized compaction for this shard, we need to ensure that this
+                    // index is still valid (i.e. the oversized compaction hasn't been replaced during the reservoir
+                    // sampling).
+                    CompactionAggregate.UnifiedAggregate oversizedAggregate = oversized.get(candidate.oversizedIndex);
+                    if (candidate.oversizedAggregate == oversizedAggregate)
+                        result.add(candidate.oversizedAggregate);
+                    else if (candidate.regularAggregate != null)
+                        result.add(candidate.regularAggregate);
+                }
+            }
+            return result;
+        }
+    }
+
+    /**
+     * A POJO refering to the compactions to submit for some shard. It can refer to just an "oversized" compaction, to
+     * just a regular (non-oversized) compaction, or to both an oversized and a regular compaction.
+     */
+    private static class ShardCandidate
+    {
+        // Every time oversizedIndex is updated, oversizedAggregate needs to be updated too. 
+        int oversizedIndex = -1;
+        CompactionAggregate.UnifiedAggregate oversizedAggregate = null;
+        CompactionAggregate.UnifiedAggregate regularAggregate = null;
+    }
+
+    private int maxConcurrentOversizedCompactions()
+    {
+        return (int) (Math.max(Math.floor(controller.getNumShards() * controller.getMaxSpaceOverhead()), 1));
+    }
+
+    private boolean isOversizedCompaction(CompactionPick compaction)
+    {
+        if (compaction == null)
+            return false;
+        // This is a very rough approximation of what should be a top bucket compaction. Other possible approaches are
+        // to set a flag in what should be the top buckets (based on their max SSTable size) and treat all compactions
+        // in these buckets as "oversized", or to entirely redefine what should be an "oversized" compaction based on
+        // all compactions currently in progress, the dataset size, and the max tolerable SA - the latter approach has
+        // the potential to be much more precise, but it might also not work well due to overfitting some snapshot of a
+        // very dynamic model.
+        // So this simple calculation is a pretty good starting point.
+        return compaction.totSizeInBytes >= controller.getShardSizeBytes() / 2;
+    }
+
+    /**
+     * @return the number of "oversized" compactions (see {@link #isOversizedCompaction(CompactionPick)} above)
+     * running currently.
+     */
+    private int runningOversizedCompactionsCount()
+    {
+        return (int) backgroundCompactions.getCompactionsInProgress().stream().filter(this::isOversizedCompaction).count();
     }
 
     @Override
@@ -541,7 +709,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         /**
          * Return the compaction aggregate
          */
-        CompactionAggregate getCompactionAggregate(Shard shard)
+        CompactionAggregate.UnifiedAggregate getCompactionAggregate(Shard shard)
         {
             if (sstables.size() < T)
                 return CompactionAggregate.createUnified(sstables, CompactionPick.EMPTY, ImmutableList.of(), shard, this);

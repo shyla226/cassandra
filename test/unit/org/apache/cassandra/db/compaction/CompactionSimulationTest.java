@@ -366,6 +366,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
     {
         double o = 1.0;
         int[] Ws = new int[] { W };
+        double maxSpaceOverhead = 0.2;
 
         Controller controller = adaptive
                                 ? new AdaptiveController(new SystemTimeSource(),
@@ -374,6 +375,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                          datasetSizeGB << 10,  // MB
                                                          numShards,
                                                          sstableSize >> 20, // MB
+                                                         maxSpaceOverhead,
                                                          updateTimeSec,
                                                          minW,
                                                          maxW,
@@ -384,7 +386,8 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                        o,
                                                        datasetSizeGB << 10,  // MB
                                                        numShards,
-                                                       sstableSize >> 20); // MB
+                                                       sstableSize >> 20,
+                                                       maxSpaceOverhead); // MB
 
         return new UnifiedCompactionStrategy(strategyFactory, controller);
     }

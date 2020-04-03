@@ -55,15 +55,16 @@ public abstract class Controller
 
     /** The data size in GB, it will be assumed that the node will have on disk roughly this size of data when it
      * reaches equilibrium. By default 1 TB. */
-    static String DATASET_SIZE_OPTION_GB = "dataset_size_in_gb";
-    static int DEFAULT_DATASET_SIZE_GB = Integer.getInteger(PREFIX + DATASET_SIZE_OPTION_GB, 1024);
+    final static String DATASET_SIZE_OPTION_GB = "dataset_size_in_gb";
+    final static int DEFAULT_DATASET_SIZE_GB = Integer.getInteger(PREFIX + DATASET_SIZE_OPTION_GB, 1024);
 
     /** The number of shards. The shard size will be calculated by dividing the data size by this number.
      * By default 5, which means shards of 200 GB (1 TB / 5).*/
     final static String NUM_SHARDS_OPTION = "num_shards";
     final static int DEFAULT_NUM_SHARDS = Integer.getInteger(PREFIX + NUM_SHARDS_OPTION, 5);
 
-    /** The minimum sstable size determines various things:
+    /**
+     * The minimum sstable size determines various things:
      *
      * - first of all it determines the size of the buckets since we multiply this value by F.
      * - secondly, when sstables are split over shard, they must be at least as large as the minimum size
@@ -71,34 +72,53 @@ public abstract class Controller
      * When the minimum sstable size is zero in the compaction options, then it is calculated by the controller by
      * looking at the initial flush size.
      */
-    static String MIN_SSTABLE_SIZE_OPTION_MB = "min_sstable_size_in_mb";
-    static int DEFAULT_MIN_SSTABLE_SIZE_MB = Integer.getInteger(PREFIX + MIN_SSTABLE_SIZE_OPTION_MB, 0);
+    final static String MIN_SSTABLE_SIZE_OPTION_MB = "min_sstable_size_in_mb";
+    final static int DEFAULT_MIN_SSTABLE_SIZE_MB = Integer.getInteger(PREFIX + MIN_SSTABLE_SIZE_OPTION_MB, 0);
+
+    /**
+     * The maximum tolerable compaction-induced space amplification, as fraction of the dataset size. The idea behind
+     * this property is to be able to tune how much to limit concurrent "oversized" compactions in different shards.
+     * On one hand allowing such compactions concurrently running in all shards allows for STCS-like space
+     * amplification, where at some point you might need free space double the size of your working set to do a (top
+     * tier) compaction, while on the other hand limiting such compactions too much might lead to compaction lagging
+     * behind, higher read amplification, and other problems of that nature.
+     */
+    final static String MAX_SPACE_OVERHEAD_OPTION = "max_space_overhead";
+    final static double DEFAULT_MAX_SPACE_OVERHEAD = Double.parseDouble(System.getProperty(PREFIX + MAX_SPACE_OVERHEAD_OPTION, "0.2"));
+    final static double MAX_SPACE_OVERHEAD_LOWER_BOUND = 0.01;
+    final static double MAX_SPACE_OVERHEAD_UPPER_BOUND = 1.0;
 
     /**
      * This parameter is intended to modify the shape of the LSM by taking into account the survival ratio of data, for now it is fixed to one.
      */
-    static double DEFAULT_SURVIVAL_FACTOR = Double.parseDouble(System.getProperty(PREFIX + "survival_factor", "1"));
+    final static double DEFAULT_SURVIVAL_FACTOR = Double.parseDouble(System.getProperty(PREFIX + "survival_factor", "1"));
 
     /**
      * Either true or false. This parameter determines which controller will be used.
      */
-    static String ADAPTIVE_OPTION = "adaptive";
-    static boolean DEFAULT_ADAPTIVE = Boolean.parseBoolean(System.getProperty(PREFIX + ADAPTIVE_OPTION, "true"));
+    final static String ADAPTIVE_OPTION = "adaptive";
+    final static boolean DEFAULT_ADAPTIVE = Boolean.parseBoolean(System.getProperty(PREFIX + ADAPTIVE_OPTION, "true"));
 
     protected final TimeSource timeSource;
     protected final Environment env;
     protected final double survivalFactor;
     protected final long dataSetSizeMB;
-    protected volatile int numShards;
+    protected final int numShards;
     protected final long shardSizeMB;
     protected volatile long minSstableSizeMB;
-
+    protected final double maxSpaceOverhead;
 
     @Nullable
     protected volatile CostsCalculator calculator;
     @Nullable private volatile Metrics metrics;
 
-    Controller(TimeSource timeSource, Environment env,  double survivalFactor,  long dataSetSizeMB, int numShards, long minSstableSizeMB)
+    Controller(TimeSource timeSource,
+               Environment env,
+               double survivalFactor,
+               long dataSetSizeMB,
+               int numShards,
+               long minSstableSizeMB,
+               double maxSpaceOverhead)
     {
         this.timeSource = timeSource;
         this.env = env;
@@ -107,6 +127,29 @@ public abstract class Controller
         this.numShards = numShards;
         this.shardSizeMB = (int) Math.ceil((double) dataSetSizeMB / numShards);
         this.minSstableSizeMB = minSstableSizeMB;
+        this.maxSpaceOverhead = maxSpaceOverhead;
+        double maxSpaceOverheadLowerBound = 1.0 / numShards;
+        if (maxSpaceOverhead < MAX_SPACE_OVERHEAD_LOWER_BOUND || maxSpaceOverhead > MAX_SPACE_OVERHEAD_UPPER_BOUND)
+        {
+            logger.warn("The value for {} is {}, but it should be between {} and {} - setting it to the closer of the two bounds.",
+                        MAX_SPACE_OVERHEAD_OPTION,
+                        maxSpaceOverhead,
+                        MAX_SPACE_OVERHEAD_LOWER_BOUND,
+                        MAX_SPACE_OVERHEAD_UPPER_BOUND);
+            maxSpaceOverhead = Math.min(MAX_SPACE_OVERHEAD_UPPER_BOUND,
+                                        Math.max(MAX_SPACE_OVERHEAD_LOWER_BOUND,
+                                                 maxSpaceOverhead));
+        }
+        if (maxSpaceOverhead < maxSpaceOverheadLowerBound)
+        {
+            logger.warn("{} shards are not enough to maintain the required maximum space overhead of {}!\n" +
+                        "The system will need to perform the most space intensive compactions in at least 1 shard at a time, " +
+                        "so it will do so in exactly 1 shard at a time, and it will behave as if {} has been set to ~{}.",
+                        numShards,
+                        maxSpaceOverhead,
+                        MAX_SPACE_OVERHEAD_OPTION,
+                        String.format("%.3f", maxSpaceOverheadLowerBound));
+        }
     }
 
     @VisibleForTesting
@@ -187,6 +230,20 @@ public abstract class Controller
 
             return flushSize;
         }
+    }
+
+    /**
+     * Returns the maximum tolerable compaction-induced space amplification, as a fraction of the dataset size.
+     * Currently this is not a strict limit for which compaction gives an ironclad guarantee never to exceed it, but
+     * the main input in a simple heuristic that is designed to limit UCS' space amplification in exchange of some
+     * delay in top bucket compactions.
+     *
+     * @return a {@code double} value between 0.01 and 1.0, representing the fraction of the expected uncompacted
+     * dataset size that should be additionally available for compaction's space amplification overhead. 
+     */
+    public double getMaxSpaceOverhead()
+    {
+        return maxSpaceOverhead;
     }
 
     /**
@@ -340,6 +397,9 @@ public abstract class Controller
         long dataSetSizeMb = (options.containsKey(DATASET_SIZE_OPTION_GB) ? Long.parseLong(options.get(DATASET_SIZE_OPTION_GB)) : DEFAULT_DATASET_SIZE_GB) << 10;
         int numShards = options.containsKey(NUM_SHARDS_OPTION) ? Integer.parseInt(options.get(NUM_SHARDS_OPTION)) : DEFAULT_NUM_SHARDS;
         long sstableSizeMb = options.containsKey(MIN_SSTABLE_SIZE_OPTION_MB) ? Long.parseLong(options.get(MIN_SSTABLE_SIZE_OPTION_MB)) : DEFAULT_MIN_SSTABLE_SIZE_MB;
+        double maxSpaceOverhead = options.containsKey(MAX_SPACE_OVERHEAD_OPTION)
+                ? Double.parseDouble(options.get(MAX_SPACE_OVERHEAD_OPTION))
+                : DEFAULT_MAX_SPACE_OVERHEAD;
 
         if (dataSetSizeMb <= 0)
             throw new IllegalArgumentException(String.format("Invalid configuration, dataset size should be positive: %d", dataSetSizeMb));
@@ -350,8 +410,8 @@ public abstract class Controller
         Environment env = new RealEnvironment(cfs);
 
         return adaptive
-               ? AdaptiveController.fromOptions(env, DEFAULT_SURVIVAL_FACTOR, dataSetSizeMb, numShards, sstableSizeMb, options)
-               : StaticController.fromOptions(env, DEFAULT_SURVIVAL_FACTOR, dataSetSizeMb, numShards, sstableSizeMb, options);
+               ? AdaptiveController.fromOptions(env, DEFAULT_SURVIVAL_FACTOR, dataSetSizeMb, numShards, sstableSizeMb, maxSpaceOverhead, options)
+               : StaticController.fromOptions(env, DEFAULT_SURVIVAL_FACTOR, dataSetSizeMb, numShards, sstableSizeMb, maxSpaceOverhead, options);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException

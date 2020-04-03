@@ -43,16 +43,22 @@ public class StaticController extends Controller
     private final int[] Ws;
 
     @VisibleForTesting // comp. simulation
-    public StaticController(Environment env, int[] Ws, double survivalFactor, long dataSetSizeMB, int numShards, long minSSTableSizeMB)
+    public StaticController(Environment env,
+                            int[] Ws,
+                            double survivalFactor,
+                            long dataSetSizeMB,
+                            int numShards,
+                            long minSSTableSizeMB,
+                            double maxSpaceOverhead)
     {
-        super(new SystemTimeSource(), env, survivalFactor, dataSetSizeMB, numShards, minSSTableSizeMB);
+        super(new SystemTimeSource(), env, survivalFactor, dataSetSizeMB, numShards, minSSTableSizeMB, maxSpaceOverhead);
         this.Ws = Ws;
     }
 
-    static Controller fromOptions(Environment env, double o, long dataSetSizeMB, int numShards, long minSSTableSizeMB, Map<String, String> options)
+    static Controller fromOptions(Environment env, double o, long dataSetSizeMB, int numShards, long minSSTableSizeMB, double maxSpaceOverhead, Map<String, String> options)
     {
         int[] Ws = parseScalingFactors(options.containsKey(SCALING_FACTORS_OPTION) ? options.get(SCALING_FACTORS_OPTION) : DEFAULT_SCALING_FACTORS);
-        return new StaticController(env, Ws, DEFAULT_SURVIVAL_FACTOR, dataSetSizeMB, numShards, minSSTableSizeMB);
+        return new StaticController(env, Ws, o, dataSetSizeMB, numShards, minSSTableSizeMB, maxSpaceOverhead);
     }
 
     @VisibleForTesting
