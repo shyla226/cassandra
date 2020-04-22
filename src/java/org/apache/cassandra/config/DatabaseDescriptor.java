@@ -368,6 +368,7 @@ public class DatabaseDescriptor
 
     private static void applyGuardrailsConfig()
     {
+        conf.guardrails.applyConfig();
         conf.guardrails.validate();
     }
 
@@ -3121,5 +3122,9 @@ public class DatabaseDescriptor
     public static GuardrailsConfig getGuardrailsConfig()
     {
         return conf.guardrails;
+    }
+    public static boolean isApplyDbaasDefaults()
+    {
+        return conf.apply_dbaas_defaults;
     }
 }
