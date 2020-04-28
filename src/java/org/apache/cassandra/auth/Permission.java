@@ -79,4 +79,9 @@ public enum Permission
             throw new IllegalArgumentException("Unknown permission: " + name);
         }
     }
+
+    public static Permission byName(String name)
+    {
+        return Permission.valueOf(name.toUpperCase(Locale.US));
+    }
 }

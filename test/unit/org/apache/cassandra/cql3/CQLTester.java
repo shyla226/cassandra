@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
@@ -26,6 +27,7 @@ import java.net.ServerSocket;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -35,6 +37,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import javax.management.JMX;
+import javax.management.ObjectName;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
@@ -46,8 +51,10 @@ import org.slf4j.LoggerFactory;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.exceptions.UnauthorizedException;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.audit.AuditLogManager;
+import org.apache.cassandra.auth.AuthCacheMBean;
 import org.apache.cassandra.auth.CassandraAuthorizer;
 import org.apache.cassandra.auth.CassandraRoleManager;
 import org.apache.cassandra.auth.PasswordAuthenticator;
@@ -64,6 +71,7 @@ import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.AbstractEndpointSnitch;
@@ -87,7 +95,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
-import static junit.framework.Assert.assertNotNull;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.fail;
 
 /**
  * Base class for CQL tests.
@@ -112,13 +121,12 @@ public abstract class CQLTester
     protected static final int nativePort;
     protected static final InetAddress nativeAddr;
     protected static final Set<InetAddressAndPort> remoteAddrs = new HashSet<>();
-    private static final Map<Pair<User, ProtocolVersion>, Cluster> clusters = new HashMap<>();
-    protected static final Map<Pair<User, ProtocolVersion>, Session> sessions = new HashMap<>();
+    private static final Map<Pair<User, ProtocolVersion>, Cluster> clusters = new ConcurrentHashMap<>();
+    protected static final Map<Pair<User, ProtocolVersion>, Session> sessions = new ConcurrentHashMap<>();
 
     // needed in GuardrailsOnTableTest to check whether dropping schema tasks have been finished
     protected static final ThreadPoolExecutor schemaCleanup =
     new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
-
 
     private static boolean isServerPrepared = false;
 
@@ -431,11 +439,15 @@ public abstract class CQLTester
         if (server != null)
             return;
 
+        prepareServer();
+
         SystemKeyspace.finishStartup();
         VirtualKeyspaceRegistry.instance.register(VirtualSchemaKeyspace.instance);
 
         StorageService.instance.initServer();
         SchemaLoader.startGossiper();
+
+        Gossiper.instance.maybeInitializeLocalState(1);
 
         server = new Server.Builder().withHost(nativeAddr).withPort(nativePort).build();
         ClientMetrics.instance.init(Collections.singleton(server));
@@ -1029,6 +1041,27 @@ public abstract class CQLTester
                       .withoutJMXReporting();
     }
 
+    public static void invalidateAuthCaches()
+    {
+        invalidate("PermissionsCache");
+        invalidate("RolesCache");
+        invalidate("CredentialsCache");
+    }
+
+    private static void invalidate(String authCacheName)
+    {
+        try
+        {
+            final ObjectName objectName = new ObjectName("org.apache.cassandra.auth:type=" + authCacheName);
+            JMX.newMBeanProxy(ManagementFactory.getPlatformMBeanServer(), objectName, AuthCacheMBean.class)
+               .invalidate();
+        }
+        catch (Exception e)
+        {
+            throw new IllegalStateException("Cannot invalidate " + authCacheName, e);
+        }
+    }
+
     protected SimpleClient newSimpleClient(ProtocolVersion version, boolean compression, boolean checksums, boolean isOverloadedException) throws IOException
     {
         return new SimpleClient(nativeAddr.getHostAddress(), nativePort, version, version.isBeta(), new EncryptionOptions()).connect(compression, checksums, isOverloadedException);
@@ -1113,7 +1146,7 @@ public abstract class CQLTester
         if (result == null)
         {
             if (rows.length > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", rows.length));
+                fail(String.format("No rows returned by query but %d expected", rows.length));
             return;
         }
 
@@ -1140,7 +1173,7 @@ public abstract class CQLTester
                 ByteBuffer actualValue = actual.getBytesUnsafe(meta.getName(j));
                 int actualBytes = actualValue == null ? -1 : actualValue.remaining();
                 if (!Objects.equal(expectedByteValue, actualValue))
-                    Assert.fail(String.format("Invalid value for row %d column %d (%s of type %s), " +
+                    fail(String.format("Invalid value for row %d column %d (%s of type %s), " +
                                               "expected <%s> (%d bytes) but got <%s> (%d bytes) " +
                                               "(using protocol version %s)",
                                               i, j, meta.getName(j), type,
@@ -1160,7 +1193,7 @@ public abstract class CQLTester
                 iter.next();
                 i++;
             }
-            Assert.fail(String.format("Got less rows than expected. Expected %d but got %d (using protocol version %s).",
+            fail(String.format("Got less rows than expected. Expected %d but got %d (using protocol version %s).",
                                       rows.length, i, protocolVersion));
         }
 
@@ -1173,7 +1206,7 @@ public abstract class CQLTester
         if (result == null)
         {
             if (rows.length > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", rows.length));
+                fail(String.format("No rows returned by query but %d expected", rows.length));
             return;
         }
 
@@ -1197,7 +1230,7 @@ public abstract class CQLTester
                 {
                     Object actualValueDecoded = actualValue == null ? null : column.type.getSerializer().deserialize(actualValue);
                     if (!Objects.equal(expected[j], actualValueDecoded))
-                        Assert.fail(String.format("Invalid value for row %d column %d (%s of type %s), expected <%s> but got <%s>",
+                        fail(String.format("Invalid value for row %d column %d (%s of type %s), expected <%s> but got <%s>",
                                                   i,
                                                   j,
                                                   column.name,
@@ -1225,7 +1258,7 @@ public abstract class CQLTester
                 }
                 logger.info("Extra row num {}: {}", i, str.toString());
             }
-            Assert.fail(String.format("Got more rows than expected. Expected %d but got %d.", rows.length, i));
+            fail(String.format("Got more rows than expected. Expected %d but got %d.", rows.length, i));
         }
 
         Assert.assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", rows.length>i ? "less" : "more", rows.length, i), i == rows.length);
@@ -1249,7 +1282,7 @@ public abstract class CQLTester
         if (result == null)
         {
             if (rows.length > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", rows.length));
+                fail(String.format("No rows returned by query but %d expected", rows.length));
             return;
         }
 
@@ -1290,11 +1323,11 @@ public abstract class CQLTester
                 sb.append(extraRows.stream().collect(Collectors.joining("\n    ")));
                 if (!missing.isEmpty())
                     sb.append("\nMissing Rows:\n    ").append(missingRows.stream().collect(Collectors.joining("\n    ")));
-                Assert.fail(sb.toString());
+                fail(sb.toString());
             }
 
             if (!missing.isEmpty())
-                Assert.fail("Missing " + missing.size() + " row(s) in result: \n    " + missingRows.stream().collect(Collectors.joining("\n    ")));
+                fail("Missing " + missing.size() + " row(s) in result: \n    " + missingRows.stream().collect(Collectors.joining("\n    ")));
         }
 
         assert ignoreExtra || expectedRows.size() == actualRows.size();
@@ -1339,7 +1372,7 @@ public abstract class CQLTester
         if (result == null)
         {
             if (numExpectedRows > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", numExpectedRows));
+                fail(String.format("No rows returned by query but %d expected", numExpectedRows));
             return;
         }
 
@@ -1360,7 +1393,7 @@ public abstract class CQLTester
                 iter.next();
                 i++;
             }
-            Assert.fail(String.format("Got less rows than expected. Expected %d but got %d.", numExpectedRows, i));
+            fail(String.format("Got less rows than expected. Expected %d but got %d.", numExpectedRows, i));
         }
 
         Assert.assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", numExpectedRows>i ? "less" : "more", numExpectedRows, i), i == numExpectedRows);
@@ -1397,7 +1430,7 @@ public abstract class CQLTester
     {
         if (result == null)
         {
-            Assert.fail("No rows returned by query.");
+            fail("No rows returned by query.");
             return;
         }
 
@@ -1432,6 +1465,21 @@ public abstract class CQLTester
         assertInvalidMessage(null, query, values);
     }
 
+    /**
+     * Checks that the specified query is not autorized for the current user.
+     * @param errorMessage The expected error message
+     * @param query the query
+     * @param values the query parameters
+     */
+    protected void assertUnauthorizedQuery(String errorMessage, String query, Object... values) throws Throwable
+    {
+        assertInvalidThrowMessage(Optional.of(ProtocolVersion.CURRENT),
+                                  errorMessage,
+                                  UnauthorizedException.class,
+                                  query,
+                                  values);
+    }
+
     protected void assertInvalidMessage(String errorMessage, String query, Object... values) throws Throwable
     {
         assertInvalidThrowMessage(errorMessage, null, query, values);
@@ -1462,18 +1510,19 @@ public abstract class CQLTester
             else
                 executeNet(protocolVersion.get(), query, values);
 
-            String q = USE_PREPARED_VALUES
-                       ? query + " (values: " + formatAllValues(values) + ")"
-                       : replaceValues(query, values);
-            Assert.fail("Query should be invalid but no error was thrown. Query is: " + q);
+            fail("Query should be invalid but no error was thrown. Query is: " + queryInfo(query, values));
+
         }
         catch (Exception e)
         {
             if (exception != null && !exception.isAssignableFrom(e.getClass()))
             {
-                Assert.fail("Query should be invalid but wrong error was thrown. " +
-                            "Expected: " + exception.getName() + ", got: " + e.getClass().getName() + ". " +
-                            "Query is: " + queryInfo(query, values));
+                fail("Query should be invalid but wrong error was thrown. " +
+                        "Expected: " + exception.getName() + ", got: " + e.getClass().getName() + ". " +
+                        "Query is: " + queryInfo(query, values) + ". Stack trace of unexpected exception is:\n" +
+                        String.join("\n", Arrays.stream(e.getStackTrace())
+                                                .map(t -> t.toString())
+                                                .collect(Collectors.toList())));
             }
             if (errorMessage != null)
             {
@@ -1497,7 +1546,7 @@ public abstract class CQLTester
         }
         catch(SyntaxException e)
         {
-            Assert.fail(String.format("Expected query syntax to be valid but was invalid. Query is: %s; Error is %s",
+            fail(String.format("Expected query syntax to be valid but was invalid. Query is: %s; Error is %s",
                                       query, e.getMessage()));
         }
     }
@@ -1512,7 +1561,7 @@ public abstract class CQLTester
         try
         {
             execute(query, values);
-            Assert.fail("Query should have invalid syntax but no error was thrown. Query is: " + queryInfo(query, values));
+            fail("Query should have invalid syntax but no error was thrown. Query is: " + queryInfo(query, values));
         }
         catch (SyntaxException e)
         {
