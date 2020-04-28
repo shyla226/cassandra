@@ -34,7 +34,6 @@ import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.*;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -71,24 +70,20 @@ public class ListRolesStatement extends AuthorizationStatement
     @Override
     public void validate(QueryState state) throws UnauthorizedException, InvalidRequestException
     {
-        state.getClientState().ensureNotAnonymous();
+        state.ensureNotAnonymous();
 
         if ((grantee != null) && !DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
             throw new InvalidRequestException(String.format("%s doesn't exist", grantee));
     }
 
-    public void authorize(ClientState state) throws InvalidRequestException
+    public void authorize(QueryState state) throws InvalidRequestException
     {
     }
 
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public ResultMessage execute(QueryState state) throws RequestValidationException, RequestExecutionException
     {
         // If the executing user has DESCRIBE permission on the root roles resource, let them list any and all roles
-        PermissionSets rootLevelPerms = DatabaseDescriptor.getAuthorizer()
-                                                          .allPermissionSets(state.getUser(), RoleResource.root());
-        boolean hasRootLevelSelect = rootLevelPerms != null &&
-                                     rootLevelPerms.granted.contains(Permission.DESCRIBE) &&
-                                     !rootLevelPerms.restricted.contains(Permission.DESCRIBE);
+        boolean hasRootLevelSelect = state.hasRolePermission(Permission.DESCRIBE, RoleResource.root());
         if (hasRootLevelSelect)
         {
             if (grantee == null)
@@ -98,7 +93,7 @@ public class ListRolesStatement extends AuthorizationStatement
         }
         else
         {
-            RoleResource currentUser = RoleResource.role(state.getUser().getName());
+            RoleResource currentUser = RoleResource.role(state.getUserName());
             if (grantee == null)
                 return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(currentUser, recursive));
             if (DatabaseDescriptor.getRoleManager().getRoles(currentUser, true).contains(grantee))

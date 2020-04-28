@@ -70,7 +70,6 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -338,7 +337,7 @@ public class SinglePartitionSliceCommandTest
 
     public static List<Unfiltered> getUnfilteredsFromSinglePartition(String q)
     {
-        SelectStatement stmt = (SelectStatement) QueryProcessor.parseStatement(q).prepare(ClientState.forInternalCalls());
+        SelectStatement stmt = (SelectStatement) QueryProcessor.parseStatement(q).prepare(QueryState.forInternalCalls());
 
         List<Unfiltered> unfiltereds = new ArrayList<>();
         SinglePartitionReadQuery.Group<SinglePartitionReadCommand> query = (SinglePartitionReadQuery.Group<SinglePartitionReadCommand>) stmt.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, 0);

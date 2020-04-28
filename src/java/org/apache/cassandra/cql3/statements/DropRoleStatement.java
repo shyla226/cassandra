@@ -23,7 +23,6 @@ import org.apache.cassandra.auth.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.*;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -40,15 +39,15 @@ public class DropRoleStatement extends AuthenticationStatement
         this.ifExists = ifExists;
     }
 
-    public void authorize(ClientState state) throws UnauthorizedException
+    public void authorize(QueryState state) throws UnauthorizedException
     {
-        super.checkPermission(state, Permission.DROP, role);
+        super.ensurePermission(state, Permission.DROP, role);
 
         // We only check superuser status for existing roles to avoid
         // caching info about roles which don't exist (CASSANDRA-9189)
         if (DatabaseDescriptor.getRoleManager().isExistingRole(role)
-            && Roles.hasSuperuserStatus(role)
-            && !state.getUser().isSuper())
+            && DatabaseDescriptor.getRoleManager().getRoleData(role).isSuper
+            && !state.isSuper())
             throw new UnauthorizedException("Only superusers can drop a role with superuser status");
     }
 
@@ -56,7 +55,7 @@ public class DropRoleStatement extends AuthenticationStatement
     public void validate(QueryState state) throws RequestValidationException
     {
         // validate login here before authorize to avoid leaking user existence to anonymous users.
-        state.getClientState().ensureNotAnonymous();
+        state.ensureNotAnonymous();
 
         if (!ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
             throw new InvalidRequestException(String.format("%s doesn't exist", role.getRoleName()));
@@ -66,7 +65,7 @@ public class DropRoleStatement extends AuthenticationStatement
             throw new InvalidRequestException("Cannot DROP primary role for current login");
     }
 
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public ResultMessage execute(QueryState state) throws RequestValidationException, RequestExecutionException
     {
         // not rejected in validate()
         if (ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))

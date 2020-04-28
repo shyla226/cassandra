@@ -33,7 +33,6 @@ import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.transport.Event.SchemaChange;
@@ -141,9 +140,9 @@ public final class CreateTableStatement extends AlterSchemaStatement
         return new SchemaChange(Change.CREATED, Target.TABLE, keyspaceName, tableName);
     }
 
-    public void authorize(ClientState client)
+    public void authorize(QueryState client)
     {
-        client.ensureKeyspacePermission(keyspaceName, Permission.CREATE);
+        client.ensureKeyspacePermission(Permission.CREATE, keyspaceName);
     }
 
     @Override
@@ -332,9 +331,9 @@ public final class CreateTableStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateTableStatement prepare(ClientState state)
+        public CreateTableStatement prepare(QueryState state)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
+            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getClientState().getKeyspace();
 
             if (null == partitionKeyColumns)
                 throw ire("No PRIMARY KEY specifed for table '%s' (exactly one required)", name);

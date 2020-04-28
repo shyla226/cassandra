@@ -41,7 +41,6 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -340,9 +339,9 @@ public final class CreateViewStatement extends AlterSchemaStatement
         return new SchemaChange(Change.CREATED, Target.TABLE, keyspaceName, viewName);
     }
 
-    public void authorize(ClientState client)
+    public void authorize(QueryState client)
     {
-        client.ensureTablePermission(keyspaceName, tableName, Permission.ALTER);
+        client.ensureTablePermission(Permission.ALTER, keyspaceName, tableName);
     }
 
     private AbstractType<?> getType(TableMetadata table, ColumnIdentifier name)
@@ -399,9 +398,9 @@ public final class CreateViewStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateViewStatement prepare(ClientState state)
+        public CreateViewStatement prepare(QueryState state)
         {
-            String keyspaceName = viewName.hasKeyspace() ? viewName.getKeyspace() : state.getKeyspace();
+            String keyspaceName = viewName.hasKeyspace() ? viewName.getKeyspace() : state.getClientState().getKeyspace();
 
             if (tableName.hasKeyspace() && !keyspaceName.equals(tableName.getKeyspace()))
                 throw ire("Cannot create a materialized view on a table in a different keyspace");

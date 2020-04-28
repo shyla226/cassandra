@@ -91,7 +91,7 @@ public class GuardrailConsistencyTest extends GuardrailTester
     {
         QueryOptions queryOptions = queryOptions(cl, serialCl);
         QueryState state = queryState.get();
-        CQLStatement statement = QueryProcessor.getStatement(formatQuery(query), state.getClientState());
+        CQLStatement statement = QueryProcessor.getStatement(formatQuery(query), state);
         statement.execute(state, queryOptions, System.nanoTime());
     }
 

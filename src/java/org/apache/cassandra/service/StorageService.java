@@ -1121,10 +1121,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (setUpSchema)
                 evolveSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION).ifPresent(MigrationManager::announce);
 
-            DatabaseDescriptor.getRoleManager().setup();
-            DatabaseDescriptor.getAuthenticator().setup();
-            DatabaseDescriptor.getAuthorizer().setup();
-            DatabaseDescriptor.getNetworkAuthorizer().setup();
+            DatabaseDescriptor.getAuthManager().setup(DatabaseDescriptor.getAuthenticator());
+
             Schema.instance.registerListener(new AuthSchemaChangeListener());
             authSetupComplete = true;
         }

@@ -158,7 +158,7 @@ public class BatchStatement implements CQLStatement
         return functions;
     }
 
-    public void authorize(ClientState state) throws InvalidRequestException, UnauthorizedException
+    public void authorize(QueryState state) throws InvalidRequestException, UnauthorizedException
     {
         for (ModificationStatement statement : statements)
             statement.authorize(state);
@@ -607,7 +607,7 @@ public class BatchStatement implements CQLStatement
                 statement.setKeyspace(state);
         }
 
-        public BatchStatement prepare(ClientState state)
+        public BatchStatement prepare(QueryState state)
         {
             List<ModificationStatement> statements = new ArrayList<>(parsedStatements.size());
             parsedStatements.forEach(s -> statements.add(s.prepare(bindVariables)));

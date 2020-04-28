@@ -17,13 +17,18 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.UnavailableException;
 
@@ -37,6 +42,12 @@ public class AuthCacheTest
     private int loadCounter = 0;
     private int validity = 2000;
     private boolean isCacheEnabled = true;
+
+    @BeforeClass
+    public static void setup()
+    {
+        DatabaseDescriptor.setConfig(new Config());
+    }
 
     @Test
     public void testCacheLoaderIsCalledOnFirst()
@@ -178,9 +189,9 @@ public class AuthCacheTest
     {
         TestCache<String, Integer> authCache = new TestCache<>(this::countingLoader, this::setValidity, () -> validity, () -> isCacheEnabled);
 
-        assertTrue(authCache.cache.policy().expireAfterWrite().isPresent());
-        assertTrue(authCache.cache.policy().refreshAfterWrite().isPresent());
-        assertTrue(authCache.cache.policy().eviction().isPresent());
+        assertTrue(authCache.cache.synchronous().policy().expireAfterWrite().isPresent());
+        assertTrue(authCache.cache.synchronous().policy().refreshAfterWrite().isPresent());
+        assertTrue(authCache.cache.synchronous().policy().eviction().isPresent());
     }
 
     @Test(expected = UnavailableException.class)
@@ -224,7 +235,18 @@ public class AuthCacheTest
                   () -> 1000,
                   (maxEntries) -> {},
                   () -> 10,
+                  (capacity) -> {},
+                  () -> 128,
                   loadFunction,
+                  (keys) -> {
+                      Map<K, V> r = new HashMap<>();
+                      for (K k : keys)
+                      {
+                          V v = loadFunction.apply(k);
+                          r.put(k, v);
+                      }
+                      return r;
+                  },
                   cacheEnabledDelegate);
         }
     }

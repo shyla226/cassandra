@@ -21,7 +21,6 @@ import java.util.*;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
-import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.Keyspace;
@@ -79,9 +78,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
         return new SchemaChange(Change.UPDATED, Target.TABLE, keyspaceName, tableName);
     }
 
-    public void authorize(ClientState client)
+    public void authorize(QueryState client)
     {
-        client.ensureTablePermission(keyspaceName, tableName, Permission.ALTER);
+        client.ensureTablePermission(Permission.ALTER, keyspaceName, tableName);
     }
 
     @Override
@@ -444,9 +443,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             this.name = name;
         }
 
-        public AlterTableStatement prepare(ClientState state)
+        public AlterTableStatement prepare(QueryState state)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
+            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getClientState().getKeyspace();
             String tableName = name.getName();
 
             switch (kind)
