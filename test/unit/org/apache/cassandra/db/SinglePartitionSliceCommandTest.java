@@ -36,8 +36,6 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -77,8 +75,6 @@ import org.apache.cassandra.utils.btree.BTreeSet;
 
 public class SinglePartitionSliceCommandTest
 {
-    private static final Logger logger = LoggerFactory.getLogger(SinglePartitionSliceCommandTest.class);
-
     private static final String KEYSPACE = "ks";
     private static final String TABLE = "tbl";
 

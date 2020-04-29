@@ -66,6 +66,7 @@ public class Config
     public volatile int roles_cache_max_entries = 1_000;
     public volatile int roles_cache_initial_capacity = 128;
     public volatile int roles_update_interval_in_ms = -1;
+    public boolean system_keyspaces_filtering;
 
     /* Hashing strategy Random or OPHF */
     public String partitioner;
