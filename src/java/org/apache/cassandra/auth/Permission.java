@@ -17,7 +17,9 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 
@@ -83,5 +85,15 @@ public enum Permission
     public static Permission byName(String name)
     {
         return Permission.valueOf(name.toUpperCase(Locale.US));
+    }
+
+    public static Set<Permission> setOf()
+    {
+        return new HashSet<>();
+    }
+
+    public static Set<Permission> immutableSetOf(Set<Permission> granted)
+    {
+        return Collections.unmodifiableSet(new HashSet<>(granted));
     }
 }
