@@ -1486,6 +1486,11 @@ public abstract class CQLTester
                                   values);
     }
 
+    protected void assertInvalidMessageNet(String errorMessage, String query, Object... values) throws Throwable
+    {
+        assertInvalidThrowMessage(Optional.of(ProtocolVersion.CURRENT), errorMessage, null, query, values);
+    }
+
     protected void assertInvalidMessage(String errorMessage, String query, Object... values) throws Throwable
     {
         assertInvalidThrowMessage(errorMessage, null, query, values);
