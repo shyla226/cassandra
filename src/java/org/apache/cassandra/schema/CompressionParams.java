@@ -66,6 +66,15 @@ public final class CompressionParams
     public static final String ENABLED = "enabled";
     public static final String MIN_COMPRESS_RATIO = "min_compress_ratio";
 
+    // Set this to true in order NOT to use default compression parameters for system tables and user tables that do not specify the compression options
+    public static final boolean NO_COMPRESSION = Boolean.getBoolean("cassandra.compression_disabled_by_default");
+
+    public static final CompressionParams DISABLED = new CompressionParams(null,
+                                                                           DEFAULT_CHUNK_LENGTH,
+                                                                           Integer.MAX_VALUE,
+                                                                           0.0,
+                                                                           Collections.emptyMap());
+
     public static final CompressionParams DEFAULT = new CompressionParams(LZ4Compressor.create(Collections.<String, String>emptyMap()),
                                                                           DEFAULT_CHUNK_LENGTH,
                                                                           calcMaxCompressedLength(DEFAULT_CHUNK_LENGTH, DEFAULT_MIN_COMPRESS_RATIO),
@@ -94,6 +103,11 @@ public final class CompressionParams
 
     // TODO: deprecated, should now be carefully removed. Doesn't affect schema code as it isn't included in equals() and hashCode()
     private volatile double crcCheckChance = 1.0;
+
+    public static CompressionParams getDefaultParams()
+    {
+        return NO_COMPRESSION ? DISABLED : DEFAULT;
+    }
 
     public static CompressionParams fromMap(Map<String, String> opts)
     {
@@ -132,7 +146,7 @@ public final class CompressionParams
 
     public static CompressionParams noCompression()
     {
-        return new CompressionParams((ICompressor) null, DEFAULT_CHUNK_LENGTH, Integer.MAX_VALUE, 0.0, Collections.emptyMap());
+        return DISABLED;
     }
 
     // The shorthand methods below are only used for tests. They are a little inconsistent in their choice of

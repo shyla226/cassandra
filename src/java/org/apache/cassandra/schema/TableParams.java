@@ -263,11 +263,11 @@ public final class TableParams
         private int memtableFlushPeriodInMs = 0;
         private int minIndexInterval = 128;
         private int maxIndexInterval = 2048;
-        private SpeculativeRetryPolicy speculativeRetry = PercentileSpeculativeRetryPolicy.NINETY_NINE_P;
-        private SpeculativeRetryPolicy additionalWritePolicy = PercentileSpeculativeRetryPolicy.NINETY_NINE_P;
+        private SpeculativeRetryPolicy speculativeRetry = SpeculativeRetryPolicy.getDefaultPolicy();
+        private SpeculativeRetryPolicy additionalWritePolicy = SpeculativeRetryPolicy.getDefaultPolicy();
         private CachingParams caching = CachingParams.DEFAULT;
         private CompactionParams compaction = CompactionParams.DEFAULT;
-        private CompressionParams compression = CompressionParams.DEFAULT;
+        private CompressionParams compression = CompressionParams.getDefaultParams();
         private ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of();
         private boolean cdc;
         private ReadRepairStrategy readRepair = ReadRepairStrategy.BLOCKING;

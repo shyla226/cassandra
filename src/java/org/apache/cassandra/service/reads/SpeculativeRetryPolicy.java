@@ -19,13 +19,22 @@ package org.apache.cassandra.service.reads;
 
 import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableParams;
 
 public interface SpeculativeRetryPolicy
 {
+    // Set this to true in order NOT to use speculative retries for tables that do not specify any speculative retry policy
+    public static final boolean NO_RETRY = Boolean.getBoolean("cassandra.speculative_retry_disabled_by_default");
+
     public enum Kind
     {
         NEVER, FIXED, PERCENTILE, HYBRID, ALWAYS
+    }
+
+    public static SpeculativeRetryPolicy getDefaultPolicy()
+    {
+        return NO_RETRY ? NeverSpeculativeRetryPolicy.INSTANCE : PercentileSpeculativeRetryPolicy.NINETY_NINE_P;
     }
 
     long calculateThreshold(Snapshot latency, long existingValue);

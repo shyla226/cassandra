@@ -1,0 +1,36 @@
+###########################################################################
+#                          jvm8-dbaas-light.options                       #
+#                                                                         #
+# See jvm-dbaas-light.options. This file is specific for Java 8 and newer.#
+###########################################################################
+
+########################
+# GENERAL JVM SETTINGS #
+########################
+
+# allows lowering thread priority without being root on linux - probably
+# not necessary on Windows but doesn't harm anything.
+# see http://tech.stolsvik.com/2010/01/linux-java-thread-priorities-workaround.html
+-XX:ThreadPriorityPolicy=42
+
+### GC settings
+
+# Serial GC
+-XX:+UseSerialGC
+
+### GC logging options -- uncomment to enable
+
+#-XX:+PrintGCDetails
+#-XX:+PrintGCDateStamps
+#-XX:+PrintHeapAtGC
+#-XX:+PrintTenuringDistribution
+#-XX:+PrintGCApplicationStoppedTime
+#-XX:+PrintPromotionFailure
+#-XX:PrintFLSStatistics=1
+# A default location is set in cassandra-env.sh
+#-Xloggc:/var/log/cassandra/gc.log
+-XX:+UseGCLogFileRotation
+-XX:NumberOfGCLogFiles=10
+-XX:GCLogFileSize=10M
+
+# The newline in the end of file is intentional
