@@ -39,7 +39,6 @@ import org.apache.cassandra.db.view.ViewManager;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
-import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.metrics.KeyspaceMetrics;
@@ -610,7 +609,6 @@ public class Keyspace
                     columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, MILLISECONDS);
             }
         }
-        int nowInSec = FBUtilities.nowInSeconds();
         try (WriteContext ctx = getWriteHandler().beginWrite(mutation, makeDurable))
         {
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
@@ -639,10 +637,7 @@ public class Keyspace
                     }
                 }
 
-                UpdateTransaction indexTransaction = updateIndexes
-                                                     ? cfs.indexManager.newUpdateTransaction(upd, ctx, nowInSec)
-                                                     : UpdateTransaction.NO_OP;
-                cfs.getWriteHandler().write(upd, ctx, indexTransaction);
+                cfs.getWriteHandler().write(upd, ctx, updateIndexes);
 
                 if (requiresViewUpdate)
                     baseComplete.set(System.currentTimeMillis());

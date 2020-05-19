@@ -115,7 +115,7 @@ public class MaxSSTableSizeWriter extends CompactionAwareWriter
                                                     cfs.metadata,
                                                     new MetadataCollector(allSSTables, cfs.metadata().comparator, level),
                                                     SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
-                                                    cfs.indexManager.listIndexes(),
+                                                    cfs.indexManager.listIndexGroups(),
                                                     txn);
 
         sstableWriter.switchWriter(writer);

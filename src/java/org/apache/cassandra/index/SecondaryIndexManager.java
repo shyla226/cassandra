@@ -22,6 +22,8 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -150,6 +152,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * The indexes that are available for writing.
      */
     private final Map<String, Index> writableIndexes = Maps.newConcurrentMap();
+
+    /**
+     * The groups of all the registered indexes
+     */
+    private final Map<Object, Index.Group> indexGroups = Maps.newConcurrentMap();
 
     /**
      * The count of pending index builds for each index.
@@ -514,7 +521,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             List<Future<?>> futures = new ArrayList<>(byType.size());
             byType.forEach((buildingSupport, groupedIndexes) ->
                            {
-                               SecondaryIndexBuilder builder = buildingSupport.getIndexBuildTask(baseCfs, groupedIndexes, sstables);
+                               SecondaryIndexBuilder builder = buildingSupport.getIndexBuildTask(baseCfs, groupedIndexes, sstables, isFullRebuild);
                                final SettableFuture build = SettableFuture.create();
                                Futures.addCallback(CompactionManager.instance.submitIndexBuild(builder), new FutureCallback()
                                {
@@ -789,6 +796,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         markAllIndexesRemoved();
         invalidateAllIndexesBlocking();
+
+        indexGroups.forEach((key, group) -> group.invalidate());
     }
 
     @VisibleForTesting
@@ -916,12 +925,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
                     try (UnfilteredRowIterator partition = page.next())
                     {
-                        Set<Index.Indexer> indexers = indexes.stream()
-                                                             .map(index -> index.indexerFor(key,
-                                                                                            partition.columns(),
-                                                                                            nowInSec,
-                                                                                            ctx,
-                                                                                            IndexTransaction.Type.UPDATE))
+                        Set<Index.Indexer> indexers = indexGroups.values().stream()
+                                                             .map(g -> g.indexerFor(indexes::contains,
+                                                                                    key,
+                                                                                    partition.columns(),
+                                                                                    nowInSec,
+                                                                                    ctx,
+                                                                                    IndexTransaction.Type.UPDATE,
+                                                                                    null))
                                                              .filter(Objects::nonNull)
                                                              .collect(Collectors.toSet());
 
@@ -1146,23 +1157,50 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /*
      * IndexRegistry methods
      */
-
-    public void registerIndex(Index index)
+    public void registerIndex(Index index, Object groupKey, Supplier<Index.Group> groupSupplier)
     {
         String name = index.getIndexMetadata().name;
         indexes.put(name, index);
         logger.trace("Registered index {}", name);
-    }
 
-    public void unregisterIndex(Index index)
-    {
-        unregisterIndex(index.getIndexMetadata().name);
+        // instantiate and add the index group if it hasn't been already added
+        Index.Group group = indexGroups.computeIfAbsent(groupKey, k -> groupSupplier.get());
+
+        // add the created index to its group if it is not a singleton group
+        if (!(group instanceof SingletonIndexGroup))
+        {
+            if (index.getBackingTable().isPresent())
+                throw new InvalidRequestException("Indexes belonging to a group of indexes shouldn't have a backing table");
+
+            group.addIndex(index);
+        }
     }
 
     private Index unregisterIndex(String name)
     {
         Index removed = indexes.remove(name);
         logger.trace(removed == null ? "Index {} was not registered" : "Removed index {} from registry", name);
+
+        if (removed != null)
+        {
+            // Remove the index from any non-singleton groups...
+            for (Index.Group group : listIndexGroups())
+            {
+                if (!(group instanceof SingletonIndexGroup) && group.containsIndex(removed))
+                {
+                    group.removeIndex(removed);
+
+                    if (group.getIndexes().isEmpty())
+                    {
+                        indexGroups.remove(group);
+                    }
+                }
+            }
+
+            // ...and remove singleton groups entirely.
+            indexGroups.remove(removed);
+        }
+
         return removed;
     }
 
@@ -1176,6 +1214,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return ImmutableSet.copyOf(indexes.values());
     }
 
+    public Set<Index.Group> listIndexGroups()
+    {
+        return ImmutableSet.copyOf(indexGroups.values());
+    }
+
     /*
      * Handling of index updates.
      * Implementations of the various IndexTransaction interfaces, for keeping indexes in sync with base data
@@ -1185,23 +1228,28 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * Transaction for updates on the write path.
      */
-    public UpdateTransaction newUpdateTransaction(PartitionUpdate update, WriteContext ctx, int nowInSec)
+    public UpdateTransaction newUpdateTransaction(PartitionUpdate update, WriteContext ctx, int nowInSec, Memtable memtable)
     {
         if (!hasIndexes())
             return UpdateTransaction.NO_OP;
-        
-        ArrayList<Index.Indexer> idxrs = new ArrayList<>();
-        for (Index i : writableIndexes.values())
-        {
-            Index.Indexer idxr = i.indexerFor(update.partitionKey(), update.columns(), nowInSec, ctx, IndexTransaction.Type.UPDATE);
-            if (idxr != null)
-                idxrs.add(idxr);
-        }
-        
-        if (idxrs.size() == 0)
-            return UpdateTransaction.NO_OP;
-        else
-            return new WriteTimeTransaction(idxrs.toArray(new Index.Indexer[idxrs.size()]));
+
+        Index.Indexer[] indexers = listIndexGroups().stream()
+                                          .map(g -> g.indexerFor(writableIndexSelector(),
+                                                                 update.partitionKey(),
+                                                                 update.columns(),
+                                                                 nowInSec,
+                                                                 ctx,
+                                                                 IndexTransaction.Type.UPDATE,
+                                                                 memtable))
+                                          .filter(Objects::nonNull)
+                                          .toArray(Index.Indexer[]::new);
+
+        return indexers.length == 0 ? UpdateTransaction.NO_OP : new WriteTimeTransaction(indexers);
+    }
+
+    private Predicate<Index> writableIndexSelector()
+    {
+        return index -> writableIndexes.containsKey(index.getIndexMetadata().name);
     }
 
     /**
@@ -1213,7 +1261,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                                           int nowInSec)
     {
         // the check for whether there are any registered indexes is already done in CompactionIterator
-        return new IndexGCTransaction(key, regularAndStaticColumns, keyspace, versions, nowInSec, writableIndexes.values());
+        return new IndexGCTransaction(key, regularAndStaticColumns, keyspace, versions, nowInSec, listIndexGroups(), writableIndexSelector());
     }
 
     /**
@@ -1226,7 +1274,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         if (!hasIndexes())
             return CleanupTransaction.NO_OP;
 
-        return new CleanupGCTransaction(key, regularAndStaticColumns, keyspace, nowInSec, writableIndexes.values());
+        return new CleanupGCTransaction(key, regularAndStaticColumns, keyspace, nowInSec, listIndexGroups(), writableIndexSelector());
     }
 
     /**
@@ -1342,7 +1390,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         private final Keyspace keyspace;
         private final int versions;
         private final int nowInSec;
-        private final Collection<Index> indexes;
+        private final Collection<Index.Group> indexGroups;
+        private final Predicate<Index> writableIndexSelector;
 
         private Row[] rows;
 
@@ -1351,14 +1400,16 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                    Keyspace keyspace,
                                    int versions,
                                    int nowInSec,
-                                   Collection<Index> indexes)
+                                   Collection<Index.Group> indexGroups,
+                                   Predicate<Index> writableIndexSelector)
         {
             this.key = key;
             this.columns = columns;
             this.keyspace = keyspace;
             this.versions = versions;
-            this.indexes = indexes;
+            this.indexGroups = indexGroups;
             this.nowInSec = nowInSec;
+            this.writableIndexSelector = writableIndexSelector;
         }
 
         public void start()
@@ -1419,9 +1470,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
             try (WriteContext ctx = keyspace.getWriteHandler().createContextForIndexing())
             {
-                for (Index index : indexes)
+                for (Index.Group group : indexGroups)
                 {
-                    Index.Indexer indexer = index.indexerFor(key, columns, nowInSec, ctx, Type.COMPACTION);
+                    Index.Indexer indexer = group.indexerFor(writableIndexSelector, key, columns, nowInSec, ctx, Type.COMPACTION, null);
                     if (indexer == null)
                         continue;
 
@@ -1447,7 +1498,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         private final RegularAndStaticColumns columns;
         private final Keyspace keyspace;
         private final int nowInSec;
-        private final Collection<Index> indexes;
+        private final Collection<Index.Group> indexGroups;
+        private final Predicate<Index> writableIndexSelector;
 
         private Row row;
         private DeletionTime partitionDelete;
@@ -1456,13 +1508,15 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                      RegularAndStaticColumns columns,
                                      Keyspace keyspace,
                                      int nowInSec,
-                                     Collection<Index> indexes)
+                                     Collection<Index.Group> indexGroups,
+                                     Predicate<Index> writableIndexSelector)
         {
             this.key = key;
             this.columns = columns;
             this.keyspace = keyspace;
-            this.indexes = indexes;
+            this.indexGroups = indexGroups;
             this.nowInSec = nowInSec;
+            this.writableIndexSelector = writableIndexSelector;
         }
 
         public void start()
@@ -1486,9 +1540,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
             try (WriteContext ctx = keyspace.getWriteHandler().createContextForIndexing())
             {
-                for (Index index : indexes)
+                for (Index.Group group : indexGroups)
                 {
-                    Index.Indexer indexer = index.indexerFor(key, columns, nowInSec, ctx, Type.CLEANUP);
+                    Index.Indexer indexer = group.indexerFor(writableIndexSelector, key, columns, nowInSec, ctx, Type.CLEANUP, null);
                     if (indexer == null)
                         continue;
 

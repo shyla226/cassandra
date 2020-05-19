@@ -24,11 +24,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -87,6 +89,8 @@ public class Memtable implements Comparable<Memtable>
 
     private static final int ROW_OVERHEAD_HEAP_SIZE = estimateRowOverhead(Integer.parseInt(System.getProperty("cassandra.memtable_row_overhead_computation_step", "100000")));
 
+    // Allows us to find a Memtable by its tracker
+    private volatile LifecycleNewTracker tracker;
     private final MemtableAllocator allocator;
     private final AtomicLong liveDataSize = new AtomicLong(0);
     private final AtomicLong currentOperations = new AtomicLong(0);
@@ -289,8 +293,16 @@ public class Memtable implements Comparable<Memtable>
         return partitions.size();
     }
 
+    public LifecycleNewTracker tracker()
+    {
+        return tracker;
+    }
+
     public List<FlushRunnable> flushRunnables(LifecycleTransaction txn)
     {
+        Preconditions.checkState(this.tracker == null, "Attempted to flush Memtable more than once on %s.%s", cfs.keyspace.getName(), cfs.name);
+        this.tracker = txn;
+
         return createFlushRunnables(txn);
     }
 
