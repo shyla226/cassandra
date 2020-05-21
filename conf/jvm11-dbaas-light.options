@@ -1,0 +1,72 @@
+############################################################################
+#                         jvm11-dbaas-light.options                        #
+#                                                                          #
+# See jvm-dbaas-light.options. This file is specific for Java 11 and newer.#
+###########################################################################
+
+### GC settings
+
+# Serial GC
+-XX:+UseSerialGC
+
+### GC logging options -- uncomment to enable
+
+# Java 9 (and newer) GC logging options:
+# See description of https://bugs.openjdk.java.net/browse/JDK-8046148 for details about the syntax.
+#
+# Short help for the log option (Run 'java -Xlog:help' to get more information)
+#    Usage: -Xlog[:[selections][:[output][:[decorators][:output-options]]]]
+#    Notes:
+#      - Just specifying the tag (e.g. gc) means that only log messages with just that single
+#        tag will be considered. If you want all log messages that contain that tag, use the
+#        wildcard (*).
+#      - You can use a combination of tags (e.g. gc+safepoint) to target only log messages that
+#        have both the gc and the safepoint tags. Can be handy if you want to dig deeper into
+#        GC induced safepoint issues but keep the remaining log messages non-verbose -
+#        for example:    gc*=info,safepoint*=info,gc+safepoint=debug
+#      - To log to separate logfiles, use multiple -Xlog arguments.
+#
+# The default options keep the GC log not very verbose.
+#
+# **WARNING**: The log levels debug+trace for the JVM logs have a measurable performance impact!
+# Unless necessary to tune GC or inspect other JVM related issues, keep the JVM logs quiet (info level is ok).
+# To get more detailed information about GC, use 'gc*=debug,safepoint*=debug' instead of
+# 'gc=info,safepoint=info', maybe also add 'heap*=trace,age*=debug,promotion*=trace,freelist*=trace'
+# and increase the GC log file size, if necessary.
+#
+# The startup scripts (jvm-dependent.sh) automatically add -Xlog options for the gc.log and jvm.log,
+# if no JVM option starting with '-Xlog:gc' is already present (i.e. specified in this file).
+# Note: If you specify the GC log option here, you also have to uncomment the -XLog option for jvm.log.
+#
+#-Xlog:gc*=info,safepoint*=info:file=/var/log/cassandra/gc.log:time,uptime,pid,tid,level:filecount=10,filesize=10M
+#-Xlog:container*=info,logging*=info,os*=info,pagesize*=info,setting*=info,startuptime*=info,system*=info,os+thread=off:file=/var/log/cassandra//logs/jvm.log:time,uptimenanos,tags,pid,tid,level:filecount=10,filesize=10M
+
+# Notes for Java 8 migration:
+# -XX:+PrintGCDetails                   maps to -Xlog:gc*:... - i.e. add a '*' after "gc"
+# -XX:+PrintGCDateStamps                maps to decorator 'time'
+# -XX:+PrintHeapAtGC                    maps to 'heap' with level 'trace'
+# -XX:+PrintTenuringDistribution        maps to 'age' with level 'debug'
+# -XX:+PrintGCApplicationStoppedTime    maps to 'safepoint' with level 'info'
+# -XX:+PrintPromotionFailure            maps to 'promotion' with level 'trace'
+# -XX:PrintFLSStatistics=1              maps to 'freelist' with level 'trace'
+
+
+
+###################
+#  JPMS SETTINGS  #
+###################
+
+-Djdk.attach.allowAttachSelf=true
+--add-exports java.base/jdk.internal.misc=ALL-UNNAMED
+--add-opens java.base/jdk.internal.module=ALL-UNNAMED
+--add-exports java.base/jdk.internal.ref=ALL-UNNAMED
+--add-exports java.base/jdk.internal.perf=ALL-UNNAMED
+--add-exports java.base/sun.nio.ch=ALL-UNNAMED
+--add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED
+--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED
+--add-exports java.rmi/sun.rmi.server=ALL-UNNAMED
+--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED
+
+-Dio.netty.tryReflectionSetAccessible=true
+
+# The newline in the end of file is intentional

@@ -137,8 +137,8 @@ public class BigTableWriter extends SSTableWriter
                 case fast:
                     if (!compressor.recommendedUses().contains(ICompressor.Uses.FAST_COMPRESSION))
                     {
-                        // The default compressor is generally fast (LZ4 with 16KiB block size)
-                        compressionParams = CompressionParams.DEFAULT;
+                        // The default compressor is g  enerally fast (LZ4 with 16KiB block size)
+                        compressionParams = CompressionParams.getDefaultParams();
                         break;
                     }
                 case table:

@@ -1,0 +1,118 @@
+###########################################################################
+#                         jvm-dbaas-light.options                         #
+#                                                                         #
+# Light server settings to reduce CPU and memory, typically for the cloud #
+# free tiers.                                                             #
+#                                                                         #
+# - all flags defined here will be used by cassandra to startup the JVM   #
+#   when CASSANDRA_DEPLOYMENT=dbaas-light                                 #
+# - one flag should be specified per line                                 #
+# - lines that do not start with '-' will be ignored                      #
+# - only static flags are accepted (no variables or parameters)           #
+# - dynamic flags will be appended to these on cassandra-env              #
+#                                                                         #
+# See jvm8-dbaas-light.options and jvm11-dbaas-light.options for Java     #
+# version specific options.                                               #
+###########################################################################
+
+# enable assertions. highly suggested for correct application functionality.
+-ea
+
+# enable thread priorities, primarily so we can give periodic tasks
+# a lower priority to avoid interfering with client workload
+-XX:+UseThreadPriorities
+
+# Enable heap-dump if there's an OOM
+-XX:+HeapDumpOnOutOfMemoryError
+
+# Per-thread stack size.
+-Xss256k
+
+# Larger interned string table, for gossip's benefit (CASSANDRA-6410)
+-XX:StringTableSize=1000003
+
+# Enable thread-local allocation blocks and allow the JVM to automatically
+# resize them at runtime.
+-XX:+UseTLAB
+-XX:+ResizeTLAB
+-XX:+UseNUMA
+
+# http://www.evanjones.ca/jvm-mmap-pause.html
+#-XX:+PerfDisableSharedMem
+
+# Prefer binding to IPv4 network intefaces (when net.ipv6.bindv6only=1). See
+# http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6342561 (short version:
+# comment out this entry to enable IPv6 support).
+-Djava.net.preferIPv4Stack=true
+
+# Honor user code @Contended annotations
+-XX:-RestrictContended
+
+# This option is required to enable the following options
+-XX:+UnlockDiagnosticVMOptions
+
+# Decrease frequency of guaranteed safepoints to avoid needless pauses
+-XX:GuaranteedSafepointInterval=300000
+
+# Disable biased locking to avoid biased lock revokation pauses
+-XX:-UseBiasedLocking
+
+### Debug/profiling options
+
+# There's no adverse side effect to enabling the debug info, so leave on by default to allow better info for profilers
+-XX:+DebugNonSafepoints
+
+# If you plan to profile using perf you will need to enable this option
+#-XX:+PreserveFramePointer
+
+# Uncomment to enable flight recorder (Use in production is subject to Oracle licensing)
+#-XX:+UnlockCommercialFeatures
+#-XX:+FlightRecorder
+
+# uncomment to have Cassandra JVM listen for remote debuggers/profilers on port 1414
+#-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=1414
+
+# uncomment to have Cassandra JVM log internal method compilation (developers only)
+#-XX:+LogCompilation
+
+# Uncomment to save vm output to logfile, including capturing a thread dump using kill -3
+# File contents are replaced on each server start.
+#-XX:+LogVMOutput
+#-XX:LogFile=/var/log/cassandra/logvmoutput.log
+
+# Limit maximum cached thread local direct buffer to 1MB to avoid native OOM
+# See https://bugs.openjdk.java.net/browse/JDK-8147468
+-Djdk.nio.maxCachedBufferSize=1048576
+
+## Heap and Direct memory settings
+
+-Xms32M
+-Xmx256M
+-XX:MaxDirectMemorySize=64M
+
+## End heap and Direct Memory settings
+
+# Ensure Netty byte buffers use the JVM direct memory allocators, thereby respecting the limit set with -XX:MaxDirectMemorySize
+# Setting this value to zero means that Netty allocations are performed with the JVM NIO allocators. Setting this to -1 or
+# to a positive value means that Netty will allocate native memory directly, bypassing the JVM direct memory metrics and thresholds.
+# With -1 the maximum allocated memory is the same as what's specified with -XX:MaxDirectMemorySize, whereas setting it to a positive
+# value will set a specific limit
+-Dio.netty.maxDirectMemory=0
+
+# Limit to 1 thread for the native transport event loop, 1 thread for the internode messaging event loop.
+# This is used by the native transport:
+-Dio.netty.eventLoopThreads=1
+# This is used by the internode messaging:
+-Dcassandra.internode-event-threads=1
+
+# Disable some periodic tasks
+-Dcassandra.speculative_retry_disabled_by_default=true
+-Dcassandra.batchlog.replay_timeout_in_ms=60000
+
+# Do not use compression by default (in order to save CPU and since the chunk cache is off)
+-Dcassandra.compression_disabled_by_default=true
+
+# Point to the correct yaml
+-Dcassandra.config=cassandra-dbaas-light.yaml
+
+# The newline in the end of file is intentional
