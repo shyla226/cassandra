@@ -464,6 +464,8 @@ seed_provider:
 # On the other hand, since writes are almost never IO bound, the ideal
 # number of "concurrent_writes" is dependent on the number of cores in
 # your system; (8 * number_of_cores) is a good rule of thumb.
+#
+# A value of 0 means direct execution.
 concurrent_reads: 32
 concurrent_writes: 32
 concurrent_counter_writes: 32
@@ -836,6 +838,9 @@ compaction_throughput_mb_per_sec: 16
 # are completely written, and used in place of the prior sstables for
 # any range that has been written. This helps to smoothly transfer reads 
 # between the sstables, reducing page cache churn and keeping hot rows hot
+#
+# Please note a value of 0 causes early open to be enabled for every new partition, so it is not recommended.
+# A negative value disables early open completely.
 sstable_preemptive_open_interval_in_mb: 50
 
 # When enabled, permits Cassandra to zero-copy stream entire eligible

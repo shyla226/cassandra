@@ -37,6 +37,7 @@ import org.apache.cassandra.audit.AuditLogOptions;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.guardrails.GuardrailsConfig;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * A class that contains configuration properties for the cassandra node it runs within.
@@ -119,6 +120,8 @@ public class Config
     public int concurrent_writes = 32;
     public int concurrent_counter_writes = 32;
     public int concurrent_materialized_view_writes = 32;
+
+    public int concurrent_responses = FBUtilities.getAvailableProcessors();
 
     @Deprecated
     public Integer concurrent_replicates = null;

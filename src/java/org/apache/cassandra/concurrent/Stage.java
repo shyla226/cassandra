@@ -49,29 +49,39 @@ import static java.util.stream.Collectors.toMap;
 
 public enum Stage
 {
-    READ              ("ReadStage",             "request",  DatabaseDescriptor::getConcurrentReaders,        DatabaseDescriptor::setConcurrentReaders,        Stage::multiThreadedLowSignalStage),
-    MUTATION          ("MutationStage",         "request",  DatabaseDescriptor::getConcurrentWriters,        DatabaseDescriptor::setConcurrentWriters,        Stage::multiThreadedLowSignalStage),
-    COUNTER_MUTATION  ("CounterMutationStage",  "request",  DatabaseDescriptor::getConcurrentCounterWriters, DatabaseDescriptor::setConcurrentCounterWriters, Stage::multiThreadedLowSignalStage),
-    VIEW_MUTATION     ("ViewMutationStage",     "request",  DatabaseDescriptor::getConcurrentViewWriters,    DatabaseDescriptor::setConcurrentViewWriters,    Stage::multiThreadedLowSignalStage),
-    GOSSIP            ("GossipStage",           "internal", () -> 1,                                         null,                                            Stage::singleThreadedStage),
-    REQUEST_RESPONSE  ("RequestResponseStage",  "request",  FBUtilities::getAvailableProcessors,             null,                                            Stage::multiThreadedLowSignalStage),
-    ANTI_ENTROPY      ("AntiEntropyStage",      "internal", () -> 1,                                         null,                                            Stage::singleThreadedStage),
-    MIGRATION         ("MigrationStage",        "internal", () -> 1,                                         null,                                            Stage::singleThreadedStage),
-    MISC              ("MiscStage",             "internal", () -> 1,                                         null,                                            Stage::singleThreadedStage),
-    TRACING           ("TracingStage",          "internal", () -> 1,                                         null,                                            Stage::tracingExecutor),
-    INTERNAL_RESPONSE ("InternalResponseStage", "internal", FBUtilities::getAvailableProcessors,             null,                                            Stage::multiThreadedStage),
-    IMMEDIATE         ("ImmediateStage",        "internal", () -> 0,                                         null,                                            Stage::immediateExecutor);
-
+    READ              ("ReadStage",             "request",  DatabaseDescriptor::getConcurrentReaders,        DatabaseDescriptor::setConcurrentReaders,        null,                       true),
+    MUTATION          ("MutationStage",         "request",  DatabaseDescriptor::getConcurrentWriters,        DatabaseDescriptor::setConcurrentWriters,        null,                       true),
+    COUNTER_MUTATION  ("CounterMutationStage",  "request",  DatabaseDescriptor::getConcurrentCounterWriters, DatabaseDescriptor::setConcurrentCounterWriters, null,                       true),
+    VIEW_MUTATION     ("ViewMutationStage",     "request",  DatabaseDescriptor::getConcurrentViewWriters,    DatabaseDescriptor::setConcurrentViewWriters,    null,                       true),
+    GOSSIP            ("GossipStage",           "internal", () -> 1,                                         null,                                            null,                       false),
+    REQUEST_RESPONSE  ("RequestResponseStage",  "request",  DatabaseDescriptor::getConcurrentResponses,      null,                                            null,                       true),
+    ANTI_ENTROPY      ("AntiEntropyStage",      "internal", () -> 1,                                         null,                                            null,                       false),
+    MIGRATION         ("MigrationStage",        "internal", () -> 1,                                         null,                                            null,                       false),
+    MISC              ("MiscStage",             "internal", () -> 1,                                         null,                                            null,                       false),
+    INTERNAL_RESPONSE ("InternalResponseStage", "internal", DatabaseDescriptor::getConcurrentResponses,      null,                                            null,                       false),
+    IMMEDIATE         ("ImmediateStage",        "internal", () -> 0,                                         null,                                            null,                       false),
+    TRACING           ("TracingStage",          "internal", () -> 1,                                         null,                                            Stage::tracingExecutor,     false);
 
     public static final long KEEP_ALIVE_SECONDS = 60; // seconds to keep "extra" threads alive for when idle
     public final String jmxName;
     private final Supplier<LocalAwareExecutorService> initialiser;
     private volatile LocalAwareExecutorService executor = null;
 
-    Stage(String jmxName, String jmxType, IntSupplier numThreads, LocalAwareExecutorService.MaximumPoolSizeListener onSetMaximumPoolSize, ExecutorServiceInitialiser initialiser)
+    Stage(String jmxName, String jmxType, IntSupplier numThreads, LocalAwareExecutorService.MaximumPoolSizeListener onSetMaximumPoolSize, ExecutorServiceInitialiser proposed, boolean lowSignal)
     {
         this.jmxName = jmxName;
-        this.initialiser = () -> initialiser.init(jmxName, jmxType, numThreads.getAsInt(), onSetMaximumPoolSize);
+        this.initialiser = () ->
+        {
+            int threads = numThreads.getAsInt();
+            if (proposed != null)
+                return proposed.init(jmxName, jmxType, threads, onSetMaximumPoolSize);
+            if (threads > 1)
+                return lowSignal ? multiThreadedLowSignalStage(jmxName, jmxType, threads, onSetMaximumPoolSize) : multiThreadedStage(jmxName, jmxType, threads, onSetMaximumPoolSize);
+            if (threads == 1)
+                return singleThreadedStage(jmxName, jmxType, threads, onSetMaximumPoolSize);
+
+            return ImmediateExecutor.INSTANCE;
+        };
     }
 
     private static String normalizeName(String stageName)
@@ -197,11 +207,6 @@ public enum Stage
     static LocalAwareExecutorService singleThreadedStage(String jmxName, String jmxType, int numThreads, LocalAwareExecutorService.MaximumPoolSizeListener onSetMaximumPoolSize)
     {
         return new JMXEnabledSingleThreadExecutor(jmxName, jmxType);
-    }
-
-    static LocalAwareExecutorService immediateExecutor(String jmxName, String jmxType, int numThreads, LocalAwareExecutorService.MaximumPoolSizeListener onSetMaximumPoolSize)
-    {
-        return ImmediateExecutor.INSTANCE;
     }
 
     @FunctionalInterface

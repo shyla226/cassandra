@@ -447,18 +447,21 @@ public class DatabaseDescriptor
         }
 
         /* Thread per pool */
-        if (conf.concurrent_reads < 2)
+        if (conf.concurrent_reads < 0)
         {
-            throw new ConfigurationException("concurrent_reads must be at least 2, but was " + conf.concurrent_reads, false);
+            throw new ConfigurationException("Concurrent reads must be non-negative", false);
         }
 
-        if (conf.concurrent_writes < 2 && System.getProperty("cassandra.test.fail_mv_locks_count", "").isEmpty())
+        if (conf.concurrent_writes < 0)
         {
-            throw new ConfigurationException("concurrent_writes must be at least 2, but was " + conf.concurrent_writes, false);
+            throw new ConfigurationException("Concurrent writes must be non-negative", false);
         }
 
-        if (conf.concurrent_counter_writes < 2)
-            throw new ConfigurationException("concurrent_counter_writes must be at least 2, but was " + conf.concurrent_counter_writes, false);
+        if (conf.concurrent_counter_writes < 0)
+            throw new ConfigurationException("Concurrent counter writes must be non-negative", false);
+
+        if (conf.concurrent_responses < 0)
+            throw new ConfigurationException("Concurrent responses must be non-negative", false);
 
         if (conf.concurrent_replicates != null)
             logger.warn("concurrent_replicates has been deprecated and should be removed from cassandra.yaml");
@@ -1685,13 +1688,13 @@ public class DatabaseDescriptor
         return conf.concurrent_writes;
     }
 
-    public static void setConcurrentWriters(int concurrent_writers)
+    public static void setConcurrentWriters(int concurrent_writes)
     {
-        if (concurrent_writers < 0)
+        if (concurrent_writes < 0)
         {
-            throw new IllegalArgumentException("Concurrent reads must be non-negative");
+            throw new IllegalArgumentException("Concurrent writes must be non-negative");
         }
-        conf.concurrent_writes = concurrent_writers;
+        conf.concurrent_writes = concurrent_writes;
     }
 
     public static int getConcurrentCounterWriters()
@@ -1703,7 +1706,7 @@ public class DatabaseDescriptor
     {
         if (concurrent_counter_writes < 0)
         {
-            throw new IllegalArgumentException("Concurrent reads must be non-negative");
+            throw new IllegalArgumentException("Concurrent counter writes must be non-negative");
         }
         conf.concurrent_counter_writes = concurrent_counter_writes;
     }
@@ -1717,9 +1720,14 @@ public class DatabaseDescriptor
     {
         if (concurrent_materialized_view_writes < 0)
         {
-            throw new IllegalArgumentException("Concurrent reads must be non-negative");
+            throw new IllegalArgumentException("Concurrent materialized view writes must be non-negative");
         }
         conf.concurrent_materialized_view_writes = concurrent_materialized_view_writes;
+    }
+
+    public static int getConcurrentResponses()
+    {
+        return conf.concurrent_responses;
     }
 
     public static int getFlushWriters()
