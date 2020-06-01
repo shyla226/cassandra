@@ -32,7 +32,7 @@ import org.apache.cassandra.utils.UUIDGen;
 
 public class PaxosState
 {
-    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentWriters() * 1024);
+    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(Math.max(1, DatabaseDescriptor.getConcurrentWriters() * 1024));
 
     private final Commit promised;
     private final Commit accepted;

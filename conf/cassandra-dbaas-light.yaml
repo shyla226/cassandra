@@ -467,10 +467,14 @@ seed_provider:
 #
 # For materialized view writes, as there is a read involved, so this should
 # be limited by the less of concurrent reads or concurrent writes.
-concurrent_writes: 2
-concurrent_reads: 2
-concurrent_counter_writes: 2
-concurrent_materialized_view_writes: 2
+#
+# A value of 0 means direct execution.
+concurrent_writes: 0
+concurrent_reads: 1
+concurrent_counter_writes: 1
+concurrent_materialized_view_writes: 1
+# Additionally set the number of concurrent response processing threads:
+concurrent_responses: 1
 
 # Maximum memory to use for sstable chunk cache and buffer pooling.
 # 32MB of this are reserved for pooling buffers, the rest is used as an
@@ -681,7 +685,9 @@ native_transport_port: 9042
 # native_transport_port_ssl: 9142
 # The maximum threads for handling requests (note that idle threads are stopped
 # after 30 seconds so there is not corresponding minimum setting).
-native_transport_max_threads: 1
+#
+# A value of 0 means direct execution.
+native_transport_max_threads: 0
 #
 # The maximum size of allowed frame. Frame (requests) larger than this will
 # be rejected as invalid. The default is 256MB. If you're changing this parameter,
@@ -836,7 +842,10 @@ compaction_throughput_mb_per_sec: 0
 # are completely written, and used in place of the prior sstables for
 # any range that has been written. This helps to smoothly transfer reads
 # between the sstables, reducing page cache churn and keeping hot rows hot
-sstable_preemptive_open_interval_in_mb: 0
+#
+# Please note a value of 0 causes early open to be enabled for every new partition, so it is not recommended.
+# A negative value disables early open completely.
+sstable_preemptive_open_interval_in_mb: -1
 
 # When enabled, permits Cassandra to zero-copy stream entire eligible
 # SSTables between nodes, including every component.
