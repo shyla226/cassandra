@@ -603,7 +603,7 @@ public class StressCQLSSTableWriter implements Closeable
                 return Schema.instance.getColumnFamilyStoreInstance(tableMetadata.id);
 
             QueryState state = QueryState.forInternalCalls();
-            CreateTableStatement statement = schemaStatement.prepare(state.getClientState());
+            CreateTableStatement statement = schemaStatement.prepare(state);
             statement.validate(state);
 
             //Build metadata with a portable tableId
@@ -636,7 +636,7 @@ public class StressCQLSSTableWriter implements Closeable
         private UpdateStatement prepareInsert()
         {
             QueryState state = QueryState.forInternalCalls();
-            CQLStatement cqlStatement = insertStatement.prepare(state.getClientState());
+            CQLStatement cqlStatement = insertStatement.prepare(state);
             UpdateStatement insert = (UpdateStatement) cqlStatement;
             insert.validate(state);
 

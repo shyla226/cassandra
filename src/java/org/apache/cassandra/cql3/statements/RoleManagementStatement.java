@@ -24,7 +24,6 @@ import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -41,15 +40,15 @@ public abstract class RoleManagementStatement extends AuthenticationStatement
         this.grantee = RoleResource.role(grantee.getName());
     }
 
-    public void authorize(ClientState state) throws UnauthorizedException
+    public void authorize(QueryState state) throws UnauthorizedException
     {
-        super.checkPermission(state, Permission.AUTHORIZE, role);
+        super.ensurePermission(state, Permission.AUTHORIZE, role);
     }
 
     @Override
     public void validate(QueryState state) throws RequestValidationException
     {
-        state.getClientState().ensureNotAnonymous();
+        state.ensureNotAnonymous();
 
         if (!DatabaseDescriptor.getRoleManager().isExistingRole(role))
             throw new InvalidRequestException(String.format("%s doesn't exist", role.getRoleName()));

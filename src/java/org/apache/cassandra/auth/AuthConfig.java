@@ -52,19 +52,6 @@ public final class AuthConfig
         if (conf.authenticator != null)
             authenticator = FBUtilities.newAuthenticator(conf.authenticator);
 
-        // the configuration options regarding credentials caching are only guaranteed to
-        // work with PasswordAuthenticator, so log a message if some other authenticator
-        // is in use and non-default values are detected
-        if (!(authenticator instanceof PasswordAuthenticator)
-            && (conf.credentials_update_interval_in_ms != -1
-                || conf.credentials_validity_in_ms != 2000
-                || conf.credentials_cache_max_entries != 1000))
-        {
-            logger.info("Configuration options credentials_update_interval_in_ms, credentials_validity_in_ms and " +
-                        "credentials_cache_max_entries may not be applicable for the configured authenticator ({})",
-                        authenticator.getClass().getName());
-        }
-
         DatabaseDescriptor.setAuthenticator(authenticator);
 
         // authorizer
@@ -77,8 +64,6 @@ public final class AuthConfig
         if (!authenticator.requireAuthentication() && authorizer.requireAuthorization())
             throw new ConfigurationException(conf.authenticator + " can't be used with " + conf.authorizer, false);
 
-        DatabaseDescriptor.setAuthorizer(authorizer);
-
         // role manager
 
         IRoleManager roleManager;
@@ -90,8 +75,6 @@ public final class AuthConfig
         if (authenticator instanceof PasswordAuthenticator && !(roleManager instanceof CassandraRoleManager))
             throw new ConfigurationException("CassandraRoleManager must be used with PasswordAuthenticator", false);
 
-        DatabaseDescriptor.setRoleManager(roleManager);
-
         // authenticator
 
         if (conf.internode_authenticator != null)
@@ -99,7 +82,6 @@ public final class AuthConfig
 
         // network authorizer
         INetworkAuthorizer networkAuthorizer = FBUtilities.newNetworkAuthorizer(conf.network_authorizer);
-        DatabaseDescriptor.setNetworkAuthorizer(networkAuthorizer);
         if (networkAuthorizer.requireAuthorization() && !authenticator.requireAuthentication())
         {
             throw new ConfigurationException(conf.network_authorizer + " can't be used with " + conf.authenticator, false);
@@ -113,5 +95,27 @@ public final class AuthConfig
         roleManager.validateConfiguration();
         networkAuthorizer.validateConfiguration();
         DatabaseDescriptor.getInternodeAuthenticator().validateConfiguration();
+
+        DatabaseDescriptor.setAuthManager(new AuthManager(roleManager, authorizer, networkAuthorizer));
+
+        if (DatabaseDescriptor.isSystemKeyspaceFilteringEnabled())
+        {
+            if (!DatabaseDescriptor.getAuthorizer().requireAuthorization())
+            {
+                logger.error("In order to use system keyspace filtering, an authorizer that requires authorization must be configured.");
+                throw new ConfigurationException("In order to use system keyspace filtering, an authorizer that requires authorization must be configured.");
+            }
+            if (!DatabaseDescriptor.getAuthenticator().requireAuthentication())
+            {
+                logger.error("In order to use system keyspace filtering, an authenticator that requires authentication must be configured.");
+                throw new ConfigurationException("In order to use system keyspace filtering, an authenticator that requires authentication must be configured.");
+            }
+
+            logger.info("System keyspaces filtering enabled.");
+        }
+        else
+        {
+            logger.info("System keyspaces filtering not enabled.");
+        }
     }
 }

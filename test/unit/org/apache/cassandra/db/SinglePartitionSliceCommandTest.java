@@ -36,8 +36,6 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -70,7 +68,6 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -78,8 +75,6 @@ import org.apache.cassandra.utils.btree.BTreeSet;
 
 public class SinglePartitionSliceCommandTest
 {
-    private static final Logger logger = LoggerFactory.getLogger(SinglePartitionSliceCommandTest.class);
-
     private static final String KEYSPACE = "ks";
     private static final String TABLE = "tbl";
 
@@ -338,7 +333,7 @@ public class SinglePartitionSliceCommandTest
 
     public static List<Unfiltered> getUnfilteredsFromSinglePartition(String q)
     {
-        SelectStatement stmt = (SelectStatement) QueryProcessor.parseStatement(q).prepare(ClientState.forInternalCalls());
+        SelectStatement stmt = (SelectStatement) QueryProcessor.parseStatement(q).prepare(QueryState.forInternalCalls());
 
         List<Unfiltered> unfiltereds = new ArrayList<>();
         SinglePartitionReadQuery.Group<SinglePartitionReadCommand> query = (SinglePartitionReadQuery.Group<SinglePartitionReadCommand>) stmt.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, 0);

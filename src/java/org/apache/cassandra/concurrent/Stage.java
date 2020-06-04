@@ -60,7 +60,8 @@ public enum Stage
     MISC              ("MiscStage",             "internal", () -> 1,                                         null,                                            null,                       false),
     INTERNAL_RESPONSE ("InternalResponseStage", "internal", DatabaseDescriptor::getConcurrentResponses,      null,                                            null,                       false),
     IMMEDIATE         ("ImmediateStage",        "internal", () -> 0,                                         null,                                            null,                       false),
-    TRACING           ("TracingStage",          "internal", () -> 1,                                         null,                                            Stage::tracingExecutor,     false);
+    TRACING           ("TracingStage",          "internal", () -> 1,                                         null,                                            Stage::tracingExecutor,     false),
+    AUTH_CACHE        ("AuthCacheLoads",        "internal", DatabaseDescriptor::getConcurrentReaders,        DatabaseDescriptor::setConcurrentReaders,        null,                       true);
 
     public static final long KEEP_ALIVE_SECONDS = 60; // seconds to keep "extra" threads alive for when idle
     public final String jmxName;

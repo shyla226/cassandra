@@ -18,33 +18,74 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
+import org.apache.cassandra.auth.GrantMode;
+import org.apache.cassandra.auth.IAuthorizer;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
 public class RevokePermissionsStatement extends PermissionsManagementStatement
 {
-    public RevokePermissionsStatement(Set<Permission> permissions, IResource resource, RoleName grantee)
+    public RevokePermissionsStatement(boolean allPermissions,
+                                      Set<Permission> permissions,
+                                      IResource resource,
+                                      RoleName grantee,
+                                      GrantMode grantMode,
+                                      Consumer<String> recognitionError)
     {
-        super(permissions, resource, grantee);
+        super(allPermissions, permissions, resource, grantee, grantMode, recognitionError);
     }
 
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public ResultMessage execute(QueryState state) throws RequestValidationException, RequestExecutionException
     {
-        DatabaseDescriptor.getAuthorizer().revoke(state.getUser(), permissions, resource, grantee);
+        Set<Permission> permissions = filteredPermissions;
+
+        Set<Permission> revoked = authorizer().revoke(state.getUser(), permissions, resource, grantee, grantMode);
+
+        // We want to warn the client if all the specified permissions have not been revoked and the client did
+        // not specified ALL in the query.
+        if (revoked.size() != permissions.size() && !allPermissions)
+        {
+            // We use a TreeSet to guarantee the order for testing
+            String permissionsStr = new TreeSet<>(permissions).stream()
+                                                              .filter(permission -> !revoked.contains(permission))
+                                                              .map(Permission::name)
+                                                              .collect(Collectors.joining(", "));
+
+            ClientWarn.instance.warn(grantMode.revokeWarningMessage(grantee.getRoleName(),
+                                                                    resource,
+                                                                    permissionsStr));
+        }
+
         return null;
     }
-    
+
+    @Override
+    protected String operation()
+    {
+        return grantMode.revokeOperationName();
+    }
+
+    @Override
+    protected Set<Permission> allPermissions()
+    {
+        return authorizer().applicablePermissions(resource);
+    }
+
     @Override
     public String toString()
     {

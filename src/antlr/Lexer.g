@@ -134,6 +134,10 @@ K_EXECUTE:     E X E C U T E;
 K_NORECURSIVE: N O R E C U R S I V E;
 K_MBEAN:       M B E A N;
 K_MBEANS:      M B E A N S;
+K_RESOURCE:    R E S O U R C E;
+K_FOR:         F O R;
+K_RESTRICT:    R E S T R I C T;
+K_UNRESTRICT:  U N R E S T R I C T;
 
 K_USER:        U S E R;
 K_USERS:       U S E R S;
@@ -142,6 +146,7 @@ K_ROLES:       R O L E S;
 K_SUPERUSER:   S U P E R U S E R;
 K_NOSUPERUSER: N O S U P E R U S E R;
 K_PASSWORD:    P A S S W O R D;
+K_HASHED:      H A S H E D;
 K_LOGIN:       L O G I N;
 K_NOLOGIN:     N O L O G I N;
 K_OPTIONS:     O P T I O N S;

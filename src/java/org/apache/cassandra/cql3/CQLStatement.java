@@ -22,7 +22,6 @@ import java.util.List;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -61,7 +60,7 @@ public interface CQLStatement
      *
      * @param state the current client state
      */
-    public void authorize(ClientState state);
+    public void authorize(QueryState state);
 
     /**
      * Perform additional validation required by the statment. To be overriden by subclasses if needed.
@@ -108,6 +107,6 @@ public interface CQLStatement
             bindVariables = new VariableSpecifications(variables);
         }
 
-        public abstract CQLStatement prepare(ClientState state);
+        public abstract CQLStatement prepare(QueryState state);
     }
 }

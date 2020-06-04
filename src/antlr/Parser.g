@@ -146,19 +146,6 @@ options {
         operations.add(Pair.create(key, update));
     }
 
-    public Set<Permission> filterPermissions(Set<Permission> permissions, IResource resource)
-    {
-        if (resource == null)
-            return Collections.emptySet();
-        Set<Permission> filtered = new HashSet<>(permissions);
-        filtered.retainAll(resource.applicablePermissions());
-        if (filtered.isEmpty())
-            addRecognitionError("Resource type " + resource.getClass().getSimpleName() +
-                                    " does not support any of the requested permissions");
-
-        return filtered;
-    }
-
     public String canonicalizeObjectName(String s, boolean enforcePattern)
     {
         // these two conditions are here because technically they are valid
@@ -246,6 +233,8 @@ cqlStatement returns [CQLStatement.Raw stmt]
     | st38=createMaterializedViewStatement { $stmt = st38; }
     | st39=dropMaterializedViewStatement   { $stmt = st39; }
     | st40=alterMaterializedViewStatement  { $stmt = st40; }
+    | st41=restrictPermissionsStatement    { $stmt = st41; }
+    | st42=unrestrictPermissionsStatement  { $stmt = st42; }
     ;
 
 /*
@@ -1037,26 +1026,60 @@ truncateStatement returns [TruncateStatement stmt]
  * GRANT <permission> ON <resource> TO <rolename>
  */
 grantPermissionsStatement returns [GrantPermissionsStatement stmt]
+    @init {
+        GrantMode grantMode = GrantMode.GRANT;
+    }
     : K_GRANT
+          ( K_AUTHORIZE K_FOR { grantMode = GrantMode.GRANTABLE; } )?
           permissionOrAll
       K_ON
           resource
       K_TO
           grantee=userOrRoleName
-      { $stmt = new GrantPermissionsStatement(filterPermissions($permissionOrAll.perms, $resource.res), $resource.res, grantee); }
+      { $stmt = new GrantPermissionsStatement($permissionOrAll.allPermissions, $permissionOrAll.perms, $resource.res, grantee, grantMode, this::addRecognitionError); }
     ;
 
 /**
  * REVOKE <permission> ON <resource> FROM <rolename>
  */
 revokePermissionsStatement returns [RevokePermissionsStatement stmt]
+    @init {
+        GrantMode grantMode = GrantMode.GRANT;
+    }
     : K_REVOKE
+          ( K_AUTHORIZE K_FOR { grantMode = GrantMode.GRANTABLE; } )?
           permissionOrAll
       K_ON
           resource
       K_FROM
           revokee=userOrRoleName
-      { $stmt = new RevokePermissionsStatement(filterPermissions($permissionOrAll.perms, $resource.res), $resource.res, revokee); }
+      { $stmt = new RevokePermissionsStatement($permissionOrAll.allPermissions, $permissionOrAll.perms, $resource.res, revokee, grantMode, this::addRecognitionError); }
+    ;
+
+/**
+ * GRANT <permission> ON <resource> TO <rolename>
+ */
+restrictPermissionsStatement returns [GrantPermissionsStatement stmt]
+    : K_RESTRICT
+          permissionOrAll
+      K_ON
+          resource
+      K_TO
+          grantee=userOrRoleName
+      { $stmt = new GrantPermissionsStatement($permissionOrAll.allPermissions, $permissionOrAll.perms, $resource.res, grantee, GrantMode.RESTRICT, this::addRecognitionError); }
+    ;
+
+/**
+ * REVOKE <permission> ON <resource> FROM <rolename>
+ */
+unrestrictPermissionsStatement returns [RevokePermissionsStatement stmt]
+    : K_UNRESTRICT
+          permissionOrAll
+      K_ON
+          resource
+      K_FROM
+          revokee=userOrRoleName
+      { $stmt = new RevokePermissionsStatement($permissionOrAll.allPermissions, $permissionOrAll.perms, $resource.res, revokee, GrantMode.RESTRICT, this::addRecognitionError); }
     ;
 
 /**
@@ -1092,17 +1115,35 @@ listPermissionsStatement returns [ListPermissionsStatement stmt]
       ( K_ON resource { resource = $resource.res; } )?
       ( K_OF roleName[grantee] )?
       ( K_NORECURSIVE { recursive = false; } )?
-      { $stmt = new ListPermissionsStatement($permissionOrAll.perms, resource, grantee, recursive); }
+      { $stmt = new ListPermissionsStatement($permissionOrAll.allPermissions, $permissionOrAll.perms, resource, grantee, recursive, this::addRecognitionError); }
     ;
 
 permission returns [Permission perm]
-    : p=(K_CREATE | K_ALTER | K_DROP | K_SELECT | K_MODIFY | K_AUTHORIZE | K_DESCRIBE | K_EXECUTE)
-    { $perm = Permission.valueOf($p.text.toUpperCase()); }
+    /*
+    Splitting the permissions looks weird, and it's just a dirty trick to get a proper
+    error message from antlr when the CQL contains an invalid permission name.
+    With just one `p=(K_CREATE...)`, antlr generates a weird and unfriendly message.
+    `org.apache.cassandra.cql3.CqlParsingTest` checks this behavior.
+    */
+    : p=(K_CREATE | K_ALTER | K_DROP)
+    { $perm = Permission.permission($p.text); }
+    | p2=(K_SELECT | K_MODIFY | K_UPDATE | K_TRUNCATE | K_AUTHORIZE | K_DESCRIBE | K_EXECUTE)
+    { $perm = Permission.permission($p2.text); }
     ;
 
-permissionOrAll returns [Set<Permission> perms]
-    : K_ALL ( K_PERMISSIONS )?       { $perms = Permission.ALL; }
-    | p=permission ( K_PERMISSION )? { $perms = EnumSet.of($p.perm); }
+permissionOrAll returns [Set<Permission> perms, boolean allPermissions]
+    @init {
+        $perms = EnumSet.noneOf(Permission.class);
+    }
+    : ( K_ALL ( K_PERMISSIONS )? )  { $allPermissions = true; }
+    |           K_PERMISSIONS       { $allPermissions = true; }
+    | (
+        p=permission ( K_PERMISSION )? { if ($p.perm != null) $perms.add($p.perm); }
+        (
+            ','
+            px=permission ( K_PERMISSION )? { if ($px.perm != null) $perms.add($px.perm); }
+        )*
+      )
     ;
 
 resource returns [IResource res]
@@ -1165,8 +1206,14 @@ createUserStatement returns [CreateRoleStatement stmt]
     : K_CREATE K_USER (K_IF K_NOT K_EXISTS { ifNotExists = true; })? u=username { name.setName($u.text, true); }
       ( K_WITH userPassword[opts] )?
       ( K_SUPERUSER { superuser = true; } | K_NOSUPERUSER { superuser = false; } )?
-      { opts.setOption(IRoleManager.Option.SUPERUSER, superuser);
-        $stmt = new CreateRoleStatement(name, opts, DCPermissions.all(), ifNotExists); }
+      {
+        opts.setOption(IRoleManager.Option.SUPERUSER, superuser);
+        if (opts.getPassword().isPresent() && opts.getHashedPassword().isPresent())
+        {
+            throw new SyntaxException("Options 'password' and 'hashed password' are mutually exclusive");
+        }
+        $stmt = new CreateRoleStatement(name, opts, DCPermissions.all(), ifNotExists);
+      }
     ;
 
 /**
@@ -1181,7 +1228,13 @@ alterUserStatement returns [AlterRoleStatement stmt]
       ( K_WITH userPassword[opts] )?
       ( K_SUPERUSER { opts.setOption(IRoleManager.Option.SUPERUSER, true); }
         | K_NOSUPERUSER { opts.setOption(IRoleManager.Option.SUPERUSER, false); } ) ?
-      {  $stmt = new AlterRoleStatement(name, opts, null); }
+      {
+        if (opts.getPassword().isPresent() && opts.getHashedPassword().isPresent())
+        {
+            throw new SyntaxException("Options 'password' and 'hashed password' are mutually exclusive");
+        }
+        $stmt = new AlterRoleStatement(name, opts);
+      }
     ;
 
 /**
@@ -1229,6 +1282,10 @@ createRoleStatement returns [CreateRoleStatement stmt]
         {
             opts.setOption(IRoleManager.Option.SUPERUSER, false);
         }
+        if (opts.getPassword().isPresent() && opts.getHashedPassword().isPresent())
+        {
+            throw new SyntaxException("Options 'password' and 'hashed password' are mutually exclusive");
+        }
         $stmt = new CreateRoleStatement(name, opts, dcperms.build(), ifNotExists);
       }
     ;
@@ -1249,7 +1306,13 @@ alterRoleStatement returns [AlterRoleStatement stmt]
     }
     : K_ALTER K_ROLE name=userOrRoleName
       ( K_WITH roleOptions[opts, dcperms] )?
-      {  $stmt = new AlterRoleStatement(name, opts, dcperms.isModified() ? dcperms.build() : null); }
+      {
+        if (opts.getPassword().isPresent() && opts.getHashedPassword().isPresent())
+        {
+            throw new SyntaxException("Options 'password' and 'hashed password' are mutually exclusive");
+        }
+        $stmt = new AlterRoleStatement(name, opts, dcperms.isModified() ? dcperms.build() : null);
+      }
     ;
 
 /**
@@ -1283,6 +1346,7 @@ roleOptions[RoleOptions opts, DCPermissions.Builder dcperms]
 
 roleOption[RoleOptions opts, DCPermissions.Builder dcperms]
     :  K_PASSWORD '=' v=STRING_LITERAL { opts.setOption(IRoleManager.Option.PASSWORD, $v.text); }
+    |  K_HASHED K_PASSWORD '=' v=STRING_LITERAL { opts.setOption(IRoleManager.Option.HASHED_PASSWORD, $v.text); }
     |  K_OPTIONS '=' m=fullMapLiteral { opts.setOption(IRoleManager.Option.OPTIONS, convertPropertyMap(m)); }
     |  K_SUPERUSER '=' b=BOOLEAN { opts.setOption(IRoleManager.Option.SUPERUSER, Boolean.valueOf($b.text)); }
     |  K_LOGIN '=' b=BOOLEAN { opts.setOption(IRoleManager.Option.LOGIN, Boolean.valueOf($b.text)); }
@@ -1297,6 +1361,7 @@ dcPermission[DCPermissions.Builder builder]
 // for backwards compatibility in CREATE/ALTER USER, this has no '='
 userPassword[RoleOptions opts]
     :  K_PASSWORD v=STRING_LITERAL { opts.setOption(IRoleManager.Option.PASSWORD, $v.text); }
+    |  K_HASHED K_PASSWORD v=STRING_LITERAL { opts.setOption(IRoleManager.Option.HASHED_PASSWORD, $v.text); }
     ;
 
 /** DEFINITIONS **/
@@ -1834,6 +1899,7 @@ basic_unreserved_keyword returns [String str]
         | K_NOLOGIN
         | K_OPTIONS
         | K_PASSWORD
+        | K_HASHED
         | K_EXISTS
         | K_CUSTOM
         | K_TRIGGER
@@ -1856,5 +1922,6 @@ basic_unreserved_keyword returns [String str]
         | K_PER
         | K_PARTITION
         | K_GROUP
+        | K_RESOURCE
         ) { $str = $k.text; }
     ;

@@ -239,7 +239,7 @@ public class PreparedStatementsTest extends CQLTester
     }
 
     @Test
-    public void prepareAndExecuteWithCustomExpressions() throws Throwable
+    public void prepareAndExecuteWithCustomExpressions()
     {
         Session session = getSession(ProtocolVersion.V5);
 

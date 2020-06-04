@@ -48,7 +48,6 @@ public final class AuthKeyspace
     public static final String ROLES = "roles";
     public static final String ROLE_MEMBERS = "role_members";
     public static final String ROLE_PERMISSIONS = "role_permissions";
-    public static final String RESOURCE_ROLE_INDEX = "resource_role_permissons_index";
     public static final String NETWORK_PERMISSIONS = "network_permissions";
 
     public static final long SUPERUSER_SETUP_DELAY = Long.getLong("cassandra.superuser_setup_delay_ms", 10000);
@@ -72,6 +71,8 @@ public final class AuthKeyspace
               + "member text,"
               + "PRIMARY KEY(role, member))");
 
+    // role_permissions contains the permissions a role is actually granted on a resource
+
     private static final TableMetadata RolePermissions =
         parse(ROLE_PERMISSIONS,
               "permissions granted to db roles",
@@ -79,15 +80,9 @@ public final class AuthKeyspace
               + "role text,"
               + "resource text,"
               + "permissions set<text>,"
+              + "restricted set<text>,"
+              + "grantables set<text>,"
               + "PRIMARY KEY(role, resource))");
-
-    private static final TableMetadata ResourceRoleIndex =
-        parse(RESOURCE_ROLE_INDEX,
-              "index of db roles with permissions granted on a resource",
-              "CREATE TABLE %s ("
-              + "resource text,"
-              + "role text,"
-              + "PRIMARY KEY(resource, role))");
 
     private static final TableMetadata NetworkPermissions =
         parse(NETWORK_PERMISSIONS,
@@ -110,6 +105,6 @@ public final class AuthKeyspace
     {
         return KeyspaceMetadata.create(SchemaConstants.AUTH_KEYSPACE_NAME,
                                        KeyspaceParams.simple(1),
-                                       Tables.of(Roles, RoleMembers, RolePermissions, ResourceRoleIndex, NetworkPermissions));
+                                       Tables.of(Roles, RoleMembers, RolePermissions, NetworkPermissions));
     }
 }

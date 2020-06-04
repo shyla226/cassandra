@@ -17,13 +17,19 @@
  */
 package org.apache.cassandra.auth;
 
-import java.util.Set;
+import java.util.Map;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.utils.Pair;
 
-public class PermissionsCache extends AuthCache<Pair<AuthenticatedUser, IResource>, Set<Permission>>
+public class PermissionsCache extends AuthCache<RoleResource, Map<IResource, PermissionSets>>
 {
+    public PermissionsCache()
+    {
+        this(DatabaseDescriptor.getAuthorizer() != null
+             ? DatabaseDescriptor.getAuthorizer()
+             : new AllowAllAuthorizer());
+    }
+
     public PermissionsCache(IAuthorizer authorizer)
     {
         super("PermissionsCache",
@@ -33,12 +39,10 @@ public class PermissionsCache extends AuthCache<Pair<AuthenticatedUser, IResourc
               DatabaseDescriptor::getPermissionsUpdateInterval,
               DatabaseDescriptor::setPermissionsCacheMaxEntries,
               DatabaseDescriptor::getPermissionsCacheMaxEntries,
-              (p) -> authorizer.authorize(p.left, p.right),
-              () -> DatabaseDescriptor.getAuthorizer().requireAuthorization());
-    }
-
-    public Set<Permission> getPermissions(AuthenticatedUser user, IResource resource)
-    {
-        return get(Pair.create(user, resource));
+              DatabaseDescriptor::setPermissionsCacheInitialCapacity,
+              DatabaseDescriptor::getPermissionsCacheInitialCapacity,
+              authorizer::allPermissionSets,
+              authorizer::allPermissionSetsMany,
+              authorizer::requireAuthorization);
     }
 }

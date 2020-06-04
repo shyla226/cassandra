@@ -18,29 +18,78 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
+import org.apache.cassandra.auth.GrantMode;
+import org.apache.cassandra.auth.IAuthorizer;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 public class GrantPermissionsStatement extends PermissionsManagementStatement
 {
-    public GrantPermissionsStatement(Set<Permission> permissions, IResource resource, RoleName grantee)
+    public GrantPermissionsStatement(boolean allPermissions,
+                                     Set<Permission> permissions,
+                                     IResource resource,
+                                     RoleName grantee,
+                                     GrantMode grantMode,
+                                     Consumer<String> recognitionError)
     {
-        super(permissions, resource, grantee);
+        super(allPermissions, permissions, resource, grantee, grantMode, recognitionError);
     }
 
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public ResultMessage execute(QueryState state) throws RequestValidationException, RequestExecutionException
     {
-        DatabaseDescriptor.getAuthorizer().grant(state.getUser(), permissions, resource, grantee);
+        IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+
+        Set<Permission> permissions = filteredPermissions;
+
+        Set<Permission> granted = authorizer.grant(state.getUser(), permissions, resource, grantee, grantMode);
+
+        permissions.stream().
+                filter(Permission::deprecated).
+                           map(perm -> "The permission " + perm.name() +
+                                       " is deprecated and has been replaced with the " +
+                                       Permission.ALL.stream().filter(p -> perm.equals(p.supersedes())).map(Permission::name).collect(Collectors.joining(", ")) +
+                                       " permissions. Please migrate to the new permission(s).").
+                           forEach(msg -> ClientWarn.instance.warn(msg));
+
+        // We want to warn the client if all the specified permissions have not been granted and the client did
+        // not specified ALL in the query.
+        if (granted.size() != permissions.size() && !allPermissions)
+        {
+            // We use a TreeSet to guarantee the order for testing
+            String permissionsStr = new TreeSet<>(permissions).stream()
+                                                              .filter(permission -> !granted.contains(permission))
+                                                              .map(Permission::name)
+                                                              .collect(Collectors.joining(", "));
+
+            ClientWarn.instance.warn(grantMode.grantWarningMessage(grantee.getRoleName(),
+                                                                   resource,
+                                                                   permissionsStr));
+        }
         return null;
+    }
+
+    protected String operation()
+    {
+        return grantMode.grantOperationName();
+    }
+
+    @Override
+    protected Set<Permission> allPermissions()
+    {
+        return authorizer().applicableNonDeprecatedPermissions(resource);
     }
 
     @Override

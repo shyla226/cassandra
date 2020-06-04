@@ -17,7 +17,11 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -28,6 +32,16 @@ import org.apache.cassandra.exceptions.RequestValidationException;
  */
 public interface IAuthorizer
 {
+    default <T extends IAuthorizer> T implementation()
+    {
+        return (T) this;
+    }
+
+    default <T extends IAuthorizer> boolean isImplementationOf(Class<T> implClass)
+    {
+        return implClass.isAssignableFrom(implementation().getClass());
+    }
+
     /**
      * Whether or not the authorizer will attempt authorization.
      * If false the authorizer will not be called for authorization of resources.
@@ -38,6 +52,8 @@ public interface IAuthorizer
     }
 
     /**
+     * Return all permissions on all resources for a role ; granted, restricted and grantables.
+     *
      * Returns a set of permissions of a user on a resource.
      * Since Roles were introduced in version 2.2, Cassandra does not distinguish in any
      * meaningful way between users and roles. A role may or may not have login privileges
@@ -45,11 +61,36 @@ public interface IAuthorizer
      * concept of a user, except to link a client session to role. AuthenticatedUser can be
      * thought of as a manifestation of a role, linked to a specific client connection.
      *
-     * @param user Authenticated user requesting authorization.
-     * @param resource Resource for which the authorization is being requested. @see DataResource.
-     * @return Set of permissions of the user on the resource. Should never return null. Use Permission.NONE instead.
+     * <em>Granted permissions:</em>
+     * The set of <em>effective</em> permissions on a particular resource is the sum of all
+     * granted permissions on the resource-chain inquired ({@link PermissionSets#granted PermissionSets.granted})
+     * <em>minus</em> the sum of all restricted permissions on the resource-chain
+     * ({@link PermissionSets#restricted PermissionSets.restricted}). This means, that negative (restricted)
+     * permissions take precedence even if the negative permissions are placed on resource parents.
+     *
+     * <em>Restricted permissions:</em>
+     * Retrurns a set of negative permissions that a user is denied on a resource.
+     *
+     * <em>Grantable permissions:</em>
+     * Returns a set of permissions that a user can grant to other users on a resource.
+     *
+     * These permissions have no effect on the <em>effective</em> permissions of the user
+     * on a resource.
+     *
+     * @return map of resource to permissions. {@code null} is not a valid return value.
      */
-    Set<Permission> authorize(AuthenticatedUser user, IResource resource);
+    Map<IResource, PermissionSets> allPermissionSets(RoleResource role);
+
+    /**
+     * Similar to {@link #allPermissionSets(RoleResource)}, but for multiple roles.
+     */
+    default Map<RoleResource, Map<IResource, PermissionSets>> allPermissionSetsMany(Iterable<? extends RoleResource> roleResources)
+    {
+        Map<RoleResource, Map<IResource, PermissionSets>> r = new HashMap<>();
+        for (RoleResource roleResource : roleResources)
+            r.put(roleResource, allPermissionSets(roleResource));
+        return r;
+    }
 
     /**
      * Grants a set of permissions on a resource to a role.
@@ -61,12 +102,15 @@ public interface IAuthorizer
      * @param permissions Set of permissions to grant.
      * @param resource Resource on which to grant the permissions.
      * @param grantee Role to which the permissions are to be granted.
+     * @param grantModes whether to grant permissions on the resource, the resource with grant option or
+     *                    only the permission to grant
+     * @return the permissions that have been sucessfully granted.
      *
      * @throws RequestValidationException
      * @throws RequestExecutionException
      * @throws java.lang.UnsupportedOperationException
      */
-    void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee)
+    Set<Permission> grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee, GrantMode... grantModes)
     throws RequestValidationException, RequestExecutionException;
 
     /**
@@ -77,14 +121,15 @@ public interface IAuthorizer
      *
      * @param performer User who revokes the permissions.
      * @param permissions Set of permissions to revoke.
-     * @param revokee Role from which to the permissions are to be revoked.
      * @param resource Resource on which to revoke the permissions.
+     * @param revokee Role from which to the permissions are to be revoked.
+     * @param grantModes what to revoke, the permission on the resource, the permission to grant or both
+     * @return the permissions that have been sucessfully revoked.
      *
-     * @throws RequestValidationException
      * @throws RequestExecutionException
      * @throws java.lang.UnsupportedOperationException
      */
-    void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee)
+    Set<Permission> revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee, GrantMode... grantModes)
     throws RequestValidationException, RequestExecutionException;
 
     /**
@@ -92,7 +137,6 @@ public interface IAuthorizer
      * This method is optional and may be called internally, so implementations which do
      * not support it should be sure to throw UnsupportedOperationException.
      *
-     * @param performer User who wants to see the permissions.
      * @param permissions Set of Permission values the user is interested in. The result should only include the
      *                    matching ones.
      * @param resource The resource on which permissions are requested. Can be null, in which case permissions on all
@@ -106,7 +150,7 @@ public interface IAuthorizer
      * @throws RequestExecutionException
      * @throws java.lang.UnsupportedOperationException
      */
-    Set<PermissionDetails> list(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee)
+    Set<PermissionDetails> list(Set<Permission> permissions, IResource resource, RoleResource grantee)
     throws RequestValidationException, RequestExecutionException;
 
     /**
@@ -128,9 +172,10 @@ public interface IAuthorizer
      * not support it should be sure to throw UnsupportedOperationException.
      *
      * @param droppedResource The resource to revoke all permissions on.
+     * @return the roles that had permissions on {@code droppedResource}
      * @throws java.lang.UnsupportedOperationException
      */
-    void revokeAllOn(IResource droppedResource);
+    Set<RoleResource> revokeAllOn(IResource droppedResource);
 
     /**
      * Set of resources that should be made inaccessible to users and only accessible internally.
@@ -152,4 +197,33 @@ public interface IAuthorizer
      * For example, use this method to create any required keyspaces/column families.
      */
     void setup();
+
+    /**
+     * Return the universe of valid permissions for a named IResource. By default, this
+     * just delegates to the resource implementation itself, but this may be overridden
+     * to allow custom permissions on certain types of resource.
+     * @param resource the IResource to get all allowed permissions for
+     * @return the set of all allowed permissions for the supplied resource
+     */
+    default Set<Permission> applicablePermissions(IResource resource)
+    {
+        return resource.applicablePermissions();
+    }
+
+    default Set<Permission> filterApplicablePermissions(IResource resource, Set<Permission> permissions)
+    {
+        EnumSet<Permission> filtered = EnumSet.copyOf(permissions);
+        filtered.retainAll(applicablePermissions(resource));
+        return filtered;
+    }
+
+    /**
+     * Permissions that are granted to the creator of the given resource.
+     * This is (usually) the same set of permissions as {@link #applicablePermissions(IResource)} but with the
+     * {@link Permission#deprecated()} ones removed.
+     */
+    default Set<Permission> applicableNonDeprecatedPermissions(IResource resource)
+    {
+        return resource.applicablePermissions().stream().filter(p -> !p.deprecated()).collect(Collectors.toCollection(Permission::setOf));
+    }
 }

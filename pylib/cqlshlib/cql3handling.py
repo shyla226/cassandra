@@ -1437,7 +1437,7 @@ syntax_rules += r'''
              ;
 
 <createUserStatement> ::= "CREATE" "USER" ( "IF" "NOT" "EXISTS" )? <username>
-                              ( "WITH" "PASSWORD" <stringLiteral> )?
+                              ( "WITH" ("HASHED")? "PASSWORD" <stringLiteral> )?
                               ( "SUPERUSER" | "NOSUPERUSER" )?
                         ;
 
@@ -1467,7 +1467,7 @@ syntax_rules += r'''
                               ( "WITH" <roleProperty> ("AND" <roleProperty>)*)?
                        ;
 
-<roleProperty> ::= "PASSWORD" "=" <stringLiteral>
+<roleProperty> ::= (("HASHED")? "PASSWORD") "=" <stringLiteral>
                  | "OPTIONS" "=" <mapLiteral>
                  | "SUPERUSER" "=" <boolean>
                  | "LOGIN" "=" <boolean>
@@ -1490,10 +1490,20 @@ syntax_rules += r'''
 '''
 
 syntax_rules += r'''
-<grantStatement> ::= "GRANT" <permissionExpr> "ON" <resource> "TO" <rolename>
+<grantStatement> ::= "GRANT" ( "AUTHORIZE" "FOR" )? <permissionExpr>
+                     "ON" (<resourceFromInternalName> | <resource>) "TO" <rolename>
                    ;
 
-<revokeStatement> ::= "REVOKE" <permissionExpr> "ON" <resource> "FROM" <rolename>
+<revokeStatement> ::= "REVOKE" ( "AUTHORIZE" "FOR" )? <permissionExpr>
+                      "ON" (<resourceFromInternalName> | <resource>) "FROM" <rolename>
+                    ;
+
+<restrictStatement> ::= "RESTRICT" <permissionExpr>
+                     "ON" (<resourceFromInternalName> | <resource>) "TO" <rolename>
+                   ;
+
+<unrestrictStatement> ::= "UNRESTRICT" <permissionExpr>
+                      "ON" (<resourceFromInternalName> | <resource>) "FROM" <rolename>
                     ;
 
 <listPermissionsStatement> ::= "LIST" <permissionExpr>
@@ -1510,7 +1520,7 @@ syntax_rules += r'''
                | "EXECUTE"
                ;
 
-<permissionExpr> ::= ( <permission> "PERMISSION"? )
+<permissionExpr> ::= ( <permission> "PERMISSION"? ("," <permission> "PERMISSION"? )* )
                    | ( "ALL" "PERMISSIONS"? )
                    ;
 

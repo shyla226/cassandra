@@ -560,7 +560,7 @@ public class CQLSSTableWriter implements Closeable
         private TableMetadata createTable(Types types)
         {
             QueryState state = QueryState.forInternalCalls();
-            CreateTableStatement statement = schemaStatement.prepare(state.getClientState());
+            CreateTableStatement statement = schemaStatement.prepare(state);
             statement.validate(state);
 
             TableMetadata.Builder builder = statement.builder(types);
@@ -578,7 +578,7 @@ public class CQLSSTableWriter implements Closeable
         private UpdateStatement prepareInsert()
         {
             QueryState state = QueryState.forInternalCalls();
-            UpdateStatement insert = (UpdateStatement) insertStatement.prepare(state.getClientState());
+            UpdateStatement insert = (UpdateStatement) insertStatement.prepare(state);
             insert.validate(state);
 
             if (insert.hasConditions())
