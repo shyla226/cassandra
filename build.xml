@@ -682,6 +682,9 @@
           <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="7.5.0" />
           <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" version="2.1.2" />
 
+          <!-- used by Trie -->
+          <dependency groupId="org.agrona" artifactId="agrona" version="1.4.0" />
+
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
         <developer id="alakshman" name="Avinash Lakshman"/>
@@ -772,6 +775,8 @@
         <!-- used by Storage_Attached_idnex -->
         <dependency groupId="org.apache.lucene" artifactId="lucene-core" />
         <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" />
+        <!-- used by Trie -->
+        <dependency groupId="org.agrona" artifactId="agrona" />
 
       </artifact:pom>
       <!-- this build-deps-pom-sources "artifact" is the same as build-deps-pom but only with those
@@ -798,7 +803,8 @@
         <!-- used by Storage_Attached_idnex -->
         <dependency groupId="org.apache.lucene" artifactId="lucene-core" />
         <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner"/>
-
+        <!-- used by Trie -->
+        <dependency groupId="org.agrona" artifactId="agrona" />
       </artifact:pom>
 
       <artifact:pom id="coverage-deps-pom"

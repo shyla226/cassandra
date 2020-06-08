@@ -26,6 +26,8 @@ import java.nio.ByteBuffer;
 
 public class DecimalSerializer extends TypeSerializer<BigDecimal>
 {
+    static final int maxScale = Integer.getInteger("dse.decimal.maxscaleforstring", 100);
+
     public static final DecimalSerializer instance = new DecimalSerializer();
 
     public <V> BigDecimal deserialize(V value, ValueAccessor<V> accessor)
@@ -64,7 +66,12 @@ public class DecimalSerializer extends TypeSerializer<BigDecimal>
 
     public String toString(BigDecimal value)
     {
-        return value == null ? "" : value.toPlainString();
+        // to avoid decimal.toPlainString() OOM, see CASSANDRA-14925
+        if (value == null)
+            return "";
+        if (Math.abs(value.scale()) <= maxScale)
+            return value.toPlainString();
+        return value.toString();
     }
 
     public Class<BigDecimal> getType()

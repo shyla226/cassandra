@@ -77,6 +77,8 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
@@ -1685,6 +1687,12 @@ public class SASIIndexTest
             public <VL, VR> int compareCustom(VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
             {
                 return UTF8Type.instance.compare(left, accessorL, right, accessorR);
+            }
+
+            @Override
+            public ByteSource asComparableBytes(ByteBuffer b, ByteComparable.Version version)
+            {
+                return UTF8Type.instance.asComparableBytes(b, version);
             }
         };
 
