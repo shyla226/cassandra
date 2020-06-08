@@ -33,6 +33,8 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 /**
@@ -66,7 +68,13 @@ public class EmptyType extends AbstractType<Void>
 
     public static final EmptyType instance = new EmptyType();
 
-    private EmptyType() {super(ComparisonType.CUSTOM);} // singleton
+    private EmptyType() {super(ComparisonType.CUSTOM, 0);} // singleton
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer b, ByteComparable.Version version)
+    {
+        return null;
+    }
 
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
@@ -112,12 +120,6 @@ public class EmptyType extends AbstractType<Void>
     public TypeSerializer<Void> getSerializer()
     {
         return EmptySerializer.instance;
-    }
-
-    @Override
-    public int valueLengthIfFixed()
-    {
-        return 0;
     }
 
     @Override

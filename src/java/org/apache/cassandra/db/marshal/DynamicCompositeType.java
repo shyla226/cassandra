@@ -19,9 +19,13 @@ package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +37,8 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 
 import static com.google.common.collect.Iterables.any;
 
@@ -175,6 +181,89 @@ public class DynamicCompositeType extends AbstractCompositeType
         {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer byteBuffer, ByteComparable.Version version)
+    {
+        List<ByteSource> srcs = new ArrayList<>();
+        ByteBuffer bb = byteBuffer.duplicate();
+
+        // statics go first
+        boolean isStatic = readIsStatic(bb);
+        srcs.add(isStatic ? null : ByteSource.EMPTY);
+
+        byte lastEoc = 0;
+        while (bb.remaining() > 0)
+        {
+            // Only the end-of-component byte of the last component of this composite can be non-zero, so the
+            // component before can't have a non-zero end-of-component byte.
+            assert lastEoc == 0 : lastEoc;
+
+            AbstractType<?> comp = getComparator(bb);
+            // The comparable bytes for the component need to ensure comparisons consistent with
+            // AbstractCompositeType.compareCustom(ByteBuffer, ByteBuffer) and
+            // DynamicCompositeType.getComparator(int, ByteBuffer, ByteBuffer):
+            // ...most often that means just adding the short name of the type, followed by the full name of the type.
+            srcs.add(ByteSource.of(comp.getClass().getSimpleName(), version));
+            srcs.add(ByteSource.of(comp.getClass().getName(), version));
+
+            // Only then the payload of the component gets encoded.
+            srcs.add(comp.asComparableBytes(ByteBufferUtil.readBytesWithShortLength(bb), version));
+            // The end-of-component byte also takes part in the comparison, and therefore needs to be encoded.
+            lastEoc = bb.get();
+            srcs.add(ByteSource.oneByte(lastEoc));
+        }
+
+        return ByteSource.withTerminator(ByteSource.END_OF_STREAM, srcs.toArray(new ByteSource[0]));
+    }
+
+    public static ByteBuffer build(List<String> types, List<ByteBuffer> values)
+    {
+        return build(types, values, (byte) 0);
+    }
+
+    @VisibleForTesting
+    public static ByteBuffer build(List<String> types, List<ByteBuffer> values, byte lastEoc)
+    {
+        assert types.size() == values.size();
+
+        int numComponents = types.size();
+        // Compute the total number of bytes that we'll need to store the types and their payloads.
+        int totalLength = 0;
+        for (int i = 0; i < numComponents; ++i)
+        {
+            int typeNameLength = types.get(i).getBytes(StandardCharsets.UTF_8).length;
+            // The type data will be stored by means of the type's fully qualified name, not by aliasing, so:
+            //   1. The type data header should be the fully qualified name length in bytes.
+            //   2. The length should be small enough so that it fits in 15 bits (2 bytes with the first bit zero).
+            assert typeNameLength <= 0x7FFF;
+            int valueLength = values.get(i).remaining();
+            // The value length should also expect its first bit to be 0, as the length should be stored as a signed
+            // 2-byte value (short).
+            assert valueLength <= 0x7FFF;
+            totalLength += 2 + typeNameLength + 2 + valueLength + 1;
+        }
+
+        ByteBuffer result = ByteBuffer.allocate(totalLength);
+        for (int i = 0; i < numComponents; ++i)
+        {
+            // Write the type data (2-byte length header + the fully qualified type name in UTF-8).
+            byte[] typeNameBytes = types.get(i).getBytes(StandardCharsets.UTF_8);
+            ByteBufferUtil.writeShortLength(result, typeNameBytes.length);
+            result.put(ByteBuffer.wrap(typeNameBytes));
+
+            // Write the type payload data (2-byte length header + the payload).
+            ByteBuffer value = values.get(i);
+            int bytesToCopy = value.remaining();
+            ByteBufferUtil.writeShortLength(result, bytesToCopy);
+            ByteBufferUtil.arrayCopy(value, value.position(), result, result.position(), bytesToCopy);
+            result.position(result.position() + bytesToCopy);
+
+            // Write the end-of-component byte.
+            result.put(i != numComponents - 1 ? (byte) 0 : lastEoc);
+        }
+        return result;
     }
 
     protected ParsedComparator parseComparator(int i, String part)
@@ -366,7 +455,8 @@ public class DynamicCompositeType extends AbstractCompositeType
 
         public FixedValueComparator(int cmp)
         {
-            super(ComparisonType.CUSTOM);
+            // VARIABLE_LENGTH due to compatibility reasons, should be 0
+            super(ComparisonType.CUSTOM, VARIABLE_LENGTH);
             this.cmp = cmp;
         }
 

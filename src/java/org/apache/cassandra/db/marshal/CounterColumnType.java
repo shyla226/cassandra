@@ -32,7 +32,7 @@ public class CounterColumnType extends NumberType<Long>
 {
     public static final CounterColumnType instance = new CounterColumnType();
 
-    CounterColumnType() {super(ComparisonType.NOT_COMPARABLE);} // singleton
+    CounterColumnType() {super(ComparisonType.NOT_COMPARABLE, VARIABLE_LENGTH);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {

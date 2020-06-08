@@ -31,6 +31,8 @@ import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.MapSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.Pair;
 
 public class MapType<K, V> extends CollectionType<Map<K, V>>
@@ -210,6 +212,31 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
         }
 
         return size1 == size2 ? 0 : (size1 < size2 ? -1 : 1);
+    }
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer b, ByteComparable.Version version)
+    {
+        return asComparableBytesMap(getKeysType(), getValuesType(), b, version);
+    }
+
+    static ByteSource asComparableBytesMap(AbstractType<?> keysComparator, AbstractType<?> valuesComparator, ByteBuffer b, ByteComparable.Version version)
+    {
+        if (!b.hasRemaining())
+            return null;
+
+        b = b.duplicate();
+        ProtocolVersion protocolVersion = ProtocolVersion.V3;
+        int size = CollectionSerializer.readCollectionSize(b, protocolVersion);
+        ByteSource[] srcs = new ByteSource[size * 2];
+        for (int i = 0; i < size; ++i)
+        {
+            ByteBuffer k = CollectionSerializer.readValue(b, protocolVersion);
+            srcs[i * 2 + 0] = keysComparator.asComparableBytes(k, version);
+            ByteBuffer v = CollectionSerializer.readValue(b, protocolVersion);
+            srcs[i * 2 + 1] = valuesComparator.asComparableBytes(v, version);
+        }
+        return ByteSource.withTerminator(0x00, srcs);
     }
 
     @Override

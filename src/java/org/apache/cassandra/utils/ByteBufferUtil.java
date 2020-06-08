@@ -294,6 +294,21 @@ public class ByteBufferUtil
         FastByteOperations.copy(src, srcPos, dst, dstPos, length);
     }
 
+    /**
+     * Transfer bytes from one ByteBuffer to another.
+     * This function acts as System.arrayCopy() but for ByteBuffers.
+     *
+     * @param src the source ByteBuffer
+     * @param srcPos starting position in the source ByteBuffer
+     * @param dst the destination ByteBuffer
+     * @param dstPos starting position in the destination ByteBuffer
+     * @param length the number of bytes to copy
+     */
+    public static void arrayCopy(ByteBuffer src, int srcPos, ByteBuffer dst, int dstPos, int length)
+    {
+        FastByteOperations.copy(src, srcPos, dst, dstPos, length);
+    }
+
     public static int put(ByteBuffer src, ByteBuffer trg)
     {
         int length = Math.min(src.remaining(), trg.remaining());
@@ -864,5 +879,27 @@ public class ByteBufferUtil
         }
 
         return true;
+    }
+
+    public static int toBytes(ByteSource byteSource, byte[] bytes)
+    {
+        int n = 0;
+
+        while (true)
+        {
+            int b = byteSource.next();
+
+            if (b == ByteSource.END_OF_STREAM) break;
+
+            if (n >= bytes.length)
+            {
+                throw new RuntimeException(String.format("Number of bytes read, %d, exceeds the buffer size of %d.", n + 1, bytes.length));
+            }
+
+            bytes[n] = (byte)b;
+            n++;
+        }
+
+        return n;
     }
 }

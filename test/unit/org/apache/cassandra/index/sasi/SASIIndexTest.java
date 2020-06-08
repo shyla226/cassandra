@@ -77,6 +77,8 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
@@ -1665,7 +1667,7 @@ public class SASIIndexTest
     {
 
         // special type which is UTF-8 but is only on the inside
-        AbstractType<?> stringType = new AbstractType<String>(AbstractType.ComparisonType.CUSTOM)
+        AbstractType<?> stringType = new AbstractType<String>(AbstractType.ComparisonType.CUSTOM, AbstractType.VARIABLE_LENGTH)
         {
             public ByteBuffer fromString(String source) throws MarshalException
             {
@@ -1685,6 +1687,12 @@ public class SASIIndexTest
             public int compareCustom(ByteBuffer a, ByteBuffer b)
             {
                 return UTF8Type.instance.compare(a, b);
+            }
+
+            @Override
+            public ByteSource asComparableBytes(ByteBuffer b, ByteComparable.Version version)
+            {
+                return UTF8Type.instance.asComparableBytes(b, version);
             }
         };
 

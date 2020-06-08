@@ -33,7 +33,7 @@ public class InetAddressType extends AbstractType<InetAddress>
 {
     public static final InetAddressType instance = new InetAddressType();
 
-    InetAddressType() {super(ComparisonType.BYTE_ORDER);} // singleton
+    InetAddressType() {super(ComparisonType.BYTE_ORDER, VARIABLE_LENGTH);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {

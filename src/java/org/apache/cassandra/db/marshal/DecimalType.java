@@ -23,6 +23,8 @@ import java.math.MathContext;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 
+import com.google.common.primitives.Ints;
+
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
@@ -31,6 +33,8 @@ import org.apache.cassandra.serializers.DecimalSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 
 public class DecimalType extends NumberType<BigDecimal>
 {
@@ -40,7 +44,13 @@ public class DecimalType extends NumberType<BigDecimal>
     private static final int MAX_SCALE = 1000;
     private static final MathContext MAX_PRECISION = new MathContext(10000);
 
-    DecimalType() {super(ComparisonType.CUSTOM);} // singleton
+    // Constants or escaping values needed to encode/decode variable-length floating point numbers (decimals) in our
+    // custom byte-ordered encoding scheme.
+    private static final int POSITIVE_DECIMAL_HEADER_MASK = 0x80;
+    private static final int NEGATIVE_DECIMAL_HEADER_MASK = 0x00;
+    private static final int DECIMAL_EXPONENT_LENGTH_HEADER_MASK = 0x40;
+
+    DecimalType() {super(ComparisonType.CUSTOM, VARIABLE_LENGTH);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
@@ -59,6 +69,106 @@ public class DecimalType extends NumberType<BigDecimal>
             return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
 
         return compose(o1).compareTo(compose(o2));
+    }
+
+
+    /**
+     * Constructs a byte-comparable representation.
+     * This is rather difficult and involves reconstructing the decimal.
+     *
+     * To compare, we need a normalized value, i.e. one with a sign, exponent and (0,1) mantissa. To avoid
+     * loss of precision, both exponent and mantissa need to be base-100.  We can't get this directly off the serialized
+     * bytes, as they have base-10 scale and base-256 unscaled part.
+     *
+     * We store:
+     *     - sign bit inverted * 0x80 + 0x40 + signed exponent length, where exponent is negated if value is negative
+     *     - zero or more exponent bytes (as given by length)
+     *     - 0x80 + first pair of decimal digits, negative is value is negative, rounded to -inf
+     *     - zero or more 0x80 + pair of decimal digits, always positive
+     *     - trailing 0x00
+     * Zero is special-cased as 0x80.
+     *
+     * Because the trailing 00 cannot be produced from a pair of decimal digits (positive or not), no value can be
+     * a prefix of another.
+     *
+     * Encoding examples:
+     *    1.1    as       c1 = 0x80 (positive number) + 0x40 + (positive exponent) 0x01 (exp length 1)
+     *                    01 = exponent 1 (100^1)
+     *                    81 = 0x80 + 01 (0.01)
+     *                    8a = 0x80 + 10 (....10)   0.0110e2
+     *                    00
+     *    -1     as       3f = 0x00 (negative number) + 0x40 - (negative exponent) 0x01 (exp length 1)
+     *                    ff = exponent -1. negative number, thus 100^1
+     *                    7f = 0x80 - 01 (-0.01)    -0.01e2
+     *                    00
+     *    -99.9  as       3f = 0x00 (negative number) + 0x40 - (negative exponent) 0x01 (exp length 1)
+     *                    ff = exponent -1. negative number, thus 100^1
+     *                    1c = 0x80 - 100 (-1.00)
+     *                    8a = 0x80 + 10  (+....10) -0.999e2
+     *                    00
+     *
+     */
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer buf, ByteComparable.Version version)
+    {
+        BigDecimal value = compose(buf);
+        if (value == null)
+            return null;
+        if (value.equals(BigDecimal.ZERO))
+            return ByteSource.oneByte(POSITIVE_DECIMAL_HEADER_MASK);
+        long scale = (((long) value.scale()) - value.precision()) & ~1;
+        boolean negative = value.signum() < 0;
+        final int negmul = negative ? -1 : 1;
+        // This should always fit into an int
+        final long exponent = (-scale * negmul) / 2;
+        // We should never have scale > Integer.MAX_VALUE, as we're always subtracting the non-negative precision of
+        // the encoded BigDecimal, and furthermore we're rounding to negative infinity.
+        if (scale > Integer.MAX_VALUE || scale < Integer.MIN_VALUE)
+        {
+            // We are practically out of range here, but let's handle that anyway
+            int mv = Long.signum(scale) * Integer.MAX_VALUE;
+            value = value.scaleByPowerOfTen(mv);
+            scale -= mv;
+        }
+        final BigDecimal mantissa = value.scaleByPowerOfTen(Ints.checkedCast(scale)).stripTrailingZeros();
+        assert mantissa.abs().compareTo(BigDecimal.ONE) < 0;
+
+        return new ByteSource()
+        {
+            int posInExp = 0;
+            BigDecimal current = mantissa;
+
+            @Override
+            public int next()
+            {
+                if (posInExp < 5)
+                {
+                    if (posInExp == 0)
+                    {
+                        int absexp = (int) (exponent < 0 ? -exponent : exponent);
+                        while (posInExp < 5 && absexp >> (32 - ++posInExp * 8) == 0) {}
+                        int explen = DECIMAL_EXPONENT_LENGTH_HEADER_MASK + (exponent < 0 ? -1 : 1) * (5 - posInExp);
+                        return explen + (negative ? NEGATIVE_DECIMAL_HEADER_MASK : POSITIVE_DECIMAL_HEADER_MASK);
+                    }
+                    else
+                        return (int) ((exponent >> (32 - posInExp++ * 8))) & 0xFF;
+                }
+                if (current == null)
+                    return END_OF_STREAM;
+                if (current.equals(BigDecimal.ZERO))
+                {
+                    current = null;
+                    return 0x00;
+                }
+                else
+                {
+                    BigDecimal v = current.scaleByPowerOfTen(2);
+                    BigDecimal floor = v.setScale(0, BigDecimal.ROUND_FLOOR);
+                    current = v.subtract(floor);
+                    return floor.byteValueExact() + 0x80;
+                }
+            }
+        };
     }
 
     public ByteBuffer fromString(String source) throws MarshalException

@@ -27,6 +27,8 @@ import org.apache.cassandra.serializers.ShortSerializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 
 public class ShortType extends NumberType<Short>
 {
@@ -34,7 +36,8 @@ public class ShortType extends NumberType<Short>
 
     ShortType()
     {
-        super(ComparisonType.CUSTOM);
+        // VARIABLE_LENGTH due to compatibility reasons, should be 2
+        super(ComparisonType.CUSTOM, VARIABLE_LENGTH);
     } // singleton
 
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
@@ -44,6 +47,12 @@ public class ShortType extends NumberType<Short>
             return diff;
 
         return ByteBufferUtil.compareUnsigned(o1, o2);
+    }
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer buf, ByteComparable.Version version)
+    {
+        return ByteSource.signedFixedLengthNumber(buf);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException

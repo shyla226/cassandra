@@ -23,7 +23,6 @@ import java.util.Date;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.cql3.Term;
-import org.apache.cassandra.cql3.statements.RequestValidations;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +32,8 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TimestampSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
@@ -49,7 +50,7 @@ public class TimestampType extends TemporalType<Date>
 
     public static final TimestampType instance = new TimestampType();
 
-    private TimestampType() {super(ComparisonType.CUSTOM);} // singleton
+    private TimestampType() {super(ComparisonType.CUSTOM, 8);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
@@ -59,6 +60,12 @@ public class TimestampType extends TemporalType<Date>
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
         return LongType.compareLongs(o1, o2);
+    }
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer buf, ByteComparable.Version version)
+    {
+        return ByteSource.optionalSignedFixedLengthNumber(buf);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException
@@ -137,12 +144,6 @@ public class TimestampType extends TemporalType<Date>
     public TypeSerializer<Date> getSerializer()
     {
         return TimestampSerializer.instance;
-    }
-
-    @Override
-    public int valueLengthIfFixed()
-    {
-        return 8;
     }
 
     @Override

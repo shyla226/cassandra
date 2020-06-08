@@ -31,6 +31,8 @@ import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 
 public class ListType<T> extends CollectionType<List<T>>
 {
@@ -192,6 +194,28 @@ public class ListType<T> extends CollectionType<List<T>>
         }
 
         return size1 == size2 ? 0 : (size1 < size2 ? -1 : 1);
+    }
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer b, ByteComparable.Version version)
+    {
+        return asComparableBytesListOrSet(getElementsType(), b, version);
+    }
+
+    static ByteSource asComparableBytesListOrSet(AbstractType<?> elementsComparator, ByteBuffer b, ByteComparable.Version version)
+    {
+        if (!b.hasRemaining())
+            return null;
+
+        b = b.duplicate();
+        int size = CollectionSerializer.readCollectionSize(b, ProtocolVersion.V3);
+        ByteSource[] srcs = new ByteSource[size];
+        for (int i = 0; i < size; ++i)
+        {
+            ByteBuffer v = CollectionSerializer.readValue(b, ProtocolVersion.V3);
+            srcs[i] = elementsComparator.asComparableBytes(v, version);
+        }
+        return ByteSource.withTerminator(0x00, srcs);
     }
 
     @Override

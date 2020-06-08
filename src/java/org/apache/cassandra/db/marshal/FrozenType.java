@@ -34,7 +34,7 @@ public class FrozenType extends AbstractType<Void>
 {
     protected FrozenType()
     {
-        super(ComparisonType.NOT_COMPARABLE);
+        super(ComparisonType.NOT_COMPARABLE, VARIABLE_LENGTH);
     }
 
     public static AbstractType<?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException

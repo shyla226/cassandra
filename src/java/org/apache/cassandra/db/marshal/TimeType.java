@@ -19,7 +19,6 @@ package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.time.ZoneOffset;
 
 import org.apache.cassandra.cql3.Constants;
@@ -29,6 +28,8 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 
 /**
  * Nanosecond resolution time values
@@ -36,11 +37,23 @@ import org.apache.cassandra.transport.ProtocolVersion;
 public class TimeType extends TemporalType<Long>
 {
     public static final TimeType instance = new TimeType();
-    private TimeType() {super(ComparisonType.BYTE_ORDER);} // singleton
+
+    private TimeType()
+    {
+        // VARIABLE_LENGTH due to compatibility reasons, should be 8
+        super(ComparisonType.BYTE_ORDER, VARIABLE_LENGTH);
+    } // singleton
 
     public ByteBuffer fromString(String source) throws MarshalException
     {
         return decompose(TimeSerializer.timeStringToLong(source));
+    }
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer buf, ByteComparable.Version version)
+    {
+        // While BYTE_ORDER would still work for this type, making use of the fixed length is more efficient.
+        return ByteSource.fixedLength(buf);
     }
 
     @Override

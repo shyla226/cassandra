@@ -20,7 +20,10 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.utils.ByteSource;
+import org.apache.cassandra.utils.UnsafeMemoryAccess;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 import org.apache.cassandra.utils.memory.NativeAllocator;
@@ -38,11 +41,29 @@ public class NativeDecoratedKey extends DecoratedKey
         int size = key.remaining();
         this.peer = allocator.allocate(4 + size, writeOp);
         MemoryUtil.setInt(peer, size);
-        MemoryUtil.setBytes(peer + 4, key);
+        MemoryUtil.setBytes(address(), key);
     }
 
     public ByteBuffer getKey()
     {
         return MemoryUtil.getByteBuffer(peer + 4, MemoryUtil.getInt(peer), ByteOrder.BIG_ENDIAN);
+    }
+
+    @Override
+    protected ByteSource keyComparableBytes(Version version)
+    {
+        return ByteSource.of(address(), length(), version);
+    }
+
+    @Inline
+    int length()
+    {
+        return UnsafeMemoryAccess.getInt(peer);
+    }
+
+    @Inline
+    long address()
+    {
+        return this.peer + 4;
     }
 }

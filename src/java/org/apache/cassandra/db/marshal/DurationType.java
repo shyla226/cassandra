@@ -39,7 +39,7 @@ public class DurationType extends AbstractType<Duration>
 
     DurationType()
     {
-        super(ComparisonType.BYTE_ORDER);
+        super(ComparisonType.BYTE_ORDER, VARIABLE_LENGTH);
     } // singleton
 
     public ByteBuffer fromString(String source) throws MarshalException

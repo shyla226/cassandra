@@ -27,12 +27,14 @@ import org.apache.cassandra.serializers.DoubleSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 
 public class DoubleType extends NumberType<Double>
 {
     public static final DoubleType instance = new DoubleType();
 
-    DoubleType() {super(ComparisonType.CUSTOM);} // singleton
+    DoubleType() {super(ComparisonType.CUSTOM, 8);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
@@ -51,6 +53,12 @@ public class DoubleType extends NumberType<Double>
             return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
 
         return compose(o1).compareTo(compose(o2));
+    }
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer buf, ByteComparable.Version version)
+    {
+        return ByteSource.optionalSignedFixedLengthFloat(buf);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException
@@ -104,12 +112,6 @@ public class DoubleType extends NumberType<Double>
     public TypeSerializer<Double> getSerializer()
     {
         return DoubleSerializer.instance;
-    }
-
-    @Override
-    public int valueLengthIfFixed()
-    {
-        return 8;
     }
 
     @Override

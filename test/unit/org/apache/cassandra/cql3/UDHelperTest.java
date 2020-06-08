@@ -56,7 +56,7 @@ public class UDHelperTest
     {
         protected UFTestCustomType()
         {
-            super(ComparisonType.CUSTOM);
+            super(ComparisonType.CUSTOM, AbstractType.VARIABLE_LENGTH);
         }
 
         public ByteBuffer fromString(String source) throws MarshalException

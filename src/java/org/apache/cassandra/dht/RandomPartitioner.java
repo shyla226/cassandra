@@ -34,6 +34,8 @@ import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.GuidGenerator;
 import org.apache.cassandra.utils.ObjectSizes;
@@ -152,11 +154,12 @@ public class RandomPartitioner implements IPartitioner
         return new BigIntegerToken(token);
     }
 
-    private boolean isValidToken(BigInteger token) {
+    private static boolean isValidToken(BigInteger token)
+    {
         return token.compareTo(ZERO) >= 0 && token.compareTo(MAXIMUM) <= 0;
     }
 
-    private final Token.TokenFactory tokenFactory = new Token.TokenFactory()
+    private static final Token.TokenFactory tokenFactory = new Token.TokenFactory()
     {
         public ByteBuffer toByteArray(Token token)
         {
@@ -242,6 +245,12 @@ public class RandomPartitioner implements IPartitioner
         public BigIntegerToken(String token)
         {
             this(new BigInteger(token));
+        }
+
+        @Override
+        public ByteSource asComparableBytes(ByteComparable.Version version)
+        {
+            return IntegerType.instance.asComparableBytes(tokenFactory.toByteArray(this), version);
         }
 
         @Override

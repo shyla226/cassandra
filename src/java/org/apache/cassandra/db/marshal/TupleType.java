@@ -34,6 +34,8 @@ import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 
 import static com.google.common.collect.Iterables.any;
 import static com.google.common.collect.Iterables.transform;
@@ -64,7 +66,7 @@ public class TupleType extends AbstractType<ByteBuffer>
 
     protected TupleType(List<AbstractType<?>> types, boolean freezeInner)
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, VARIABLE_LENGTH);
 
         if (freezeInner)
             this.types = Lists.newArrayList(transform(types, AbstractType::freeze));
@@ -192,6 +194,19 @@ public class TupleType extends AbstractType<ByteBuffer>
         return 0;
     }
 
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer byteBuffer, ByteComparable.Version version)
+    {
+        ByteBuffer[] bufs = split(byteBuffer);  // this may be shorter than types.size -- other srcs remain null in that case
+        ByteSource[] srcs = new ByteSource[types.size()];
+        for (int i = 0; i < bufs.length; ++i)
+            srcs[i] = types.get(i).asComparableBytes(bufs[i], version);
+        // We always have a fixed number of sources, with the trailing ones possibly being nulls.
+        // This can only result in a prefix if the last type in the tuple allows prefixes. Since that type is required
+        // to be weakly prefix-free, so is the tuple.
+        return ByteSource.withTerminator(ByteSource.END_OF_STREAM, srcs);
+    }
+
     /**
      * Split a tuple value into its component values.
      */
@@ -224,7 +239,7 @@ public class TupleType extends AbstractType<ByteBuffer>
         return components;
     }
 
-    public static ByteBuffer buildValue(ByteBuffer[] components)
+    public static ByteBuffer buildValue(ByteBuffer... components)
     {
         int totalLength = 0;
         for (ByteBuffer component : components)

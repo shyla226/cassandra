@@ -27,13 +27,15 @@ import org.apache.cassandra.serializers.FloatSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 
 
 public class FloatType extends NumberType<Float>
 {
     public static final FloatType instance = new FloatType();
 
-    FloatType() {super(ComparisonType.CUSTOM);} // singleton
+    FloatType() {super(ComparisonType.CUSTOM, 4);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
@@ -52,6 +54,12 @@ public class FloatType extends NumberType<Float>
             return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
 
         return compose(o1).compareTo(compose(o2));
+    }
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer buf, ByteComparable.Version version)
+    {
+        return ByteSource.optionalSignedFixedLengthFloat(buf);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException
@@ -105,12 +113,6 @@ public class FloatType extends NumberType<Float>
     public TypeSerializer<Float> getSerializer()
     {
         return FloatSerializer.instance;
-    }
-
-    @Override
-    public int valueLengthIfFixed()
-    {
-        return 4;
     }
 
     @Override

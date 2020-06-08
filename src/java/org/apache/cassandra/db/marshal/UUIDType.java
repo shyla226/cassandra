@@ -30,6 +30,8 @@ import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.UUIDSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.UUIDGen;
 
 /**
@@ -48,7 +50,7 @@ public class UUIDType extends AbstractType<UUID>
 
     UUIDType()
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, 16);
     }
 
     public boolean isEmptyValueMeaningless()
@@ -99,6 +101,28 @@ public class UUIDType extends AbstractType<UUID>
         }
 
         return UnsignedLongs.compare(b1.getLong(s1 + 8), b2.getLong(s2 + 8));
+    }
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer b, ByteComparable.Version v)
+    {
+        if (!b.hasRemaining())
+            return null;
+
+        int s = b.position();
+        long msb = b.getLong(s);
+        long version = ((msb >>> 12) & 0xf);
+        ByteBuffer swizzled = ByteBuffer.allocate(16);
+
+        if (version == 1)
+            swizzled.putLong(0, TimeUUIDType.reorderTimestampBytes(msb));
+        else
+            swizzled.putLong(0, (version << 60) | ((msb >>> 4) & 0x0FFFFFFFFFFFF000L) | (msb & 0xFFFL));
+
+        swizzled.putLong(8, b.getLong(s + 8));
+
+        // fixed-length thus prefix-free
+        return ByteSource.fixedLength(swizzled);
     }
 
     @Override
@@ -168,11 +192,5 @@ public class UUIDType extends AbstractType<UUID>
     static int version(ByteBuffer uuid)
     {
         return (uuid.get(6) & 0xf0) >> 4;
-    }
-
-    @Override
-    public int valueLengthIfFixed()
-    {
-        return 16;
     }
 }

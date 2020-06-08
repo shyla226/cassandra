@@ -39,7 +39,7 @@ public class AsciiType extends AbstractType<String>
 {
     public static final AsciiType instance = new AsciiType();
 
-    AsciiType() {super(ComparisonType.BYTE_ORDER);} // singleton
+    AsciiType() {super(ComparisonType.BYTE_ORDER, VARIABLE_LENGTH);} // singleton
 
     private final FastThreadLocal<CharsetEncoder> encoder = new FastThreadLocal<CharsetEncoder>()
     {

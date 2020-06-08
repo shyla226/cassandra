@@ -26,6 +26,8 @@ import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.BooleanSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +38,10 @@ public class BooleanType extends AbstractType<Boolean>
 
     public static final BooleanType instance = new BooleanType();
 
-    BooleanType() {super(ComparisonType.CUSTOM);} // singleton
+    private static final ByteBuffer FALSE_VALUE = ByteBuffer.wrap(new byte[]{0});
+    private static final ByteBuffer TRUE_VALUE = ByteBuffer.wrap(new byte[]{1});
+
+    BooleanType() {super(ComparisonType.CUSTOM, 1);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
@@ -54,6 +59,17 @@ public class BooleanType extends AbstractType<Boolean>
         if (b1 == 0)
             return b2 == 0 ? 0 : -1;
         return b2 == 0 ? 1 : 0;
+    }
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer buf, ByteComparable.Version version)
+    {
+        if (!buf.hasRemaining())
+            return null;
+        byte b = buf.get(buf.position());
+        if (b != 0)
+            b = 1;
+        return ByteSource.oneByte(b);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException
@@ -94,11 +110,5 @@ public class BooleanType extends AbstractType<Boolean>
     public TypeSerializer<Boolean> getSerializer()
     {
         return BooleanSerializer.instance;
-    }
-
-    @Override
-    public int valueLengthIfFixed()
-    {
-        return 1;
     }
 }

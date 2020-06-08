@@ -23,12 +23,13 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.cql3.Term;
-import org.apache.cassandra.cql3.statements.RequestValidations;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.SimpleDateSerializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.ByteSource;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
@@ -36,7 +37,18 @@ public class SimpleDateType extends TemporalType<Integer>
 {
     public static final SimpleDateType instance = new SimpleDateType();
 
-    SimpleDateType() {super(ComparisonType.BYTE_ORDER);} // singleton
+    SimpleDateType()
+    {
+        // VARIABLE_LENGTH due to compatibility reasons, should be 4
+        super(ComparisonType.BYTE_ORDER, VARIABLE_LENGTH);
+    } // singleton
+
+    @Override
+    public ByteSource asComparableBytes(ByteBuffer buf, ByteComparable.Version version)
+    {
+        // While BYTE_ORDER would still work for this type, making use of the fixed length is more efficient.
+        return ByteSource.fixedLength(buf);
+    }
 
     public ByteBuffer fromString(String source) throws MarshalException
     {
