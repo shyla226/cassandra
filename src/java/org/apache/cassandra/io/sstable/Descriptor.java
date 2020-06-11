@@ -114,6 +114,11 @@ public class Descriptor
         return filenameFor(component) + TMP_EXT;
     }
 
+    public File fileFor(Component component)
+    {
+        return new File(filenameFor(component));
+    }
+
     public String filenameFor(Component component)
     {
         return baseFilename() + separator + component.name();

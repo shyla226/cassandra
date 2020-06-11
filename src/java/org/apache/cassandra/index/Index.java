@@ -20,7 +20,9 @@
  */
 package org.apache.cassandra.index;
 
+import java.nio.ByteBuffer;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -50,6 +52,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CollatedViewIndexBuilder;
 import org.apache.cassandra.index.transactions.IndexTransaction;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
 import org.apache.cassandra.io.sstable.SSTable;
@@ -380,6 +383,23 @@ public interface Index
     public AbstractType<?> customExpressionValueType();
 
     /**
+     * If the index supports custom search expressions using the
+     * {@code SELECT * FROM table WHERE expr(index_name, expression)} syntax, this method should return a new
+     * {@link RowFilter.CustomExpression} for the specified expression value. Index implementations may provide their
+     * own implementations using method {@link RowFilter.CustomExpression#isSatisfiedBy(TableMetadata, DecoratedKey, Row)}
+     * to filter reconciled rows in the coordinator. Otherwise, the default implementation will accept all rows.
+     * See DB-2185 and DSP-16537 for further details.
+     *
+     * @param metadata the indexed table metadata
+     * @param value the custom expression value
+     * @return a custom index expression for the specified value
+     */
+    default RowFilter.CustomExpression customExpressionFor(TableMetadata metadata, ByteBuffer value)
+    {
+        return new RowFilter.CustomExpression(metadata, getIndexMetadata(), value);
+    }
+
+    /**
      * Transform an initial RowFilter into the filter that will still need to applied
      * to a set of Rows after the index has performed it's initial scan.
      * Used in ReadCommand#executeLocal to reduce the amount of filtering performed on the
@@ -426,6 +446,16 @@ public interface Index
      * @throws InvalidRequestException
      */
     public void validate(PartitionUpdate update) throws InvalidRequestException;
+
+    /**
+     * Returns the SSTable-attached {@link Component}s created by this index.
+     *
+     * @return the SSTable components created by this index
+     */
+    default Set<Component> getComponents()
+    {
+        return Collections.emptySet();
+    }
 
     /*
      * Update processing
@@ -694,6 +724,13 @@ public interface Index
          * should dispose of any resources tied to the lifecycle of the {@link Group}.
          */
         default void invalidate() { }
+
+        /**
+         * Returns the SSTable-attached {@link Component}s created by this index group.
+         *
+         * @return the SSTable components created by this group
+         */
+        Set<Component> getComponents();
     }
 
     /**
@@ -781,7 +818,6 @@ public interface Index
          */
         Searcher searcherFor(ReadCommand command);
 
-
         /**
          * Return a function which performs post processing on the results of a partition range read command.
          * In future, this may be used as a generalized mechanism for transforming results on the coordinator prior
@@ -800,6 +836,18 @@ public interface Index
         {
             return partitions -> partitions;
         }
+
+        /**
+         * Transform an initial {@link RowFilter} into the filter that will still need to applied to a set of Rows after
+         * the index has performed it's initial scan.
+         *
+         * Used in {@link ReadCommand#executeLocally(ReadExecutionController)} to reduce the amount of filtering performed on the
+         * results of the index query.
+         *
+         * @return the (hopefully) reduced filter that would still need to be applied after
+         *         the index was used to narrow the initial result set
+         */
+        RowFilter postIndexQueryFilter();
     }
 
     /*

@@ -2108,6 +2108,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     public void truncateBlocking()
     {
+        truncateBlocking(DatabaseDescriptor.isAutoSnapshot());
+    }
+
+
+    /**
+     * Truncate deletes the entire column family's data with no expensive tombstone creation
+     */
+    public void truncateBlocking(boolean snapshot)
+    {
         // We have two goals here:
         // - truncate should delete everything written before truncate was invoked
         // - but not delete anything that isn't part of the snapshot we create.
@@ -2125,7 +2134,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         final long truncatedAt;
         final CommitLogPosition replayAfter;
 
-        if (keyspace.getMetadata().params.durableWrites || DatabaseDescriptor.isAutoSnapshot())
+        if (keyspace.getMetadata().params.durableWrites || snapshot)
         {
             replayAfter = forceBlockingFlush();
             viewManager.forceBlockingFlush();
@@ -2158,7 +2167,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 logger.debug("Discarding sstable data for truncated CF + indexes");
                 data.notifyTruncated(truncatedAt);
 
-                if (DatabaseDescriptor.isAutoSnapshot())
+                if (snapshot)
                     snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(name, SNAPSHOT_TRUNCATE_PREFIX));
 
                 discardSSTables(truncatedAt);
@@ -2172,7 +2181,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             }
         };
 
-        runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true);
+        runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, CompactionInfo.StopTrigger.TRUNCATE);
         logger.info("Truncate of {}.{} is complete", keyspace.getName(), name);
     }
 
@@ -2195,6 +2204,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return runWithCompactionsDisabled(callable, (sstable) -> true, interruptValidation, interruptViews, true);
     }
 
+    public <V> V runWithCompactionsDisabled(Callable<V> callable, boolean interruptValidation, boolean interruptViews, CompactionInfo.StopTrigger trigger)
+    {
+        return runWithCompactionsDisabled(callable, (sstable) -> true, interruptValidation, interruptViews, true, trigger);
+    }
+
+    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<SSTableReader> sstablesPredicate, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes)
+    {
+        return runWithCompactionsDisabled(callable, sstablesPredicate, interruptValidation, interruptViews, interruptIndexes, CompactionInfo.StopTrigger.NONE);
+    }
     /**
      * Runs callable with compactions paused and compactions including sstables matching sstablePredicate stopped
      *
@@ -2205,7 +2223,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @param interruptIndexes if we should interrupt compactions on indexes. NOTE: if you set this to true your sstablePredicate
      *                         must be able to handle LocalPartitioner sstables!
      */
-    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<SSTableReader> sstablesPredicate, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes)
+    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<SSTableReader> sstablesPredicate, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes, CompactionInfo.StopTrigger trigger)
     {
         // synchronize so that concurrent invocations don't re-enable compactions partway through unexpectedly,
         // and so we only run one major compaction at a time
@@ -2224,7 +2242,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                  CompactionManager.CompactionPauser pausedStrategies = pauseCompactionStrategies(toInterruptFor))
             {
                 // interrupt in-progress compactions
-                CompactionManager.instance.interruptCompactionForCFs(toInterruptFor, sstablesPredicate, interruptValidation);
+                CompactionManager.instance.interruptCompactionForCFs(toInterruptFor, sstablesPredicate, interruptValidation, trigger);
                 CompactionManager.instance.waitForCessation(toInterruptFor, sstablesPredicate);
 
                 // doublecheck that we finished, instead of timing out

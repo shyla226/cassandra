@@ -163,6 +163,11 @@ public class Memtable implements Comparable<Memtable>
         return allocator;
     }
 
+    public void allocateExtraOnHeap(long additionalSpace, OpOrder.Group opGroup)
+    {
+        getAllocator().onHeap().allocate(additionalSpace, opGroup);
+    }
+
     public long getLiveDataSize()
     {
         return liveDataSize.get();

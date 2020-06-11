@@ -169,7 +169,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         this.option = option;
     }
 
-    public void skipBytes(int numBytes) throws IOException
+    public void skipBytes(long numBytes) throws IOException
     {
         flush();
         fchannel.position(fchannel.position() + numBytes);

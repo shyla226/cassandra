@@ -30,6 +30,7 @@ import com.google.common.base.Objects;
 public class Component
 {
     public static final char separator = '-';
+    public static final char SUB_SEPARATOR = '_';
 
     final static EnumSet<Type> TYPES = EnumSet.allOf(Type.class);
 

@@ -104,4 +104,9 @@ public interface SSTableFlushObserver
      * Called when all data is written to the file and it's ready to be finished up.
      */
     void complete();
+
+    /**
+     * Clean up resources on error. There should be no side effects if called multiple times.
+     */
+    default void abort(Throwable accumulator) {}
 }

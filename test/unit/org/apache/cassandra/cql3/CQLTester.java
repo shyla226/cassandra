@@ -22,9 +22,12 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.MalformedURLException;
 import java.net.ServerSocket;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
+import java.rmi.server.RMISocketFactory;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -33,6 +36,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import javax.management.MBeanServerConnection;
+import javax.management.remote.JMXConnector;
+import javax.management.remote.JMXConnectorFactory;
+import javax.management.remote.JMXConnectorServer;
+import javax.management.remote.JMXServiceURL;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
@@ -48,6 +57,7 @@ import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.audit.AuditLogManager;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -81,6 +91,8 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.security.ThreadAwareSecurityManager;
+import org.apache.cassandra.utils.JMXServerUtils;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static junit.framework.Assert.assertNotNull;
 
@@ -110,6 +122,11 @@ public abstract class CQLTester
     protected static final Map<ProtocolVersion, Session> sessions = new HashMap<>();
 
     private static boolean isServerPrepared = false;
+
+    private static JMXConnectorServer jmxServer;
+    private static String jmxHost;
+    private static int jmxPort;
+    protected static MBeanServerConnection jmxConnection;
 
     public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>(ProtocolVersion.SUPPORTED.size());
 
@@ -239,6 +256,42 @@ public abstract class CQLTester
         SystemKeyspace.persistLocalMetadata();
         AuditLogManager.instance.initialize();
         isServerPrepared = true;
+    }
+
+    /**
+     * Starts the JMX server. It's safe to call this method multiple times.
+     */
+    public static void startJMXServer() throws Exception
+    {
+        if (jmxServer != null)
+            return;
+
+        InetAddress loopback = InetAddress.getLoopbackAddress();
+        jmxHost = loopback.getHostAddress();
+        try (ServerSocket sock = new ServerSocket())
+        {
+            sock.bind(new InetSocketAddress(loopback, 0));
+            jmxPort = sock.getLocalPort();
+        }
+
+        jmxServer = JMXServerUtils.createJMXServer(jmxPort, true);
+        jmxServer.start();
+    }
+    public static JMXServiceURL getJMXServiceURL() throws MalformedURLException
+    {
+        assert jmxServer != null : "jmxServer not started";
+
+        return new JMXServiceURL(String.format("service:jmx:rmi:///jndi/rmi://%s:%d/jmxrmi", jmxHost, jmxPort));
+    }
+
+    public static void createMBeanServerConnection() throws Exception
+    {
+        assert jmxServer != null : "jmxServer not started";
+
+        Map<String, Object> env = new HashMap<>();
+        env.put("com.sun.jndi.rmi.factory.socket", RMISocketFactory.getDefaultSocketFactory());
+        JMXConnector jmxc = JMXConnectorFactory.connect(getJMXServiceURL(), env);
+        jmxConnection =  jmxc.getMBeanServerConnection();
     }
 
     public static void cleanupAndLeaveDirs() throws IOException
@@ -461,10 +514,12 @@ public abstract class CQLTester
 
     public ColumnFamilyStore getCurrentColumnFamilyStore(String keyspace)
     {
-        String currentTable = currentTable();
-        return currentTable == null
-             ? null
-             : Keyspace.open(keyspace).getColumnFamilyStore(currentTable);
+        return getColumnFamilyStore(keyspace, currentTable());
+    }
+
+    public ColumnFamilyStore getColumnFamilyStore(String keyspace, String table)
+    {
+        return Keyspace.open(keyspace).getColumnFamilyStore(table);
     }
 
     public void flush(boolean forceFlush)
@@ -480,23 +535,38 @@ public abstract class CQLTester
 
     public void flush(String keyspace)
     {
-        ColumnFamilyStore store = getCurrentColumnFamilyStore(keyspace);
+        flush(keyspace, currentTable());
+    }
+
+    public void flush(String keyspace, String table)
+    {
+        ColumnFamilyStore store = Keyspace.open(keyspace).getColumnFamilyStore(table);
         if (store != null)
             store.forceBlockingFlush();
     }
 
     public void disableCompaction(String keyspace)
     {
-        ColumnFamilyStore store = getCurrentColumnFamilyStore(keyspace);
+        disableCompaction(keyspace, currentTable());
+    }
+
+    public void disableCompaction(String keyspace, String table)
+    {
+        ColumnFamilyStore store = getColumnFamilyStore(keyspace, table);
         if (store != null)
             store.disableAutoCompaction();
     }
 
     public void compact()
     {
+        compact(KEYSPACE, currentTable());
+    }
+
+    public void compact(String keyspace, String table)
+    {
         try
         {
-            ColumnFamilyStore store = getCurrentColumnFamilyStore();
+            ColumnFamilyStore store = getColumnFamilyStore(keyspace, table);
             if (store != null)
                 store.forceMajorCompaction();
         }
@@ -672,7 +742,7 @@ public abstract class CQLTester
         return currentKeyspace;
     }
 
-    protected String createTable(String query)
+    public String createTable(String query)
     {
         return createTable(KEYSPACE, query);
     }
@@ -844,6 +914,23 @@ public abstract class CQLTester
         schemaChange(fullQuery);
     }
 
+    /**
+     *  Because the tracing executor is single threaded, submitting an empty event should ensure
+     *  that all tracing events mutations have been applied.
+     */
+    protected void waitForTracingEvents()
+    {
+        try
+        {
+            Stage.TRACING.executor().submit(() -> {}).get();
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Failed to wait for tracing events: {}", t);
+        }
+    }
+
     protected void assertLastSchemaChange(Event.SchemaChange.Change change, Event.SchemaChange.Target target,
                                           String keyspace, String name,
                                           String... argTypes)
@@ -908,7 +995,7 @@ public abstract class CQLTester
         return sessionNet().execute(new SimpleStatement(formatQuery(query)).setFetchSize(pageSize));
     }
 
-    protected Session sessionNet()
+    public Session sessionNet()
     {
         return sessionNet(getDefaultVersion());
     }
@@ -951,7 +1038,7 @@ public abstract class CQLTester
         return executeFormattedQuery(formatQuery(query), values);
     }
 
-    protected UntypedResultSet executeFormattedQuery(String query, Object... values) throws Throwable
+    public UntypedResultSet executeFormattedQuery(String query, Object... values) throws Throwable
     {
         UntypedResultSet rs;
         if (usePrepared)

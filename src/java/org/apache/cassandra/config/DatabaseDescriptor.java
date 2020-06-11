@@ -363,6 +363,8 @@ public class DatabaseDescriptor
         applyEncryptionContext();
 
         applySslContextHotReload();
+
+        conf.sai_options.validate();
     }
 
     private static void applySimpleConfig()
@@ -3153,5 +3155,25 @@ public class DatabaseDescriptor
     public static void setRangeTombstoneListGrowthFactor(double resizeFactor)
     {
         conf.range_tombstone_list_growth_factor = resizeFactor;
+    }
+
+    public static int getSAISegmentWriteBufferSpace()
+    {
+        return conf.sai_options.segment_write_buffer_space_mb;
+    }
+
+    public static void setSAISegmentWriteBufferSpace(int bufferSpace)
+    {
+        conf.sai_options.segment_write_buffer_space_mb = bufferSpace;
+    }
+
+    public static double getSAIZeroCopyUsedThreshold()
+    {
+        return conf.sai_options.zerocopy_used_threshold;
+    }
+
+    public static void setSAIZeroCopyUsedThreshold(double threshold)
+    {
+        conf.sai_options.zerocopy_used_threshold = threshold;
     }
 }

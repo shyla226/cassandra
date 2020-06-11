@@ -240,9 +240,15 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         markIndexesBuilding(ImmutableSet.of(index), true, isNewCF);
 
+        return buildIndex(index);
+    }
+
+    @VisibleForTesting
+    public Future<?> buildIndex(final Index index)
+    {
         Callable<?> initialBuildTask = null;
         // if the index didn't register itself, we can probably assume that no initialization needs to happen
-        if (indexes.containsKey(indexDef.name))
+        if (indexes.containsKey(index.getIndexMetadata().name))
         {
             try
             {
@@ -791,8 +797,10 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         if (indexDef.isCustom())
         {
             assert indexDef.options != null;
-            String className = indexDef.options.get(IndexTarget.CUSTOM_INDEX_OPTION_NAME);
+            // Find any aliases to the fully qualified index class name:
+            String className = IndexMetadata.expandAliases(indexDef.options.get(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
             assert !Strings.isNullOrEmpty(className);
+
             try
             {
                 Class<? extends Index> indexClass = FBUtilities.classForName(className, "Index");
@@ -1063,6 +1071,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public void deletePartition(UnfilteredRowIterator partition, int nowInSec)
     {
+        if (!handles(IndexTransaction.Type.CLEANUP))
+            return;
+
         // we need to acquire memtable lock because secondary index deletion may
         // cause a race (see CASSANDRA-3712). This is done internally by the
         // index transaction when it commits
@@ -1175,6 +1186,15 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return indexes.values().stream().filter((i) -> i.supportsExpression(expression.column(), expression.operator())).findFirst();
     }
 
+    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType)
+    {
+        return indexes.values()
+                      .stream()
+                      .filter(i -> indexType.isInstance(i) && i.supportsExpression(expression.column(), expression.operator()))
+                      .map(indexType::cast)
+                      .findFirst();
+    }
+
     /**
      * Called at write time to ensure that values present in the update
      * are valid according to the rules of all registered indexes which
@@ -1256,6 +1276,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return ImmutableSet.copyOf(indexGroups.values());
     }
 
+    public Index.Group getIndexGroup(Object key)
+    {
+        return indexGroups.get(key);
+    }
+
     /**
      * Returns the {@link Index.Group} the specified index belongs to, as specified during registering with
      * {@link #registerIndex(Index, Object, Supplier)}.
@@ -1269,6 +1294,12 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         Index index = getIndex(metadata);
         return index == null ? null : getIndexGroup(index);
+    }
+
+    @VisibleForTesting
+    public boolean needsFullRebuild(String index)
+    {
+        return needsFullRebuild.contains(index);
     }
 
     public Index.Group getIndexGroup(Index index)
@@ -1332,6 +1363,20 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             return CleanupTransaction.NO_OP;
 
         return new CleanupGCTransaction(key, regularAndStaticColumns, keyspace, nowInSec, listIndexGroups(), writableIndexSelector());
+    }
+
+    /**
+     * @param type index transaction type
+     * @return true if at least one of the indexes will be able to handle given index transaction type
+     */
+    public boolean handles(IndexTransaction.Type type)
+    {
+        for (Index.Group group : indexGroups.values())
+        {
+            if (group.handles(type))
+                return true;
+        }
+        return false;
     }
 
     /**

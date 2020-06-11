@@ -30,6 +30,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.concurrent.InfiniteLoopExecutor;
 import org.slf4j.Logger;
@@ -597,12 +598,13 @@ public final class Ref<T> implements RefCounted<T>
                         if (haveLoops != null)
                             haveLoops.add(visiting);
                         NoSpamLogger.log(logger,
-                                NoSpamLogger.Level.ERROR,
-                                rootObject.getClass().getName(),
-                                1,
-                                TimeUnit.SECONDS,
-                                "Strong self-ref loop detected {}",
-                                path);
+                                         NoSpamLogger.Level.ERROR,
+                                         rootObject.getClass().getName(),
+                                         1,
+                                         TimeUnit.SECONDS,
+                                         "Strong self-ref loop detected, {} references itself:\n {}",
+                                         visiting,
+                                         String.join("\n", path.stream().map(Object::toString).collect(Collectors.toList())));
                     }
                     else if (child == null)
                     {
@@ -618,6 +620,7 @@ public final class Ref<T> implements RefCounted<T>
             }
         }
     }
+
 
     static final Map<Class<?>, List<Field>> fieldMap = new HashMap<>();
     static List<Field> getFields(Class<?> clazz)

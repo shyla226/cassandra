@@ -305,7 +305,8 @@ public class SSTableFlushObserverTest
                                            new MetadataCollector(metadata.comparator).sstableLevel(0),
                                            new SerializationHeader(true, metadata, metadata.regularAndStaticColumns(), EncodingStats.NO_STATS),
                                            Collections.singletonList(observer),
-                                           transaction);
+                                           transaction,
+                                           Collections.emptySet());
 
         SSTableReader reader;
         try
