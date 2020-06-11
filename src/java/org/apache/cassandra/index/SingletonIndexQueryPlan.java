@@ -33,11 +33,13 @@ public class SingletonIndexQueryPlan implements Index.QueryPlan
 {
     private final Index index;
     private final Set<Index> indexes;
+    private final RowFilter postIndexFilter;
 
-    protected SingletonIndexQueryPlan(Index index)
+    protected SingletonIndexQueryPlan(Index index, RowFilter postIndexFilter)
     {
         this.index = index;
         this.indexes = Collections.singleton(index);
+        this.postIndexFilter = postIndexFilter;
     }
 
     @Nullable
@@ -46,7 +48,7 @@ public class SingletonIndexQueryPlan implements Index.QueryPlan
         for (RowFilter.Expression e : rowFilter.getExpressions())
         {
             if (index.supportsExpression(e.column(), e.operator()))
-                return new SingletonIndexQueryPlan(index);
+                return new SingletonIndexQueryPlan(index, index.getPostIndexQueryFilter(rowFilter));
         }
 
         return null;
@@ -75,5 +77,11 @@ public class SingletonIndexQueryPlan implements Index.QueryPlan
     public Index.Searcher searcherFor(ReadCommand command)
     {
         return index.searcherFor(command);
+    }
+
+    @Override
+    public RowFilter postIndexQueryFilter()
+    {
+        return postIndexFilter;
     }
 }

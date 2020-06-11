@@ -440,15 +440,14 @@ public abstract class ReadCommand extends AbstractReadQuery
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
         Index.QueryPlan indexQueryPlan = indexQueryPlan();
 
-        Index index = null;
         Index.Searcher searcher = null;
         if (indexQueryPlan != null)
         {
             cfs.indexManager.checkQueryability(indexQueryPlan);
 
             // TODO to be ported in a separate ticket to support multi-index query without requiring ALLOW FILTERING
-            index = indexQueryPlan.getFirst();
-            searcher = index.searcherFor(this);
+            Index index = indexQueryPlan.getFirst();
+            searcher = indexQueryPlan.searcherFor(this);
             Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
         }
 
@@ -472,7 +471,7 @@ public abstract class ReadCommand extends AbstractReadQuery
 
             // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
             // no point in checking it again.
-            RowFilter filter = (null == searcher) ? rowFilter() : index.getPostIndexQueryFilter(rowFilter());
+            RowFilter filter = (null == searcher) ? rowFilter() : indexQueryPlan.postIndexQueryFilter();
 
             /*
              * TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,

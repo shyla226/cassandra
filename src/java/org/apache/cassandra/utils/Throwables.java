@@ -41,6 +41,25 @@ public final class Throwables
         void perform() throws E;
     }
 
+    /**
+     * Check if the provided throwable is of the provided class, or than any of the throwable in his clause chain is
+     * of the provided class.
+     *
+     * @param t the {@link Throwable} to check.
+     * @param causeClass the class to check if the exception is an instance of, or is caused by.
+     * @return {@code true} if {@code t} is of class {@code causeClass} or any of its cause is.
+     */
+    public static <T extends Throwable> boolean isCausedBy(Throwable t, Class<T> causeClass)
+    {
+        while (t != null)
+        {
+            if (causeClass.isInstance(t))
+                return true;
+            t = t.getCause();
+        }
+        return false;
+    }
+
     public static boolean isCausedBy(Throwable t, Predicate<Throwable> cause)
     {
         return cause.test(t) || (t.getCause() != null && cause.test(t.getCause()));
@@ -166,6 +185,28 @@ public final class Throwables
                 throw (opType == FileOpType.WRITE) ? new FSWriteError(e, filePath) : new FSReadError(e, filePath);
             }
         }));
+    }
+
+    public static Throwable close(Throwable accumulate, AutoCloseable ... actions)
+    {
+        for (AutoCloseable action : actions)
+            accumulate = close(accumulate, action);
+        return accumulate;
+    }
+
+    public static Throwable close(Throwable accumulate, AutoCloseable action)
+    {
+        if (action == null)
+            return accumulate;
+        try
+        {
+            action.close();
+        }
+        catch (Throwable t)
+        {
+            accumulate = merge(accumulate, t);
+        }
+        return accumulate;
     }
 
     public static Throwable close(Throwable accumulate, Iterable<? extends AutoCloseable> closeables)

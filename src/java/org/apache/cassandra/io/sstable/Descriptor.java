@@ -125,6 +125,11 @@ public class Descriptor
         return String.format("%s.%s%s", filenameFor(component), UUIDGen.getTimeUUID(), TMP_EXT);
     }
 
+    public File fileFor(Component component)
+    {
+        return new File(filenameFor(component));
+    }
+
     public String filenameFor(Component component)
     {
         return baseFilename() + separator + component.name();

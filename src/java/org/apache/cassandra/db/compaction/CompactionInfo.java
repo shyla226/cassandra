@@ -31,6 +31,8 @@ import com.google.common.collect.ImmutableSet;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 
+import static org.apache.cassandra.db.compaction.CompactionInfo.StopTrigger.NONE;
+
 public final class CompactionInfo
 {
     public static final String ID = "id";
@@ -167,14 +169,43 @@ public final class CompactionInfo
         return sstables.stream().anyMatch(sstablePredicate);
     }
 
+    public enum StopTrigger
+    {
+        NONE(false),
+        TRUNCATE(true);
+
+        private final boolean isFinal;
+
+        StopTrigger(boolean isFinal)
+        {
+            this.isFinal = isFinal;
+        }
+
+        // A stop trigger marked as final should not be overwritten. So a table operation that is
+        // marked with a final stop trigger cannot have it's stop trigger changed to another value.
+        public boolean isFinal()
+        {
+            return isFinal;
+        }
+    }
+
     public static abstract class Holder
     {
         private volatile boolean stopRequested = false;
+        private volatile StopTrigger trigger = NONE;
+
         public abstract CompactionInfo getCompactionInfo();
 
         public void stop()
         {
             stopRequested = true;
+        }
+
+        public void stop(StopTrigger trigger)
+        {
+            this.stopRequested = true;
+            if (!this.trigger.isFinal())
+                this.trigger = trigger;
         }
 
         /**
@@ -186,6 +217,14 @@ public final class CompactionInfo
         public boolean isStopRequested()
         {
             return stopRequested || (isGlobal() && CompactionManager.instance.isGlobalCompactionPaused());
+        }
+
+        /**
+         * @return cause of compaction interruption.
+         */
+        public StopTrigger trigger()
+        {
+            return trigger;
         }
     }
 

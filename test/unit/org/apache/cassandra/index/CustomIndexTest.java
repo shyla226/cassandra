@@ -39,6 +39,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.schema.TableMetadata;
@@ -1650,6 +1651,12 @@ public class CustomIndexTest extends CQLTester
                         observers.forEach(SSTableFlushObserver::complete);
                     }
                 };
+            }
+
+            @Override
+            public Set<Component> getComponents()
+            {
+                return Collections.emptySet();
             }
         }
     }

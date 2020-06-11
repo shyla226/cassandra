@@ -23,6 +23,7 @@ import java.nio.charset.Charset;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArraySet;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.Collections2;
@@ -34,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.RowIndexEntry;
+import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
@@ -71,7 +73,7 @@ public abstract class SSTable
     public static final int TOMBSTONE_HISTOGRAM_TTL_ROUND_SECONDS = Integer.valueOf(System.getProperty("cassandra.streaminghistogram.roundseconds", "60"));
 
     public final Descriptor descriptor;
-    protected final Set<Component> components;
+    public final Set<Component> components;
     public final boolean compression;
 
     public DecoratedKey first;
@@ -304,7 +306,8 @@ public abstract class SSTable
      * Reads the list of components from the TOC component.
      * @return set of components found in the TOC
      */
-    protected static Set<Component> readTOC(Descriptor descriptor) throws IOException
+    @VisibleForTesting
+    public static Set<Component> readTOC(Descriptor descriptor) throws IOException
     {
         return readTOC(descriptor, true);
     }
@@ -348,6 +351,16 @@ public abstract class SSTable
     }
 
     /**
+     * Rewrite TOC components by deleting existing TOC file and append new components
+     */
+    private static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
+    {
+        File tocFile = descriptor.fileFor(Component.TOC);
+        tocFile.delete();
+        appendTOC(descriptor, components);
+    }
+
+    /**
      * Registers new custom components. Used by custom compaction strategies.
      * Adding a component for the second time is a no-op.
      * Don't remove this - this method is a part of the public API, intended for use by custom compaction strategies.
@@ -355,9 +368,48 @@ public abstract class SSTable
      */
     public synchronized void addComponents(Collection<Component> newComponents)
     {
-        Collection<Component> componentsToAdd = Collections2.filter(newComponents, Predicates.not(Predicates.in(components)));
+        registerComponents(newComponents, null);
+    }
+
+    /**
+     * Registers new custom components into sstable and update size tracking
+     * @param newComponents collection of components to be added
+     * @param tracker used to update on-disk size metrics
+     */
+    public synchronized void registerComponents(Collection<Component> newComponents, Tracker tracker)
+    {
+        Collection<Component> componentsToAdd = new HashSet<>(Collections2.filter(newComponents, x -> !components.contains(x)));
         appendTOC(descriptor, componentsToAdd);
         components.addAll(componentsToAdd);
+
+        if (tracker == null)
+            return;
+
+        for (Component component : componentsToAdd)
+        {
+            File file = descriptor.fileFor(component);
+            if (file.exists())
+                tracker.updateSizeTracking(file.length());
+        }
+    }
+
+    /**
+     * Unregisters custom components from sstable and update size tracking
+     * @param removeComponents collection of components to be remove
+     * @param tracker used to update on-disk size metrics
+     */
+    public synchronized void unregisterComponents(Collection<Component> removeComponents, Tracker tracker)
+    {
+        Collection<Component> componentsToRemove = new HashSet<>(Collections2.filter(removeComponents, components::contains));
+        components.removeAll(componentsToRemove);
+        rewriteTOC(descriptor, components);
+
+        for (Component component : componentsToRemove)
+        {
+            File file = descriptor.fileFor(component);
+            if (file.exists())
+                tracker.updateSizeTracking(-file.length());
+        }
     }
 
     public AbstractBounds<Token> getBounds()
