@@ -208,9 +208,4 @@ public class StubIndex implements Index
     {
         return (controller) -> Util.executeLocally((PartitionRangeReadCommand)command, baseCfs, controller);
     }
-
-    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand readCommand)
-    {
-        return (iter, command) -> iter;
-    }
 }

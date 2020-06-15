@@ -18,7 +18,6 @@
 package org.apache.cassandra.service;
 
 import java.nio.ByteBuffer;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -1916,10 +1915,10 @@ public class StorageProxy implements StorageProxyMBean
     private static float estimateResultsPerRange(PartitionRangeReadCommand command, Keyspace keyspace)
     {
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
-        Index index = command.getIndex(cfs);
-        float maxExpectedResults = index == null
+        Index.QueryPlan queryPlan = command.indexQueryPlan();
+        float maxExpectedResults = queryPlan == null
                                  ? command.limits().estimateTotalResults(cfs)
-                                 : index.getEstimatedResultRows();
+                                 : queryPlan.getEstimatedResultRows();
 
         // adjust maxExpectedResults by the number of tokens this node has and the replication factor for this ks
         return (maxExpectedResults / DatabaseDescriptor.getNumTokens()) / keyspace.getReplicationStrategy().getReplicationFactor().allReplicas;
@@ -1930,6 +1929,7 @@ public class StorageProxy implements StorageProxyMBean
     {
         private final Keyspace keyspace;
         private final ConsistencyLevel consistency;
+        private final Index.QueryPlan indexQueryPlan;
         private final Iterator<? extends AbstractBounds<PartitionPosition>> ranges;
         private final int rangeCount;
 
@@ -1937,6 +1937,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             this.keyspace = keyspace;
             this.consistency = consistency;
+            this.indexQueryPlan = command.indexQueryPlan();
 
             List<? extends AbstractBounds<PartitionPosition>> l = keyspace.getReplicationStrategy() instanceof LocalStrategy
                                                           ? command.dataRange().keyRange().unwrap()
@@ -1955,7 +1956,7 @@ public class StorageProxy implements StorageProxyMBean
             if (!ranges.hasNext())
                 return endOfData();
 
-            return ReplicaPlans.forRangeRead(keyspace, consistency, ranges.next(), 1);
+            return ReplicaPlans.forRangeRead(keyspace, indexQueryPlan, consistency, ranges.next(), 1);
         }
     }
 

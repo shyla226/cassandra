@@ -188,11 +188,6 @@ public interface IndexRegistry
                 return null;
             }
 
-            public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command)
-            {
-                return null;
-            }
-
             public Searcher searcherFor(ReadCommand command)
             {
                 return null;

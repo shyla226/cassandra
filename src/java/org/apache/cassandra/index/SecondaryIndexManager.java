@@ -27,6 +27,8 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
@@ -35,7 +37,6 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -62,21 +63,30 @@ import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index.IndexBuildingSupport;
+import org.apache.cassandra.exceptions.ReadFailureException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.transactions.*;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.locator.Endpoints;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.pager.SinglePartitionPager;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.json.simple.JSONValue;
 
 import static org.apache.cassandra.utils.ExecutorUtils.awaitTermination;
 import static org.apache.cassandra.utils.ExecutorUtils.shutdown;
@@ -132,6 +142,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     // default page size (in rows) when rebuilding the index for a whole partition
     public static final int DEFAULT_PAGE_SIZE = 10000;
+
+    // store per-endpoint index status: the key of inner map is identifier "keyspace.index"
+    public static final Map<InetAddressAndPort, Map<String, Index.Status>> peerIndexStatus = new ConcurrentHashMap<>();
+    // executes index status propagation task asynchronously to avoid potential deadlock on SIM
+    private static final ExecutorService statusPropagationExecutor = Executors.newSingleThreadExecutor();
 
     /**
      * All registered indexes.
@@ -282,6 +297,22 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             return reloadIndex(indexDef);
         else
             return createIndex(indexDef, isNewCF);
+    }
+
+    /**
+     * Throws an {@link IndexNotAvailableException} if any of the indexes in the specified {@link Index.QueryPlan} is
+     * not queryable, as it's defined by {@link #isIndexQueryable(Index)}.
+     *
+     * @param queryPlan a query plan
+     * @throws IndexNotAvailableException if the query plan has any index that is not queryable
+     */
+    public void checkQueryability(Index.QueryPlan queryPlan)
+    {
+        for (Index index : queryPlan.getIndexes())
+        {
+            if (!isIndexQueryable(index))
+                throw new IndexNotAvailableException(index);
+        }
     }
 
     /**
@@ -503,7 +534,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             logger.info("Submitting index {} of {} for data in {}",
                         isFullRebuild ? "recovery" : "build",
-                        indexes.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.joining(",")),
+                        commaSeparated(indexes),
                         sstables.stream().map(SSTableReader::toString).collect(Collectors.joining(",")));
 
             // Group all building tasks
@@ -656,7 +687,10 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                             AtomicInteger counter = inProgressBuilds.computeIfAbsent(indexName, ignored -> new AtomicInteger(0));
 
                             if (isFullRebuild)
+                            {
                                 needsFullRebuild.remove(indexName);
+                                makeIndexNonQueryable(index, Index.Status.FULL_REBUILD_STARTED);
+                            }
 
                             if (counter.getAndIncrement() == 0 && DatabaseDescriptor.isDaemonInitialized() && !isNewCF)
                                 SystemKeyspace.setIndexRemoved(keyspaceName, indexName);
@@ -674,13 +708,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         String indexName = index.getIndexMetadata().name;
         if (isFullRebuild)
-        {
-            if (queryableIndexes.add(indexName))
-                logger.info("Index [{}] became queryable after successful build.", indexName);
-
-            if (writableIndexes.put(indexName, index) == null)
-                logger.info("Index [{}] became writable after successful build.", indexName);
-        }
+            makeIndexQueryable(index, Index.Status.BUILD_SUCCEEDED);
         
         AtomicInteger counter = inProgressBuilds.get(indexName);
         if (counter != null)
@@ -748,6 +776,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         writableIndexes.remove(indexName);
         needsFullRebuild.remove(indexName);
         inProgressBuilds.remove(indexName);
+        // remove existing indexing status
+        propagateLocalIndexStatus(keyspace.getName(), indexName, Index.Status.DROPPED);
     }
 
     public Index getIndexByName(String indexName)
@@ -1080,15 +1110,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * ReadOrderGroup, or an estimate of the result size from an average index query.
      *
      * @param rowFilter RowFilter of the command to be executed
-     * @return an Index instance, ready to use during execution of the command, or null if none
-     * of the registered indexes can support the command.
+     * @return the best available index query plan for the row filter, or {@code null} if none of the registered indexes
+     * can support the command.
      */
-    public Index getBestIndexFor(RowFilter rowFilter)
+    public Index.QueryPlan getBestIndexQueryPlanFor(RowFilter rowFilter)
     {
         if (indexes.isEmpty() || rowFilter.isEmpty())
             return null;
 
-        Set<Index> searchableIndexes = new HashSet<>();
         for (RowFilter.Expression expression : rowFilter)
         {
             if (expression.isCustom())
@@ -1098,40 +1127,48 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 RowFilter.CustomExpression customExpression = (RowFilter.CustomExpression) expression;
                 logger.trace("Command contains a custom index expression, using target index {}", customExpression.getTargetIndex().name);
                 Tracing.trace("Command contains a custom index expression, using target index {}", customExpression.getTargetIndex().name);
-                return indexes.get(customExpression.getTargetIndex().name);
-            }
-            else if (!expression.isUserDefined())
-            {
-                indexes.values().stream()
-                       .filter(index -> index.supportsExpression(expression.column(), expression.operator()))
-                       .forEach(searchableIndexes::add);
+                Index.Group group = getIndexGroup(customExpression.getTargetIndex());
+                return group == null ? null : group.queryPlanFor(rowFilter);
             }
         }
 
-        if (searchableIndexes.isEmpty())
+        Set<Index.QueryPlan> queryPlans = indexGroups.values()
+                                                     .stream()
+                                                     .map(g -> g.queryPlanFor(rowFilter))
+                                                     .filter(Objects::nonNull)
+                                                     .collect(Collectors.toSet());
+
+        if (queryPlans.isEmpty())
         {
             logger.trace("No applicable indexes found");
             Tracing.trace("No applicable indexes found");
             return null;
         }
 
-        Index selected = searchableIndexes.size() == 1
-                         ? Iterables.getOnlyElement(searchableIndexes)
-                         : searchableIndexes.stream()
-                                            .min((a, b) -> Longs.compare(a.getEstimatedResultRows(),
-                                                                         b.getEstimatedResultRows()))
-                                            .orElseThrow(() -> new AssertionError("Could not select most selective index"));
+        // find the best plan
+        Index.QueryPlan selected = queryPlans.size() == 1
+                                   ? Iterables.getOnlyElement(queryPlans)
+                                   : queryPlans.stream()
+                                               .min(Comparator.naturalOrder())
+                                               .orElseThrow(() -> new AssertionError("Could not select most selective index"));
 
         // pay for an additional threadlocal get() rather than build the strings unnecessarily
         if (Tracing.isTracing())
         {
             Tracing.trace("Index mean cardinalities are {}. Scanning with {}.",
-                          searchableIndexes.stream().map(i -> i.getIndexMetadata().name + ':' + i.getEstimatedResultRows())
-                                           .collect(Collectors.joining(",")),
-                          selected.getIndexMetadata().name);
+                          queryPlans.stream()
+                                    .map(p -> commaSeparated(p.getIndexes()) + ':' + p.getEstimatedResultRows())
+                                    .collect(Collectors.joining(",")),
+                          commaSeparated(selected.getIndexes()));
         }
         return selected;
     }
+
+    private static String commaSeparated(Collection<Index> indexes)
+    {
+        return indexes.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.joining(","));
+    }
+
 
     public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
     {
@@ -1217,6 +1254,26 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     public Set<Index.Group> listIndexGroups()
     {
         return ImmutableSet.copyOf(indexGroups.values());
+    }
+
+    /**
+     * Returns the {@link Index.Group} the specified index belongs to, as specified during registering with
+     * {@link #registerIndex(Index, Object, Supplier)}.
+     *
+     * @param metadata the index metadata
+     * @return the group the index belongs to, or {@code null} if the index is not registered or if it hasn't been
+     * associated to any group
+     */
+    @Nullable
+    public Index.Group getIndexGroup(IndexMetadata metadata)
+    {
+        Index index = getIndex(metadata);
+        return index == null ? null : getIndexGroup(index);
+    }
+
+    public Index.Group getIndexGroup(Index index)
+    {
+        return indexGroups.values().stream().filter(g -> g.containsIndex(index)).findAny().orElse(null);
     }
 
     /*
@@ -1614,5 +1671,141 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         shutdown(asyncExecutor, blockingExecutor);
         awaitTermination(timeout, units, asyncExecutor, blockingExecutor);
+    }
+
+    /**
+     * Remove endpoints whose indexes are not queryable for the specified {@link Index.QueryPlan}.
+     *
+     * @param liveEndpoints current live endpoints where non-queryable endpoints will be removed
+     * @param keyspace to be queried
+     * @param indexQueryPlan index query plan used in the read command
+     * @param level consistency level of read command
+     */
+    public static <E extends Endpoints<E>> E filterForQuery(E liveEndpoints, Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel level)
+    {
+        E queryableEndpoints = liveEndpoints.filter(replica -> {
+
+            for (Index index : indexQueryPlan.getIndexes())
+            {
+                Index.Status status = getIndexStatus(replica.endpoint(), keyspace.getName(), index.getIndexMetadata().name);
+                if (!index.isQueryable(status))
+                    return false;
+            }
+
+            return true;
+        });
+
+        int initial = liveEndpoints.size();
+        int filtered = queryableEndpoints.size();
+
+        // Throw ReadFailureException if read request cannot satisfy Consistency Level due to non-queryable indexes.
+        // It is to provide a better UX, compared to throwing UnavailableException when the nodes are actually alive.
+        if (initial != filtered)
+        {
+            int required = level.blockFor(keyspace);
+            if (required <= initial && required > filtered)
+            {
+                Map<InetAddressAndPort, RequestFailureReason> failureReasons = new HashMap<>();
+                liveEndpoints.without(queryableEndpoints.endpoints())
+                             .forEach(replica -> failureReasons.put(replica.endpoint(), RequestFailureReason.INDEX_NOT_AVAILABLE));
+
+                throw new ReadFailureException(level, filtered, required, false, failureReasons);
+            }
+        }
+
+        return queryableEndpoints;
+    }
+
+    public void makeIndexNonQueryable(Index index, Index.Status status)
+    {
+        String name = index.getIndexMetadata().name;
+        if (indexes.get(name) == index)
+        {
+            propagateLocalIndexStatus(keyspace.getName(), name, status);
+            if (!index.isQueryable(status))
+                queryableIndexes.remove(name);
+        }
+    }
+
+    public void makeIndexQueryable(Index index, Index.Status status)
+    {
+        String name = index.getIndexMetadata().name;
+        if (indexes.get(name) == index)
+        {
+            propagateLocalIndexStatus(keyspace.getName(), name, status);
+            if (index.isQueryable(status))
+            {
+                queryableIndexes.add(name);
+                logger.info("Index [{}] became queryable after successful build.", name);
+            }
+
+            if (writableIndexes.put(name, index) == null)
+                logger.info("Index [{}] became writable after successful build.", name);
+        }
+    }
+
+    public static Index.Status getIndexStatus(InetAddressAndPort peer, String keyspace, String index)
+    {
+        return peerIndexStatus.getOrDefault(peer, Collections.emptyMap())
+                              .getOrDefault(identifier(keyspace, index), Index.Status.UNKNOWN);
+    }
+
+    public synchronized static void receivePeerIndexStatus(InetAddressAndPort endpoint, VersionedValue versionedValue)
+    {
+        try
+        {
+            if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
+                return;
+
+            Map<String, String> peerStatus = (Map<String, String>) JSONValue.parseWithException(versionedValue.value);
+            Map<String, Index.Status> indexStatus = new ConcurrentHashMap<>();
+
+            for (Map.Entry<String, String> e : peerStatus.entrySet())
+            {
+                String keyspaceIndex = e.getKey();
+                Index.Status status = Index.Status.valueOf(e.getValue());
+                indexStatus.put(keyspaceIndex, status);
+            }
+
+            peerIndexStatus.put(endpoint, indexStatus);
+        }
+        catch (Throwable e)
+        {
+            logger.warn("Unable to parse index status: {}", e.getMessage());
+        }
+    }
+
+    @VisibleForTesting
+    public synchronized static void propagateLocalIndexStatus(String keyspace, String index, Index.Status status)
+    {
+        try
+        {
+            Map<String, Index.Status> states = peerIndexStatus.computeIfAbsent(FBUtilities.getBroadcastAddressAndPort(),
+                                                                               k -> new ConcurrentHashMap<>());
+            String keyspaceIndex = identifier(keyspace, index);
+
+            if (status == Index.Status.DROPPED)
+                states.remove(keyspaceIndex);
+            else
+                states.put(keyspaceIndex, status);
+
+            String newStatus = JSONValue.toJSONString(states.entrySet().stream()
+                                                            .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().toString())));
+            statusPropagationExecutor.submit(() -> {
+                // schedule gossiper update asynchronously to avoid potential deadlock when another thread is holding
+                // gossiper taskLock.
+                VersionedValue value = StorageService.instance.valueFactory.indexStatus(newStatus);
+                Gossiper.instance.addLocalApplicationState(ApplicationState.INDEX_STATUS, value);
+            });
+        }
+        catch (Throwable e)
+        {
+            logger.warn("Unable to propagate index status: {}", e.getMessage());
+        }
+    }
+
+    private static String identifier(String keyspace, String index)
+    {
+        return new StringBuilder().append(keyspace).append('.').append(index).toString();
     }
 }

@@ -307,11 +307,6 @@ public class SASIIndex implements Index, INotificationConsumer
         return newWriter(baseCfs.metadata().partitionKeyType, descriptor, Collections.singletonMap(index.getDefinition(), index), tracker.opType());
     }
 
-    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command)
-    {
-        return (partitionIterator, readCommand) -> partitionIterator;
-    }
-
     public IndexBuildingSupport getBuildTaskSupport()
     {
         return INDEX_BUILDER_SUPPORT;

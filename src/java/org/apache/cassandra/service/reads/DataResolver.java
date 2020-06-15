@@ -43,6 +43,7 @@ import org.apache.cassandra.db.transform.EmptyPartitionsDiscarder;
 import org.apache.cassandra.db.transform.Filter;
 import org.apache.cassandra.db.transform.FilteredPartitions;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.ReplicaPlan;
@@ -120,7 +121,8 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         if (command.rowFilter().isEmpty())
             return false;
 
-        IndexMetadata indexDef = command.indexMetadata();
+        Index.QueryPlan queryPlan = command.indexQueryPlan();
+        IndexMetadata indexDef = queryPlan == null ? null : queryPlan.getFirst().getIndexMetadata();
         if (indexDef != null && indexDef.isCustom())
         {
             String className = indexDef.options.get(IndexTarget.CUSTOM_INDEX_OPTION_NAME);
