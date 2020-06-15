@@ -243,7 +243,7 @@ public class PartitionRangeReadTest
         for (int i = 0; i + 1 < tokens.size(); i++)
         {
             Range<PartitionPosition> range = Range.makeRowRange(tokens.get(i), tokens.get(i + 1));
-            ranges.add(ReplicaPlans.forRangeRead(keyspace, ConsistencyLevel.ONE, range, 1));
+            ranges.add(ReplicaPlans.forRangeRead(keyspace, null, ConsistencyLevel.ONE, range, 1));
             vnodeCount++;
         }
 
