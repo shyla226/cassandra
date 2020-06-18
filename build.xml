@@ -678,9 +678,10 @@
           <dependency groupId="org.assertj" artifactId="assertj-core" version="3.15.0"/>
           <dependency groupId="org.awaitility" artifactId="awaitility" version="4.0.3" />
 
-          <!-- used by Storage_Attached_idnex -->
+          <!-- used by Storage_Attached_index -->
           <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="7.5.0" />
           <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" version="2.1.2" />
+          <dependency groupId="org.hamcrest" artifactId="hamcrest-all" version="1.3" />
 
           <!-- used by Trie -->
           <dependency groupId="org.agrona" artifactId="agrona" version="1.4.0" />
@@ -772,9 +773,11 @@
         <dependency groupId="org.assertj" artifactId="assertj-core"/>
         <dependency groupId="org.awaitility" artifactId="awaitility"/>
 
-        <!-- used by Storage_Attached_idnex -->
+        <!-- used by Storage_Attached_index -->
         <dependency groupId="org.apache.lucene" artifactId="lucene-core" />
         <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" />
+        <dependency groupId="org.hamcrest" artifactId="hamcrest-all" />
+
         <!-- used by Trie -->
         <dependency groupId="org.agrona" artifactId="agrona" />
 
@@ -800,9 +803,11 @@
         <dependency groupId="org.assertj" artifactId="assertj-core"/>
         <dependency groupId="org.awaitility" artifactId="awaitility"/>
 
-        <!-- used by Storage_Attached_idnex -->
+        <!-- used by Storage_Attached_index -->
         <dependency groupId="org.apache.lucene" artifactId="lucene-core" />
         <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner"/>
+        <dependency groupId="org.hamcrest" artifactId="hamcrest-all" />
+
         <!-- used by Trie -->
         <dependency groupId="org.agrona" artifactId="agrona" />
       </artifact:pom>
@@ -865,6 +870,13 @@
 
         <dependency groupId="ch.qos.logback" artifactId="logback-core"/>
         <dependency groupId="ch.qos.logback" artifactId="logback-classic"/>
+
+        <!-- used by Storage_Attached_index -->
+        <dependency groupId="org.apache.lucene" artifactId="lucene-core" />
+        <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner"/>
+        <dependency groupId="org.hamcrest" artifactId="hamcrest-all" />
+        <!-- used by Trie -->
+        <dependency groupId="org.agrona" artifactId="agrona" />
 
         <!-- don't need hadoop classes to run, but if you use the hadoop stuff -->
         <dependency groupId="org.apache.hadoop" artifactId="hadoop-core" optional="true"/>
