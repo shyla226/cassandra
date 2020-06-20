@@ -45,6 +45,7 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.FutureArrays;
 import org.apache.lucene.util.bkd.BKDWriter;
+import org.apache.lucene.util.packed.DirectWriter;
 
 
 /**
@@ -57,6 +58,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
     private final FileHandle postingsFile;
     private final BKDPostingsIndex postingsIndex;
+    private final DirectReaders.Reader leafOrderMapReader;
 
     /**
      * Performs a blocking read.
@@ -67,6 +69,9 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         super(indexComponents, kdtreeFile, bkdIndexRoot);
         this.postingsFile = postingsFile;
         this.postingsIndex = new BKDPostingsIndex(postingsFile, bkdPostingsRoot);
+
+        final byte bits = (byte) DirectWriter.unsignedBitsRequired(maxPointsInLeafNode - 1);
+        leafOrderMapReader = DirectReaders.getReaderForBitsPerValue(bits);
     }
 
     public static int openPerIndexFiles()
@@ -204,7 +209,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 return;
             }
 
-            Preconditions.checkState(!index.isLeafNode(), "Leaf node %s does not have kd-tree postings.", index.getNodeID());
+            if (index.isLeafNode())
+                throw new IllegalStateException(String.format("Leaf node %s does not have kd-tree postings.", index.getNodeID()));
 
             // Recurse on left sub-tree:
             index.pushLeft();
@@ -299,7 +305,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             final SeekingRandomAccessInput randoInput = new SeekingRandomAccessInput(bkdInput);
             for (int x = 0; x < count; x++)
             {
-                origIndex[x] = (short) LeafOrderMap.getValue(randoInput, orderMapPointer, maxPointsInLeafNode - 1, x);
+                origIndex[x] = (short) LeafOrderMap.getValue(randoInput, orderMapPointer, x, leafOrderMapReader);
             }
 
             // seek beyond the ordermap

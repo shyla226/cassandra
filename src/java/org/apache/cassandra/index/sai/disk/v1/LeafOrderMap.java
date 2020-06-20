@@ -28,6 +28,11 @@ import org.apache.lucene.util.packed.DirectWriter;
 
 public class LeafOrderMap
 {
+    public static int getValue(RandomAccessInput in, long offset, int index, DirectReaders.Reader reader)
+    {
+        return Math.toIntExact(reader.get(in, offset, index));
+    }
+
     public static int getValue(RandomAccessInput in, long offset, int maxValue, int index)
     {
         final byte bits = (byte)DirectWriter.unsignedBitsRequired(maxValue);
