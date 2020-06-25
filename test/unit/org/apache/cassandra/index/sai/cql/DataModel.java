@@ -66,7 +66,7 @@ public interface DataModel
     String TIMEUUID_COLUMN = "temporal_id";
     String NON_INDEXED_COLUMN = "non_indexed";
 
-    Set<String> skipColumns = Sets.newHashSet(NON_INDEXED_COLUMN, BOOLEAN_COLUMN, INET_COLUMN);
+    Set<String> skipColumns = Sets.newHashSet(NON_INDEXED_COLUMN, BOOLEAN_COLUMN);
 
     int DEFAULT_TTL_SECONDS = 10;
 

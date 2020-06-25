@@ -35,6 +35,7 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
 
 public class SkipListMemoryIndex extends MemoryIndex
@@ -62,7 +63,11 @@ public class SkipListMemoryIndex extends MemoryIndex
     @Override
     public long add(DecoratedKey key, Clustering clustering, ByteBuffer value)
     {
-        if (value != null) setMinMaxTerm(value);
+        if (value != null)
+        {
+            value = TypeUtil.encode(value, columnContext.getValidator());
+            setMinMaxTerm(value);
+        }
 
         long overhead = CSLM_OVERHEAD; // DKs are shared
         PrimaryKeys keys = index.get(value);

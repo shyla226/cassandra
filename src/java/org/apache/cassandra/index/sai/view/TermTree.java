@@ -23,6 +23,7 @@ import java.util.Set;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 
 public interface TermTree
 {
@@ -42,8 +43,8 @@ public interface TermTree
         {
             addIndex(index);
 
-            min = min == null || comparator.compare(min, index.minTerm()) > 0 ? index.minTerm() : min;
-            max = max == null || comparator.compare(max, index.maxTerm()) < 0 ? index.maxTerm() : max;
+            min = min == null || TypeUtil.compare(min, index.minTerm(), comparator) > 0 ? index.minTerm() : min;
+            max = max == null || TypeUtil.compare(max, index.maxTerm(), comparator) < 0 ? index.maxTerm() : max;
         }
 
         protected abstract void addIndex(SSTableIndex index);

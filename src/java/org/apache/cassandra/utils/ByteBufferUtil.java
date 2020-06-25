@@ -309,6 +309,11 @@ public class ByteBufferUtil
         FastByteOperations.copy(src, srcPos, dst, dstPos, length);
     }
 
+    public static void arrayCopy(ByteBuffer src, int srcPos, byte[] dst, int dstPos, int length)
+    {
+        FastByteOperations.copy(src, srcPos, dst, dstPos, length);
+    }
+
     public static int put(ByteBuffer src, ByteBuffer trg)
     {
         int length = Math.min(src.remaining(), trg.remaining());

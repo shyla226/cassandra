@@ -31,6 +31,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Interval;
 import org.apache.cassandra.utils.IntervalTree;
 
@@ -110,7 +111,7 @@ public class RangeTermTree implements TermTree
 
         public int compareTo(Term o)
         {
-            return comparator.compare(term, o.term);
+            return TypeUtil.compare(term, o.term, comparator);
         }
     }
 }

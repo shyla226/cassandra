@@ -26,8 +26,6 @@ import org.apache.cassandra.index.sai.disk.v1.BKDReader;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.ByteComparable;
 import org.apache.lucene.index.PointValues.Relation;
 import org.apache.lucene.util.FutureArrays;
 
@@ -79,7 +77,7 @@ class BKDQueries
     {
         byte[] buffer = new byte[TypeUtil.fixedSizeOf(type)];
         assert buffer.length == bytesPerDim * numDim;
-        ByteBufferUtil.toBytes(type.asComparableBytes(value, ByteComparable.Version.OSS41), buffer);
+        TypeUtil.toComparableBytes(value, type, buffer);
         return buffer;
     }
 

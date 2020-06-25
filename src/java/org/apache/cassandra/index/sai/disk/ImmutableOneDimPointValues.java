@@ -24,8 +24,6 @@ import java.io.IOException;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.ByteComparable;
 import org.apache.lucene.codecs.MutablePointValues;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.bkd.BKDWriter;
@@ -74,7 +72,7 @@ public class ImmutableOneDimPointValues extends MutablePointValues
     {
         while (termEnum.hasNext())
         {
-            ByteBufferUtil.toBytes(termComparator.asComparableBytes(termEnum.next(), ByteComparable.Version.OSS41), scratch);
+            TypeUtil.toComparableBytes(termEnum.next(), termComparator, scratch);
             try (final PostingList postings = termEnum.postings())
             {
                 int segmentRowId;
