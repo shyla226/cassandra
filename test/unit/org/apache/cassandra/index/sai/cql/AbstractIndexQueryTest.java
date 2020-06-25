@@ -33,6 +33,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.apache.cassandra.inject.Injections;
@@ -325,6 +326,12 @@ public abstract class AbstractIndexQueryTest extends SAITester
             query(tester, model, DataModel.FLOAT_COLUMN, Operator.GT, 10.2f);
 
             rangeQuery(tester, model, DataModel.FLOAT_COLUMN, 4.6f, 6.7f);
+
+            query(tester, model, DataModel.INET_COLUMN, Operator.EQ, InetAddressType.instance.fromString("170.63.206.57"));
+            query(tester, model, DataModel.INET_COLUMN, Operator.EQ, InetAddressType.instance.fromString("170.63.206.56"));
+            query(tester, model, DataModel.INET_COLUMN, Operator.EQ, InetAddressType.instance.fromString("205.204.196.65"));
+            query(tester, model, DataModel.INET_COLUMN, Operator.EQ, InetAddressType.instance.fromString("164.165.67.10"));
+            query(tester, model, DataModel.INET_COLUMN, Operator.EQ, InetAddressType.instance.fromString("204.196.242.71"));
 
             rangeQuery(tester, model, DataModel.INT_COLUMN, 2977853, 6784240);
 

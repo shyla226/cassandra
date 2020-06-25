@@ -43,7 +43,6 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -100,7 +99,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
                 currentBuilder = newSegmentBuilder();
             }
 
-            addTerm(value.duplicate(), rowKey, sstableRowId);
+            addTerm(TypeUtil.encode(value.duplicate(), context.getValidator()), rowKey, sstableRowId);
         }
     }
 

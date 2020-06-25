@@ -75,7 +75,7 @@ public class ColumnContext
     private static final Logger logger = LoggerFactory.getLogger(ColumnContext.class);
 
     private static final Set<AbstractType<?>> EQ_ONLY_TYPES =
-            ImmutableSet.of(UTF8Type.instance, AsciiType.instance, BooleanType.instance, InetAddressType.instance, UUIDType.instance);
+            ImmutableSet.of(UTF8Type.instance, AsciiType.instance, BooleanType.instance, UUIDType.instance);
 
     private final AbstractType<?> keyValidator;
     private final ClusteringComparator clusteringComparator;

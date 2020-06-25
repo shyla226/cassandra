@@ -133,6 +133,8 @@ public class Expression
 
     public Expression add(Operator op, ByteBuffer value)
     {
+        value = TypeUtil.encode(value, validator);
+
         boolean lowerInclusive = false, upperInclusive = false;
         switch (op)
         {
@@ -189,14 +191,10 @@ public class Expression
         return this;
     }
 
-    public Expression addExclusion(ByteBuffer value)
-    {
-        exclusions.add(value);
-        return this;
-    }
-
     public boolean isSatisfiedBy(ByteBuffer value)
     {
+        value = TypeUtil.encode(value, validator);
+
         if (!TypeUtil.isValid(value, validator))
         {
             logger.error(context.logMessage("Value is not valid for indexed column {} with {}"), context.getColumnName(), validator);
@@ -214,7 +212,7 @@ public class Expression
             else
             {
                 // range or (not-)equals - (mainly) for numeric values
-                int cmp = validator.compare(lower.value, value);
+                int cmp = TypeUtil.compare(lower.value, value, validator);
 
                 // in case of (NOT_)EQ lower == upper
                 if (operation == Op.EQ || operation == Op.NOT_EQ)
@@ -236,7 +234,7 @@ public class Expression
             else
             {
                 // range - mainly for numeric values
-                int cmp = validator.compare(upper.value, value);
+                int cmp = TypeUtil.compare(upper.value, value, validator);
                 if (cmp < 0 || (cmp == 0 && !upper.inclusive))
                     return false;
             }
@@ -246,7 +244,7 @@ public class Expression
         // this covers EQ/RANGE with exclusions.
         for (ByteBuffer term : exclusions)
         {
-            if (TypeUtil.isString(validator) && validateStringValue(value, term) || validator.compare(term, value) == 0)
+            if (TypeUtil.isString(validator) && validateStringValue(value, term) || TypeUtil.compare(term, value, validator) == 0)
                 return false;
         }
 
@@ -291,17 +289,17 @@ public class Expression
         return operation;
     }
 
-    public boolean hasLower()
+    private boolean hasLower()
     {
         return lower != null;
     }
 
-    public boolean hasUpper()
+    private boolean hasUpper()
     {
         return upper != null;
     }
 
-    public boolean isLowerSatisfiedBy(ByteBuffer value)
+    private boolean isLowerSatisfiedBy(ByteBuffer value)
     {
         if (!hasLower())
             return true;
@@ -310,7 +308,7 @@ public class Expression
         return cmp > 0 || cmp == 0 && lower.inclusive;
     }
 
-    public boolean isUpperSatisfiedBy(ByteBuffer value)
+    private boolean isUpperSatisfiedBy(ByteBuffer value)
     {
         if (!hasUpper())
             return true;

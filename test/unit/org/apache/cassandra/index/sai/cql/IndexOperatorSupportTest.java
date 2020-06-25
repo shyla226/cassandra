@@ -68,8 +68,6 @@ public class IndexOperatorSupportTest extends SAITester
         scenarios.add(new String[] { "Should reject NEQ query for " + DataModel.INT_COLUMN, DataModel.INT_COLUMN, "SELECT * FROM %%s WHERE %s != 10" });
         scenarios.add(new String[] { "Should reject NEQ query for " + DataModel.BIGINT_COLUMN, DataModel.BIGINT_COLUMN, "SELECT * FROM %%s WHERE %s != 10" });
 
-        scenarios.add(new String[] { "Should reject range query for " + DataModel.INET_COLUMN, DataModel.INET_COLUMN, "SELECT * FROM %%s WHERE %s > '170.63.206.57'" });
-
         scenarios.add(new String[] { "Should reject range query for " + DataModel.BOOLEAN_COLUMN, DataModel.BOOLEAN_COLUMN, "SELECT * FROM %%s WHERE %s > true" });
 
         scenarios.add(new String[] { "Should reject range query for " + DataModel.UUID_COLUMN, DataModel.UUID_COLUMN, "SELECT * FROM %%s WHERE %s > e37394dc-d17b-11e8-a8d5-f2801f1b9fd1" });
