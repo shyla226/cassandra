@@ -187,7 +187,7 @@ public abstract class AbstractIndexTest extends TestBaseImpl
                 }
             }, null, null);
 
-            RepairOption options = new RepairOption(RepairParallelism.SEQUENTIAL, false, false, false, 1, Collections.emptyList(), false, false, false, PreviewKind.NONE, false);
+            RepairOption options = new RepairOption(RepairParallelism.SEQUENTIAL, false, false, false, 1, Collections.emptyList(), false, false, false, PreviewKind.NONE, false, false);
             int ranges = StorageService.instance.repairAsync(KEYSPACE, options.asMap());
 
             if (ranges < 1)

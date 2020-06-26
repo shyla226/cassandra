@@ -97,10 +97,10 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
 
         /*
          * postIndexFilter comprised by those expressions in the read command row filter that can't be handled by
-         * {@link FilterTree#satisfiedBy(Unfiltered, Row, boolean)}. That includes expressions targeted to any partition
-         * key column, and {@link RowFilter.UserExpression}s like those used by RLAC.
+         * {@link FilterTree#satisfiedBy(Unfiltered, Row, boolean)}. That includes expressions targeted
+         * at {@link RowFilter.UserExpression}s like those used by RLAC.
          */
-        RowFilter postIndexFilter = rowFilter.with(e -> e.column().isPartitionKey() || e.isUserDefined());
+        RowFilter postIndexFilter = rowFilter.with(e -> e.isUserDefined());
         return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, acceptedExpressions, selectedIndexes);
     }
 

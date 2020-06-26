@@ -29,6 +29,7 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
@@ -77,9 +78,9 @@ public class Operation extends RangeIterator
         this.controller = controller;
     }
 
-    public boolean satisfiedBy(Unfiltered currentCluster, Row staticRow, boolean allowMissingColumns)
+    public boolean satisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow, boolean allowMissingColumns)
     {
-        return filterTree.satisfiedBy(currentCluster, staticRow, allowMissingColumns);
+        return filterTree.satisfiedBy(key, currentCluster, staticRow, allowMissingColumns);
     }
 
     @VisibleForTesting
