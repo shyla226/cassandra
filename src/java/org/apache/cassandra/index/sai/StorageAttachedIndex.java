@@ -278,11 +278,6 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Complex columns are not yet supported by storage-attached indexes.");
         }
 
-        if (target.left.isPartitionKey())
-        {
-            throw new InvalidRequestException("Partition key columns are not yet supported by storage-attached indexes.");
-        }
-
         if (!SUPPORTED_TYPES.contains(target.left.cellValueType().asCQL3Type()))
         {
             throw new InvalidRequestException("Unsupported type: " + target.left.cellValueType().asCQL3Type());

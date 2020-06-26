@@ -151,6 +151,15 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
+    public void shouldFailCreationOnPartitionKey() throws Exception
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(id) USING 'StorageAttachedIndex'"))
+                .isInstanceOf(InvalidQueryException.class)
+                .hasMessageContaining("Cannot create secondary index on the only partition key column id");
+    }
+
+    @Test
     public void shouldFailCreationUsingMode()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");

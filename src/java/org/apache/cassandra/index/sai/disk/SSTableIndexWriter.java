@@ -86,7 +86,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         if (maybeAbort())
             return;
 
-        ByteBuffer value = ColumnContext.getValueOf(column, row, nowInSec);
+        ByteBuffer value = context.getValueOf(column, rowKey, row, nowInSec);
         if (value != null)
         {
             if (currentBuilder == null)
@@ -187,7 +187,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
             }
 
             // Builder memory is released against the limiter at the conclusion of a successful
-            // flush. Note that any failure that occurs before this (even in term addition) will 
+            // flush. Note that any failure that occurs before this (even in term addition) will
             // actuate this column writer's abort logic from the parent SSTable-level writer, and
             // that abort logic will release the current builder's memory against the limiter.
             long globalBytesUsed = currentBuilder.release(indexComponents);
@@ -257,7 +257,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         // It's possible for the current builder to be unassigned after we flush a final segment.
         if (currentBuilder != null)
         {
-            // If an exception is thrown out of any writer operation prior to successful segment 
+            // If an exception is thrown out of any writer operation prior to successful segment
             // flush, we will end up here, and we need to free up builder memory tracked by the limiter:
             long allocated = currentBuilder.totalBytesAllocated();
             long globalBytesUsed = currentBuilder.release(indexComponents);

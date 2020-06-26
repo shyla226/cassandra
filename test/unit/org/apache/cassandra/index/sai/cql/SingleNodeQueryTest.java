@@ -26,7 +26,10 @@ import java.util.List;
 import org.junit.Before;
 import org.junit.runners.Parameterized;
 
+import static org.apache.cassandra.index.sai.cql.DataModel.*;
 import org.apache.cassandra.inject.Injections;
+
+import com.google.common.collect.ImmutableList;
 
 public class SingleNodeQueryTest extends AbstractIndexQueryTest
 {
@@ -44,13 +47,17 @@ public class SingleNodeQueryTest extends AbstractIndexQueryTest
     {
         List<Object[]> scenarios = new LinkedList<>();
 
-        scenarios.add(new Object[]{ new DataModel.BaseDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA), BASE_QUERY_SETS });
+        scenarios.add(new Object[]{ new DataModel.BaseDataModel(NORMAL_COLUMNS, NORMAL_COLUMN_DATA), BASE_QUERY_SETS });
 
-        scenarios.add(new Object[]{ new DataModel.CompoundKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA), BASE_QUERY_SETS });
+        scenarios.add(new Object[]{ new DataModel.CompoundKeyDataModel(NORMAL_COLUMNS, NORMAL_COLUMN_DATA), BASE_QUERY_SETS });
 
-        scenarios.add(new Object[]{ new DataModel.CompoundKeyWithStaticsDataModel(DataModel.STATIC_COLUMNS, DataModel.STATIC_COLUMN_DATA), STATIC_QUERY_SETS });
+        scenarios.add(new Object[]{ new DataModel.CompoundKeyWithStaticsDataModel(STATIC_COLUMNS, STATIC_COLUMN_DATA), STATIC_QUERY_SETS });
 
-        scenarios.add(new Object[]{ new DataModel.CompositePartitionKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA), BASE_QUERY_SETS });
+        scenarios.add(new Object[]{ new DataModel.CompositePartitionKeyDataModel(NORMAL_COLUMNS, NORMAL_COLUMN_DATA), ImmutableList.builder()
+                .addAll(BASE_QUERY_SETS)
+                .addAll(COMPOSITE_PARTITION_QUERY_SETS)
+                .build()
+        });
 
         return scenarios;
     }
