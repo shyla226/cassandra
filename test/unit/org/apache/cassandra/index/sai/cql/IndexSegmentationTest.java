@@ -105,7 +105,7 @@ public class IndexSegmentationTest extends SAITester
 
         // get open files with 1 index segment per sstable
         upgradeSSTables();
-        waitForAssert(() -> verifyIndexFiles(sstable, sstable), WAIT_FOR_INDEX_FILE_CLEANUP);
+        waitForAssert(() -> verifyIndexFiles(sstable, sstable));
 
         long indexDescriptor = getOpenIndexFiles();
         long openFilesWithOneSegment = getOpenVmFiles();
@@ -118,7 +118,7 @@ public class IndexSegmentationTest extends SAITester
         SegmentBuilder.updateLastValidSegmentRowId(1);
 
         upgradeSSTables();
-        waitForAssert(() -> verifyIndexFiles(sstable, sstable), WAIT_FOR_INDEX_FILE_CLEANUP);
+        waitForAssert(() -> verifyIndexFiles(sstable, sstable));
 
         // verify open files after increasing segment count
         long openFilesWithThousandSegment = getOpenVmFiles();
@@ -169,7 +169,7 @@ public class IndexSegmentationTest extends SAITester
             segments = (int) Math.ceil(num * 1.0 / (lastValidSegmentRowId + 1));
             verifySegments(v1IndexName, segments);
             verifySegments(v2IndexName, segments);
-            waitForAssert(() -> verifyIndexFiles(1, 1), WAIT_FOR_INDEX_FILE_CREATION);
+            waitForAssert(() -> verifyIndexFiles(1, 1));
 
             // verify small limit query touches all segments
             long count = getIndexFetchCount.getAsLong();
@@ -244,7 +244,7 @@ public class IndexSegmentationTest extends SAITester
     {
         verifySegments(v1IndexName, segments);
         verifySegments(v2IndexName, segments);
-        waitForAssert(() -> verifyIndexFiles(1, 1), WAIT_FOR_INDEX_FILE_CREATION);
+        waitForAssert(() -> verifyIndexFiles(1, 1));
 
         // verify small limit query touches all segments
         long count = getIndexFetchCount.getAsLong();

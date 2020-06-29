@@ -108,7 +108,7 @@ public class CompactionTest extends AbstractNodeLifecycleTest
 
         // verify 2 sstable indexes
         assertNumRows(num, "SELECT * FROM %%s WHERE v1 >= 0");
-        waitForAssert(() -> verifyIndexFiles(2, 0), WAIT_FOR_INDEX_FILE_CLEANUP);
+        waitForAssert(() -> verifyIndexFiles(2, 0));
         verifySSTableIndexes(indexName, 2);
 
         // index components are included after anti-compaction
@@ -250,7 +250,7 @@ public class CompactionTest extends AbstractNodeLifecycleTest
                     () -> {
                         try
                         {
-                            waitForAssert(() -> Assert.assertEquals(1, compactionLatch.getCount()), WAIT_FOR_COMPACTION_STARTED);
+                            waitForAssert(() -> Assert.assertEquals(1, compactionLatch.getCount()));
 
                             // build indexes on SSTables that will be compacted soon
                             createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
@@ -313,7 +313,7 @@ public class CompactionTest extends AbstractNodeLifecycleTest
                     () -> {
                         try
                         {
-                            waitForAssert(() -> Assert.assertEquals(1, compactionLatch.getCount()), WAIT_FOR_COMPACTION_STARTED);
+                            waitForAssert(() -> Assert.assertEquals(1, compactionLatch.getCount()));
 
                             // drop all indexes
                             dropIndex("DROP INDEX %s." + v1IndexName);
