@@ -116,6 +116,7 @@ import org.apache.cassandra.locator.Replicas;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.CASClientRequestMetrics;
 import org.apache.cassandra.metrics.CASClientWriteRequestMetrics;
+import org.apache.cassandra.metrics.ClientRangeRequestMetrics;
 import org.apache.cassandra.metrics.ClientRequestMetrics;
 import org.apache.cassandra.metrics.ClientWriteRequestMetrics;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
@@ -182,7 +183,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     };
     private static final ClientRequestMetrics readMetrics = new ClientRequestMetrics("Read");
-    private static final ClientRequestMetrics rangeMetrics = new ClientRequestMetrics("RangeSlice");
+    public static final ClientRangeRequestMetrics rangeMetrics = new ClientRangeRequestMetrics("RangeSlice");
     private static final ClientWriteRequestMetrics writeMetrics = new ClientWriteRequestMetrics("Write");
     private static final CASClientWriteRequestMetrics casWriteMetrics = new CASClientWriteRequestMetrics("CASWrite");
     private static final CASClientRequestMetrics casReadMetrics = new CASClientRequestMetrics("CASRead");
@@ -2234,6 +2235,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             finally
             {
+                rangeMetrics.roundTrips.update(batchesRequested);
                 long latency = System.nanoTime() - startTime;
                 rangeMetrics.addNano(latency);
                 Keyspace.openAndGetStore(command.metadata()).metric.coordinatorScanLatency.update(latency, TimeUnit.NANOSECONDS);
@@ -2260,19 +2262,30 @@ public class StorageProxy implements StorageProxyMBean
 
         Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
         RangeIterator ranges = new RangeIterator(command, keyspace, consistencyLevel);
+        int maxConcurrencyFactor = Math.min(ranges.rangeCount, MAX_CONCURRENT_RANGE_REQUESTS);
+        int concurrencyFactor = maxConcurrencyFactor;
 
-        // our estimate of how many result rows there will be per-range
-        float resultsPerRange = estimateResultsPerRange(command, keyspace);
-        // underestimate how many rows we will get per-range in order to increase the likelihood that we'll
-        // fetch enough rows in the first round
-        resultsPerRange -= resultsPerRange * CONCURRENT_SUBREQUESTS_MARGIN;
-        int maxConcurrencyFactor = Math.min(ranges.rangeCount(), MAX_CONCURRENT_RANGE_REQUESTS);
-        int concurrencyFactor = resultsPerRange == 0.0
+        Index.QueryPlan queryPlan = command.indexQueryPlan();
+        if ( queryPlan == null || queryPlan.shouldEstimateInitialConcurrency())
+        {
+            // our estimate of how many result rows there will be per-range
+            float resultsPerRange = estimateResultsPerRange(command, keyspace);
+            // underestimate how many rows we will get per-range in order to increase the likelihood that we'll
+            // fetch enough rows in the first round
+            resultsPerRange -= resultsPerRange * CONCURRENT_SUBREQUESTS_MARGIN;
+            concurrencyFactor = resultsPerRange == 0.0
                                 ? 1
                                 : Math.max(1, Math.min(maxConcurrencyFactor, (int) Math.ceil(command.limits().count() / resultsPerRange)));
-        logger.trace("Estimated result rows per range: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
-                     resultsPerRange, command.limits().count(), ranges.rangeCount(), concurrencyFactor);
-        Tracing.trace("Submitting range requests on {} ranges with a concurrency of {} ({} rows per range expected)", ranges.rangeCount(), concurrencyFactor, resultsPerRange);
+            logger.trace("Estimated result rows per range: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
+                         resultsPerRange, command.limits().count(), ranges.rangeCount(), concurrencyFactor);
+            Tracing.trace("Submitting range requests on {} ranges with a concurrency of {} ({} rows per range expected)", ranges.rangeCount(), concurrencyFactor, resultsPerRange);
+        }
+        else
+        {
+            logger.trace("Max concurrent range requests: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
+                         MAX_CONCURRENT_RANGE_REQUESTS, command.limits().count(), ranges.rangeCount(), concurrencyFactor);
+            Tracing.trace("Submitting range requests on {} ranges with a concurrency of {}", ranges.rangeCount(), concurrencyFactor);
+        }
 
         // Note that in general, a RangeCommandIterator will honor the command limit for each range, but will not enforce it globally.
         RangeMerger mergedRanges = new RangeMerger(ranges, keyspace, consistencyLevel);

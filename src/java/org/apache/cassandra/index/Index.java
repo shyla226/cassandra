@@ -783,6 +783,17 @@ public interface Index
                                .orElseThrow(AssertionError::new); // registered groups are never empty
         }
 
+        /**
+         * Used to determine whether to estimate initial concurrency during remote range reads. Default is true, each
+         * implementation must override this method if they choose a different strategy (e.g. StorageAttachedIndexQueryPlan).
+         *
+         * @return true if the {@link QueryPlan} should estimate initial concurrency, false otherwise
+         */
+        default boolean shouldEstimateInitialConcurrency()
+        {
+            return true;
+        }
+
         @Override
         default int compareTo(QueryPlan other)
         {
