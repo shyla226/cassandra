@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.distributed.test;
+package org.apache.cassandra.distributed.test.sai;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -32,13 +32,12 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
-import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.utils.Throwables;
 import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
