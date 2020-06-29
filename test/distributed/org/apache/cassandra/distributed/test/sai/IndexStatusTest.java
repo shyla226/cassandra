@@ -28,16 +28,13 @@ import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
-import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.schema.IndexMetadata;
 import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
@@ -56,7 +53,7 @@ public class IndexStatusTest extends TestBaseImpl
     @Before
     public void init() throws IOException
     {
-        cluster = (Cluster) builder().withNodes(nodes).withConfig(config -> config.set("enable_sasi_indexes", true).with(NETWORK).with(GOSSIP)).start();
+        cluster = builder().withNodes(nodes).withConfig(config -> config.with(NETWORK).with(GOSSIP)).start();
 
         cluster.schemaChange("CREATE KEYSPACE " + KEYSPACE + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': " + replicationFactor + "};");
         cluster.schemaChange(String.format("CREATE TABLE %s.cf (k int, v1 int, v2 int, PRIMARY KEY (k))", KEYSPACE));
@@ -131,7 +128,7 @@ public class IndexStatusTest extends TestBaseImpl
 
     private void createIndex(String indexName, String column)
     {
-        cluster.schemaChange(String.format("CREATE CUSTOM INDEX %s ON %s.cf (%s) USING 'org.apache.cassandra.distributed.test.IndexStatusTest$TestIndex';", indexName, KEYSPACE, column));
+        cluster.schemaChange(String.format("CREATE CUSTOM INDEX %s ON %s.cf (%s) USING 'StorageAttachedIndex';", indexName, KEYSPACE, column));
     }
 
     private void verifyPeerIndexStatus(String index, Index.Status node2Status, Index.Status node1Status)
@@ -234,23 +231,5 @@ public class IndexStatusTest extends TestBaseImpl
         }
         Object[][] results = cluster.get(host).executeInternal(query);
         Assert.assertEquals(1, (long) results[0][0]);
-    }
-
-    /**
-     * Use this TestIndex to simulate Storage-Attached-Index behavior
-     */
-    public static class TestIndex extends SASIIndex
-    {
-
-        public TestIndex(ColumnFamilyStore baseCfs, IndexMetadata config)
-        {
-            super(baseCfs, config);
-        }
-
-        @Override
-        public boolean isQueryable(Status status)
-        {
-            return status == Status.UNKNOWN || status == Status.BUILD_SUCCEEDED;
-        }
     }
 }

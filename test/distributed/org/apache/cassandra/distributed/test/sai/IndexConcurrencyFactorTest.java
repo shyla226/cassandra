@@ -34,7 +34,7 @@ import static junit.framework.TestCase.assertEquals;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 
-public class MultiNodeConcurrencyFactorTest extends TestBaseImpl
+public class IndexConcurrencyFactorTest extends TestBaseImpl
 {
     private static final String SAI_TABLE = "sai_simple_primary_key";
 

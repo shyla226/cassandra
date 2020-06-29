@@ -58,11 +58,9 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.compaction.ActiveCompactionsTracker;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
@@ -73,6 +71,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.codecs.CodecUtil;
+import org.awaitility.Awaitility;
 
 import static org.apache.cassandra.inject.ActionBuilder.newActionBuilder;
 import static org.apache.cassandra.inject.Expression.quote;
@@ -88,11 +87,6 @@ public class SAITester extends CQLTester
     protected static final String CREATE_TABLE_TEMPLATE = "CREATE TABLE %s (id1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
             "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
     protected static final String CREATE_INDEX_TEMPLATE = "CREATE CUSTOM INDEX IF NOT EXISTS ON %%s(%s) USING 'StorageAttachedIndex'";
-
-    protected static final String WAIT_FOR_INDEX_FILE_CLEANUP = "wait for index file cleanup";
-    protected static final String WAIT_FOR_INDEX_FILE_CREATION = "wait for index file creation";
-    protected static final String WAIT_FOR_COMPACTION_STARTED = "wait for compaction to start";
-    protected static final String WAIT_FOR_BUILD_STARTED = "wait for index build to start";
 
     protected static int ASSERTION_TIMEOUT_SECONDS = 15;
 
@@ -204,44 +198,14 @@ public class SAITester extends CQLTester
         }
     }
 
-    protected void waitForAssert(Runnable runnableAssert, String description, long pollingInterval, long timeout, TimeUnit unit)
+    protected void waitForAssert(Runnable runnableAssert, long timeout, TimeUnit unit)
     {
-        // TODO use library instead
-        long start = System.nanoTime();
-        long wait = unit.toNanos(timeout);
-        boolean done = false;
-        Throwable toThrow = null;
-
-        while (System.nanoTime() - start <= wait && !done)
-        {
-            try
-            {
-                runnableAssert.run();
-                done = true;
-            }
-            catch (Throwable t)
-            {
-                toThrow = t;
-                FBUtilities.sleepQuietly(100);
-            }
-        }
-
-        if (!done)
-            throw Throwables.cleaned(toThrow);
+        Awaitility.await().dontCatchUncaughtExceptions().atMost(timeout, unit).untilAsserted(runnableAssert::run);
     }
 
-    protected void waitForAssert(Runnable assertion, String description)
+    protected void waitForAssert(Runnable assertion)
     {
-        waitForAssert(() -> {
-            try
-            {
-                assertion.run();
-            }
-            catch (Throwable ex)
-            {
-                throw new RuntimeException(ex);
-            }
-        }, description, 3, ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        waitForAssert(assertion, ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 
     protected boolean indexNeedsFullRebuild(String index)
@@ -269,16 +233,7 @@ public class SAITester extends CQLTester
     protected void verifyInitialIndexFailed(String indexName)
     {
         // Verify that the initial index build fails...
-        waitForAssert(() -> {
-            try
-            {
-                assertTrue(indexNeedsFullRebuild(indexName));
-            }
-            catch (Exception e)
-            {
-                throw Throwables.unchecked(e);
-            }
-        }, "Waiting for initial build to fail...");
+        waitForAssert(() -> assertTrue(indexNeedsFullRebuild(indexName)));
     }
 
     protected boolean verifyChecksum(String column, boolean isLiteral)
@@ -328,16 +283,7 @@ public class SAITester extends CQLTester
 
     protected void waitForIndexQueryable(String keyspace, String table)
     {
-        waitForAssert(() -> {
-            try
-            {
-                assertTrue(isIndexQueryable(keyspace, table));
-            }
-            catch (Throwable ex)
-            {
-                throw new RuntimeException(ex);
-            }
-        }, "wait for index to be queryable", 3, 60, TimeUnit.SECONDS);
+        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), 60, TimeUnit.SECONDS);
     }
 
     protected void startCompaction() throws Throwable
@@ -361,7 +307,7 @@ public class SAITester extends CQLTester
             {
                 throw Throwables.unchecked(ex);
             }
-        }, "Waiting for compactions to stop", 3, 300, TimeUnit.SECONDS);
+        }, 300, TimeUnit.SECONDS);
 
     }
 
@@ -376,7 +322,7 @@ public class SAITester extends CQLTester
             {
                 throw new RuntimeException(ex);
             }
-        }, "wait for compactions to finish", 3, 60, TimeUnit.SECONDS);
+        }, 60, TimeUnit.SECONDS);
     }
 
     protected void waitForEquals(ObjectName name, ObjectName name2)
@@ -395,7 +341,7 @@ public class SAITester extends CQLTester
             {
                 throw Throwables.unchecked(ex);
             }
-        }, "wait for metric value", 3, 160, TimeUnit.SECONDS);
+        }, 160, TimeUnit.SECONDS);
     }
 
     protected void waitForEquals(ObjectName name, long value)
@@ -410,7 +356,7 @@ public class SAITester extends CQLTester
             {
                 throw Throwables.unchecked(ex);
             }
-        }, "wait for metric value", 3, 160, TimeUnit.SECONDS);
+        }, 160, TimeUnit.SECONDS);
     }
 
     protected ObjectName objectName(String name, String keyspace, String table, String index, String type)

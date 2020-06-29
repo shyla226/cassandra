@@ -559,7 +559,7 @@ public class NativeIndexDDLTest extends SAITester
         Injections.inject(failNDIInitialializaion);
         assertEquals(0, INDEX_BUILD_COUNTER.get());
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-        waitForAssert(() -> assertEquals(1, INDEX_BUILD_COUNTER.get()), "Waiting for initial build submission...");
+        waitForAssert(() -> assertEquals(1, INDEX_BUILD_COUNTER.get()));
         waitForCompactions();
 
         // FailuresMap is not support for protocol v4.
@@ -701,7 +701,7 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals(2, rows.all().size());
 
         compact();
-        waitForAssert(() -> verifyIndexFiles(1, 1), WAIT_FOR_INDEX_FILE_CREATION);
+        waitForAssert(() -> verifyIndexFiles(1, 1));
 
         rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(2, rows.all().size());
@@ -755,7 +755,7 @@ public class NativeIndexDDLTest extends SAITester
             truncate(true);
         }
 
-        waitForAssert(() -> verifyIndexFiles(0, 0), WAIT_FOR_INDEX_FILE_CREATION);
+        waitForAssert(() -> verifyIndexFiles(0, 0));
 
         // verify index-view-manager has been cleaned up
         verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 0);
@@ -901,7 +901,7 @@ public class NativeIndexDDLTest extends SAITester
             // Create a new index, which will actuate a build compaction and fail, but leave the node running...
             createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
             // two index builders running in different compaction threads because of parallelised index initial build
-            waitForAssert(() -> assertEquals(2, INDEX_BUILD_COUNTER.get()), "Waiting for initial build submission...");
+            waitForAssert(() -> assertEquals(2, INDEX_BUILD_COUNTER.get()));
             waitForCompactionsFinished();
 
             // Only token/offset files for the first SSTable in the compaction task should exist, while column-specific files are blown away:
@@ -936,8 +936,8 @@ public class NativeIndexDDLTest extends SAITester
             // Create a new index, which will actuate a build compaction and fail, but leave the node running...
             createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
             // two index builders running in different compaction threads because of parallelised index initial build
-            waitForAssert(() -> assertEquals(2, INDEX_BUILD_COUNTER.get()), "Waiting for initial build submission...");
-            waitForAssert(() -> assertEquals(0, getCompactionTasks()), "Waiting for initial build stopped...");
+            waitForAssert(() -> assertEquals(2, INDEX_BUILD_COUNTER.get()));
+            waitForAssert(() -> assertEquals(0, getCompactionTasks()));
 
             // SSTable-level token/offset file(s) should be removed, while column-specific files never existed:
             verifyIndexFiles(0, 0);
@@ -976,7 +976,7 @@ public class NativeIndexDDLTest extends SAITester
 
         // compact empty index
         compact();
-        waitForAssert(() -> verifyIndexFiles(1, 0, 0, 2), WAIT_FOR_INDEX_FILE_CREATION);
+        waitForAssert(() -> verifyIndexFiles(1, 0, 0, 2));
 
         rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(0, rows.all().size());
@@ -1055,7 +1055,7 @@ public class NativeIndexDDLTest extends SAITester
         compact();
         verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 1, 0);
         verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), 1, 0);
-        waitForAssert(() -> verifyIndexFiles(1, 0, 0, 2), WAIT_FOR_INDEX_FILE_CREATION);
+        waitForAssert(() -> verifyIndexFiles(1, 0, 0, 2));
 
         rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(0, rows.all().size());
@@ -1085,7 +1085,7 @@ public class NativeIndexDDLTest extends SAITester
 
         Injections.inject(delayIndexBuilderCompletion);
         String indexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-        waitForAssert(() -> assertEquals(1, delayIndexBuilderCompletion.getCount()), "wait for index build to start");
+        waitForAssert(() -> assertEquals(1, delayIndexBuilderCompletion.getCount()));
 
         dropIndex("DROP INDEX %s." + indexName);
 

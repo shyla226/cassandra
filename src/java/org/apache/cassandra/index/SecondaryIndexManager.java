@@ -1781,8 +1781,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             propagateLocalIndexStatus(keyspace.getName(), name, status);
             if (index.isQueryable(status))
             {
-                queryableIndexes.add(name);
-                logger.info("Index [{}] became queryable after successful build.", name);
+                if (queryableIndexes.add(name))
+                    logger.info("Index [{}] became queryable after successful build.", name);
             }
 
             if (writableIndexes.put(name, index) == null)
