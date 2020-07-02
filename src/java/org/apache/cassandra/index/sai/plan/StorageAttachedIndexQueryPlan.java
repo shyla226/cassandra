@@ -59,6 +59,12 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         this.indexes = indexes;
     }
 
+    @Override
+    public boolean shouldEstimateInitialConcurrency()
+    {
+        return false;
+    }
+
     @Nullable
     public static StorageAttachedIndexQueryPlan create(ColumnFamilyStore cfs,
                                                        TableQueryMetrics queryMetrics,

@@ -87,7 +87,7 @@ public class NodeRestartTest extends AbstractNodeLifecycleTest
 
         simulateNodeRestart(false);
 
-        waitForAssert(() -> Assert.assertEquals(1, initTaskLatch.getCount()), WAIT_FOR_BUILD_STARTED);
+        waitForAssert(() -> Assert.assertEquals(1, initTaskLatch.getCount()));
 
         // If we do not make the index queryable before it starts accepting queries, this will fail:
         assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");

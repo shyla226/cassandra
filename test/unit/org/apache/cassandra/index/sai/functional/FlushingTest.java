@@ -70,7 +70,7 @@ public class FlushingTest extends AbstractNodeLifecycleTest
         verifySSTableIndexes(v1IndexName, sstables, 0);
 
         compact();
-        waitForAssert(() -> verifyIndexFiles(1, 0, 0, 1), WAIT_FOR_INDEX_FILE_CREATION);
+        waitForAssert(() -> verifyIndexFiles(1, 0, 0, 1));
 
         rows = executeNet("SELECT id FROM %s WHERE v1 >= 0");
         assertEquals(0, rows.all().size());

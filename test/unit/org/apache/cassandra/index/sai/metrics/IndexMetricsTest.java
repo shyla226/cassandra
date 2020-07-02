@@ -107,7 +107,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
             {
                 throw Throwables.unchecked(ex);
             }
-        }, "waiting for write latencies to materialize", 3, 60, TimeUnit.SECONDS);
+        }, 60, TimeUnit.SECONDS);
 
         assertEquals(0L, getMetricValue(objectName("SSTableCellCount", keyspace, TABLE, INDEX, "IndexMetrics")));
         assertEquals(0L, getMetricValue(objectName("DiskUsedBytes", keyspace, TABLE, INDEX, "IndexMetrics")));

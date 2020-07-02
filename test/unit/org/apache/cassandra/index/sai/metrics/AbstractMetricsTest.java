@@ -68,7 +68,7 @@ public abstract class AbstractMetricsTest extends SAITester
             {
                 throw Throwables.unchecked(ex);
             }
-        }, "wait for compactions to finish", 3, 60, TimeUnit.SECONDS);
+        }, 60, TimeUnit.SECONDS);
     }
 
     protected void waitForVerifyHistogram(ObjectName name, long count)
@@ -82,7 +82,7 @@ public abstract class AbstractMetricsTest extends SAITester
             {
                 throw Throwables.unchecked(ex);
             }
-        }, "wait for histogram count to hit " + count, 3, 10, TimeUnit.SECONDS);
+        }, 10, TimeUnit.SECONDS);
     }
 
     protected void waitForGreaterThanZero(ObjectName name)
@@ -96,6 +96,6 @@ public abstract class AbstractMetricsTest extends SAITester
             {
                 throw Throwables.unchecked(ex);
             }
-        }, "wait for non-zero metric count", 3, 160, TimeUnit.SECONDS);
+        }, 160, TimeUnit.SECONDS);
     }
 }
