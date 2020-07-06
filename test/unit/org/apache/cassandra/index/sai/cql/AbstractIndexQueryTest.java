@@ -21,6 +21,7 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -28,6 +29,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -42,6 +44,7 @@ import org.apache.cassandra.db.marshal.SimpleDateType;
 import org.apache.cassandra.db.marshal.TimeType;
 import org.apache.cassandra.db.marshal.TimestampType;
 import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.utils.Pair;
 import org.hamcrest.Matchers;
 
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
@@ -79,6 +82,14 @@ public abstract class AbstractIndexQueryTest extends SAITester
                                                                   new StaticColumnQuerySet(24, 10),
                                                                   new StaticColumnQuerySet(24, 100),
                                                                   new StaticColumnQuerySet(24, Integer.MAX_VALUE));
+
+    static List<BaseQuerySet> COMPOSITE_PARTITION_QUERY_SETS = ImmutableList.of(new CompositePartitionQuerySet(10, 5),
+            new CompositePartitionQuerySet(10, 10),
+            new CompositePartitionQuerySet(10, Integer.MAX_VALUE),
+            new CompositePartitionQuerySet(24, 10),
+            new CompositePartitionQuerySet(24, 100),
+            new CompositePartitionQuerySet(24, Integer.MAX_VALUE));
+
 
     static final Injections.Counter INDEX_QUERY_COUNTER = Injections.newCounter("IndexQueryCounter")
                                                                   .add(newInvokePoint().onClass(StorageAttachedIndexSearcher.class).onMethod("search"))
@@ -259,6 +270,44 @@ public abstract class AbstractIndexQueryTest extends SAITester
             query(tester, model, DataModel.STATIC_INT_COLUMN, Operator.GT, 1910);
 
             rangeQuery(tester, model, DataModel.STATIC_INT_COLUMN, 1845, 1909);
+        }
+    }
+
+    static class CompositePartitionQuerySet extends BaseQuerySet
+    {
+        CompositePartitionQuerySet(int limit, int fetchSize)
+        {
+            super(limit, fetchSize);
+        }
+
+        public void execute(SAITester tester, DataModel model) throws Throwable
+        {
+            super.execute(tester, model);
+
+            for(Pair<String, String> partitionKeyComponent: model.keyColumns())
+            {
+                String partitionKeyComponentName = partitionKeyComponent.left;
+                query(tester, model, partitionKeyComponentName, Operator.EQ, 0);
+                query(tester, model, partitionKeyComponentName, Operator.GT, 0);
+                query(tester, model, partitionKeyComponentName, Operator.LTE, 2);
+                query(tester, model, partitionKeyComponentName, Operator.GTE, -1);
+                query(tester, model, partitionKeyComponentName, Operator.LT, 50);
+                query(tester, model, partitionKeyComponentName, Operator.GT, 0);
+            }
+
+            String firstPartitionKey = model.keyColumns().get(0).left;
+            String secondPartitionKey = model.keyColumns().get(1).left;
+            List<Operator> numericOperators = Arrays.asList(Operator.EQ, Operator.GT, Operator.LT, Operator.GTE, Operator.LTE);
+            List<List<Operator>> combinations = Lists.cartesianProduct(numericOperators, numericOperators).stream()
+                    .filter(p->p.get(0) != Operator.EQ || p.get(1) != Operator.EQ) //If both are EQ the entire partition is specified
+                    .collect(Collectors.toList());
+            for(List<Operator> operators : combinations)
+            {
+                andQuery(tester, model,
+                        firstPartitionKey, operators.get(0), 2,
+                        secondPartitionKey, operators.get(1), 2,
+                        false);
+            }
         }
     }
 

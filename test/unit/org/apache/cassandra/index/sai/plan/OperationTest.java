@@ -26,9 +26,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -278,19 +282,20 @@ public class OperationTest extends IndexingSchemaLoader
         Operation.Builder builder = new Operation.Builder(OperationType.AND, controller, new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)));
         Operation op = builder.complete();
 
+        DecoratedKey key = buildKey("0");
         Unfiltered row = buildRow(buildCell(age, instance.decompose(6), System.currentTimeMillis()));
         Row staticRow = buildRow(Clustering.STATIC_CLUSTERING);
 
-        Assert.assertTrue(op.satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
 
         row = buildRow(buildCell(age, instance.decompose(5), System.currentTimeMillis()));
 
         // and reject incorrect value
-        Assert.assertFalse(op.satisfiedBy(row, staticRow, false));
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow, false));
 
         row = buildRow(buildCell(age, instance.decompose(6), System.currentTimeMillis()));
 
-        Assert.assertTrue(op.satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
 
         // range with exclusions - age != 5 AND age > 1 AND age != 6 AND age <= 10
         builder = new Operation.Builder(OperationType.AND, controller,
@@ -305,7 +310,7 @@ public class OperationTest extends IndexingSchemaLoader
         {
             row = buildRow(buildCell(age, instance.decompose(i), System.currentTimeMillis()));
 
-            boolean result = op.satisfiedBy(row, staticRow, false);
+            boolean result = op.satisfiedBy(key, row, staticRow, false);
             Assert.assertTrue(exclusions.contains(i) != result);
         }
 
@@ -321,7 +326,7 @@ public class OperationTest extends IndexingSchemaLoader
         {
             row = buildRow(buildCell(age, instance.decompose(i), System.currentTimeMillis()));
 
-            boolean result = op.satisfiedBy(row, staticRow, false);
+            boolean result = op.satisfiedBy(key, row, staticRow, false);
             Assert.assertTrue(exclusions.contains(i) != result);
         }
 
@@ -344,7 +349,7 @@ public class OperationTest extends IndexingSchemaLoader
         {
             row = buildRow(buildCell(age, instance.decompose(i), System.currentTimeMillis()));
 
-            boolean result = op.satisfiedBy(row, staticRow, false);
+            boolean result = op.satisfiedBy(key, row, staticRow, false);
             Assert.assertTrue(exclusions.contains(i) != result);
         }
 
@@ -358,17 +363,17 @@ public class OperationTest extends IndexingSchemaLoader
         row = buildRow(buildCell(age, instance.decompose(6), System.currentTimeMillis()),
                                   buildCell(timestamp, LongType.instance.decompose(11L), System.currentTimeMillis()));
 
-        Assert.assertFalse(op.satisfiedBy(row, staticRow, false));
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow, false));
 
         row = buildRow(buildCell(age, instance.decompose(5), System.currentTimeMillis()),
                                   buildCell(timestamp, LongType.instance.decompose(22L), System.currentTimeMillis()));
 
-        Assert.assertTrue(op.satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
 
         row = buildRow(buildCell(age, instance.decompose(5), System.currentTimeMillis()),
                                   buildCell(timestamp, LongType.instance.decompose(9L), System.currentTimeMillis()));
 
-        Assert.assertFalse(op.satisfiedBy(row, staticRow, false));
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow, false));
 
         // operation with internal expressions and right child
         builder = new Operation.Builder(OperationType.OR, controller,
@@ -381,26 +386,26 @@ public class OperationTest extends IndexingSchemaLoader
         row = buildRow(buildCell(age, instance.decompose(5), System.currentTimeMillis()),
                                   buildCell(timestamp, LongType.instance.decompose(9L), System.currentTimeMillis()));
 
-        Assert.assertTrue(op.satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
 
         row = buildRow(buildCell(age, instance.decompose(20), System.currentTimeMillis()),
                                   buildCell(timestamp, LongType.instance.decompose(11L), System.currentTimeMillis()));
 
-        Assert.assertTrue(op.satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
 
         row = buildRow(buildCell(age, instance.decompose(0), System.currentTimeMillis()),
                                   buildCell(timestamp, LongType.instance.decompose(9L), System.currentTimeMillis()));
 
-        Assert.assertFalse(op.satisfiedBy(row, staticRow, false));
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow, false));
 
         // and for desert let's try out null and deleted rows etc.
         builder = new Operation.Builder(OperationType.AND, controller);
         builder.add(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(30)));
         op = builder.complete();
 
-        Assert.assertFalse(op.satisfiedBy(null, staticRow, false));
-        Assert.assertFalse(op.satisfiedBy(row, null, false));
-        Assert.assertFalse(op.satisfiedBy(row, staticRow, false));
+        Assert.assertFalse(op.satisfiedBy(key, null, staticRow, false));
+        Assert.assertFalse(op.satisfiedBy(key, row, null, false));
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow, false));
 
         long now = System.currentTimeMillis();
 
@@ -408,15 +413,15 @@ public class OperationTest extends IndexingSchemaLoader
                 Row.Deletion.regular(new DeletionTime(now - 10, (int) (now / 1000))),
                           buildCell(age, instance.decompose(6), System.currentTimeMillis()));
 
-        Assert.assertFalse(op.satisfiedBy(row, staticRow, false));
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow, false));
 
         row = buildRow(deletedCell(age, System.currentTimeMillis(), FBUtilities.nowInSeconds()));
 
-        Assert.assertFalse(op.satisfiedBy(row, staticRow, true));
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow, true));
 
         try
         {
-            Assert.assertFalse(op.satisfiedBy(buildRow(), staticRow, false));
+            Assert.assertFalse(op.satisfiedBy(key, buildRow(), staticRow, false));
         }
         catch (IllegalStateException e)
         {
@@ -425,7 +430,7 @@ public class OperationTest extends IndexingSchemaLoader
 
         try
         {
-            Assert.assertFalse(op.satisfiedBy(buildRow(), staticRow, true));
+            Assert.assertFalse(op.satisfiedBy(key, buildRow(), staticRow, true));
         }
         catch (IllegalStateException e)
         {
@@ -493,6 +498,7 @@ public class OperationTest extends IndexingSchemaLoader
         ColumnMetadata height = getColumn(CLUSTERING_BACKEND, UTF8Type.instance.decompose("height"));
         ColumnMetadata score = getColumn(CLUSTERING_BACKEND, UTF8Type.instance.decompose("score"));
 
+        DecoratedKey key = buildKey(CLUSTERING_BACKEND, "0");
         Unfiltered row = buildRow(Clustering.make(UTF8Type.instance.fromString("US"), Int32Type.instance.decompose(27)),
                                   buildCell(height, instance.decompose(182), System.currentTimeMillis()),
                                   buildCell(score, DoubleType.instance.decompose(1.0d), System.currentTimeMillis()));
@@ -502,46 +508,46 @@ public class OperationTest extends IndexingSchemaLoader
         builder.add(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(27)));
         builder.add(new SimpleExpression(height, Operator.EQ, Int32Type.instance.decompose(182)));
 
-        Assert.assertTrue(builder.complete().satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow, false));
 
         builder = new Operation.Builder(OperationType.AND, controller);
 
         builder.add(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(28)));
         builder.add(new SimpleExpression(height, Operator.EQ, Int32Type.instance.decompose(182)));
 
-        Assert.assertFalse(builder.complete().satisfiedBy(row, staticRow, false));
+        Assert.assertFalse(builder.complete().satisfiedBy(key, row, staticRow, false));
 
         builder = new Operation.Builder(OperationType.AND, controller);
         builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US")));
         builder.add(new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(27)));
 
-        Assert.assertTrue(builder.complete().satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow, false));
 
         builder = new Operation.Builder(OperationType.AND, controller);
         builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("BY")));
         builder.add(new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(28)));
 
-        Assert.assertFalse(builder.complete().satisfiedBy(row, staticRow, false));
+        Assert.assertFalse(builder.complete().satisfiedBy(key, row, staticRow, false));
 
         builder = new Operation.Builder(OperationType.AND, controller);
         builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US")));
         builder.add(new SimpleExpression(age, Operator.LTE, Int32Type.instance.decompose(27)));
         builder.add(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182)));
 
-        Assert.assertTrue(builder.complete().satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow, false));
 
         builder = new Operation.Builder(OperationType.AND, controller);
         builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US")));
         builder.add(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182)));
         builder.add(new SimpleExpression(score, Operator.EQ, DoubleType.instance.decompose(1.0d)));
 
-        Assert.assertTrue(builder.complete().satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow, false));
 
         builder = new Operation.Builder(OperationType.AND, controller);
         builder.add(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182)));
         builder.add(new SimpleExpression(score, Operator.EQ, DoubleType.instance.decompose(1.0d)));
 
-        Assert.assertTrue(builder.complete().satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow, false));
     }
 
     private Map<Expression.Op, Expression> convert(Multimap<ColumnMetadata, Expression> expressions)
@@ -563,6 +569,7 @@ public class OperationTest extends IndexingSchemaLoader
         final ColumnMetadata sensorType = getColumn(STATIC_BACKEND, UTF8Type.instance.decompose("sensor_type"));
         final ColumnMetadata value = getColumn(STATIC_BACKEND, UTF8Type.instance.decompose("value"));
 
+        DecoratedKey key = buildKey(STATIC_BACKEND, 0);
         Unfiltered row = buildRow(Clustering.make(UTF8Type.instance.fromString("date"), LongType.instance.decompose(20160401L)),
                           buildCell(value, DoubleType.instance.decompose(24.56), System.currentTimeMillis()));
         Row staticRow = buildRow(Clustering.STATIC_CLUSTERING,
@@ -573,28 +580,28 @@ public class OperationTest extends IndexingSchemaLoader
                                         new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE")),
                                         new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56))).complete();
 
-        Assert.assertTrue(op.satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
 
         // sensor_type ='TEMPERATURE' AND value = 30
         op = new Operation.Builder(OperationType.AND, controller,
                                              new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE")),
                                              new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(30.00))).complete();
 
-        Assert.assertFalse(op.satisfiedBy(row, staticRow, false));
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow, false));
 
         // sensor_type ='PRESSURE' OR value = 24.56
         op = new Operation.Builder(OperationType.OR, controller,
                                              new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE")),
                                              new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56))).complete();
 
-        Assert.assertTrue(op.satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
 
         // sensor_type ='PRESSURE' OR value = 30
         op = new Operation.Builder(OperationType.AND, controller,
                                    new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("PRESSURE")),
                                    new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(30.00))).complete();
 
-        Assert.assertFalse(op.satisfiedBy(row, staticRow, false));
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow, false));
 
         // (sensor_type = 'TEMPERATURE' OR sensor_type = 'PRESSURE') AND value = 24.56
         op = new Operation.Builder(OperationType.OR, controller,
@@ -603,14 +610,14 @@ public class OperationTest extends IndexingSchemaLoader
              .setRight(new Operation.Builder(OperationType.AND, controller,
                                              new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56)))).complete();
 
-        Assert.assertTrue(op.satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
 
         // sensor_type = LIKE 'TEMP%'  AND value = 24.56
         op = new Operation.Builder(OperationType.AND, controller,
                                    new SimpleExpression(sensorType, Operator.LIKE_PREFIX, UTF8Type.instance.decompose("TEMP")),
                                    new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56))).complete();
 
-        Assert.assertTrue(op.satisfiedBy(row, staticRow, false));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
     }
 
     private static class SimpleExpression extends RowFilter.Expression
@@ -631,6 +638,26 @@ public class OperationTest extends IndexingSchemaLoader
         {
             throw new UnsupportedOperationException();
         }
+    }
+
+    private static DecoratedKey buildKey(Object... key) {
+        return buildKey(BACKEND, key);
+    }
+
+    private static DecoratedKey buildKey(ColumnFamilyStore cfs, Object... key) {
+        AbstractType<?> type = cfs.metadata().partitionKeyType;
+        ByteBuffer decomposed;
+        if(type instanceof CompositeType)
+        {
+            Preconditions.checkArgument(key.length == type.subTypes().size());
+            decomposed = ((CompositeType) type).decompose(key);
+        }
+        else
+        {
+            Preconditions.checkArgument(key.length == 1);
+            decomposed = ((AbstractType) type).decompose(key[0]);
+        }
+        return Murmur3Partitioner.instance.decorateKey(decomposed);
     }
 
     private static Unfiltered buildRow(Cell... cells)

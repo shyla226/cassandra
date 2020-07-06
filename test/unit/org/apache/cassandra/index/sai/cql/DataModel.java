@@ -213,7 +213,7 @@ public interface DataModel
 
         public void createIndexes(SAITester tester) throws Throwable
         {
-            String template = "CREATE CUSTOM INDEX ndi_%s_index_%s ON %%s (%s) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'";
+            String template = "CREATE CUSTOM INDEX sai_%s_index_%s ON %%s (%s) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'";
 
             for (Pair<String, String> column : columns)
             {
@@ -447,6 +447,21 @@ public interface DataModel
             nonIndexedTable = tester.createTable(String.format(template, keyColumnDefs, normalColumnDefs, primaryKey));
         }
 
+        public void createIndexes(SAITester tester) throws Throwable
+        {
+            super.createIndexes(tester);
+            String template = "CREATE CUSTOM INDEX sai_%s_2i_index_%s ON %%s (%s) USING 'StorageAttachedIndex'";
+
+            for (Pair<String, String> column : keyColumns)
+            {
+                if (!skipColumns.contains(column.left))
+                {
+                    executeLocalIndexed(tester, String.format(template, column.left, indexedTable, column.left));
+                    tester.waitForCompactions();
+                }
+            }
+        }
+
         @Override
         public void insertRows(SAITester tester) throws Throwable
         {
@@ -465,8 +480,8 @@ public interface DataModel
             executeLocal(tester, String.format("UPDATE %%s SET %s = 27429638 WHERE p1 = 3 AND p2 = 0", INT_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = 31 WHERE p1 = 3 AND p2 = 1", SMALLINT_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = 116 WHERE p1 = 4 AND p2 = 0", TINYINT_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = 'State of Michigan' WHERE p1 = 4 AND p2 = 1", TEXT_COLUMN));
-            executeLocal(tester, String.format("UPDATE %%s SET %s = '00:20:26' WHERE p1 = 5 AND p2 = 0", TIME_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = 'State of Michigan' WHERE p1 = 4 AND p2 = 2", TEXT_COLUMN));
+            executeLocal(tester, String.format("UPDATE %%s SET %s = '00:20:26' WHERE p1 = 5 AND p2 = 3", TIME_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = '2009-07-16T00:00:00' WHERE p1 = 5 AND p2 = 1", TIMESTAMP_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = e37394dc-d17b-11e8-a8d5-f2801f1b9fd1 WHERE p1 = 6 AND p2 = 0", UUID_COLUMN));
             executeLocal(tester, String.format("UPDATE %%s SET %s = 1fc81a4c-d17d-11e8-a8d5-f2801f1b9fd1 WHERE p1 = 6 AND p2 = 1", TIMEUUID_COLUMN));

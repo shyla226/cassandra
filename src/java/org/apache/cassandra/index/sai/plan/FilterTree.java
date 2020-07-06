@@ -22,11 +22,13 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Map;
 
 import com.google.common.collect.ListMultimap;
 
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.plan.Expression.Op;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -95,20 +97,21 @@ public class FilterTree
      * Level #2 computes AND between "first_name" and result of level #3, AND (state, country) which is already computed
      * Level #1 does OR between results of AND (first_name) and AND (state, country) and returns final result.
      *
+     * @param key The partition key for the row.
      * @param currentCluster The row cluster to check.
      * @param staticRow The static row associated with current cluster.
      * @param allowMissingColumns allow columns value to be null.
      * @return true if give Row satisfied all of the expressions in the tree,
      *         false otherwise.
      */
-    public boolean satisfiedBy(Unfiltered currentCluster, Row staticRow, boolean allowMissingColumns)
+    public boolean satisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow, boolean allowMissingColumns)
     {
         boolean sideL, sideR;
 
         if (expressions == null || expressions.isEmpty())
         {
-            sideL =  left != null &&  left.satisfiedBy(currentCluster, staticRow, allowMissingColumns);
-            sideR = right != null && right.satisfiedBy(currentCluster, staticRow, allowMissingColumns);
+            sideL =  left != null &&  left.satisfiedBy(key, currentCluster, staticRow, allowMissingColumns);
+            sideR = right != null && right.satisfiedBy(key, currentCluster, staticRow, allowMissingColumns);
 
             // one of the expressions was skipped
             // because it had no indexes attached
@@ -117,14 +120,14 @@ public class FilterTree
         }
         else
         {
-            sideL = localSatisfiedBy(currentCluster, staticRow, allowMissingColumns);
+            sideL = localSatisfiedBy(key, currentCluster, staticRow, allowMissingColumns);
 
             // if there is no right it means that this expression
             // is last in the sequence, we can just return result from local expressions
             if (right == null)
                 return sideL;
 
-            sideR = right.satisfiedBy(currentCluster, staticRow, allowMissingColumns);
+            sideR = right.satisfiedBy(key, currentCluster, staticRow, allowMissingColumns);
         }
 
 
@@ -167,29 +170,29 @@ public class FilterTree
      *
      * #4 return accumulator => true (row satisfied all of the conditions)
      *
+     * @param key The partition key for the row.
      * @param currentCluster The row cluster to check.
      * @param staticRow The static row associated with current cluster.
      * @param allowMissingColumns allow columns value to be null.
      * @return true if give Row satisfied all of the analyzed expressions,
      *         false otherwise.
      */
-    private boolean localSatisfiedBy(Unfiltered currentCluster, Row staticRow, boolean allowMissingColumns)
+    private boolean localSatisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow, boolean allowMissingColumns)
     {
         if (currentCluster == null || !currentCluster.isRow())
             return false;
-
-        //logger.debug("localSatisfiedBy currentCluster="+currentCluster);
 
         final int now = FBUtilities.nowInSeconds();
         boolean result = false;
         int idx = 0;
 
-        for (ColumnMetadata column : expressions.keySet())
+        for (Map.Entry<ColumnMetadata, Expression> entry : expressions.entries())
         {
-            if (column.kind == Kind.PARTITION_KEY)
-                continue;
+            ColumnMetadata column = entry.getKey();
+            ColumnContext context = entry.getValue().context;
 
-            ByteBuffer value = ColumnContext.getValueOf(column, column.kind == Kind.STATIC ? staticRow : (Row) currentCluster, now);
+            ByteBuffer value = context.getValueOf(column, key, column.kind == Kind.STATIC ? staticRow : (Row) currentCluster, now);
+
             boolean isMissingColumn = value == null;
 
             if (!allowMissingColumns && isMissingColumn)

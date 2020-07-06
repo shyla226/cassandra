@@ -167,14 +167,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 Unfiltered row = partition.next();
 
                 queryContext.rowsFiltered++;
-                if (tree.satisfiedBy(row, staticRow, true))
+                if (tree.satisfiedBy(partition.partitionKey(), row, staticRow, true))
                     clusters.add(row);
             }
 
             if (clusters.isEmpty())
             {
                 queryContext.rowsFiltered++;
-                if (tree.satisfiedBy(staticRow, staticRow, true))
+                if (tree.satisfiedBy(partition.partitionKey(), staticRow, staticRow, true))
                     clusters.add(staticRow);
             }
 

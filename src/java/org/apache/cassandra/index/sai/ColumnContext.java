@@ -34,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -82,7 +83,7 @@ public class ColumnContext
     private static final Set<AbstractType<?>> EQ_ONLY_TYPES =
             ImmutableSet.of(UTF8Type.instance, AsciiType.instance, BooleanType.instance, UUIDType.instance);
 
-    private final AbstractType<?> keyValidator;
+    private final AbstractType<?> partitionKeyType;
     private final ClusteringComparator clusteringComparator;
 
     private final String keyspace;
@@ -103,7 +104,7 @@ public class ColumnContext
     {
         this.keyspace = tableMeta.keyspace;
         this.table = tableMeta.name;
-        this.keyValidator = tableMeta.partitionKeyType;
+        this.partitionKeyType = tableMeta.partitionKeyType;
         this.clusteringComparator = tableMeta.comparator;
         this.column = column;
         this.config = metadata;
@@ -120,13 +121,16 @@ public class ColumnContext
     }
 
     @VisibleForTesting
-    public ColumnContext(String keyspace, String table,
-                         AbstractType<?> keyValidator, ClusteringComparator clusteringComparator,
-                         ColumnMetadata column, IndexWriterConfig indexWriterConfig)
+    public ColumnContext(String keyspace,
+                         String table,
+                         AbstractType<?> partitionKeyType,
+                         ClusteringComparator clusteringComparator,
+                         ColumnMetadata column,
+                         IndexWriterConfig indexWriterConfig)
     {
         this.keyspace = keyspace;
         this.table = table;
-        this.keyValidator = keyValidator;
+        this.partitionKeyType = partitionKeyType;
         this.clusteringComparator = clusteringComparator;
         this.column = column;
         this.config = null;
@@ -140,7 +144,7 @@ public class ColumnContext
     {
         this.keyspace = table.keyspace;
         this.table = table.name;
-        this.keyValidator = table.partitionKeyType;
+        this.partitionKeyType = table.partitionKeyType;
         this.clusteringComparator = table.comparator;
         this.column = column;
         this.config = null;
@@ -152,7 +156,7 @@ public class ColumnContext
 
     public AbstractType<?> keyValidator()
     {
-        return keyValidator;
+        return partitionKeyType;
     }
 
     public ClusteringComparator clusteringComparator()
@@ -186,7 +190,7 @@ public class ColumnContext
                                : liveMemtables.computeIfAbsent(mt, memtable -> new MemtableIndex(this));
 
         long start = System.nanoTime();
-        long bytes = target.index(key, row.clustering(), getValueOf(column, row, FBUtilities.nowInSeconds()));
+        long bytes = target.index(key, row.clustering(), getValueOf(column, key, row, FBUtilities.nowInSeconds()));
         indexMetrics.memtableIndexWriteLatency.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
         return bytes;
     }
@@ -339,13 +343,17 @@ public class ColumnContext
         return (operator != null) && !(TypeUtil.isString(getValidator()) && operator == Expression.Op.RANGE);
     }
 
-    public static ByteBuffer getValueOf(ColumnMetadata column, Row row, int nowInSecs)
+    public ByteBuffer getValueOf(ColumnMetadata column, DecoratedKey key, Row row, int nowInSecs)
     {
         if (row == null)
             return null;
 
         switch (column.kind)
         {
+            case PARTITION_KEY:
+                return partitionKeyType instanceof CompositeType
+                        ? CompositeType.extractComponent(key.getKey(), column.position())
+                        : key.getKey();
             case CLUSTERING:
                 // skip indexing of static clustering when regular column is indexed
                 if (row.isStatic())
@@ -393,13 +401,13 @@ public class ColumnContext
 
         return Objects.equals(column, other.column) &&
                 Objects.equals(config, other.config) &&
-                Objects.equals(keyValidator, other.keyValidator) &&
+                Objects.equals(partitionKeyType, other.partitionKeyType) &&
                 Objects.equals(clusteringComparator, other.clusteringComparator);
     }
 
     public int hashCode()
     {
-        return Objects.hash(column, config, keyValidator, clusteringComparator);
+        return Objects.hash(column, config, partitionKeyType, clusteringComparator);
     }
 
     /**
