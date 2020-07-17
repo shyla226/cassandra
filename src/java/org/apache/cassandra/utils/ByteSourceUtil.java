@@ -332,18 +332,25 @@ public final class ByteSourceUtil
      * Reads the bytes of the given source into a byte array. Doesn't do any transformation on the bytes, just reads
      * them until it reads an {@link ByteSource#END_OF_STREAM} byte, after which it returns an array of all the read
      * bytes, <strong>excluding the {@link ByteSource#END_OF_STREAM}</strong>.
+     * <p>
+     * This method sizes a tentative internal buffer array at {@code initialBufferCapacity}.  However, if
+     * {@code byteSource} exceeds this size, the buffer array is recreated with doubled capacity as many times as
+     * necessary.  If, after {@code byteSource} is fully exhausted, the number of bytes read from it does not exactly
+     * match the current size of the tentative buffer array, then it is copied into another array sized to fit the
+     * number of bytes read; otherwise, it is returned without that final copy step.
      *
      * @param byteSource The source which bytes we're interested in.
+     * @param initialBufferCapacity The initial size of the internal buffer.
      * @return A byte array containing exactly all the read bytes. In case of a {@code null} source, the returned byte
      * array will be empty.
      */
-    public static byte[] readBytes(ByteSource byteSource)
+    public static byte[] readBytes(ByteSource byteSource, final int initialBufferCapacity)
     {
         if (byteSource == null)
             return new byte[0];
 
         int readBytes = 0;
-        byte[] buf = new byte[INITIAL_BUFFER_CAPACITY];
+        byte[] buf = new byte[initialBufferCapacity];
         int data;
         while ((data = byteSource.next()) != ByteSource.END_OF_STREAM)
         {
@@ -351,8 +358,28 @@ public final class ByteSourceUtil
             buf[readBytes++] = (byte) (data & 0xFF);
         }
 
-        buf = Arrays.copyOf(buf, readBytes);
+        if (readBytes != buf.length)
+        {
+            buf = Arrays.copyOf(buf, readBytes);
+        }
         return buf;
+    }
+
+    /**
+     * Reads the bytes of the given source into a byte array. Doesn't do any transformation on the bytes, just reads
+     * them until it reads an {@link ByteSource#END_OF_STREAM} byte, after which it returns an array of all the read
+     * bytes, <strong>excluding the {@link ByteSource#END_OF_STREAM}</strong>.
+     * <p>
+     * This is equivalent to {@link #readBytes(ByteSource, int)} where the second actual parameter is
+     * {@linkplain #INITIAL_BUFFER_CAPACITY} ({@value INITIAL_BUFFER_CAPACITY}).
+     *
+     * @param byteSource The source which bytes we're interested in.
+     * @return A byte array containing exactly all the read bytes. In case of a {@code null} source, the returned byte
+     * array will be empty.
+     */
+    public static byte[] readBytes(ByteSource byteSource)
+    {
+        return readBytes(byteSource, INITIAL_BUFFER_CAPACITY);
     }
 
     /**
