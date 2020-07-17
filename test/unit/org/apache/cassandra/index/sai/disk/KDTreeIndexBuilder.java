@@ -21,17 +21,22 @@
 package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
+import java.util.stream.Stream;
 
 import org.junit.Assert;
 
 import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.ShortType;
@@ -79,6 +84,7 @@ public class KDTreeIndexBuilder
             return null;
         }
     };
+    private static final BigDecimal ONE_TENTH = BigDecimal.valueOf(1, 1);
 
     public KDTreeIndexBuilder(IndexComponents indexComponents,
                               AbstractType<?> type,
@@ -142,6 +148,21 @@ public class KDTreeIndexBuilder
                 size,
                 startTermInclusive,
                 endTermExclusive);
+        return indexBuilder.flushAndOpen();
+    }
+
+    public static IndexSearcher buildDecimalSearcher(IndexComponents indexComponents, BigDecimal startTermInclusive, BigDecimal endTermExclusive)
+            throws IOException
+    {
+        BigDecimal bigDifference = endTermExclusive.subtract(startTermInclusive);
+        int size = bigDifference.intValueExact() * 10;
+        Assert.assertTrue(size > 0);
+        KDTreeIndexBuilder indexBuilder = new KDTreeIndexBuilder(indexComponents,
+                DecimalType.instance,
+                singleOrd(decimalRange(startTermInclusive, endTermExclusive), startTermInclusive.intValueExact() * 10, size),
+                size,
+                startTermInclusive.intValueExact() * 10,
+                endTermExclusive.intValueExact() * 10);
         return indexBuilder.flushAndOpen();
     }
 
@@ -235,6 +256,29 @@ public class KDTreeIndexBuilder
                 .collect(Collectors.toList())
                 .iterator();
     }
+
+    public static Iterator<ByteBuffer> decimalRange(final BigDecimal startInclusive, final BigDecimal endExclusive)
+    {
+        int n = endExclusive.subtract(startInclusive).intValueExact() * 10;
+        final Supplier<BigDecimal> generator = new Supplier<BigDecimal>() {
+            BigDecimal current = startInclusive;
+
+            @Override
+            public BigDecimal get() {
+                BigDecimal result = current;
+                current = current.add(ONE_TENTH);
+                return result;
+            }
+        };
+        return Stream.generate(generator)
+                .limit(n)
+                .map(bd -> {
+                    return TypeUtil.encodeDecimal(DecimalType.instance.decompose(bd));
+                })
+                .collect(Collectors.toList())
+                .iterator();
+    }
+
 
     /**
      * Returns sequential ordered encoded shorts from {@code startInclusive} (inclusive) to {@code endExclusive}
