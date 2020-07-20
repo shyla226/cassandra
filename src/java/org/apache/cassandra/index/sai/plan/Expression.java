@@ -28,15 +28,11 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.disk.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class Expression
@@ -45,7 +41,7 @@ public class Expression
 
     public enum Op
     {
-        EQ, MATCH, PREFIX, NOT_EQ, RANGE;
+        EQ, MATCH, PREFIX, NOT_EQ, RANGE, CONTAINS_KEY, CONTAINS_VALUE;
 
         public static Op valueOf(Operator operator)
         {
@@ -56,6 +52,12 @@ public class Expression
 
                 case NEQ:
                     return NOT_EQ;
+
+                case CONTAINS:
+                    return CONTAINS_VALUE; // non-frozen map: value contains term;
+
+                case CONTAINS_KEY:
+                    return CONTAINS_KEY; // non-frozen map: value contains key term;
 
                 case LT:
                 case GT:
@@ -73,9 +75,17 @@ public class Expression
                     return null;
             }
         }
-    }
 
-    private final QueryController controller;
+        public boolean isEquality()
+        {
+            return this == EQ || this == CONTAINS_KEY || this == CONTAINS_VALUE;
+        }
+
+        public boolean isEqualityOrRange()
+        {
+            return isEquality() || this == RANGE;
+        }
+    }
 
     public final AbstractAnalyzer analyzer;
 
@@ -86,62 +96,39 @@ public class Expression
     protected Op operation;
 
     public Bound lower, upper;
-    
+    public boolean upperInclusive, lowerInclusive;
+
     final List<ByteBuffer> exclusions = new ArrayList<>();
 
     public Expression(Expression other)
     {
-        this(other.controller, other.context);
+        this(other.context);
         operation = other.operation;
     }
 
-    public Expression(QueryController controller, ColumnContext columnContext)
+    public Expression(ColumnContext columnContext)
     {
-        this.controller = controller;
         this.context = columnContext;
         this.analyzer = columnContext.getAnalyzer();
         this.validator = columnContext.getValidator();
     }
 
-    @VisibleForTesting
-    public Expression(String name, AbstractType<?> validator)
-    {
-        this(null, new ColumnContext("test_ks", "test_cf",
-                                     UTF8Type.instance, 
-                                     new ClusteringComparator(), 
-                                     ColumnMetadata.regularColumn("sai", "internal", name, validator),
-                                     IndexWriterConfig.emptyConfig()));
-    }
-
-    public Expression setLower(Bound newLower)
-    {
-        lower = newLower == null ? null : new Bound(newLower.value, newLower.inclusive);
-        return this;
-    }
-
-    public Expression setUpper(Bound newUpper)
-    {
-        upper = newUpper == null ? null : new Bound(newUpper.value, newUpper.inclusive);
-        return this;
-    }
-
-    public Expression setOp(Op op)
-    {
-        this.operation = op;
-        return this;
-    }
-
     public Expression add(Operator op, ByteBuffer value)
     {
-        value = TypeUtil.encode(value, validator);
-
-        boolean lowerInclusive = false, upperInclusive = false;
+        boolean lowerInclusive, upperInclusive;
+        // If the type supports rounding then we need to make sure that index
+        // range search is always inclusive, otherwise we run the risk of
+        // missing values that are within the exclusive range but are rejected
+        // because their rounded value is the same as the value being queried.
+        lowerInclusive = upperInclusive = TypeUtil.supportsRounding(validator);
         switch (op)
         {
             case LIKE_PREFIX:
             case LIKE_MATCHES:
             case EQ:
-                lower = new Bound(value, true);
+            case CONTAINS:
+            case CONTAINS_KEY:
+                lower = new Bound(value, validator, true);
                 upper = lower;
                 operation = Op.valueOf(op);
                 break;
@@ -153,7 +140,7 @@ public class Expression
                 if (operation == null)
                 {
                     operation = Op.NOT_EQ;
-                    lower = new Bound(value, true);
+                    lower = new Bound(value, validator, true);
                     upper = lower;
                 }
                 else
@@ -162,63 +149,74 @@ public class Expression
 
             case LTE:
                 if (context.getDefinition().isReversedType())
+                {
+                    this.lowerInclusive = true;
                     lowerInclusive = true;
+                }
                 else
+                {
+                    this.upperInclusive = true;
                     upperInclusive = true;
+                }
             case LT:
                 operation = Op.RANGE;
                 if (context.getDefinition().isReversedType())
-                    lower = new Bound(value, lowerInclusive);
+                    lower = new Bound(value, validator, lowerInclusive);
                 else
-                    upper = new Bound(value, upperInclusive);
+                    upper = new Bound(value, validator, upperInclusive);
                 break;
 
             case GTE:
                 if (context.getDefinition().isReversedType())
+                {
+                    this.upperInclusive = true;
                     upperInclusive = true;
+                }
                 else
+                {
+                    this.lowerInclusive = true;
                     lowerInclusive = true;
+                }
             case GT:
                 operation = Op.RANGE;
                 if (context.getDefinition().isReversedType())
-                    upper = new Bound(value, upperInclusive);
+                    upper = new Bound(value, validator,  upperInclusive);
                 else
-                    lower = new Bound(value, lowerInclusive);
-
+                    lower = new Bound(value, validator, lowerInclusive);
                 break;
         }
 
         return this;
     }
 
-    public boolean isSatisfiedBy(ByteBuffer value)
+    public boolean isSatisfiedBy(ByteBuffer columnValue)
     {
-        value = TypeUtil.encode(value, validator);
-
-        if (!TypeUtil.isValid(value, validator))
+        if (!TypeUtil.isValid(columnValue, validator))
         {
             logger.error(context.logMessage("Value is not valid for indexed column {} with {}"), context.getColumnName(), validator);
             return false;
         }
 
+        Value value = new Value(columnValue, validator);
+
         if (lower != null)
         {
             // suffix check
-            if (TypeUtil.isString(validator))
+            if (TypeUtil.isLiteral(validator))
             {
-                if (!validateStringValue(value, lower.value))
+                if (!validateStringValue(value.raw, lower.value.raw))
                     return false;
             }
             else
             {
                 // range or (not-)equals - (mainly) for numeric values
-                int cmp = TypeUtil.compare(lower.value, value, validator);
+                int cmp = TypeUtil.comparePostFilter(lower.value, value, validator);
 
                 // in case of (NOT_)EQ lower == upper
-                if (operation == Op.EQ || operation == Op.NOT_EQ)
+                if (operation == Op.EQ || operation == Op.CONTAINS_KEY || operation == Op.CONTAINS_VALUE || operation == Op.NOT_EQ)
                     return cmp == 0;
 
-                if (cmp > 0 || (cmp == 0 && !lower.inclusive))
+                if (cmp > 0 || (cmp == 0 && !lowerInclusive))
                     return false;
             }
         }
@@ -226,16 +224,16 @@ public class Expression
         if (upper != null && lower != upper)
         {
             // string (prefix or suffix) check
-            if (TypeUtil.isString(validator))
+            if (TypeUtil.isLiteral(validator))
             {
-                if (!validateStringValue(value, upper.value))
+                if (!validateStringValue(value.raw, upper.value.raw))
                     return false;
             }
             else
             {
                 // range - mainly for numeric values
-                int cmp = TypeUtil.compare(upper.value, value, validator);
-                if (cmp < 0 || (cmp == 0 && !upper.inclusive))
+                int cmp = TypeUtil.comparePostFilter(upper.value, value, validator);
+                if (cmp < 0 || (cmp == 0 && !upperInclusive))
                     return false;
             }
         }
@@ -244,7 +242,8 @@ public class Expression
         // this covers EQ/RANGE with exclusions.
         for (ByteBuffer term : exclusions)
         {
-            if (TypeUtil.isString(validator) && validateStringValue(value, term) || TypeUtil.compare(term, value, validator) == 0)
+            if (TypeUtil.isLiteral(validator) && validateStringValue(value.raw, term) ||
+                TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
                 return false;
         }
 
@@ -263,8 +262,10 @@ public class Expression
             {
                 case EQ:
                 case MATCH:
-                // Operation.isSatisfiedBy handles conclusion on !=,
-                // here we just need to make sure that term matched it
+                    // Operation.isSatisfiedBy handles conclusion on !=,
+                    // here we just need to make sure that term matched it
+                case CONTAINS_KEY:
+                case CONTAINS_VALUE:
                 case NOT_EQ:
                     isMatch = validator.compare(term, requestedValue) == 0;
                     break;
@@ -304,7 +305,7 @@ public class Expression
         if (!hasLower())
             return true;
 
-        int cmp = validator.compare(value, lower.value);
+        int cmp = validator.compare(value, lower.value.raw);
         return cmp > 0 || cmp == 0 && lower.inclusive;
     }
 
@@ -313,7 +314,7 @@ public class Expression
         if (!hasUpper())
             return true;
 
-        int cmp = validator.compare(value, upper.value);
+        int cmp = validator.compare(value, upper.value.raw);
         return cmp < 0 || cmp == 0 && upper.inclusive;
     }
 
@@ -322,9 +323,9 @@ public class Expression
         return String.format("Expression{name: %s, op: %s, lower: (%s, %s), upper: (%s, %s), exclusions: %s}",
                              context.getColumnName(),
                              operation,
-                             lower == null ? "null" : validator.getString(lower.value),
+                             lower == null ? "null" : validator.getString(lower.value.raw),
                              lower != null && lower.inclusive,
-                             upper == null ? "null" : validator.getString(upper.value),
+                             upper == null ? "null" : validator.getString(upper.value.raw),
                              upper != null && upper.inclusive,
                              Iterators.toString(Iterators.transform(exclusions.iterator(), validator::getString)));
     }
@@ -349,24 +350,59 @@ public class Expression
         Expression o = (Expression) other;
 
         return Objects.equals(context.getColumnName(), o.context.getColumnName())
-                && validator.equals(o.validator)
-                && operation == o.operation
-                && Objects.equals(lower, o.lower)
-                && Objects.equals(upper, o.upper)
-                && exclusions.equals(o.exclusions);
+               && validator.equals(o.validator)
+               && operation == o.operation
+               && Objects.equals(lower, o.lower)
+               && Objects.equals(upper, o.upper)
+               && exclusions.equals(o.exclusions);
+    }
+
+    /**
+     * A representation of a column value in it's raw and encoded form.
+     */
+    public static class Value
+    {
+        public final ByteBuffer raw;
+        public final ByteBuffer encoded;
+
+        public Value(ByteBuffer value, AbstractType<?> type)
+        {
+            this.raw = value;
+            this.encoded = TypeUtil.encode(value, type);
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if (!(other instanceof Value))
+                return false;
+
+            Value o = (Value) other;
+            return raw.equals(o.raw) && encoded.equals(o.encoded);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            HashCodeBuilder builder = new HashCodeBuilder();
+            builder.append(raw);
+            builder.append(encoded);
+            return builder.toHashCode();
+        }
     }
 
     public static class Bound
     {
-        public final ByteBuffer value;
+        public final Value value;
         public final boolean inclusive;
 
-        public Bound(ByteBuffer value, boolean inclusive)
+        public Bound(ByteBuffer value, AbstractType<?> type, boolean inclusive)
         {
-            this.value = value;
+            this.value = new Value(value, type);
             this.inclusive = inclusive;
         }
 
+        @Override
         public boolean equals(Object other)
         {
             if (!(other instanceof Bound))
@@ -376,6 +412,7 @@ public class Expression
             return value.equals(o.value) && inclusive == o.inclusive;
         }
 
+        @Override
         public int hashCode()
         {
             HashCodeBuilder builder = new HashCodeBuilder();

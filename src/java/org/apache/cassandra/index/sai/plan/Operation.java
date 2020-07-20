@@ -108,7 +108,8 @@ public class Operation extends RangeIterator
 
             // EQ/LIKE_*/NOT_EQ can have multiple expressions e.g. text = "Hello World",
             // becomes text = "Hello" OR text = "World" because "space" is always interpreted as a split point (by analyzer),
-            // NOT_EQ is made an independent expression only in case of pre-existing multiple EQ expressions, or
+            // CONTAINS/CONTAINS_KEY are always treated as multiple expressions since they currently only targetting
+            // collections, NOT_EQ is made an independent expression only in case of pre-existing multiple EQ expressions, or
             // if there is no EQ operations and NOT_EQ is met or a single NOT_EQ expression present,
             // in such case we know exactly that there would be no more EQ/RANGE expressions for given column
             // since NOT_EQ has the lowest priority.
@@ -116,9 +117,13 @@ public class Operation extends RangeIterator
             switch (e.operator())
             {
                 case EQ:
-                    isMultiExpression = false;
+                    // EQ operator will always be a multiple expression because it is being used by
+                    // map entries
+                    isMultiExpression = columnContext.isCollection();
                     break;
 
+                case CONTAINS:
+                case CONTAINS_KEY:
                 case LIKE_PREFIX:
                 case LIKE_MATCHES:
                     isMultiExpression = true;
@@ -126,7 +131,7 @@ public class Operation extends RangeIterator
 
                 case NEQ:
                     isMultiExpression = (perColumn.size() == 0 || perColumn.size() > 1
-                                     || (perColumn.size() == 1 && perColumn.get(0).getOp() == Expression.Op.NOT_EQ));
+                                         || (perColumn.size() == 1 && perColumn.get(0).getOp() == Expression.Op.NOT_EQ));
                     break;
             }
             if (isMultiExpression)
@@ -134,25 +139,25 @@ public class Operation extends RangeIterator
                 while (analyzer.hasNext())
                 {
                     final ByteBuffer token = analyzer.next();
-                    perColumn.add(new Expression(controller, columnContext).add(e.operator(), token));
+                    perColumn.add(new Expression(columnContext).add(e.operator(), token));
                 }
             }
             else
             // "range" or not-equals operator, combines both bounds together into the single expression,
             // iff operation of the group is AND, otherwise we are forced to create separate expressions,
-            // not-equals is combined with the range iff operator is AND.
+            // not-equals is combined with the range if operator is AND.
             {
                 Expression range;
                 if (perColumn.size() == 0 || op != OperationType.AND)
                 {
-                    perColumn.add((range = new Expression(controller, columnContext)));
+                    perColumn.add((range = new Expression(columnContext)));
                 }
                 else
                 {
                     range = Iterables.getLast(perColumn);
                 }
 
-                if (!TypeUtil.isString(columnContext.getValidator()))
+                if (!TypeUtil.isLiteral(columnContext.getValidator()))
                 {
                     range.add(e.operator(), e.getIndexValue().duplicate());
                 }
@@ -174,6 +179,8 @@ public class Operation extends RangeIterator
         switch (op)
         {
             case EQ:
+            case CONTAINS:
+            case CONTAINS_KEY:
                 return 5;
 
             case LIKE_PREFIX:

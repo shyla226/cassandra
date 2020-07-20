@@ -1,9 +1,23 @@
 /*
- * Copyright DataStax, Inc.
  *
- * Please see the included license file for details.
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ *
  */
-
 package org.apache.cassandra.index.sai.cql;
 
 import java.net.InetAddress;
@@ -11,77 +25,31 @@ import java.net.InetAddress;
 import org.junit.Before;
 import org.junit.Test;
 
-import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.cql.types.InetTest;
 
-public class InetAddressIndexTest extends CQLTester
+/**
+ * This is testing that we can query ipv4 addresses using ipv6 equivalent addresses.
+ *
+ * The remaining InetAddressType tests are now handled by {@link InetTest}
+ */
+public class InetAddressTypeEquivalencyTest extends SAITester
 {
     @Before
-    public void createTableAndIndex()
+    public void createTableAndIndex() throws Throwable
     {
         requireNetwork();
 
         createTable("CREATE TABLE %s (pk int, ck int, ip inet, PRIMARY KEY(pk, ck ))");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(ip) USING 'StorageAttachedIndex'");
-
         disableCompaction();
     }
 
     @Test
-    public void queryFromMemtable() throws Throwable
+    public void mixedWorkloadQueryTest() throws Throwable
     {
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 1, '127.0.0.1')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 2, '127.0.0.1')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 3, '127.0.0.2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 4, '::ffff:7f00:3')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 5, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 6, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 7, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 8, '2002:4559:1fe2::4559:1fe3')");
+        createIndex("CREATE CUSTOM INDEX ON %s(ip) USING 'StorageAttachedIndex'");
 
-        runQueries();
-    }
-
-    @Test
-    public void queryFromSingleSSTable() throws Throwable
-    {
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 1, '127.0.0.1')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 2, '127.0.0.1')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 3, '127.0.0.2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 4, '::ffff:7f00:3')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 5, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 6, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 7, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 8, '2002:4559:1fe2::4559:1fe3')");
-
-        flush();
-
-        runQueries();
-    }
-
-    @Test
-    public void queryFromMultipleSSTables() throws Throwable
-    {
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 1, '127.0.0.1')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 2, '127.0.0.1')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 3, '127.0.0.2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 4, '::ffff:7f00:3')");
-
-        flush();
-
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 5, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 6, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 7, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 8, '2002:4559:1fe2::4559:1fe3')");
-
-        flush();
-
-        runQueries();
-    }
-
-    @Test
-    public void queryFromMemtableAndSSTables() throws Throwable
-    {
         execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 1, '127.0.0.1')");
         execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 2, '127.0.0.1')");
         execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 3, '127.0.0.2')");
@@ -96,28 +64,6 @@ public class InetAddressIndexTest extends CQLTester
 
         execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 7, '2002:4559:1fe2::4559:1fe2')");
         execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 8, '2002:4559:1fe2::4559:1fe3')");
-
-        runQueries();
-    }
-
-    @Test
-    public void queryFromCompactedSSTable() throws Throwable
-    {
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 1, '127.0.0.1')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 2, '127.0.0.1')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 3, '127.0.0.2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 4, '::ffff:7f00:3')");
-
-        flush();
-
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 5, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 6, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 7, '2002:4559:1fe2::4559:1fe2')");
-        execute("INSERT INTO %s (pk, ck, ip) VALUES (1, 8, '2002:4559:1fe2::4559:1fe3')");
-
-        flush();
-
-        compact();
 
         runQueries();
     }

@@ -57,7 +57,7 @@ public class SkipListMemoryIndex extends MemoryIndex
     public SkipListMemoryIndex(ColumnContext columnContext)
     {
         super(columnContext);
-        index = new ConcurrentSkipListMap<>(columnContext.getValidator());
+        index = new ConcurrentSkipListMap<>(TypeUtil.comparator(columnContext.getValidator()));
     }
 
     @Override
@@ -91,8 +91,8 @@ public class SkipListMemoryIndex extends MemoryIndex
     @Override
     public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
-        ByteBuffer min = expression.lower == null ? null : expression.lower.value;
-        ByteBuffer max = expression.upper == null ? null : expression.upper.value;
+        ByteBuffer min = expression.lower == null ? null : expression.lower.value.encoded;
+        ByteBuffer max = expression.upper == null ? null : expression.upper.value.encoded;
 
         SortedMap<ByteBuffer, PrimaryKeys> search;
 

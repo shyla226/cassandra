@@ -72,6 +72,6 @@ public abstract class MemoryIndex
 
     public static MemoryIndex forColumn(ColumnContext columnContext)
     {
-        return columnContext.isString() ? new TrieMemoryIndex(columnContext) : new SkipListMemoryIndex(columnContext);
+        return columnContext.isLiteral() ? new TrieMemoryIndex(columnContext) : new SkipListMemoryIndex(columnContext);
     }
 }

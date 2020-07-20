@@ -67,6 +67,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
@@ -93,6 +94,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.metrics.AbstractMetrics;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
@@ -198,7 +200,8 @@ public class StorageAttachedIndex implements Index
                                                                         CQL3Type.Native.DOUBLE, CQL3Type.Native.FLOAT, CQL3Type.Native.INT,
                                                                         CQL3Type.Native.SMALLINT, CQL3Type.Native.TEXT, CQL3Type.Native.TIME,
                                                                         CQL3Type.Native.TIMESTAMP, CQL3Type.Native.TIMEUUID, CQL3Type.Native.TINYINT,
-                                                                        CQL3Type.Native.UUID, CQL3Type.Native.VARCHAR, CQL3Type.Native.INET);
+                                                                        CQL3Type.Native.UUID, CQL3Type.Native.VARCHAR, CQL3Type.Native.INET,
+                                                                        CQL3Type.Native.VARINT);
 
     private static final Set<Class<? extends IPartitioner>> ILLEGAL_PARTITIONERS =
             ImmutableSet.of(OrderPreservingPartitioner.class, LocalPartitioner.class, ByteOrderedPartitioner.class, RandomPartitioner.class);
@@ -220,7 +223,7 @@ public class StorageAttachedIndex implements Index
 
         ColumnMetadata column = TargetParser.parse(baseCfs.metadata(), config).left;
         TableMetadata table = baseCfs.metadata();
-        this.context = new ColumnContext(table, column, config);
+        this.context = new ColumnContext(table, config);
     }
 
     /**
@@ -273,18 +276,26 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Cannot create more than one storage-attached index on the same target column: " + targetColumn);
         }
 
-        if (target.left.isComplex())
+
+        AbstractType<?> type = TypeUtil.cellValueType(target);
+
+        // If we are indexing frozen collections or map entries we need to validate the
+        // sub-types
+        if (type.isCollection() && !type.isMultiCell() || type instanceof CompositeType)
         {
-            throw new InvalidRequestException("Complex columns are not yet supported by storage-attached indexes.");
+            for (AbstractType<?> subType : type.subTypes())
+            {
+                if (!SUPPORTED_TYPES.contains(subType.asCQL3Type()))
+                    throw new InvalidRequestException("Unsupported type: " + subType.asCQL3Type());
+            }
+        }
+        else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()))
+        {
+            throw new InvalidRequestException("Unsupported type: " + type.asCQL3Type());
         }
 
-        if (!SUPPORTED_TYPES.contains(target.left.cellValueType().asCQL3Type()))
-        {
-            throw new InvalidRequestException("Unsupported type: " + target.left.cellValueType().asCQL3Type());
-        }
-
-        AbstractAnalyzer.fromOptions(target.left.cellValueType(), options);
-        IndexWriterConfig.fromOptions(null, target.left.cellValueType(), options);
+        AbstractAnalyzer.fromOptions(type, options);
+        IndexWriterConfig.fromOptions(null, type, options);
 
         return Collections.emptyMap();
     }
@@ -701,6 +712,6 @@ public class StorageAttachedIndex implements Index
     @Override
     public Set<Component> getComponents()
     {
-        return new HashSet<>(IndexComponents.perColumnComponents(context.getColumnName(), context.isString()));
+        return new HashSet<>(IndexComponents.perColumnComponents(context.getColumnName(), context.isLiteral()));
     }
 }

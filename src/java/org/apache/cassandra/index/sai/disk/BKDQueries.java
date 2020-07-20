@@ -59,14 +59,14 @@ class BKDQueries
         Bound lower = null ;
         if (expression.lower != null)
         {
-            final byte[] lowerBound = toComparableBytes(numDim, bytesPerDim, expression.lower.value, expression.validator);
+            final byte[] lowerBound = toComparableBytes(numDim, bytesPerDim, expression.lower.value.encoded, expression.validator);
             lower = new Bound(lowerBound, !expression.lower.inclusive);
         }
 
         Bound upper = null;
         if (expression.upper != null)
         {
-            final byte[] upperBound = toComparableBytes(numDim, bytesPerDim, expression.upper.value, expression.validator);
+            final byte[] upperBound = toComparableBytes(numDim, bytesPerDim, expression.upper.value.encoded, expression.validator);
             upper = new Bound(upperBound, !expression.upper.inclusive);
         }
 
