@@ -45,6 +45,7 @@ import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -86,7 +87,7 @@ public class SSTableIndex
 
         try
         {
-            this.indexFiles = new PerIndexFiles(components, columnContext.isString());
+            this.indexFiles = new PerIndexFiles(components, columnContext.isLiteral());
 
             ImmutableList.Builder<Segment> segmentsBuilder = ImmutableList.builder();
 
@@ -105,8 +106,8 @@ public class SSTableIndex
             this.minKey = metadatas.get(0).minKey;
             this.maxKey = metadatas.get(metadatas.size() - 1).maxKey;
 
-            this.minTerm = metadatas.stream().map(m -> m.minTerm).min(validator).orElse(null);
-            this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(validator).orElse(null);
+            this.minTerm = metadatas.stream().map(m -> m.minTerm).min(TypeUtil.comparator(validator)).orElse(null);
+            this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(validator)).orElse(null);
 
             this.numRows = metadatas.stream().mapToLong(m -> m.numRows).sum();
 

@@ -239,7 +239,7 @@ public class SegmentsSystemViewTest extends SAITester
 
                 IndexComponents components = IndexComponents.create(sstableIndex.getColumnContext().getColumnName(), sstable);
 
-                if (sstableIndex.getColumnContext().isString())
+                if (sstableIndex.getColumnContext().isLiteral())
                 {
                     addComponentSizeToMap(lengths, components.termsData, components);
                     addComponentSizeToMap(lengths, components.postingLists, components);

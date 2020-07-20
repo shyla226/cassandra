@@ -54,8 +54,8 @@ public class RangeTermTree implements TermTree
 
     public Set<SSTableIndex> search(Expression e)
     {
-        ByteBuffer minTerm = e.lower == null ? min : e.lower.value;
-        ByteBuffer maxTerm = e.upper == null ? max : e.upper.value;
+        ByteBuffer minTerm = e.lower == null ? min : e.lower.value.encoded;
+        ByteBuffer maxTerm = e.upper == null ? max : e.upper.value.encoded;
 
         return new HashSet<>(rangeTree.search(Interval.create(new Term(minTerm, comparator),
                                                               new Term(maxTerm, comparator),

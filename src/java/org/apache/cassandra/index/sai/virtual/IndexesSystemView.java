@@ -118,7 +118,7 @@ public class IndexesSystemView extends AbstractVirtualTable
                                .column(COLUMN_NAME, context.getColumnName())
                                .column(IS_QUERYABLE, manager.isIndexQueryable(index))
                                .column(IS_BUILDING, manager.isIndexBuilding(indexName))
-                               .column(IS_STRING, context.isString())
+                               .column(IS_STRING, context.isLiteral())
                                .column(ANALYZER, context.getAnalyzer().toString())
                                .column(INDEXED_SSTABLE_COUNT, view.size())
                                .column(CELL_COUNT, context.getCellCount())

@@ -86,7 +86,7 @@ public abstract class SegmentBuilder
         private final BKDTreeRamBuffer kdTreeRamBuffer;
         private final IndexWriterConfig indexWriterConfig;
 
-        KDTreeSegmentBuilder(AbstractType<?> termComparator, NamedMemoryLimiter limiter, IndexWriterConfig indexWriterConfig, IndexComponents indexComponents)
+        KDTreeSegmentBuilder(AbstractType<?> termComparator, NamedMemoryLimiter limiter, IndexWriterConfig indexWriterConfig)
         {
             super(termComparator, limiter);
 

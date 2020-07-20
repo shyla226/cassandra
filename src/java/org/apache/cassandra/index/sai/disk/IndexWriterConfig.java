@@ -85,7 +85,7 @@ public class IndexWriterConfig
 
         if (options.get(POSTING_LIST_LVL_MIN_LEAVES) != null || options.get(POSTING_LIST_LVL_SKIP_OPTION) != null)
         {
-            if (TypeUtil.isString(type))
+            if (TypeUtil.isLiteral(type))
             {
                 throw new InvalidRequestException(String.format("CQL type %s cannot have auxiliary posting lists on index %s.", type.asCQL3Type(), indexName));
             }

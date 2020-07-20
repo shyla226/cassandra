@@ -72,7 +72,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
         if (logger.isTraceEnabled())
             logger.trace(indexComponents.logMessage("Searching on expression '{}'..."), exp);
 
-        if (exp.getOp() == Expression.Op.RANGE || exp.getOp() == Expression.Op.EQ)
+        if (exp.getOp().isEqualityOrRange())
         {
             final BKDReader.IntersectVisitor query = bkdQueryFrom(exp, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
             QueryEventListener.BKDIndexEventListener listener = MulticastQueryEventListeners.of(context.queryContext, perColumnEventListener);

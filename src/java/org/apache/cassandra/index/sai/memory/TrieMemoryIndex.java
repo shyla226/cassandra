@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,24 +44,34 @@ import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
-import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 
 public class TrieMemoryIndex extends MemoryIndex
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemoryIndex.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+
+    public static final int MAX_STRING_TERM_SIZE = Integer.getInteger("cassandra.sai.max_string_term_size_kb", 1) * 1024;
+    public static final int MAX_FROZEN_COLLECTION_TERM_SIZE = Integer.getInteger("cassandra.sai.max_frozen_term_size_kb", 5) * 1024;
+    public static final String TERM_OVERSIZE_MESSAGE =
+    "Can't add term of column {} to index for key: {}, term size {} " +
+    "max allowed size {}, use analyzed = true (if not yet set) for that column.";
 
     private static final int MAX_TERM_SIZE = 1024;
 
     protected final ConcurrentTrie index;
     private final AbstractType<?> type;
+    private final int maxTermSize;
 
     public TrieMemoryIndex(ColumnContext columnContext)
     {
         super(columnContext);
-        this.index = new ConcurrentPrefixTrie(columnContext.getDefinition(), columnContext.clusteringComparator());
+        this.index = new ConcurrentPrefixTrie(columnContext, columnContext.clusteringComparator());
         this.type = columnContext.getValidator();
+        this.maxTermSize = columnContext.isFrozenCollection() ? MAX_FROZEN_COLLECTION_TERM_SIZE : MAX_STRING_TERM_SIZE;
     }
 
     @Override
@@ -70,23 +81,22 @@ public class TrieMemoryIndex extends MemoryIndex
 
         analyzer.reset(value.duplicate());
 
-
         long size = 0;
         while (analyzer.hasNext())
         {
             ByteBuffer term = analyzer.next();
 
-            setMinMaxTerm(term);
-
-            if (term.remaining() >= MAX_TERM_SIZE)
+            if (term.remaining() >= maxTermSize)
             {
-                logger.warn(columnContext.logMessage("Can't add term of column {} to index for key: {}, term size {} max allowed size {}, use analyzed = true (if not yet set) for that column."),
-                                                     columnContext.getColumnName(),
-                                                     columnContext.keyValidator().getString(key.getKey()),
-                                                     FBUtilities.prettyPrintMemory(term.remaining()),
-                                                     FBUtilities.prettyPrintMemory(MAX_TERM_SIZE));
+                noSpamLogger.warn(columnContext.logMessage(TERM_OVERSIZE_MESSAGE),
+                                  columnContext.getColumnName(),
+                                  columnContext.keyValidator().getString(key.getKey()),
+                                  FBUtilities.prettyPrintMemory(term.remaining()),
+                                  FBUtilities.prettyPrintMemory(maxTermSize));
                 continue;
             }
+
+            setMinMaxTerm(term);
 
             String literal = analyzer.nextLiteral(type);
             size += index.add(literal, key, clustering);
@@ -117,7 +127,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 {
                     KeyValuePair<PrimaryKeys> pair = kvs.next();
                     CharSequence key = pair.getKey();
-                    ByteBuffer term = columnContext.getValidator().fromString(key.toString());
+                    ByteBuffer term = TypeUtil.fromString(key.toString(), columnContext.getValidator());
                     PrimaryKeys primaryKeys = pair.getValue();
                     return Pair.create(term, primaryKeys);
                 }
@@ -130,12 +140,12 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         public static final SizeEstimatingNodeFactory NODE_FACTORY = new SizeEstimatingNodeFactory();
 
-        protected final ColumnMetadata definition;
+        protected final ColumnContext context;
         private final ClusteringComparator clusteringComparator;
 
-        ConcurrentTrie(ColumnMetadata column, ClusteringComparator clusteringComparator)
+        ConcurrentTrie(ColumnContext context, ClusteringComparator clusteringComparator)
         {
-            definition = column;
+            this.context = context;
             this.clusteringComparator = clusteringComparator;
         }
 
@@ -165,9 +175,9 @@ public class TrieMemoryIndex extends MemoryIndex
 
         public RangeIterator search(Expression expression)
         {
-            ByteBuffer prefix = expression.lower == null ? null : expression.lower.value;
+            ByteBuffer prefix = expression.lower == null ? null : expression.lower.value.encoded;
 
-            Iterable<PrimaryKeys> search = search(expression.getOp(), definition.cellValueType().getString(prefix));
+            Iterable<PrimaryKeys> search = search(expression.getOp(), TypeUtil.getString(prefix, context.getValidator()));
 
             RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
             for (PrimaryKeys keys : search)
@@ -189,9 +199,9 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         private final ConcurrentRadixTree<PrimaryKeys> trie;
 
-        private ConcurrentPrefixTrie(ColumnMetadata column, ClusteringComparator clusteringComparator)
+        private ConcurrentPrefixTrie(ColumnContext context, ClusteringComparator clusteringComparator)
         {
-            super(column, clusteringComparator);
+            super(context, clusteringComparator);
             trie = new ConcurrentRadixTree<>(NODE_FACTORY);
         }
 
@@ -217,6 +227,8 @@ public class TrieMemoryIndex extends MemoryIndex
             {
                 case EQ:
                 case MATCH:
+                case CONTAINS_KEY:
+                case CONTAINS_VALUE:
                     PrimaryKeys keys = trie.getValueForExactKey(value);
                     return keys == null ? Collections.emptyList() : Collections.singletonList(keys);
 
