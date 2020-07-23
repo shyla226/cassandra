@@ -90,7 +90,7 @@ public abstract class AbstractMetricsTest extends SAITester
         waitForAssert(() -> {
             try
             {
-                assertTrue(((Number) getMetricValue(name)).longValue() > 0);
+                assertTrue(((Number) getMetricValue(name)).doubleValue() > 0);
             }
             catch (Throwable ex)
             {
