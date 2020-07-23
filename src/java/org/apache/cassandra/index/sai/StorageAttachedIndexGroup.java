@@ -39,6 +39,7 @@ import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.metrics.IndexGroupMetrics;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
+import org.apache.cassandra.index.sai.metrics.TableStateMetrics;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -72,6 +73,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final TableQueryMetrics queryMetrics;
+    private final TableStateMetrics stateMetrics;
     private final IndexGroupMetrics groupMetrics;
     
     private final Set<StorageAttachedIndex> indices = new HashSet<>();
@@ -83,6 +85,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     {
         this.baseCfs = baseCfs;
         this.queryMetrics = new TableQueryMetrics(baseCfs.metadata());
+        this.stateMetrics = new TableStateMetrics(baseCfs.metadata(), this);
         this.groupMetrics = new IndexGroupMetrics(baseCfs.metadata(), this);
         this.contextManager = new SSTableContextManager();
 
@@ -135,6 +138,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         // in case of dropping table, sstable contexts should already been removed by SSTableListChangedNotification.
         queryMetrics.release();
         groupMetrics.release();
+        stateMetrics.release();
         baseCfs.getTracker().unsubscribe(this);
     }
 
@@ -340,6 +344,30 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     public long diskUsage()
     {
         return contextManager.diskUsage();
+    }
+
+    /**
+     * @return count of indexes building
+     */
+    public int totalIndexBuildsInProgress()
+    {
+        return (int) indices.stream().filter(i -> baseCfs.indexManager.isIndexBuilding(i.getIndexMetadata().name)).count();
+    }
+
+    /**
+     * @return count of queryable indexes
+     */
+    public int totalQueryableIndexCount()
+    {
+        return (int) indices.stream().filter(i -> baseCfs.indexManager.isIndexQueryable(i)).count();
+    }
+
+    /**
+     * @return count of indexes
+     */
+    public int totalIndexCount()
+    {
+        return indices.size();
     }
 
     /**
