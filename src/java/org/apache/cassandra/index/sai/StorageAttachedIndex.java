@@ -279,17 +279,16 @@ public class StorageAttachedIndex implements Index
 
         AbstractType<?> type = TypeUtil.cellValueType(target);
 
-        // If we are indexing frozen collections or map entries we need to validate the
-        // sub-types
-        if (type.isCollection() && !type.isMultiCell() || type instanceof CompositeType)
+        // If we are indexing map entries we need to validate the sub-types
+        if (TypeUtil.isComposite(type))
         {
             for (AbstractType<?> subType : type.subTypes())
             {
-                if (!SUPPORTED_TYPES.contains(subType.asCQL3Type()))
+                if (!SUPPORTED_TYPES.contains(subType.asCQL3Type()) && !TypeUtil.isFrozenCollection(subType))
                     throw new InvalidRequestException("Unsupported type: " + subType.asCQL3Type());
             }
         }
-        else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()))
+        else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()) && !TypeUtil.isFrozenCollection(type))
         {
             throw new InvalidRequestException("Unsupported type: " + type.asCQL3Type());
         }
