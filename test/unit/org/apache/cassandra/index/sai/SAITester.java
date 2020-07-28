@@ -55,17 +55,22 @@ import com.sun.management.UnixOperatingSystemMXBean;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.sai.disk.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -165,6 +170,16 @@ public class SAITester extends CQLTester
     public void removeAllInjections()
     {
         Injections.deleteAll();
+    }
+
+    public static ColumnContext createColumnContext(String name, AbstractType<?> validator)
+    {
+        return new ColumnContext("test_ks",
+                                 "test_cf",
+                                 UTF8Type.instance,
+                                 new ClusteringComparator(),
+                                 ColumnMetadata.regularColumn("sai", "internal", name, validator),
+                                 IndexWriterConfig.emptyConfig());
     }
 
     protected void simulateNodeRestart()

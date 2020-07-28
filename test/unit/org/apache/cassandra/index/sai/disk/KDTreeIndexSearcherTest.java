@@ -25,6 +25,7 @@ import org.junit.Test;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.ShortType;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
@@ -40,11 +41,11 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
     public void testRangeQueriesAgainstInt32Index() throws Exception
     {
         final IndexSearcher indexSearcher = buildInt32Searcher(newIndexComponents(), 0, 10);
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", Int32Type.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", Int32Type.instance))
         {{
             operation = Op.RANGE;
-            lower = new Bound(Int32Type.instance.decompose(2), false);
-            upper = new Bound(Int32Type.instance.decompose(7), true);
+            lower = new Bound(Int32Type.instance.decompose(2), Int32Type.instance, false);
+            upper = new Bound(Int32Type.instance.decompose(7), Int32Type.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertEquals(3, results.next().getLong());
@@ -54,19 +55,19 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
             assertEquals(7, results.next().getLong());
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", Int32Type.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", Int32Type.instance))
         {{
             operation = Op.RANGE;
-            lower = new Bound(Int32Type.instance.decompose(10), true);
+            lower = new Bound(Int32Type.instance.decompose(10), Int32Type.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertFalse(results.hasNext());
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", Int32Type.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", Int32Type.instance))
         {{
             operation = Op.RANGE;
-            upper = new Bound(Int32Type.instance.decompose(0), false);
+            upper = new Bound(Int32Type.instance.decompose(0), Int32Type.instance, false);
         }}, SSTableQueryContext.forTest()))
         {
             assertFalse(results.hasNext());
@@ -79,19 +80,19 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
     public void testEqQueriesAgainstInt32Index() throws Exception
     {
         final IndexSearcher indexSearcher = buildInt32Searcher(newIndexComponents(), 0, 3);
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", Int32Type.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", Int32Type.instance))
         {{
             operation = Op.EQ;
-            lower = upper = new Bound(Int32Type.instance.decompose(0), true);
+            lower = upper = new Bound(Int32Type.instance.decompose(0), Int32Type.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertEquals(0, results.next().getLong());
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", Int32Type.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", Int32Type.instance))
         {{
             operation = Op.EQ;
-            lower = upper = new Bound(Int32Type.instance.decompose(3), true);
+            lower = upper = new Bound(Int32Type.instance.decompose(3), Int32Type.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertFalse(results.hasNext());
@@ -104,11 +105,11 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
     public void testRangeQueriesAgainstLongIndex() throws Exception
     {
         final IndexSearcher indexSearcher = buildLongSearcher(newIndexComponents(), 0, 10);
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", LongType.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", LongType.instance))
         {{
             operation = Op.RANGE;
-            lower = new Bound(LongType.instance.decompose(2L), false);
-            upper = new Bound(LongType.instance.decompose(7L), true);
+            lower = new Bound(LongType.instance.decompose(2L), LongType.instance, false);
+            upper = new Bound(LongType.instance.decompose(7L), LongType.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertEquals(3L, results.next().getLong());
@@ -118,19 +119,19 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
             assertEquals(7L, results.next().getLong());
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", LongType.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", LongType.instance))
         {{
             operation = Op.RANGE;
-            lower = new Bound(LongType.instance.decompose(10L), true);
+            lower = new Bound(LongType.instance.decompose(10L), LongType.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertFalse(results.hasNext());
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", LongType.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", LongType.instance))
         {{
             operation = Op.RANGE;
-            upper = new Bound(LongType.instance.decompose(0L), false);
+            upper = new Bound(LongType.instance.decompose(0L), LongType.instance, false);
         }}, SSTableQueryContext.forTest()))
         {
             assertFalse(results.hasNext());
@@ -143,19 +144,19 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
     public void testEqQueriesAgainstLongIndex() throws Exception
     {
         final IndexSearcher indexSearcher = buildLongSearcher(newIndexComponents(), 0, 3);
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", LongType.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", LongType.instance))
         {{
             operation = Op.EQ;
-            lower = upper = new Bound(LongType.instance.decompose(0L), true);
+            lower = upper = new Bound(LongType.instance.decompose(0L), LongType.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertEquals(0L, results.next().getLong());
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", LongType.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", LongType.instance))
         {{
             operation = Op.EQ;
-            lower = upper = new Bound(LongType.instance.decompose(3L), true);
+            lower = upper = new Bound(LongType.instance.decompose(3L), LongType.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertFalse(results.hasNext());
@@ -168,11 +169,11 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
     public void testRangeQueriesAgainstShortIndex() throws Exception
     {
         final IndexSearcher indexSearcher = buildShortSearcher(newIndexComponents(), (short) 0, (short) 10);
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", ShortType.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", ShortType.instance))
         {{
             operation = Op.RANGE;
-            lower = new Bound(ShortType.instance.decompose((short) 2), false);
-            upper = new Bound(ShortType.instance.decompose((short) 7), true);
+            lower = new Bound(ShortType.instance.decompose((short) 2), ShortType.instance, false);
+            upper = new Bound(ShortType.instance.decompose((short) 7), ShortType.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertEquals(3L, results.next().getLong());
@@ -182,19 +183,19 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
             assertEquals(7L, results.next().getLong());
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", ShortType.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", ShortType.instance))
         {{
             operation = Op.RANGE;
-            lower = new Bound(ShortType.instance.decompose((short) 10), true);
+            lower = new Bound(ShortType.instance.decompose((short) 10), ShortType.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertFalse(results.hasNext());
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", ShortType.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", ShortType.instance))
         {{
             operation = Op.RANGE;
-            upper = new Bound(ShortType.instance.decompose((short) 0), false);
+            upper = new Bound(ShortType.instance.decompose((short) 0), ShortType.instance, false);
         }}, SSTableQueryContext.forTest()))
         {
             assertFalse(results.hasNext());
@@ -207,19 +208,19 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
     public void testEqQueriesAgainstShortIndex() throws Exception
     {
         final IndexSearcher indexSearcher = buildShortSearcher(newIndexComponents(), (short) 0, (short) 3);
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", ShortType.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", ShortType.instance))
         {{
             operation = Op.EQ;
-            lower = upper = new Bound(ShortType.instance.decompose((short) 0), true);
+            lower = upper = new Bound(ShortType.instance.decompose((short) 0), ShortType.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertEquals(0L, results.next().getLong());
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression("meh", ShortType.instance)
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", ShortType.instance))
         {{
             operation = Op.EQ;
-            lower = upper = new Bound(ShortType.instance.decompose((short) 3), true);
+            lower = upper = new Bound(ShortType.instance.decompose((short) 3), ShortType.instance, true);
         }}, SSTableQueryContext.forTest()))
         {
             assertFalse(results.hasNext());
@@ -234,10 +235,10 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
         final IndexSearcher indexSearcher = buildShortSearcher(newIndexComponents(), (short) 0, (short) 3);
         try
         {
-            indexSearcher.search(new Expression("meh", ShortType.instance)
+            indexSearcher.search(new Expression(SAITester.createColumnContext("meh", ShortType.instance))
             {{
                 operation = Op.NOT_EQ;
-                lower = upper = new Bound(ShortType.instance.decompose((short) 0), true);
+                lower = upper = new Bound(ShortType.instance.decompose((short) 0), ShortType.instance, true);
             }}, SSTableQueryContext.forTest());
 
             fail("Expect IllegalArgumentException thrown, but didn't");

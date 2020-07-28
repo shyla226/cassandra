@@ -142,7 +142,7 @@ public class MemtableIndexWriter implements ColumnIndexWriter
         long numRows;
         SegmentMetadata.ComponentMetadataMap indexMetas;
 
-        if (TypeUtil.isString(termComparator))
+        if (TypeUtil.isLiteral(termComparator))
         {
             try (InvertedIndexWriter writer = new InvertedIndexWriter(indexComponents))
             {

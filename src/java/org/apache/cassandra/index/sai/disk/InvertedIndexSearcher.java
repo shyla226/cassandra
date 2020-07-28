@@ -72,10 +72,10 @@ public class InvertedIndexSearcher extends IndexSearcher
         if (logger.isTraceEnabled())
             logger.trace(indexComponents.logMessage("Searching on expression '{}'..."), exp);
 
-        if (exp.getOp() != Expression.Op.EQ)
+        if (!exp.getOp().isEquality())
             throw new IllegalArgumentException(indexComponents.logMessage("Unsupported expression: " + exp));
 
-        final ByteComparable term = ByteComparable.fixedLength(exp.lower.value);
+        final ByteComparable term = ByteComparable.fixedLength(exp.lower.value.encoded);
         QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context.queryContext, perColumnEventListener);
 
         PostingList postingList = reader.exactMatch(term, listener, context.queryContext);

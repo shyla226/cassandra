@@ -86,7 +86,7 @@ public abstract class IndexSearcher implements Closeable
      */
     public static int openPerIndexFiles(AbstractType<?> columnType)
     {
-        return TypeUtil.isString(columnType) ? InvertedIndexSearcher.openPerIndexFiles() : KDTreeIndexSearcher.openPerIndexFiles();
+        return TypeUtil.isLiteral(columnType) ? InvertedIndexSearcher.openPerIndexFiles() : KDTreeIndexSearcher.openPerIndexFiles();
     }
 
     /**

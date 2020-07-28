@@ -42,6 +42,7 @@ import org.junit.Test;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.index.sai.IndexingSchemaLoader;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.Operation.OperationType;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.Clustering;
@@ -79,6 +80,10 @@ public class OperationTest extends IndexingSchemaLoader
     private static ColumnFamilyStore CLUSTERING_BACKEND;
     private static ColumnFamilyStore STATIC_BACKEND;
 
+    private QueryController controller;
+    private QueryController controllerClustering;
+    private QueryController controllerStatic;
+
     @BeforeClass
     public static void loadSchema() throws ConfigurationException
     {
@@ -97,13 +102,17 @@ public class OperationTest extends IndexingSchemaLoader
         STATIC_BACKEND = Keyspace.open(KS_NAME).getColumnFamilyStore(STATIC_CF_NAME);
     }
 
-    private QueryController controller;
-
     @Before
     public void beforeTest()
     {
         ReadCommand command = PartitionRangeReadCommand.allDataRead(BACKEND.metadata(), FBUtilities.nowInSeconds());
         controller = new QueryController(BACKEND, command, Collections.emptyList(), new QueryContext(), null);
+
+        command = PartitionRangeReadCommand.allDataRead(CLUSTERING_BACKEND.metadata(), FBUtilities.nowInSeconds());
+        controllerClustering = new QueryController(CLUSTERING_BACKEND, command, Collections.emptyList(), new QueryContext(), null);
+
+        command = PartitionRangeReadCommand.allDataRead(STATIC_BACKEND.metadata(), FBUtilities.nowInSeconds());
+        controllerStatic = new QueryController(STATIC_BACKEND, command, Collections.emptyList(), new QueryContext(), null);
     }
 
     @After
@@ -120,16 +129,16 @@ public class OperationTest extends IndexingSchemaLoader
 
         // age != 5 AND age > 1 AND age != 6 AND age <= 10
         Map<Expression.Op, Expression> expressions = convert(Operation.analyzeGroup(controller, OperationType.AND,
-                                                                                Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)),
-                                                                                              new SimpleExpression(age, Operator.GT, Int32Type.instance.decompose(1)),
-                                                                                              new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(6)),
-                                                                                              new SimpleExpression(age, Operator.LTE, Int32Type.instance.decompose(10)))));
+                                                                                    Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)),
+                                                                                                  new SimpleExpression(age, Operator.GT, Int32Type.instance.decompose(1)),
+                                                                                                  new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(6)),
+                                                                                                  new SimpleExpression(age, Operator.LTE, Int32Type.instance.decompose(10)))));
 
-        Expression expected = new Expression("age", Int32Type.instance)
+        Expression expected = new Expression(SAITester.createColumnContext("age", Int32Type.instance))
         {{
             operation = Op.RANGE;
-            lower = new Bound(Int32Type.instance.decompose(1), false);
-            upper = new Bound(Int32Type.instance.decompose(10), true);
+            lower = new Bound(Int32Type.instance.decompose(1), Int32Type.instance, false);
+            upper = new Bound(Int32Type.instance.decompose(10), Int32Type.instance, true);
 
             exclusions.add(Int32Type.instance.decompose(5));
             exclusions.add(Int32Type.instance.decompose(6));
@@ -140,134 +149,134 @@ public class OperationTest extends IndexingSchemaLoader
 
         // age != 5 OR age >= 7
         expressions = convert(Operation.analyzeGroup(controller, OperationType.OR,
-                                                    Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)),
-                                                                  new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(7)))));
+                                                     Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)),
+                                                                   new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(7)))));
         Assert.assertEquals(2, expressions.size());
 
-        Assert.assertEquals(new Expression("age", Int32Type.instance)
-                            {{
-                                    operation = Op.NOT_EQ;
-                                    lower = new Bound(Int32Type.instance.decompose(5), true);
-                                    upper = lower;
-                            }}, expressions.get(Expression.Op.NOT_EQ));
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        {{
+            operation = Op.NOT_EQ;
+            lower = new Bound(Int32Type.instance.decompose(5), Int32Type.instance, true);
+            upper = lower;
+        }}, expressions.get(Expression.Op.NOT_EQ));
 
-        Assert.assertEquals(new Expression("age", Int32Type.instance)
-                            {{
-                                    operation = Op.RANGE;
-                                    lower = new Bound(Int32Type.instance.decompose(7), true);
-                            }}, expressions.get(Expression.Op.RANGE));
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        {{
+            operation = Op.RANGE;
+            lower = new Bound(Int32Type.instance.decompose(7), Int32Type.instance, true);
+        }}, expressions.get(Expression.Op.RANGE));
 
         // age != 5 OR age < 7
         expressions = convert(Operation.analyzeGroup(controller, OperationType.OR,
-                                                    Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)),
-                                                                  new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(7)))));
+                                                     Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)),
+                                                                   new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(7)))));
 
         Assert.assertEquals(2, expressions.size());
-        Assert.assertEquals(new Expression("age", Int32Type.instance)
-                            {{
-                                    operation = Op.RANGE;
-                                    upper = new Bound(Int32Type.instance.decompose(7), false);
-                            }}, expressions.get(Expression.Op.RANGE));
-        Assert.assertEquals(new Expression("age", Int32Type.instance)
-                            {{
-                                    operation = Op.NOT_EQ;
-                                    lower = new Bound(Int32Type.instance.decompose(5), true);
-                                    upper = lower;
-                            }}, expressions.get(Expression.Op.NOT_EQ));
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        {{
+            operation = Op.RANGE;
+            upper = new Bound(Int32Type.instance.decompose(7), Int32Type.instance, false);
+        }}, expressions.get(Expression.Op.RANGE));
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        {{
+            operation = Op.NOT_EQ;
+            lower = new Bound(Int32Type.instance.decompose(5), Int32Type.instance, true);
+            upper = lower;
+        }}, expressions.get(Expression.Op.NOT_EQ));
 
         // age > 1 AND age < 7
         expressions = convert(Operation.analyzeGroup(controller, OperationType.AND,
-                                                    Arrays.asList(new SimpleExpression(age, Operator.GT, Int32Type.instance.decompose(1)),
-                                                                  new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(7)))));
+                                                     Arrays.asList(new SimpleExpression(age, Operator.GT, Int32Type.instance.decompose(1)),
+                                                                   new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(7)))));
 
         Assert.assertEquals(1, expressions.size());
-        Assert.assertEquals(new Expression("age", Int32Type.instance)
-                            {{
-                                    operation = Op.RANGE;
-                                    lower = new Bound(Int32Type.instance.decompose(1), false);
-                                    upper = new Bound(Int32Type.instance.decompose(7), false);
-                            }}, expressions.get(Expression.Op.RANGE));
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        {{
+            operation = Op.RANGE;
+            lower = new Bound(Int32Type.instance.decompose(1), Int32Type.instance, false);
+            upper = new Bound(Int32Type.instance.decompose(7), Int32Type.instance, false);
+        }}, expressions.get(Expression.Op.RANGE));
 
         // first_name = 'a' OR first_name != 'b'
         expressions = convert(Operation.analyzeGroup(controller, OperationType.OR,
-                                                    Arrays.asList(new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("a")),
-                                                                  new SimpleExpression(firstName, Operator.NEQ, UTF8Type.instance.decompose("b")))));
+                                                     Arrays.asList(new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("a")),
+                                                                   new SimpleExpression(firstName, Operator.NEQ, UTF8Type.instance.decompose("b")))));
 
         Assert.assertEquals(2, expressions.size());
-        Assert.assertEquals(new Expression("first_name", UTF8Type.instance)
-                            {{
-                                    operation = Op.NOT_EQ;
-                                    lower = new Bound(UTF8Type.instance.decompose("b"), true);
-                                    upper = lower;
-                            }}, expressions.get(Expression.Op.NOT_EQ));
-        Assert.assertEquals(new Expression("first_name", UTF8Type.instance)
-                            {{
-                                    operation = Op.EQ;
-                                    lower = upper = new Bound(UTF8Type.instance.decompose("a"), true);
-                            }}, expressions.get(Expression.Op.EQ));
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("first_name", UTF8Type.instance))
+        {{
+            operation = Op.NOT_EQ;
+            lower = new Bound(UTF8Type.instance.decompose("b"), UTF8Type.instance, true);
+            upper = lower;
+        }}, expressions.get(Expression.Op.NOT_EQ));
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("first_name", UTF8Type.instance))
+        {{
+            operation = Op.EQ;
+            lower = upper = new Bound(UTF8Type.instance.decompose("a"), UTF8Type.instance, true);
+        }}, expressions.get(Expression.Op.EQ));
 
         // comment = 'soft eng' and comment != 'likes do'
         ListMultimap<ColumnMetadata, Expression> e = Operation.analyzeGroup(controller, OperationType.OR,
                                                                             Arrays.asList(new SimpleExpression(comment, Operator.LIKE_MATCHES, UTF8Type.instance.decompose("soft eng")),
-                                                                  new SimpleExpression(comment, Operator.NEQ, UTF8Type.instance.decompose("likes do"))));
+                                                                                          new SimpleExpression(comment, Operator.NEQ, UTF8Type.instance.decompose("likes do"))));
 
         List<Expression> expectedExpressions = new ArrayList<Expression>(2)
         {{
-                add(new Expression("comment", UTF8Type.instance)
-                {{
-                        operation = Op.MATCH;
-                        lower = new Bound(UTF8Type.instance.decompose("soft eng"), true);
-                        upper = lower;
-                }});
+            add(new Expression(SAITester.createColumnContext("comment", UTF8Type.instance))
+            {{
+                operation = Op.MATCH;
+                lower = new Bound(UTF8Type.instance.decompose("soft eng"), UTF8Type.instance, true);
+                upper = lower;
+            }});
 
-                add(new Expression("comment", UTF8Type.instance)
-                {{
-                        operation = Op.NOT_EQ;
-                        lower = new Bound(UTF8Type.instance.decompose("likes do"), true);
-                        upper = lower;
-                }});
+            add(new Expression(SAITester.createColumnContext("comment", UTF8Type.instance))
+            {{
+                operation = Op.NOT_EQ;
+                lower = new Bound(UTF8Type.instance.decompose("likes do"), UTF8Type.instance, true);
+                upper = lower;
+            }});
         }};
 
         Assert.assertEquals(expectedExpressions, e.get(comment));
 
         // first_name = 'j' and comment != 'likes do'
         e = Operation.analyzeGroup(controller, OperationType.OR,
-                        Arrays.asList(new SimpleExpression(comment, Operator.NEQ, UTF8Type.instance.decompose("likes do")),
-                                      new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("j"))));
+                                   Arrays.asList(new SimpleExpression(comment, Operator.NEQ, UTF8Type.instance.decompose("likes do")),
+                                                 new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("j"))));
 
         expectedExpressions = new ArrayList<Expression>(2)
         {{
-                add(new Expression("comment", UTF8Type.instance)
-                {{
-                        operation = Op.NOT_EQ;
-                        lower = new Bound(UTF8Type.instance.decompose("likes do"), true);
-                        upper = lower;
-                }});
+            add(new Expression(SAITester.createColumnContext("comment", UTF8Type.instance))
+            {{
+                operation = Op.NOT_EQ;
+                lower = new Bound(UTF8Type.instance.decompose("likes do"), UTF8Type.instance, true);
+                upper = lower;
+            }});
         }};
 
         Assert.assertEquals(expectedExpressions, e.get(comment));
 
         // age != 27 first_name = 'j' and age != 25
         e = Operation.analyzeGroup(controller, OperationType.OR,
-                        Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(27)),
-                                      new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("j")),
-                                      new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(25))));
+                                   Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(27)),
+                                                 new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("j")),
+                                                 new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(25))));
 
         expectedExpressions = new ArrayList<Expression>(2)
         {{
-                add(new Expression("age", Int32Type.instance)
-                {{
-                        operation = Op.NOT_EQ;
-                        lower = new Bound(Int32Type.instance.decompose(27), true);
-                        upper = lower;
-                }});
+            add(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+            {{
+                operation = Op.NOT_EQ;
+                lower = new Bound(Int32Type.instance.decompose(27), Int32Type.instance, true);
+                upper = lower;
+            }});
 
-                add(new Expression("age", Int32Type.instance)
-                {{
-                        operation = Op.NOT_EQ;
-                        lower = new Bound(Int32Type.instance.decompose(25), true);
-                        upper = lower;
-                }});
+            add(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+            {{
+                operation = Op.NOT_EQ;
+                lower = new Bound(Int32Type.instance.decompose(25), Int32Type.instance, true);
+                upper = lower;
+            }});
         }};
 
         Assert.assertEquals(expectedExpressions, e.get(age));
@@ -438,6 +447,7 @@ public class OperationTest extends IndexingSchemaLoader
         }
     }
 
+
     @Test
     public void testAnalyzeNotIndexedButDefinedColumn()
     {
@@ -452,10 +462,10 @@ public class OperationTest extends IndexingSchemaLoader
 
         Assert.assertEquals(2, expressions.size());
 
-        Assert.assertEquals(new Expression("height", Int32Type.instance)
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("height", Int32Type.instance))
         {{
                 operation = Op.NOT_EQ;
-                lower = new Bound(Int32Type.instance.decompose(5), true);
+                lower = new Bound(Int32Type.instance.decompose(5), Int32Type.instance, true);
                 upper = lower;
         }}, expressions.get(Expression.Op.NOT_EQ));
 
@@ -466,10 +476,10 @@ public class OperationTest extends IndexingSchemaLoader
 
         Assert.assertEquals(2, expressions.size());
 
-        Assert.assertEquals(new Expression("height", Int32Type.instance)
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("height", Int32Type.instance))
         {{
             operation = Op.RANGE;
-            lower = new Bound(Int32Type.instance.decompose(0), false);
+            lower = new Bound(Int32Type.instance.decompose(0), Int32Type.instance, false);
             exclusions.add(Int32Type.instance.decompose(5));
         }}, expressions.get(Expression.Op.RANGE));
 
@@ -481,11 +491,11 @@ public class OperationTest extends IndexingSchemaLoader
 
         Assert.assertEquals(2, expressions.size());
 
-        Assert.assertEquals(new Expression("height", Int32Type.instance)
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("height", Int32Type.instance))
         {{
                 operation = Op.RANGE;
-                lower = new Bound(Int32Type.instance.decompose(0), true);
-                upper = new Bound(Int32Type.instance.decompose(10), false);
+                lower = new Bound(Int32Type.instance.decompose(0), Int32Type.instance, true);
+                upper = new Bound(Int32Type.instance.decompose(10), Int32Type.instance, false);
                 exclusions.add(Int32Type.instance.decompose(5));
         }}, expressions.get(Expression.Op.RANGE));
     }
@@ -504,46 +514,46 @@ public class OperationTest extends IndexingSchemaLoader
                                   buildCell(score, DoubleType.instance.decompose(1.0d), System.currentTimeMillis()));
         Row staticRow = buildRow(Clustering.STATIC_CLUSTERING);
 
-        Operation.Builder builder = new Operation.Builder(OperationType.AND, controller);
+        Operation.Builder builder = new Operation.Builder(OperationType.AND, controllerClustering);
         builder.add(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(27)));
         builder.add(new SimpleExpression(height, Operator.EQ, Int32Type.instance.decompose(182)));
 
         Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow, false));
 
-        builder = new Operation.Builder(OperationType.AND, controller);
+        builder = new Operation.Builder(OperationType.AND, controllerClustering);
 
         builder.add(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(28)));
         builder.add(new SimpleExpression(height, Operator.EQ, Int32Type.instance.decompose(182)));
 
         Assert.assertFalse(builder.complete().satisfiedBy(key, row, staticRow, false));
 
-        builder = new Operation.Builder(OperationType.AND, controller);
+        builder = new Operation.Builder(OperationType.AND, controllerClustering);
         builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US")));
         builder.add(new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(27)));
 
         Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow, false));
 
-        builder = new Operation.Builder(OperationType.AND, controller);
+        builder = new Operation.Builder(OperationType.AND, controllerClustering);
         builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("BY")));
         builder.add(new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(28)));
 
         Assert.assertFalse(builder.complete().satisfiedBy(key, row, staticRow, false));
 
-        builder = new Operation.Builder(OperationType.AND, controller);
+        builder = new Operation.Builder(OperationType.AND, controllerClustering);
         builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US")));
         builder.add(new SimpleExpression(age, Operator.LTE, Int32Type.instance.decompose(27)));
         builder.add(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182)));
 
         Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow, false));
 
-        builder = new Operation.Builder(OperationType.AND, controller);
+        builder = new Operation.Builder(OperationType.AND, controllerClustering);
         builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US")));
         builder.add(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182)));
         builder.add(new SimpleExpression(score, Operator.EQ, DoubleType.instance.decompose(1.0d)));
 
         Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow, false));
 
-        builder = new Operation.Builder(OperationType.AND, controller);
+        builder = new Operation.Builder(OperationType.AND, controllerClustering);
         builder.add(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182)));
         builder.add(new SimpleExpression(score, Operator.EQ, DoubleType.instance.decompose(1.0d)));
 
@@ -576,44 +586,44 @@ public class OperationTest extends IndexingSchemaLoader
                          buildCell(sensorType, UTF8Type.instance.decompose("TEMPERATURE"), System.currentTimeMillis()));
 
         // sensor_type ='TEMPERATURE' AND value = 24.56
-        Operation op = new Operation.Builder(OperationType.AND, controller,
+        Operation op = new Operation.Builder(OperationType.AND, controllerStatic,
                                         new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE")),
                                         new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56))).complete();
 
         Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
 
         // sensor_type ='TEMPERATURE' AND value = 30
-        op = new Operation.Builder(OperationType.AND, controller,
+        op = new Operation.Builder(OperationType.AND, controllerStatic,
                                              new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE")),
                                              new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(30.00))).complete();
 
         Assert.assertFalse(op.satisfiedBy(key, row, staticRow, false));
 
         // sensor_type ='PRESSURE' OR value = 24.56
-        op = new Operation.Builder(OperationType.OR, controller,
+        op = new Operation.Builder(OperationType.OR, controllerStatic,
                                              new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE")),
                                              new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56))).complete();
 
         Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
 
         // sensor_type ='PRESSURE' OR value = 30
-        op = new Operation.Builder(OperationType.AND, controller,
+        op = new Operation.Builder(OperationType.AND, controllerStatic,
                                    new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("PRESSURE")),
                                    new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(30.00))).complete();
 
         Assert.assertFalse(op.satisfiedBy(key, row, staticRow, false));
 
         // (sensor_type = 'TEMPERATURE' OR sensor_type = 'PRESSURE') AND value = 24.56
-        op = new Operation.Builder(OperationType.OR, controller,
+        op = new Operation.Builder(OperationType.OR, controllerStatic,
                                    new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE")),
                                    new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("PRESSURE")))
-             .setRight(new Operation.Builder(OperationType.AND, controller,
+             .setRight(new Operation.Builder(OperationType.AND, controllerStatic,
                                              new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56)))).complete();
 
         Assert.assertTrue(op.satisfiedBy(key, row, staticRow, false));
 
         // sensor_type = LIKE 'TEMP%'  AND value = 24.56
-        op = new Operation.Builder(OperationType.AND, controller,
+        op = new Operation.Builder(OperationType.AND, controllerStatic,
                                    new SimpleExpression(sensorType, Operator.LIKE_PREFIX, UTF8Type.instance.decompose("TEMP")),
                                    new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56))).complete();
 

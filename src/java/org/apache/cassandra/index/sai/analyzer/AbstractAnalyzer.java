@@ -28,6 +28,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 
 public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
 {
@@ -64,7 +65,7 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         }
 
         assert next != null;
-        return validator.getString(next);
+        return TypeUtil.getString(next, validator);
     }
 
     public void remove()

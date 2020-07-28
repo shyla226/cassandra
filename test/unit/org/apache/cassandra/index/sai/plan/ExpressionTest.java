@@ -34,9 +34,9 @@ public class ExpressionTest
     public void testBoundHashCode()
     {
         ByteBuffer buf1 = UTF8Type.instance.decompose("blah");
-        Bound b1 = new Bound(buf1, true);
+        Bound b1 = new Bound(buf1, UTF8Type.instance, true);
         ByteBuffer buf2 = UTF8Type.instance.decompose("blah");
-        Bound b2 = new Bound(buf2, true);
+        Bound b2 = new Bound(buf2, UTF8Type.instance, true);
         assertEquals(b1, b2);
         assertEquals(b1.hashCode(), b2.hashCode());
     }
@@ -45,9 +45,9 @@ public class ExpressionTest
     public void testNotMatchingBoundHashCode()
     {
         ByteBuffer buf1 = UTF8Type.instance.decompose("blah");
-        Bound b1 = new Bound(buf1, true);
+        Bound b1 = new Bound(buf1, UTF8Type.instance, true);
         ByteBuffer buf2 = UTF8Type.instance.decompose("blah2");
-        Bound b2 = new Bound(buf2, true);
+        Bound b2 = new Bound(buf2, UTF8Type.instance, true);
         assertNotEquals(b1, b2);
         assertNotEquals(b1.hashCode(), b2.hashCode());
     }
