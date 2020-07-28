@@ -24,19 +24,119 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.statements.schema.IndexTarget;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.Pair;
 
 public class TypeUtilTest extends NdiRandomizedTest
 {
+    @Test
+    public void testSimpleType()
+    {
+        for (CQL3Type cql3Type : StorageAttachedIndex.SUPPORTED_TYPES)
+        {
+            AbstractType<?> type = cql3Type.getType();
+            AbstractType<?> reversedType = ReversedType.getInstance(type);
+
+            boolean isLiteral = cql3Type == CQL3Type.Native.ASCII || cql3Type == CQL3Type.Native.TEXT || cql3Type == CQL3Type.Native.VARCHAR;
+            assertEquals(isLiteral, TypeUtil.isLiteral(type));
+            assertEquals(TypeUtil.isLiteral(type), TypeUtil.isLiteral(reversedType));
+            assertEquals(isLiteral, TypeUtil.isUTF8OrAscii(type));
+            assertEquals(TypeUtil.isUTF8OrAscii(type), TypeUtil.isUTF8OrAscii(reversedType));
+            assertEquals(TypeUtil.isIn(type, AbstractAnalyzer.ANALYZABLE_TYPES),
+                         TypeUtil.isIn(reversedType, AbstractAnalyzer.ANALYZABLE_TYPES));
+        }
+    }
+
+    @Test
+    public void testMapType()
+    {
+        for(CQL3Type keyCql3Type : StorageAttachedIndex.SUPPORTED_TYPES)
+        {
+            AbstractType<?> keyType = keyCql3Type.getType();
+
+            testCollectionType((valueType, multiCell) -> MapType.getInstance(keyType, valueType, multiCell),
+                               (valueType, nonFrozenMap) -> {
+                                   assertEquals(keyType, cellValueType(nonFrozenMap, IndexTarget.Type.KEYS));
+                                   assertEquals(valueType, cellValueType(nonFrozenMap, IndexTarget.Type.VALUES));
+                                   AbstractType<?> entryType = cellValueType(nonFrozenMap, IndexTarget.Type.KEYS_AND_VALUES);
+                                   assertEquals(CompositeType.getInstance(keyType, valueType), entryType);
+                                   assertTrue(TypeUtil.isLiteral(entryType));
+                               });
+        }
+    }
+
+    @Test
+    public void testSetType()
+    {
+        testCollectionType(SetType::getInstance, (a, b) -> {});
+    }
+
+    @Test
+    public void testListType()
+    {
+        testCollectionType(ListType::getInstance, (a, b) -> {});
+    }
+
+    private static void testCollectionType(BiFunction<AbstractType<?>, Boolean, AbstractType<?>> init,
+                                           BiConsumer<AbstractType<?>, AbstractType<?>> nonFrozenCollectionTester)
+    {
+        for(CQL3Type elementType : StorageAttachedIndex.SUPPORTED_TYPES)
+        {
+            AbstractType<?> frozenCollection = init.apply(elementType.getType(), false);
+            AbstractType<?> reversedFrozenCollection = ReversedType.getInstance(frozenCollection);
+
+            AbstractType<?> type = TypeUtil.cellValueType(target(frozenCollection, IndexTarget.Type.FULL));
+            assertTrue(TypeUtil.isFrozenCollection(type));
+            assertTrue(TypeUtil.isLiteral(type));
+            assertFalse(type.isReversed());
+
+            type = TypeUtil.cellValueType(target(reversedFrozenCollection, IndexTarget.Type.FULL));
+            assertTrue(TypeUtil.isFrozenCollection(type));
+            assertTrue(TypeUtil.isLiteral(type));
+            assertTrue(type.isReversed());
+
+            AbstractType<?> nonFrozenCollection = init.apply(elementType.getType(), true);
+            assertEquals(elementType.getType(), cellValueType(nonFrozenCollection, IndexTarget.Type.VALUES));
+            nonFrozenCollectionTester.accept(elementType.getType(), nonFrozenCollection);
+        }
+    }
+
+    private static AbstractType<?> cellValueType(AbstractType<?> type, IndexTarget.Type indexType)
+    {
+        return TypeUtil.cellValueType(target(type, indexType));
+    }
+
+    private static Pair<ColumnMetadata, IndexTarget.Type> target(AbstractType<?> type, IndexTarget.Type indexType)
+    {
+        return Pair.create(column(type), indexType);
+    }
+
+    private static ColumnMetadata column(AbstractType<?> type)
+    {
+        return ColumnMetadata.regularColumn("ks", "cf", "col", type);
+    }
+
     @Test
     public void shouldCompareByteBuffers()
     {

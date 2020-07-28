@@ -206,7 +206,7 @@ public class FilterTree
 
             boolean match;
 
-            if (context.isCollection())
+            if (context.isNonFrozenCollection())
             {
                 Iterator<ByteBuffer> valueIterator = context.getValuesOf(row, now);
 

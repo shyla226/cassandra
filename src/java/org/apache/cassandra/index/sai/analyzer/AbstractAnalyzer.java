@@ -32,7 +32,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 
 public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
 {
-    static final Set<AbstractType<?>> ANALYZABLE_TYPES = ImmutableSet.of(UTF8Type.instance, AsciiType.instance); 
+    public static final Set<AbstractType<?>> ANALYZABLE_TYPES = ImmutableSet.of(UTF8Type.instance, AsciiType.instance);
     
     protected ByteBuffer next = null;
     String nextLiteral = null;
@@ -87,7 +87,7 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
     {
         if (options.get(NonTokenizingOptions.CASE_SENSITIVE) != null || options.get(NonTokenizingOptions.NORMALIZE) != null)
         {
-            if (!ANALYZABLE_TYPES.contains(type))
+            if (!TypeUtil.isIn(type, ANALYZABLE_TYPES))
             {
                 throw new InvalidRequestException("CQL type " + type.asCQL3Type() + " cannot be analyzed.");
             }

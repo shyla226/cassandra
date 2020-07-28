@@ -195,7 +195,7 @@ public class ColumnContext
 
         long bytes = 0;
 
-        if (isCollection())
+        if (isNonFrozenCollection())
         {
             Iterator<ByteBuffer> bufferIterator = getValuesOf(row, FBUtilities.nowInSeconds());
             if (bufferIterator != null)
@@ -289,14 +289,14 @@ public class ColumnContext
         return validator;
     }
 
-    public boolean isCollection()
+    public boolean isNonFrozenCollection()
     {
-        return target.left.type.isCollection() && target.left.type.isMultiCell();
+        return TypeUtil.isNonFrozenCollection(target.left.type);
     }
 
     public boolean isFrozenCollection()
     {
-        return target.left.type.isCollection() && !target.left.type.isMultiCell();
+        return TypeUtil.isFrozenCollection(target.left.type);
     }
 
     public String getColumnName()
@@ -368,7 +368,7 @@ public class ColumnContext
         Expression.Op operator = Expression.Op.valueOf(op);
         IndexTarget.Type type = target.right;
 
-        if (isCollection()) // non-frozen
+        if (isNonFrozenCollection()) // non-frozen
         {
             if (type == IndexTarget.Type.KEYS) return operator == Expression.Op.CONTAINS_KEY;
             if (type == IndexTarget.Type.VALUES) return operator == Expression.Op.CONTAINS_VALUE;

@@ -44,7 +44,10 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.SecondaryIndexManager;
+import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexBuilder;
@@ -357,11 +360,32 @@ public class NativeIndexDDLTest extends SAITester
     @Test
     public void shouldCreateIndexOnReversedType() throws Throwable
     {
-        createTable("CREATE TABLE %s (id text, ck int, val text, PRIMARY KEY (id,ck)) WITH CLUSTERING ORDER BY (ck desc)");
+        createTable("CREATE TABLE %s (id text, ck1 text, ck2 int, val text, PRIMARY KEY (id,ck1,ck2)) WITH CLUSTERING ORDER BY (ck1 desc, ck2 desc)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(ck) USING 'StorageAttachedIndex'");
+        String indexNameCk1 = createIndex("CREATE CUSTOM INDEX ON %s(ck1) USING 'StorageAttachedIndex'");
+        String indexNameCk2 = createIndex("CREATE CUSTOM INDEX ON %s(ck2) USING 'StorageAttachedIndex'");
 
-        assertEquals(1, NDI_CREATION_COUNTER.get());
+        execute("insert into %s(id, ck1, ck2, val) values('1', '2', 3, '3')");
+        execute("insert into %s(id, ck1, ck2, val) values('1', '3', 4, '4')");
+        assertEquals(1, executeNet("SELECT * FROM %s WHERE ck1='3'").all().size());
+        assertEquals(2, executeNet("SELECT * FROM %s WHERE ck2>=0").all().size());
+        assertEquals(2, executeNet("SELECT * FROM %s WHERE ck2<=4").all().size());
+
+        flush();
+        assertEquals(1, executeNet("SELECT * FROM %s WHERE ck1='2'").all().size());
+        assertEquals(2, executeNet("SELECT * FROM %s WHERE ck2>=3").all().size());
+        assertEquals(2, executeNet("SELECT * FROM %s WHERE ck2<=4").all().size());
+
+        SecondaryIndexManager sim = getCurrentColumnFamilyStore().indexManager;
+        StorageAttachedIndex index = (StorageAttachedIndex) sim.getIndexByName(indexNameCk1);
+        ColumnContext context = index.getContext();
+        assertTrue(context.isLiteral());
+        assertTrue(context.getValidator() instanceof ReversedType);
+
+        index = (StorageAttachedIndex) sim.getIndexByName(indexNameCk2);
+        context = index.getContext();
+        assertFalse(context.isLiteral());
+        assertTrue(context.getValidator() instanceof ReversedType);
     }
 
     @Test
