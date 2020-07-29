@@ -93,7 +93,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         if (maybeAbort())
             return;
 
-        if (columnContext.isCollection())
+        if (columnContext.isNonFrozenCollection())
         {
             Iterator<ByteBuffer> valueIterator = columnContext.getValuesOf(row, nowInSec);
             if (valueIterator != null)

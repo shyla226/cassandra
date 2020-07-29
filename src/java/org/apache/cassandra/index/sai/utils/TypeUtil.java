@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.Set;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -32,8 +33,10 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ComplexColumnData;
@@ -77,7 +80,7 @@ public class TypeUtil
      */
     public static boolean supportsRounding(AbstractType<?> type)
     {
-        return type instanceof IntegerType;
+        return isBigInteger(type);
     }
 
     /**
@@ -106,48 +109,38 @@ public class TypeUtil
     {
         if (type.isValueLengthFixed())
             return type.valueLengthIfFixed();
-        else if (type instanceof InetAddressType)
+        else if (isInetAddress(type))
             return 16;
-        else if (type instanceof IntegerType)
+        else if (isBigInteger(type))
             return 20;
         return 16;
     }
 
     public static AbstractType<?> cellValueType(Pair<ColumnMetadata, IndexTarget.Type> target)
     {
-        if (target.left.type.isCollection() && target.left.type.isMultiCell())
+        AbstractType<?> type = target.left.type;
+        if (isNonFrozenCollection(type))
         {
-            switch (((CollectionType<?>)target.left.type).kind)
+            CollectionType<?> collection = ((CollectionType<?>) type);
+            switch (collection.kind)
             {
                 case LIST:
-                    return ((CollectionType<?>) target.left.type).valueComparator();
+                    return collection.valueComparator();
                 case SET:
-                    return ((CollectionType<?>) target.left.type).nameComparator();
+                    return collection.nameComparator();
                 case MAP:
                     switch (target.right)
                     {
                         case KEYS:
-                            return ((CollectionType<?>) target.left.type).nameComparator();
+                            return collection.nameComparator();
                         case VALUES:
-                            return ((CollectionType<?>) target.left.type).valueComparator();
+                            return collection.valueComparator();
                         case KEYS_AND_VALUES:
-                            return CompositeType.getInstance(((CollectionType<?>) target.left.type).nameComparator(),
-                                                             ((CollectionType<?>) target.left.type).valueComparator());
+                            return CompositeType.getInstance(collection.nameComparator(), collection.valueComparator());
                     }
             }
         }
-        return target.left.type;
-    }
-
-    /**
-     * Returns <code>true</code> if values of the given {@link AbstractType} should be indexed as literals.
-     */
-    public static boolean isLiteral(AbstractType<?> type)
-    {
-        return type instanceof UTF8Type ||
-               type instanceof AsciiType ||
-               type instanceof CompositeType ||
-               (type.isCollection() && !type.isMultiCell());
+        return type;
     }
 
     /**
@@ -159,7 +152,7 @@ public class TypeUtil
      */
     public static String getString(ByteBuffer value, AbstractType<?> type)
     {
-        if (type instanceof CompositeType)
+        if (isComposite(type))
             return ByteBufferUtil.bytesToHex(value);
         return type.getString(value);
     }
@@ -170,7 +163,7 @@ public class TypeUtil
      */
     public static ByteBuffer fromString(String value, AbstractType<?> type)
     {
-        if (type instanceof CompositeType)
+        if (isComposite(type))
             return ByteBufferUtil.hexToBytes(value);
         return type.fromString(value);
     }
@@ -180,9 +173,9 @@ public class TypeUtil
      */
     public static void toComparableBytes(ByteBuffer value, AbstractType<?> type, byte[] bytes)
     {
-        if (type instanceof InetAddressType)
+        if (isInetAddress(type))
             ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, 16);
-        else if (type instanceof IntegerType)
+        else if (isBigInteger(type))
             ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, 20);
         else
             ByteBufferUtil.toBytes(type.asComparableBytes(value, ByteComparable.Version.OSS41), bytes);
@@ -198,9 +191,9 @@ public class TypeUtil
         if (value == null)
             return null;
 
-        if (type instanceof InetAddressType)
+        if (isInetAddress(type))
             return encodeInetAddress(value);
-        else if (type instanceof IntegerType)
+        else if (isBigInteger(type))
             return encodeBigInteger(value);
         return value;
     }
@@ -213,11 +206,11 @@ public class TypeUtil
      */
     public static int compare(ByteBuffer b1, ByteBuffer b2, AbstractType<?> type)
     {
-        if (type instanceof InetAddressType)
+        if (isInetAddress(type))
             return compareInet(b1, b2);
             // BigInteger values, frozen types and composite types (map entries) use compareUnsigned to maintain
             // a consistent order between the in-memory index and the on-disk index.
-        else if ((type instanceof IntegerType) || (type.isCollection() && !type.isMultiCell()) || (type instanceof CompositeType))
+        else if ((isBigInteger(type)) || isCompositeOrFrozenCollection(type))
             return FastByteOperations.compareUnsigned(b1, b2);
 
         return type.compare(b1, b2 );
@@ -232,10 +225,10 @@ public class TypeUtil
      */
     public static int comparePostFilter(Expression.Value requestedValue, Expression.Value columnValue, AbstractType<?> type)
     {
-        if (type instanceof InetAddressType)
+        if (isInetAddress(type))
             return compareInet(requestedValue.encoded, columnValue.encoded);
             // Override comparisons for frozen collections and composite types (map entries)
-        else if ((type.isCollection() && !type.isMultiCell()) || (type instanceof CompositeType))
+        else if (isCompositeOrFrozenCollection(type))
             return FastByteOperations.compareUnsigned(requestedValue.raw, columnValue.raw);
 
         return type.compare(requestedValue.raw, columnValue.raw);
@@ -252,7 +245,7 @@ public class TypeUtil
         Stream<ByteBuffer> stream = StreamSupport.stream(cellData.spliterator(), false).filter(cell -> cell != null && cell.isLive(nowInSecs))
                                                                .map(cell -> cellValue(target, cell));
 
-        if (validator instanceof InetAddressType)
+        if (isInetAddress(validator))
             stream = stream.sorted((c1, c2) -> compareInet(encodeInetAddress(c1), encodeInetAddress(c2)));
 
         return stream.iterator();
@@ -261,7 +254,7 @@ public class TypeUtil
     public static Comparator<ByteBuffer> comparator(AbstractType<?> type)
     {
         // Override the comparator for BigInteger, frozen collections and composite types
-        if ((type instanceof IntegerType) || (type.isCollection() && !type.isMultiCell()) || (type instanceof CompositeType))
+        if ((isBigInteger(type)) || isCompositeOrFrozenCollection(type))
             return FastByteOperations::compareUnsigned;
 
         return type;
@@ -371,5 +364,104 @@ public class TypeUtil
         bytes[3] = (byte)(size & 0xff);
         bytes[0] ^= 0x80;
         return ByteBuffer.wrap(bytes);
+    }
+
+    /* Type comparison to get rid of ReversedType */
+
+    /**
+     * Returns <code>true</code> if values of the given {@link AbstractType} should be indexed as literals.
+     */
+    public static boolean isLiteral(AbstractType<?> type)
+    {
+        return isUTF8OrAscii(type) || isCompositeOrFrozenCollection(type);
+    }
+
+    /**
+     * Returns <code>true</code> if given {@link AbstractType} is UTF8 or Ascii
+     */
+    public static boolean isUTF8OrAscii(AbstractType<?> type)
+    {
+        type = baseType(type);
+        return type instanceof UTF8Type || type instanceof AsciiType;
+    }
+
+    /**
+     * Returns <code>true</code> if given {@link AbstractType} is Composite(map entry) or frozen-collection.
+     */
+    public static boolean isCompositeOrFrozenCollection(AbstractType<?> type)
+    {
+        type = baseType(type);
+        return type instanceof CompositeType || (type.isCollection() && !type.isMultiCell());
+    }
+
+    /**
+     * Returns <code>true</code> if given {@link AbstractType} is frozen-collection.
+     */
+    public static boolean isFrozenCollection(AbstractType<?> type)
+    {
+        type = baseType(type);
+        return type.isCollection() && !type.isMultiCell();
+    }
+
+    /**
+     * Returns <code>true</code> if given {@link AbstractType} is non-frozen-collection.
+     */
+    public static boolean isNonFrozenCollection(AbstractType<?> type)
+    {
+        type = baseType(type);
+        return type.isCollection() && type.isMultiCell();
+    }
+
+    /**
+     * Returns <code>true</code> if given {@link AbstractType} is included in the types.
+     */
+    public static boolean isIn(AbstractType<?> type, Set<AbstractType<?>> types)
+    {
+        type = baseType(type);
+        return types.contains(type);
+    }
+
+    /**
+     * Returns <code>true</code> if given {@link AbstractType} is {@link InetAddressType}
+     */
+    private static boolean isInetAddress(AbstractType<?> type)
+    {
+        type = baseType(type);
+        return type instanceof InetAddressType;
+    }
+
+    /**
+     * Returns <code>true</code> if given {@link AbstractType} is {@link IntegerType}
+     */
+    private static boolean isBigInteger(AbstractType<?> type)
+    {
+        type = baseType(type);
+        return type instanceof IntegerType;
+    }
+
+    /**
+     * Returns <code>true</code> if given {@link AbstractType} is {@link DecimalType}
+     */
+    private static boolean isBigDecimal(AbstractType<?> type)
+    {
+        type = baseType(type);
+        return type instanceof DecimalType;
+    }
+
+    /**
+     * Returns <code>true</code> if given {@link AbstractType} is {@link CompositeType}
+     */
+    public static boolean isComposite(AbstractType<?> type)
+    {
+        type = baseType(type);
+        return type instanceof CompositeType;
+    }
+
+    /**
+     * @return base type if given type is reversed, otherwise return itself
+     */
+    private static AbstractType<?> baseType(AbstractType<?> type)
+    {
+        return type.isReversed() ? ((ReversedType<?>) type).baseType : type;
     }
 }

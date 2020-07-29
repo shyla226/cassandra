@@ -119,7 +119,7 @@ public class Operation extends RangeIterator
                 case EQ:
                     // EQ operator will always be a multiple expression because it is being used by
                     // map entries
-                    isMultiExpression = columnContext.isCollection();
+                    isMultiExpression = columnContext.isNonFrozenCollection();
                     break;
 
                 case CONTAINS:

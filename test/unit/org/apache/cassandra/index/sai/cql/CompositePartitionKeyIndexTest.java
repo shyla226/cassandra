@@ -4,7 +4,7 @@
  * Please see the included license file for details.
  */
 
-package com.datastax.bdp.index.cql;
+package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Before;
 import org.junit.Test;
