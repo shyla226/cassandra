@@ -20,34 +20,25 @@
  */
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.LinkedList;
-import java.util.List;
-
 import org.junit.Before;
-import org.junit.runners.Parameterized;
+import org.junit.Test;
 
-import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.config.DatabaseDescriptor;
 
 /**
- * SmokeQueryTest is a single node, compound and static data model copy of SingleNodeQueryTest
+ * Force generates segments due to a small RAM size on compaction, to test segment splitting
  */
-public class SmokeQueryTest extends AbstractIndexQueryTest
+public class TinySegmentQueryCellDeletionsTest extends AbstractIndexQueryTest
 {
     @Before
-    public void setup() throws Throwable
+    public void setSegmentWriteBufferSpace() throws Throwable
     {
-        requireNetwork();
-
-        Injections.inject(INDEX_QUERY_COUNTER);
+        DatabaseDescriptor.setSAISegmentWriteBufferSpace(0);
     }
 
-    @SuppressWarnings("unused")
-    @Parameterized.Parameters(name = "{0}")
-    public static List<Object[]> params()
+    @Test
+    public void testCellDeletions() throws Throwable
     {
-        List<Object[]> scenarios = new LinkedList<>();
-
-        scenarios.add(new Object[]{ new DataModel.CompoundKeyWithStaticsDataModel(DataModel.STATIC_COLUMNS, DataModel.STATIC_COLUMN_DATA), STATIC_QUERY_SETS });
-        return scenarios;
+        cellDeletions();
     }
 }

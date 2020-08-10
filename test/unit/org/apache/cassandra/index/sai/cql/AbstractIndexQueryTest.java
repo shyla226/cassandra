@@ -20,8 +20,8 @@
  */
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.Collections;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -30,23 +30,27 @@ import java.util.stream.Collectors;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import org.junit.Before;
 import org.junit.Ignore;
-import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
-import org.apache.cassandra.db.marshal.InetAddressType;
-import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
-import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.SimpleDateType;
 import org.apache.cassandra.db.marshal.TimeType;
 import org.apache.cassandra.db.marshal.TimestampType;
 import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
+import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.utils.Pair;
 import org.hamcrest.Matchers;
 
+import static org.apache.cassandra.index.sai.cql.DataModel.NORMAL_COLUMNS;
+import static org.apache.cassandra.index.sai.cql.DataModel.NORMAL_COLUMN_DATA;
+import static org.apache.cassandra.index.sai.cql.DataModel.STATIC_COLUMNS;
+import static org.apache.cassandra.index.sai.cql.DataModel.STATIC_COLUMN_DATA;
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
@@ -100,8 +104,15 @@ public abstract class AbstractIndexQueryTest extends SAITester
     @Parameterized.Parameter(1)
     public List<BaseQuerySet> sets;
 
-    @Test
-    public void testWriteLifecycle() throws Throwable
+    @Before
+    public void setup() throws Throwable
+    {
+        requireNetwork();
+
+        Injections.inject(INDEX_QUERY_COUNTER);
+    }
+
+    public void writeLifecycle() throws Throwable
     {
         dataModel.createTables(this);
 
@@ -142,8 +153,7 @@ public abstract class AbstractIndexQueryTest extends SAITester
         executeQueries(dataModel, sets);
     }
 
-    @Test
-    public void testRowDeletions() throws Throwable
+    public void rowDeletions() throws Throwable
     {
         dataModel.createTables(this);
 
@@ -175,8 +185,7 @@ public abstract class AbstractIndexQueryTest extends SAITester
         executeQueries(dataModel, sets);
     }
 
-    @Test
-    public void testCellDeletions() throws Throwable
+    public void cellDeletions() throws Throwable
     {
         dataModel.createTables(this);
 
@@ -203,8 +212,7 @@ public abstract class AbstractIndexQueryTest extends SAITester
         executeQueries(dataModel, sets);
     }
 
-    @Test
-    public void testTimeToLive() throws Throwable
+    public void timeToLive() throws Throwable
     {
         dataModel.createTables(this);
 
@@ -232,8 +240,22 @@ public abstract class AbstractIndexQueryTest extends SAITester
     @Parameterized.Parameters(name = "{0}")
     public static List<Object[]> params()
     {
-        // we need this method with empty data for Parametrized
-        return Collections.emptyList();
+        List<Object[]> scenarios = new LinkedList<>();
+
+        scenarios.add(new Object[]{ new DataModel.BaseDataModel(NORMAL_COLUMNS, NORMAL_COLUMN_DATA), BASE_QUERY_SETS });
+
+        scenarios.add(new Object[]{ new DataModel.CompoundKeyDataModel(NORMAL_COLUMNS, NORMAL_COLUMN_DATA), BASE_QUERY_SETS });
+
+        scenarios.add(new Object[]{ new DataModel.CompoundKeyWithStaticsDataModel(STATIC_COLUMNS, STATIC_COLUMN_DATA), STATIC_QUERY_SETS });
+
+        scenarios.add(new Object[]{ new DataModel.CompositePartitionKeyDataModel(NORMAL_COLUMNS, NORMAL_COLUMN_DATA),
+                                    ImmutableList.builder()
+                                                 .addAll(BASE_QUERY_SETS)
+                                                 .addAll(COMPOSITE_PARTITION_QUERY_SETS)
+                                                 .build()
+        });
+
+        return scenarios;
     }
 
     static String randomPostfix()
