@@ -37,6 +37,9 @@ public class SSTableQueryContext
     public long prevTokenValue = Long.MIN_VALUE;
     public long prevSSTableRowId = -1;
 
+    public long prevSkipToTokenValue = Long.MIN_VALUE;
+    public long prevSkipToSSTableRowId = -1;
+
     public SSTableQueryContext(QueryContext queryContext)
     {
         this.queryContext = queryContext;
