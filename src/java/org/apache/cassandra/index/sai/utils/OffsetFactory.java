@@ -106,7 +106,7 @@ public class OffsetFactory implements LongArray.Factory
      * Cache the prev token value and prev sstable row id pair, and share it between different indexed columns in the
      * same query.
      */
-    private static class TokenLongArray extends OffsetLongArray
+    static class TokenLongArray extends OffsetLongArray
     {
         private final SSTableQueryContext context;
 
@@ -139,16 +139,19 @@ public class OffsetFactory implements LongArray.Factory
         @Override
         public long findTokenRowID(long tokenValue)
         {
-            long segmentRowId = toSegmentRowId(context.prevSSTableRowId);
+            long segmentRowId = toSegmentRowId(context.prevSkipToSSTableRowId);
 
             // Don't use cached value from previous segment when there is duplicated tokens across segments.
-            if (tokenValue == context.prevTokenValue && segmentRowId >= 0)
+            if (tokenValue == context.prevSkipToTokenValue && segmentRowId >= 0)
             {
                 context.markTokenSkippingCacheHit();
             }
             else
             {
                 segmentRowId = super.findTokenRowID(tokenValue);
+
+                context.prevSkipToTokenValue = tokenValue;
+                context.prevSkipToSSTableRowId = toSSTableRowId(segmentRowId);
             }
             context.markTokenSkippingLookup();
             return segmentRowId;
