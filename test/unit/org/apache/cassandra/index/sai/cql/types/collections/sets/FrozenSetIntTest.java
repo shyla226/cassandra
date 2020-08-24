@@ -16,7 +16,7 @@ public class FrozenSetIntTest extends IndexingTypeSupport
     @Parameterized.Parameters(name = "dataset={0},wide={1},scenario={2}")
     public static Collection<Object[]> generateParameters()
     {
-        return generateParameters(new CollectionDataSet.FrozenSetDataSet<>(random, new DataSet.IntDataSet(random)));
+        return generateParameters(new CollectionDataSet.FrozenSetDataSet<>(new DataSet.AsciiDataSet()));
     }
 
     public FrozenSetIntTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)

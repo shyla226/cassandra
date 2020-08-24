@@ -16,7 +16,7 @@ public class MapEntriesAsciiTest extends IndexingTypeSupport
     @Parameterized.Parameters(name = "dataset={0},wide={1},scenario={2}")
     public static Collection<Object[]> generateParameters()
     {
-        return generateParameters(new CollectionDataSet.MapEntriesDataSet<>(random, new DataSet.AsciiDataSet(random)));
+        return generateParameters(new CollectionDataSet.MapEntriesDataSet<>(new DataSet.AsciiDataSet()));
     }
 
     public MapEntriesAsciiTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)

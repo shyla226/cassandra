@@ -16,7 +16,7 @@ public class MapKeysVarintTest extends IndexingTypeSupport
     @Parameterized.Parameters(name = "dataset={0},wide={1},scenario={2}")
     public static Collection<Object[]> generateParameters()
     {
-        return generateParameters(new CollectionDataSet.MapKeysDataSet<>(random, new DataSet.VarintDataSet(random)));
+        return generateParameters(new CollectionDataSet.MapKeysDataSet<>(new DataSet.VarintDataSet()));
     }
 
     public MapKeysVarintTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)

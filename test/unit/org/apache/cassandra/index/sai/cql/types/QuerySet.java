@@ -1,4 +1,5 @@
 /*
+ *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -7,13 +8,15 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ *
  */
 package org.apache.cassandra.index.sai.cql.types;
 
@@ -23,15 +26,12 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 
-import com.carrotsearch.randomizedtesting.generators.RandomInts;
+import org.apache.cassandra.cql3.CQLTester;
 
-import static org.apache.cassandra.cql3.CQLTester.assertRows;
-import static org.apache.cassandra.cql3.CQLTester.assertRowsIgnoringOrder;
 import static org.apache.cassandra.index.sai.cql.types.IndexingTypeSupport.NUMBER_OF_VALUES;
 
-public abstract class QuerySet
+public abstract class QuerySet extends CQLTester
 {
     final DataSet<?> dataset;
 
@@ -40,7 +40,7 @@ public abstract class QuerySet
         this.dataset = dataset;
     }
 
-    abstract void runQueries(Random random, Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable;
+    abstract void runQueries(Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable;
 
     public static class NumericQuerySet extends QuerySet
     {
@@ -49,7 +49,8 @@ public abstract class QuerySet
             super(dataset);
         }
 
-        void runQueries(Random random, Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
+        @Override
+        void runQueries(Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
         {
             // Query each value for all operators
             for (int index = 0; index < allRows.length; index++)
@@ -72,8 +73,8 @@ public abstract class QuerySet
                 int index2 = 0;
                 while (index1 == index2)
                 {
-                    index1 = RandomInts.randomIntBetween(random, 0, allRows.length - 1);
-                    index2 = RandomInts.randomIntBetween(random, 0, allRows.length - 1);
+                    index1 = getRandom().nextIntBetween(0, allRows.length - 1);
+                    index2 = getRandom().nextIntBetween(0, allRows.length - 1);
                 }
 
                 int min = Math.min(index1, index2);
@@ -106,7 +107,7 @@ public abstract class QuerySet
         }
 
         @Override
-        void runQueries(Random random, Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
+        void runQueries(Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
         {
             // Query each value for EQ operator
             for (int index = 0; index < allRows.length; index++)
@@ -127,7 +128,7 @@ public abstract class QuerySet
         }
 
         @Override
-        public void runQueries(Random random, Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
+        public void runQueries(Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
         {
             for (int index = 0; index < allRows.length; index++)
             {
@@ -137,7 +138,7 @@ public abstract class QuerySet
 
             for (int and = 0; and < allRows.length / 4; and++)
             {
-                int index = RandomInts.randomIntBetween(random, 0, allRows.length - 1);
+                int index = getRandom().nextIntBetween(0, allRows.length - 1);
                 Iterator valueIterator = ((Collection)allRows[index][2]).iterator();
                 Object value1 = valueIterator.next();
                 Object value2 = valueIterator.hasNext() ? valueIterator.next() : value1;
@@ -177,7 +178,7 @@ public abstract class QuerySet
         }
 
         @Override
-        void runQueries(Random random, Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
+        void runQueries(Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
         {
             for (int index = 0; index < allRows.length; index++)
             {
@@ -206,7 +207,7 @@ public abstract class QuerySet
         }
 
         @Override
-        public void runQueries(Random random, Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
+        public void runQueries(Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
         {
             for (int index = 0; index < allRows.length; index++)
             {
@@ -216,10 +217,10 @@ public abstract class QuerySet
 
             for (int and = 0; and < allRows.length / 4; and++)
             {
-                int index = RandomInts.randomIntBetween(random, 0, allRows.length - 1);
+                int index = getRandom().nextIntBetween(0, allRows.length - 1);
                 Map map = (Map)allRows[index][2];
-                Object value1 = map.values().toArray()[RandomInts.randomIntBetween(random, 0, map.values().size() - 1)];
-                Object value2 = map.keySet().toArray()[RandomInts.randomIntBetween(random, 0, map.values().size() - 1)];
+                Object value1 = map.values().toArray()[getRandom().nextIntBetween(0, map.values().size() - 1)];
+                Object value2 = map.keySet().toArray()[getRandom().nextIntBetween(0, map.values().size() - 1)];
                 assertRowsIgnoringOrder(runner.execute("SELECT * FROM %s WHERE value CONTAINS ? AND value CONTAINS ? ALLOW FILTERING",
                         value1, value2), getExpectedRows(value1, value2, allRows));
             }
@@ -256,7 +257,7 @@ public abstract class QuerySet
         }
 
         @Override
-        public void runQueries(Random random, Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
+        public void runQueries(Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
         {
             for (int index = 0; index < allRows.length; index++)
             {
@@ -266,10 +267,10 @@ public abstract class QuerySet
 
             for (int and = 0; and < allRows.length / 4; and++)
             {
-                int index = RandomInts.randomIntBetween(random, 0, allRows.length - 1);
+                int index = getRandom().nextIntBetween(0, allRows.length - 1);
                 Map map = (Map)allRows[index][2];
-                Object key1 = map.keySet().toArray()[RandomInts.randomIntBetween(random, 0, map.keySet().size() - 1)];
-                Object key2 = map.keySet().toArray()[RandomInts.randomIntBetween(random, 0, map.keySet().size() - 1)];
+                Object key1 = map.keySet().toArray()[getRandom().nextIntBetween(0, map.keySet().size() - 1)];
+                Object key2 = map.keySet().toArray()[getRandom().nextIntBetween(0, map.keySet().size() - 1)];
                 assertRowsIgnoringOrder(runner.execute("SELECT * FROM %s WHERE value CONTAINS KEY ? AND value CONTAINS KEY ? ALLOW FILTERING",
                         key1, key2), getExpectedRows(key1, key2, allRows));
             }
@@ -306,7 +307,7 @@ public abstract class QuerySet
         }
 
         @Override
-        public void runQueries(Random random, Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
+        public void runQueries(Object[][] allRows, IndexingTypeSupport.QueryRunner runner) throws Throwable
         {
             for (int index = 0; index < allRows.length; index++)
             {
@@ -318,11 +319,11 @@ public abstract class QuerySet
             }
             for (int and = 0; and < allRows.length / 4; and++)
             {
-                int index = RandomInts.randomIntBetween(random, 0, allRows.length - 1);
+                int index = getRandom().nextIntBetween(0, allRows.length - 1);
                 Map map = (Map)allRows[index][2];
-                Object key1 = map.keySet().toArray()[RandomInts.randomIntBetween(random, 0, map.keySet().size() - 1)];
+                Object key1 = map.keySet().toArray()[getRandom().nextIntBetween(0, map.keySet().size() - 1)];
                 Object value1 = map.get(key1);
-                Object key2 = map.keySet().toArray()[RandomInts.randomIntBetween(random, 0, map.keySet().size() - 1)];
+                Object key2 = map.keySet().toArray()[getRandom().nextIntBetween(0, map.keySet().size() - 1)];
                 Object value2 = map.get(key2);
                 assertRowsIgnoringOrder(runner.execute("SELECT * FROM %s WHERE value[?] = ? AND value[?] = ? ALLOW FILTERING",
                         key1, value1, key2, value2), getExpectedRows(key1, value1, key2, value2, allRows));

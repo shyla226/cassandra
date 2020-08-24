@@ -16,7 +16,7 @@ public class FrozenMapAsciiTest extends IndexingTypeSupport
     @Parameterized.Parameters(name = "dataset={0},wide={1},scenario={2}")
     public static Collection<Object[]> generateParameters()
     {
-        return generateParameters(new CollectionDataSet.FrozenMapValuesDataSet<>(random, new DataSet.AsciiDataSet(random)));
+        return generateParameters(new CollectionDataSet.FrozenMapValuesDataSet<>(new DataSet.AsciiDataSet()));
     }
 
     public FrozenMapAsciiTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
