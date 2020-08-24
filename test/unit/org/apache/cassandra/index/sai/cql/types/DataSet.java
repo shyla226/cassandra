@@ -27,12 +27,10 @@ import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
-import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-import com.carrotsearch.randomizedtesting.generators.RandomInts;
-import com.carrotsearch.randomizedtesting.generators.RandomStrings;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.serializers.SimpleDateSerializer;
@@ -41,7 +39,7 @@ import org.apache.cassandra.utils.UUIDGen;
 
 import static org.apache.cassandra.index.sai.cql.types.IndexingTypeSupport.NUMBER_OF_VALUES;
 
-public abstract class DataSet<T>
+public abstract class DataSet<T> extends CQLTester
 {
     public T[] values;
 
@@ -54,7 +52,7 @@ public abstract class DataSet<T>
 
     public static abstract class NumericDataSet<T extends Number> extends DataSet<T>
     {
-        NumericDataSet(Random random)
+        NumericDataSet()
         {
             values = emptyValues();
             List<T> list = Arrays.asList(values);
@@ -63,8 +61,8 @@ public abstract class DataSet<T>
                 T value1, value2;
                 while (true)
                 {
-                    value1 = nextValue(random);
-                    value1 = random.nextBoolean() ? negate(value1) : abs(value1);
+                    value1 = nextValue();
+                    value1 = getRandom().nextBoolean() ? negate(value1) : abs(value1);
                     value2 = increment(value1);
                     if (!list.contains(value1) && !list.contains(value2))
                         break;
@@ -77,7 +75,7 @@ public abstract class DataSet<T>
 
         abstract T[] emptyValues();
 
-        abstract T nextValue(Random random);
+        abstract T nextValue();
 
         abstract T negate(T value);
 
@@ -93,11 +91,6 @@ public abstract class DataSet<T>
 
     public static class IntDataSet extends NumericDataSet<Integer>
     {
-        public IntDataSet(Random random)
-        {
-            super(random);
-        }
-
         @Override
         Integer[] emptyValues()
         {
@@ -105,9 +98,9 @@ public abstract class DataSet<T>
         }
 
         @Override
-        Integer nextValue(Random random)
+        Integer nextValue()
         {
-            return random.nextInt();
+            return getRandom().nextInt();
         }
 
         @Override
@@ -136,11 +129,6 @@ public abstract class DataSet<T>
 
     public static class BigintDataSet extends NumericDataSet<Long>
     {
-        public BigintDataSet(Random random)
-        {
-            super(random);
-        }
-
         @Override
         Long[] emptyValues()
         {
@@ -148,9 +136,9 @@ public abstract class DataSet<T>
         }
 
         @Override
-        Long nextValue(Random random)
+        Long nextValue()
         {
-            return random.nextLong();
+            return getRandom().nextLong();
         }
 
         @Override
@@ -179,11 +167,6 @@ public abstract class DataSet<T>
 
     public static class SmallintDataSet extends NumericDataSet<Short>
     {
-        public SmallintDataSet(Random random)
-        {
-            super(random);
-        }
-
         @Override
         Short[] emptyValues()
         {
@@ -191,9 +174,9 @@ public abstract class DataSet<T>
         }
 
         @Override
-        Short nextValue(Random random)
+        Short nextValue()
         {
-            return (short)random.nextInt(Short.MAX_VALUE + 1);
+            return getRandom().nextShort();
         }
 
         @Override
@@ -222,11 +205,6 @@ public abstract class DataSet<T>
 
     public static class TinyintDataSet extends NumericDataSet<Byte>
     {
-        public TinyintDataSet(Random random)
-        {
-            super(random);
-        }
-
         @Override
         Byte[] emptyValues()
         {
@@ -234,9 +212,9 @@ public abstract class DataSet<T>
         }
 
         @Override
-        Byte nextValue(Random random)
+        Byte nextValue()
         {
-            return (byte)random.nextInt(Byte.MAX_VALUE + 1);
+            return getRandom().nextByte();
         }
 
         @Override
@@ -265,11 +243,6 @@ public abstract class DataSet<T>
 
     public static class VarintDataSet extends NumericDataSet<BigInteger>
     {
-        public VarintDataSet(Random random)
-        {
-            super(random);
-        }
-
         @Override
         BigInteger[] emptyValues()
         {
@@ -277,9 +250,9 @@ public abstract class DataSet<T>
         }
 
         @Override
-        BigInteger nextValue(Random random)
+        BigInteger nextValue()
         {
-            return new BigInteger(RandomInts.randomIntBetween(random, 16, 512), random);
+            return getRandom().nextBigInteger(16, 512);
         }
 
         @Override
@@ -308,11 +281,6 @@ public abstract class DataSet<T>
 
     public static class DecimalDataSet extends NumericDataSet<BigDecimal>
     {
-        public DecimalDataSet(Random random)
-        {
-            super(random);
-        }
-
         @Override
         BigDecimal[] emptyValues()
         {
@@ -320,11 +288,9 @@ public abstract class DataSet<T>
         }
 
         @Override
-        BigDecimal nextValue(Random random)
+        BigDecimal nextValue()
         {
-            return BigDecimal.valueOf(
-                    RandomInts.randomIntBetween(random, -1_000_000, 1_000_000),
-                    RandomInts.randomIntBetween(random, -64, 64));
+            return getRandom().nextBigDecimal(-1_000_000, 1_000_000, -64, 64);
         }
 
         @Override
@@ -354,11 +320,6 @@ public abstract class DataSet<T>
 
     public static class FloatDataSet extends NumericDataSet<Float>
     {
-        public FloatDataSet(Random random)
-        {
-            super(random);
-        }
-
         @Override
         Float[] emptyValues()
         {
@@ -366,9 +327,9 @@ public abstract class DataSet<T>
         }
 
         @Override
-        Float nextValue(Random random)
+        Float nextValue()
         {
-            return random.nextFloat();
+            return getRandom().nextFloat();
         }
 
         @Override
@@ -397,11 +358,6 @@ public abstract class DataSet<T>
 
     public static class DoubleDataSet extends NumericDataSet<Double>
     {
-        public DoubleDataSet(Random random)
-        {
-            super(random);
-        }
-
         @Override
         Double[] emptyValues()
         {
@@ -409,9 +365,9 @@ public abstract class DataSet<T>
         }
 
         @Override
-        Double nextValue(Random random)
+        Double nextValue()
         {
-            return random.nextDouble();
+            return getRandom().nextDouble();
         }
 
         @Override
@@ -440,7 +396,7 @@ public abstract class DataSet<T>
 
     public static class AsciiDataSet extends DataSet<String>
     {
-        public AsciiDataSet(Random random)
+        public AsciiDataSet()
         {
             values = new String[NUMBER_OF_VALUES];
             List<String> list = Arrays.asList(values);
@@ -449,7 +405,7 @@ public abstract class DataSet<T>
                 String value;
                 while (true)
                 {
-                    value = RandomStrings.randomAsciiOfLengthBetween(random, 8, 256);
+                    value = getRandom().nextAsciiString(8, 256);
                     if (!list.contains(value))
                         break;
                 }
@@ -471,7 +427,7 @@ public abstract class DataSet<T>
 
     public static class TextDataSet extends DataSet<String>
     {
-        public TextDataSet(Random random)
+        public TextDataSet()
         {
             values = new String[NUMBER_OF_VALUES];
             List<String> list = Arrays.asList(values);
@@ -480,7 +436,7 @@ public abstract class DataSet<T>
                 String value;
                 while (true)
                 {
-                    value = RandomStrings.randomAsciiOfLengthBetween(random , 8, 256);
+                    value = getRandom().nextAsciiString(8, 256);
                     if (!list.contains(value))
                         break;
                 }
@@ -502,7 +458,7 @@ public abstract class DataSet<T>
 
     public static class DateDataSet extends DataSet<Integer>
     {
-        public DateDataSet(Random random)
+        public DateDataSet()
         {
             values = new Integer[NUMBER_OF_VALUES];
             List<Integer> list = Arrays.asList(values);
@@ -515,7 +471,7 @@ public abstract class DataSet<T>
                 Integer value;
                 while (true)
                 {
-                    value = SimpleDateSerializer.timeInMillisToDay(min + Math.round(random.nextDouble() * range));
+                    value = SimpleDateSerializer.timeInMillisToDay(min + Math.round(getRandom().nextDouble() * range));
                     if (!list.contains(value))
                         break;
                 }
@@ -537,7 +493,7 @@ public abstract class DataSet<T>
 
     public static class TimeDataSet extends DataSet<Long>
     {
-        public TimeDataSet(Random random)
+        public TimeDataSet()
         {
             values = new Long[NUMBER_OF_VALUES];
             List<Long> list = Arrays.asList(values);
@@ -546,10 +502,10 @@ public abstract class DataSet<T>
                 Long value;
                 while (true)
                 {
-                    int hours = RandomInts.randomIntBetween(random, 0, 23);
-                    int minutes = RandomInts.randomIntBetween(random, 0, 59);
-                    int seconds = RandomInts.randomIntBetween(random, 0, 59);
-                    long nanos = RandomInts.randomIntBetween(random, 0, 1000000000);
+                    int hours = getRandom().nextIntBetween(0, 23);
+                    int minutes = getRandom().nextIntBetween(0, 59);
+                    int seconds = getRandom().nextIntBetween(0, 59);
+                    long nanos = getRandom().nextIntBetween(0, 1000000000);
                     value = TimeSerializer.timeStringToLong(String.format("%s:%s:%s.%s", hours, minutes, seconds, nanos));
                     if (!list.contains(value))
                         break;
@@ -573,7 +529,7 @@ public abstract class DataSet<T>
 
     public static class TimestampDataSet extends DataSet<Date>
     {
-        public TimestampDataSet(Random random)
+        public TimestampDataSet()
         {
             values = new Date[NUMBER_OF_VALUES];
             List<Date> list = Arrays.asList(values);
@@ -586,7 +542,7 @@ public abstract class DataSet<T>
                 Date value;
                 while (true)
                 {
-                    value = Date.from(Instant.ofEpochSecond(min + Math.round(random.nextDouble() * range)));
+                    value = Date.from(Instant.ofEpochSecond(min + Math.round(getRandom().nextDouble() * range)));
                     if (!list.contains(value))
                         break;
                 }
@@ -608,7 +564,7 @@ public abstract class DataSet<T>
 
     public static class UuidDataSet extends DataSet<UUID>
     {
-        public UuidDataSet(Random random)
+        public UuidDataSet()
         {
             values = new UUID[NUMBER_OF_VALUES];
             List<UUID> list = Arrays.asList(values);
@@ -640,7 +596,7 @@ public abstract class DataSet<T>
 
     public static class TimeuuidDataSet extends DataSet<UUID>
     {
-        public TimeuuidDataSet(Random random)
+        public TimeuuidDataSet()
         {
             values = new UUID[NUMBER_OF_VALUES];
             List<UUID> list = Arrays.asList(values);
@@ -672,7 +628,7 @@ public abstract class DataSet<T>
 
     public static class InetDataSet extends DataSet<InetAddress>
     {
-        public InetDataSet(Random random)
+        public InetDataSet()
         {
             values = new InetAddress[NUMBER_OF_VALUES];
             List<InetAddress> list = Arrays.asList(values);
@@ -683,11 +639,11 @@ public abstract class DataSet<T>
                 while (true)
                 {
                     byte[] bytes;
-                    if (random.nextBoolean())
+                    if (getRandom().nextBoolean())
                         bytes = new byte[4];
                     else
                         bytes = new byte[16];
-                    random.nextBytes(bytes);
+                    getRandom().nextBytes(bytes);
                     try
                     {
                         value = InetAddress.getByAddress(bytes);
