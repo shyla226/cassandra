@@ -21,7 +21,9 @@
 package org.apache.cassandra.index.sai.disk;
 
 import org.junit.Test;
+import java.math.BigDecimal;
 
+import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.ShortType;
@@ -31,6 +33,7 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 
+import static org.apache.cassandra.index.sai.disk.KDTreeIndexBuilder.buildDecimalSearcher;
 import static org.apache.cassandra.index.sai.disk.KDTreeIndexBuilder.buildInt32Searcher;
 import static org.apache.cassandra.index.sai.disk.KDTreeIndexBuilder.buildLongSearcher;
 import static org.apache.cassandra.index.sai.disk.KDTreeIndexBuilder.buildShortSearcher;
@@ -196,6 +199,70 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
         {{
             operation = Op.RANGE;
             upper = new Bound(ShortType.instance.decompose((short) 0), ShortType.instance, false);
+        }}, SSTableQueryContext.forTest()))
+        {
+            assertFalse(results.hasNext());
+        }
+
+        indexSearcher.close();
+    }
+
+
+    @Test
+    public void testEqQueriesAgainstDecimalIndex() throws Exception
+    {
+        final IndexSearcher indexSearcher = buildDecimalSearcher(newIndexComponents(), BigDecimal.valueOf(0), BigDecimal.valueOf(3));
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", DecimalType.instance))
+        {{
+            operation = Op.EQ;
+            lower = upper = new Bound(DecimalType.instance.decompose(BigDecimal.valueOf(0)), DecimalType.instance, true);
+        }}, SSTableQueryContext.forTest()))
+        {
+            assertEquals(0L, results.next().getLong());
+        }
+
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", DecimalType.instance))
+        {{
+            operation = Op.EQ;
+            lower = upper = new Bound(DecimalType.instance.decompose(BigDecimal.valueOf(3)), DecimalType.instance, true);
+        }}, SSTableQueryContext.forTest()))
+        {
+            assertFalse(results.hasNext());
+        }
+
+        indexSearcher.close();
+    }
+
+    @Test
+    public void testRangeQueriesAgainstDecimalIndex() throws Exception
+    {
+        final IndexSearcher indexSearcher = buildDecimalSearcher(newIndexComponents(), BigDecimal.valueOf(0), BigDecimal.valueOf(10));
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", DecimalType.instance))
+        {{
+            operation = Op.RANGE;
+            lower = new Bound(DecimalType.instance.decompose(BigDecimal.valueOf(2)), DecimalType.instance, false);
+            upper = new Bound(DecimalType.instance.decompose(BigDecimal.valueOf(7)), DecimalType.instance, true);
+        }}, SSTableQueryContext.forTest()))
+        {
+            for (long l = 21L; l <= 70L; l++)
+            {
+                assertEquals(l, results.next().getLong());
+            }
+        }
+
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", DecimalType.instance))
+        {{
+            operation = Op.RANGE;
+            lower = new Bound(DecimalType.instance.decompose(BigDecimal.valueOf(10)), DecimalType.instance, true);
+        }}, SSTableQueryContext.forTest()))
+        {
+            assertFalse(results.hasNext());
+        }
+
+        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", DecimalType.instance))
+        {{
+            operation = Op.RANGE;
+            upper = new Bound(DecimalType.instance.decompose(BigDecimal.valueOf(0)), DecimalType.instance, false);
         }}, SSTableQueryContext.forTest()))
         {
             assertFalse(results.hasNext());

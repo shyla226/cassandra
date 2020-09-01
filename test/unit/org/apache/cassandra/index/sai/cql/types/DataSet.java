@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.cql.types;
 
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -304,6 +305,52 @@ public abstract class DataSet<T>
             return "varint";
         }
     }
+
+    public static class DecimalDataSet extends NumericDataSet<BigDecimal>
+    {
+        public DecimalDataSet(Random random)
+        {
+            super(random);
+        }
+
+        @Override
+        BigDecimal[] emptyValues()
+        {
+            return new BigDecimal[NUMBER_OF_VALUES];
+        }
+
+        @Override
+        BigDecimal nextValue(Random random)
+        {
+            return BigDecimal.valueOf(
+                    RandomInts.randomIntBetween(random, -1_000_000, 1_000_000),
+                    RandomInts.randomIntBetween(random, -64, 64));
+        }
+
+        @Override
+        BigDecimal negate(BigDecimal value)
+        {
+            return value.signum() > 0 ? value.negate() : value;
+        }
+
+        @Override
+        BigDecimal abs(BigDecimal value)
+        {
+            return value.signum() < 0 ? value.abs() : value;
+        }
+
+        @Override
+        BigDecimal increment(BigDecimal value)
+        {
+            return value.add(BigDecimal.ONE);
+        }
+
+        public String toString()
+        {
+            return "decimal";
+        }
+    }
+
 
     public static class FloatDataSet extends NumericDataSet<Float>
     {
