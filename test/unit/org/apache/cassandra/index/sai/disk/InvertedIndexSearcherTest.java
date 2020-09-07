@@ -91,6 +91,9 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
                 try (RangeIterator results = searcher.search(new Expression(SAITester.createColumnContext("meh", UTF8Type.instance))
                                                              .add(Operator.EQ, termsEnum.get(t).left), SSTableQueryContext.forTest()))
                 {
+                    assertTrue(results.hasNext());
+                    assertEquals(results.getMinimum(), results.getCurrent());
+
                     for (int p = 0; p < numPostings; ++p)
                     {
                         final long expectedToken = termsEnum.get(t).right.get(p);
@@ -103,6 +106,9 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
                 try (RangeIterator results = searcher.search(new Expression(SAITester.createColumnContext("meh", UTF8Type.instance))
                                                              .add(Operator.EQ, termsEnum.get(t).left), SSTableQueryContext.forTest()))
                 {
+                    assertTrue(results.hasNext());
+                    assertEquals(results.getMinimum(), results.getCurrent());
+
                     // test skipping to the last block
                     final int idxToSkip = numPostings - 7;
                     // tokens are equal to their corresponding row IDs

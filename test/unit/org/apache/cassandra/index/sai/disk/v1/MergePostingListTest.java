@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -109,34 +108,6 @@ public class MergePostingListTest extends NdiRandomizedTest
     }
 
     @Test
-    public void shouldRecoverWhenAdvanceIsInterrupted() throws IOException
-    {
-        final List<PostingList> lists = newArrayList(new SingleFailurePostingList(new int[]{ 1, 5, 10 }, 1),
-                                                     new ArrayPostingList(new int[]{ 2, 3, 8 }),
-                                                     new ArrayPostingList(new int[]{ 3, 5, 9 }));
-
-        final PostingList merged = MergePostingList.merge(lists);
-        final PostingList expected = new ArrayPostingList(new int[]{ 1, 2, 3, 5, 8, 9, 10 });
-
-        try
-        {
-            merged.advance(9);
-        }
-        catch (SingleFailurePostingList.LookupException ignore)
-        {
-            // expected
-        }
-        catch (Throwable t)
-        {
-            fail();
-        }
-
-        // retry should succeed
-        assertEquals(expected.advance(9), merged.advance(9));
-        assertPostingListEquals(expected, merged);
-    }
-
-    @Test
     public void shouldConsumeDuplicatedPostingOnAdvance() throws IOException
     {
         final List<PostingList> lists = newArrayList(
@@ -176,13 +147,7 @@ public class MergePostingListTest extends NdiRandomizedTest
     @Test
     public void shouldAdvanceToAllElementsWithoutFailures()
     {
-        testAdvancingToAllElements(false);
-    }
-
-    @Test
-    public void shouldAdvanceToAllElementsWithFailures()
-    {
-        testAdvancingToAllElements(true);
+        testAdvancingToAllElements();
     }
 
     @Test
@@ -231,14 +196,11 @@ public class MergePostingListTest extends NdiRandomizedTest
     {
         for (int i = 0; i < 1000; ++i)
         {
-            testAdvancingOnRandom(false);
+            testAdvancingOnRandom();
         }
-
-        // test once with random NICE's
-        testAdvancingOnRandom(true);
     }
 
-    private void testAdvancingOnRandom(boolean randomFailures) throws IOException
+    private void testAdvancingOnRandom() throws IOException
     {
         final int postingsCount = nextInt(1, 50_000);
         final int postingListCount = nextInt(5, 50);
@@ -259,7 +221,7 @@ public class MergePostingListTest extends NdiRandomizedTest
         final List<PostingList> splitPostingLists = new ArrayList<>();
         for (List<Integer> split : splitPostings.values())
         {
-            splitPostingLists.add(randomFailures ? new RandomFailurePostingList(Ints.toArray(split)) : new ArrayPostingList(Ints.toArray(split)));
+            splitPostingLists.add(new ArrayPostingList(Ints.toArray(split)));
         }
 
         final PostingList merge = MergePostingList.merge(splitPostingLists);
@@ -316,7 +278,7 @@ public class MergePostingListTest extends NdiRandomizedTest
         }
     }
 
-    private void testAdvancingToAllElements(boolean randomFailures)
+    private void testAdvancingToAllElements()
     {
         final int[] postings1 = randomPostings();
         final int[] postings2 = randomPostings();
@@ -326,8 +288,7 @@ public class MergePostingListTest extends NdiRandomizedTest
                                               .sorted()
                                               .toArray();
 
-        final List<PostingList> lists = randomFailures ? newArrayList(new RandomFailurePostingList(postings1), new RandomFailurePostingList(postings2))
-                                                       : newArrayList(new ArrayPostingList(postings1), new ArrayPostingList(postings2));
+        final List<PostingList> lists = newArrayList(new ArrayPostingList(postings1), new ArrayPostingList(postings2));
 
         final PostingList merged = MergePostingList.merge(lists);
 
@@ -366,59 +327,5 @@ public class MergePostingListTest extends NdiRandomizedTest
     private interface PostingListAdvance
     {
         int advance(PostingList list) throws IOException;
-    }
-
-    /**
-     * Wraps {@link ArrayPostingList} and simulates one-time failure at a given index.
-     */
-    private static class SingleFailurePostingList extends ArrayPostingList
-    {
-        private final int failAtIdx;
-        private boolean failed = false;
-
-        public SingleFailurePostingList(int[] postings, int failAtIdx)
-        {
-            super(postings);
-
-            this.failAtIdx = failAtIdx;
-        }
-
-        @Override
-        public int getPostingAt(int i)
-        {
-            if (!failed && i == failAtIdx)
-            {
-                failed = true;
-                throw new LookupException(failAtIdx);
-            }
-
-            return super.getPostingAt(i);
-        }
-    }
-
-    /**
-     * Wraps {@link ArrayPostingList} and introduces random failures at lookup.
-     */
-    private static class RandomFailurePostingList extends ArrayPostingList
-    {
-        private final Random random;
-
-        public RandomFailurePostingList(int[] postings)
-        {
-            super(postings);
-
-            random = getRandom();
-        }
-
-        @Override
-        public int getPostingAt(int i)
-        {
-            if (random.nextBoolean())
-            {
-                throw new LookupException(i);
-            }
-
-            return super.getPostingAt(i);
-        }
     }
 }
