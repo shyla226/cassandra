@@ -76,27 +76,19 @@ public class PostingListRangeIterator extends RangeIterator
      * Create a direct PostingListRangeIterator where the underlying PostingList is materialised
      * immediately so the posting list size can be used.
      */
-    public PostingListRangeIterator(PostingList postingList,
-                                    IndexSearcher.RangeIteratorStatistics rangeIteratorStatistics,
-                                    LongArray.Factory segmentRowIdToTokenFactory,
-                                    LongArray.Factory segmentRowIdToOffsetFactory,
-                                    KeyFetcher keyFetcher,
-                                    SSTableQueryContext context,
-                                    IndexComponents components)
+    public PostingListRangeIterator(IndexSearcher.SearcherContext context, KeyFetcher keyFetcher, IndexComponents components)
     {
-        super(rangeIteratorStatistics.minToken, rangeIteratorStatistics.maxToken, postingList.size());
-        this.postingList = postingList;
-        long maxPartitionOffset = rangeIteratorStatistics.maxPartitionOffset;
-        this.context = context;
+        super(context.minToken, context.maxToken, context.postingList.size());
+        this.postingList = context.postingList;
+        this.context = context.context;
         this.components = components;
 
         try
         {
-            // startingIndex of 0 means `findTokenRowId` should search all tokens in the segment.
-            this.segmentRowIdToToken = segmentRowIdToTokenFactory.openTokenReader(0, context);
-            this.segmentRowIdToOffset = segmentRowIdToOffsetFactory.open();
+            this.segmentRowIdToToken = context.segmentRowIdToToken;
+            this.segmentRowIdToOffset = context.segmentRowIdToOffset;
             this.keyReader = keyFetcher.createReader();
-            this.producer = new OnDiskKeyProducer(keyFetcher, keyReader, segmentRowIdToOffset, maxPartitionOffset);
+            this.producer = new OnDiskKeyProducer(keyFetcher, keyReader, segmentRowIdToOffset);
         }
         catch (Throwable t)
         {

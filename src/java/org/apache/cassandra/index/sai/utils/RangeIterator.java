@@ -29,7 +29,6 @@ import java.util.PriorityQueue;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.index.sai.Token;
-import org.apache.cassandra.index.sasi.utils.AbstractIterator;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**

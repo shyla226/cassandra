@@ -45,17 +45,13 @@ public class OnDiskKeyProducer
     private final RandomAccessReader keyReader;
     private final LongArray segmentRowIdToOffset;
 
-    private final long maxPartitionOffset;
-
     private long lastOffset = NO_OFFSET;
-    private boolean exhausted;
 
-    public OnDiskKeyProducer(KeyFetcher keyFetcher, RandomAccessReader keyReader, LongArray segmentRowIdToOffset, long maxPartitionOffset)
+    public OnDiskKeyProducer(KeyFetcher keyFetcher, RandomAccessReader keyReader, LongArray segmentRowIdToOffset)
     {
         this.keyFetcher = keyFetcher;
         this.keyReader = keyReader;
         this.segmentRowIdToOffset = segmentRowIdToOffset;
-        this.maxPartitionOffset = maxPartitionOffset;
     }
 
     public Token produceToken(long token, int segmentRowId)
@@ -75,24 +71,11 @@ public class OnDiskKeyProducer
             return NO_OFFSET;
         }
 
-        // Due to ZCS, index files may still contain partition offsets that are not part of partial SSTable.
-        if (offset > maxPartitionOffset)
-        {
-            exhausted = true;
-            return NO_OFFSET;
-        }
-
         // Catalog the last offset if it's valid:
         lastOffset = offset;
 
         return offset;
     }
-
-    public boolean isExhausted()
-    {
-        return exhausted;
-    }
-
 
     public class OnDiskToken extends Token
     {

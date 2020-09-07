@@ -104,44 +104,34 @@ public abstract class IndexSearcher implements Closeable
         if (postingList == null)
             return RangeIterator.empty();
 
-        final RangeIteratorStatistics rangeIteratorStatistics = new RangeIteratorStatistics();
-        if (rangeIteratorStatistics.noOverlap)
-            return RangeIterator.empty();
-
-        RangeIterator iterator = new PostingListRangeIterator(postingList,
-                                                              rangeIteratorStatistics,
-                                                              rowIdToTokenFactory,
-                                                              rowIdToOffsetFactory,
-                                                              keyFetcher,
-                                                              context,
-                                                              indexComponents);
-
-        // "hasNext()" will attempt to compute next token and update its proper current value instead of using min which
-        // it's just theoretical lower bound included in RangeIteratorStatistics..
-        // Because RangeIterator expects proper "getCurrent" value used for sorting in PriorityQueue
-        if (!iterator.hasNext())
-            return RangeIterator.empty();
-
-        return iterator;
+        SearcherContext searcherContext = new SearcherContext(context, postingList.peekable());
+        return new PostingListRangeIterator(searcherContext, keyFetcher, indexComponents);
     }
 
-    public class RangeIteratorStatistics
+    public class SearcherContext
     {
-        long minToken;
-        long maxToken;
-        long maxPartitionOffset;
-        boolean noOverlap;
+        final long minToken;
+        final long maxToken;
+        final LongArray segmentRowIdToToken;
+        final LongArray segmentRowIdToOffset;
+        final SSTableQueryContext context;
+        final PostingList.PeekablePostingList postingList;
 
-        RangeIteratorStatistics()
+        SearcherContext(SSTableQueryContext context, PostingList.PeekablePostingList postingList)
         {
-            // Note: min token will be used to init RangeIterator#current which is used to ranges in RangeIterator#Build#ranges.
-            minToken = toLongToken(metadata.minKey);
+            this.context = context;
+            this.postingList = postingList;
+
+            // startingIndex of 0 means `findTokenRowId` should search all tokens in the segment.
+            this.segmentRowIdToToken = rowIdToTokenFactory.openTokenReader(0, context);
+            this.segmentRowIdToOffset = rowIdToOffsetFactory.open();
+
+            // Use the first row id's token as min
+            minToken = this.segmentRowIdToToken.get(postingList.peek());
             // use segment's metadata for the range iterator, may not be accurate, but should not matter to performance.
             maxToken = metadata.maxKey.isMinimum()
                     ? toLongToken(DatabaseDescriptor.getPartitioner().getMaximumToken())
                     : toLongToken(metadata.maxKey);
-
-            maxPartitionOffset = Long.MAX_VALUE;
         }
     }
 
