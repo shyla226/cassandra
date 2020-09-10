@@ -16,7 +16,7 @@ public class MapEntriesIntTest extends IndexingTypeSupport
     @Parameterized.Parameters(name = "dataset={0},wide={1},scenario={2}")
     public static Collection<Object[]> generateParameters()
     {
-        return generateParameters(new CollectionDataSet.MapEntriesDataSet<>(random, new DataSet.IntDataSet(random)));
+        return generateParameters(new CollectionDataSet.MapEntriesDataSet<>(new DataSet.IntDataSet()));
     }
 
     public MapEntriesIntTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)

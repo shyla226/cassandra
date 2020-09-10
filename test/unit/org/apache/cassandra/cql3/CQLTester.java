@@ -47,9 +47,13 @@ import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import org.junit.*;
+import org.junit.rules.TestWatcher;
+import org.junit.runner.Description;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.carrotsearch.randomizedtesting.generators.RandomInts;
+import com.carrotsearch.randomizedtesting.generators.RandomStrings;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
@@ -127,6 +131,8 @@ public abstract class CQLTester
     private static String jmxHost;
     private static int jmxPort;
     protected static MBeanServerConnection jmxConnection;
+
+    private static Randomization random;
 
     public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>(ProtocolVersion.SUPPORTED.size());
 
@@ -294,6 +300,13 @@ public abstract class CQLTester
         jmxConnection =  jmxc.getMBeanServerConnection();
     }
 
+    public static Randomization getRandom()
+    {
+        if (random == null)
+            random = new Randomization();
+        return random;
+    }
+
     public static void cleanupAndLeaveDirs() throws IOException
     {
         // We need to stop and unmap all CLS instances prior to cleanup() or we'll get failures on Windows.
@@ -347,6 +360,9 @@ public abstract class CQLTester
 
         FileUtils.delete(cachesDir.listFiles());
     }
+
+    @Rule
+    public FailureWatcher failureRule = new FailureWatcher();
 
     @BeforeClass
     public static void setUpClass()
@@ -1970,6 +1986,97 @@ public abstract class CQLTester
         public String toString()
         {
             return "UserTypeValue" + toCQLString();
+        }
+    }
+
+    public static class Randomization
+    {
+        private long seed;
+        private Random random;
+
+        Randomization()
+        {
+            if (random == null)
+            {
+                seed = Long.getLong("cassandra.test.random.seed", System.nanoTime());
+                random = new Random(seed);
+            }
+        }
+
+        public void printSeedOnFailure()
+        {
+            System.err.println("Randomized test failed. To rerun test use -Dcassandra.test.random.seed=" + seed);
+        }
+
+        public int nextInt()
+        {
+            return random.nextInt();
+        }
+
+        public int nextIntBetween(int minValue, int maxValue)
+        {
+            return RandomInts.randomIntBetween(random, minValue, maxValue);
+        }
+
+        public long nextLong()
+        {
+            return random.nextLong();
+        }
+
+        public short nextShort()
+        {
+            return (short)random.nextInt(Short.MAX_VALUE + 1);
+        }
+
+        public byte nextByte()
+        {
+            return (byte)random.nextInt(Byte.MAX_VALUE + 1);
+        }
+
+        public BigInteger nextBigInteger(int minNumBits, int maxNumBits)
+        {
+            return new BigInteger(RandomInts.randomIntBetween(random, minNumBits, maxNumBits), random);
+        }
+
+        public BigDecimal nextBigDecimal(int minUnscaledValue, int maxUnscaledValue, int minScale, int maxScale)
+        {
+            return BigDecimal.valueOf(RandomInts.randomIntBetween(random, minUnscaledValue, maxUnscaledValue),
+                                      RandomInts.randomIntBetween(random, minScale, maxScale));
+        }
+
+        public float nextFloat()
+        {
+            return random.nextFloat();
+        }
+
+        public double nextDouble()
+        {
+            return random.nextDouble();
+        }
+
+        public String nextAsciiString(int minLength, int maxLength)
+        {
+            return RandomStrings.randomAsciiOfLengthBetween(random, minLength, maxLength);
+        }
+
+        public boolean nextBoolean()
+        {
+            return random.nextBoolean();
+        }
+
+        public void nextBytes(byte[] bytes)
+        {
+            random.nextBytes(bytes);
+        }
+    }
+
+    public static class FailureWatcher extends TestWatcher
+    {
+        @Override
+        protected void failed(Throwable e, Description description)
+        {
+            if (random != null)
+                random.printSeedOnFailure();
         }
     }
 }

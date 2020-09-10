@@ -16,7 +16,7 @@ public class FrozenMapVarintTest extends IndexingTypeSupport
     @Parameterized.Parameters(name = "dataset={0},wide={1},scenario={2}")
     public static Collection<Object[]> generateParameters()
     {
-        return generateParameters(new CollectionDataSet.FrozenMapValuesDataSet<>(random, new DataSet.VarintDataSet(random)));
+        return generateParameters(new CollectionDataSet.FrozenMapValuesDataSet<>(new DataSet.VarintDataSet()));
     }
 
     public FrozenMapVarintTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
