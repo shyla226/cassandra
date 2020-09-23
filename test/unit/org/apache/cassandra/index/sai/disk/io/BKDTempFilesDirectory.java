@@ -62,7 +62,10 @@ public class BKDTempFilesDirectory extends Directory
     public IndexOutput createTempOutput(String prefix, String suffix, IOContext context)
     {
         final String name = prefix + "_" + Long.toString(nextTempFileCounter.getAndIncrement(), Character.MAX_RADIX) + "_" + suffix;
-        final String file = delegate.descriptor.tmpFilenameFor(new Component(Component.Type.CUSTOM, String.format(PER_COLUMN_FILE_NAME_FORMAT, delegate.column, name)));
+        final String file = delegate.descriptor.tmpFilenameFor(new Component(Component.Type.CUSTOM,
+                                                                             String.format(PER_COLUMN_FILE_NAME_FORMAT,
+                                                                                           delegate.indexName,
+                                                                                           name)));
         return delegate.createOutput(new File(file));
     }
 

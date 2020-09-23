@@ -33,6 +33,7 @@ import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
+import com.google.common.base.Strings;
 import com.google.common.collect.ObjectArrays;
 import com.google.common.io.Files;
 import org.slf4j.Logger;
@@ -70,7 +71,7 @@ public class IndexComponents
 
     public static final String TYPE_PREFIX = "SAI";
     private static final String PER_SSTABLE_FILE_NAME_FORMAT = TYPE_PREFIX + "_%s.db";
-    public static final String PER_COLUMN_FILE_NAME_FORMAT = "%s_" + PER_SSTABLE_FILE_NAME_FORMAT;
+    public static final String PER_COLUMN_FILE_NAME_FORMAT = TYPE_PREFIX + "_%s_%s.db";
 
     public static class IndexComponent extends Component
     {
@@ -165,10 +166,18 @@ public class IndexComponents
             return !perSSTable && this != META;
         }
 
-        public IndexComponent newComponent(String column)
+        public IndexComponent newComponent()
         {
-            String componentName = perSSTable ? String.format(PER_SSTABLE_FILE_NAME_FORMAT, name)
-                                              : String.format(PER_COLUMN_FILE_NAME_FORMAT, column, name);
+            assert perSSTable;
+            String componentName = String.format(PER_SSTABLE_FILE_NAME_FORMAT, name);
+
+            return new IndexComponent(this, componentName);
+        }
+
+        public IndexComponent newComponent(String indexName)
+        {
+            assert !perSSTable;
+            String componentName = String.format(PER_COLUMN_FILE_NAME_FORMAT, indexName, name);
 
             return new IndexComponent(this, componentName);
         }
@@ -192,13 +201,13 @@ public class IndexComponents
 
     private static final NDIType[] ALL_PER_COLUMN_COMPONENTS = ObjectArrays.concat(NUMERIC_PER_COLUMN_COMPONENTS, STRING_COMPONENTS, NDIType.class);
 
-    public static final IndexComponent TOKEN_VALUES = NDIType.TOKEN_VALUES.newComponent(null);
+    public static final IndexComponent TOKEN_VALUES = NDIType.TOKEN_VALUES.newComponent();
 
-    public static final IndexComponent OFFSETS_VALUES = NDIType.OFFSETS_VALUES.newComponent(null);
+    public static final IndexComponent OFFSETS_VALUES = NDIType.OFFSETS_VALUES.newComponent();
 
-    public static final IndexComponent GROUP_META = NDIType.GROUP_META.newComponent(null);
+    public static final IndexComponent GROUP_META = NDIType.GROUP_META.newComponent();
 
-    public static final IndexComponent GROUP_COMPLETION_MARKER = NDIType.GROUP_COMPLETION_MARKER.newComponent(null);
+    public static final IndexComponent GROUP_COMPLETION_MARKER = NDIType.GROUP_COMPLETION_MARKER.newComponent();
 
 
     /**
@@ -216,86 +225,63 @@ public class IndexComponents
                                                                                             .build();
 
     public final Descriptor descriptor;
-    public final String column;
     public final String indexName;
 
     private final SequentialWriterOption writerOption;
 
-    @VisibleForTesting
-    IndexComponents(String column, Descriptor descriptor, SequentialWriterOption sequentialWriterOption)
+    IndexComponents(Descriptor descriptor, SequentialWriterOption sequentialWriterOption)
     {
-        this(column, -1, descriptor, sequentialWriterOption);
+        this(null, descriptor, sequentialWriterOption);
     }
 
-    private IndexComponents(String column,
-                            int segmentNumber,
-                            Descriptor descriptor,
-                            SequentialWriterOption sequentialWriterOption)
+    @VisibleForTesting
+    IndexComponents(String indexName, Descriptor descriptor, SequentialWriterOption sequentialWriterOption)
     {
-        this.writerOption = sequentialWriterOption;
+        this.indexName = indexName;
         this.descriptor = descriptor;
-        this.column = column;
-        this.indexName = segmentName(column, segmentNumber);
+        this.writerOption = sequentialWriterOption;
 
         termsData = NDIType.TERMS_DATA.newComponent(indexName);
         postingLists = NDIType.POSTING_LISTS.newComponent(indexName);
         meta = NDIType.META.newComponent(indexName);
-        groupCompletionMarker = NDIType.GROUP_COMPLETION_MARKER.newComponent(indexName);
+        groupCompletionMarker = NDIType.GROUP_COMPLETION_MARKER.newComponent();
         kdTree = NDIType.KD_TREE.newComponent(indexName);
         kdTreePostingLists = NDIType.KD_TREE_POSTING_LISTS.newComponent(indexName);
         columnCompletionMarker = NDIType.COLUMN_COMPLETION_MARKER.newComponent(indexName);
     }
 
     /**
-     * Used to access per-sstable components when column name is not available
-     */
-    public static IndexComponents perSSTable(Descriptor descriptor)
-    {
-        return new IndexComponents("", -1, descriptor, defaultWriterOption);
-    }
-
-    public static IndexComponents perSSTable(SSTableReader ssTableReader)
-    {
-        return new IndexComponents("", -1, ssTableReader.descriptor, defaultWriterOption);
-    }
-
-    /**
      * Used to access per-sstable and per-index components
      */
-    public static IndexComponents create(String column, SSTableReader ssTableReader)
+    public static IndexComponents create(String indexName, SSTableReader ssTableReader)
     {
-        return new IndexComponents(column, -1, ssTableReader.descriptor, defaultWriterOption);
+        return create(indexName, ssTableReader.descriptor);
     }
 
-    public static IndexComponents create(String column, Descriptor descriptor)
+    public static IndexComponents create(String indexName, Descriptor descriptor)
     {
-        return new IndexComponents(column, -1, descriptor, defaultWriterOption);
-    }
-
-    /**
-     * Used to access per-sstable and per-index components with segment number created during compaction
-     */
-    public static IndexComponents create(String column, int segmentNumber, Descriptor descriptor)
-    {
-        return new IndexComponents(column, segmentNumber, descriptor, defaultWriterOption);
-    }
-
-    private static Set<IndexComponent> components(String column, NDIType... types)
-    {
-        Set<IndexComponent> components = new HashSet<>(types.length);
-        for (NDIType type : types)
-        {
-            components.add(type.newComponent(column));
-        }
-        return components;
+        return new IndexComponents(indexName, descriptor, defaultWriterOption);
     }
 
     /**
      * Returns the sstable {@link Component}s for the specified column index, excluding the shared ones.
      */
-    public static Set<IndexComponent> perColumnComponents(String column, boolean isLiteral)
+    public static Set<IndexComponent> perColumnComponents(String indexName, boolean isLiteral)
     {
-        return components(column, isLiteral ? LITERAL_PER_COLUMN_COMPONENTS : NUMERIC_PER_COLUMN_COMPONENTS);
+        return components(indexName, isLiteral ? LITERAL_PER_COLUMN_COMPONENTS : NUMERIC_PER_COLUMN_COMPONENTS);
+    }
+
+    /**
+     * Used to access per-sstable shared components
+     */
+    public static IndexComponents perSSTable(Descriptor descriptor)
+    {
+        return new IndexComponents(descriptor, defaultWriterOption);
+    }
+
+    public static IndexComponents perSSTable(SSTableReader ssTableReader)
+    {
+        return perSSTable(ssTableReader.descriptor);
     }
 
     /**
@@ -310,52 +296,54 @@ public class IndexComponents
     /**
      * @return <code>true</code> if an index build successfully completed for the given column index
      */
-    public static boolean isColumnIndexComplete(Descriptor descriptor, String column)
+    public static boolean isColumnIndexComplete(Descriptor descriptor, String indexName)
     {
-        return isGroupIndexComplete(descriptor) && descriptor.fileFor(NDIType.COLUMN_COMPLETION_MARKER.newComponent(column)).exists();
+        return isGroupIndexComplete(descriptor) && descriptor.fileFor(NDIType.COLUMN_COMPLETION_MARKER.newComponent(indexName)).exists();
     }
 
     /**
      * @return <code>true</code> if an index build successfully completed for the given column index but
      * the SSTable did not have any indexable rows relating to the index
      */
-    public static boolean isColumnIndexEmpty(Descriptor descriptor, String column)
+    public static boolean isColumnIndexEmpty(Descriptor descriptor, String indexName)
     {
-        long numIndexFiles = components(column, ALL_PER_COLUMN_COMPONENTS).stream().map(descriptor::fileFor).filter(File::exists).count();
+        long numIndexFiles = components(indexName, ALL_PER_COLUMN_COMPONENTS).stream().map(descriptor::fileFor).filter(File::exists).count();
 
-        return isColumnIndexComplete(descriptor, column) && (numIndexFiles == 1);
+        return isColumnIndexComplete(descriptor, indexName) && (numIndexFiles == 1);
     }
 
-    private String segmentName(String column, int segmentNumber)
+    /**
+     * Delete the per-SSTable index files from the filesystem
+     */
+    public static void deletePerSSTableIndexComponents(Descriptor descriptor)
     {
-        return column + (segmentNumber == -1 ? "" : Component.SUB_SEPARATOR + segmentNumber);
+        PER_SSTABLE_COMPONENTS.stream()
+                              .map(descriptor::fileFor)
+                              .filter(File::exists)
+                              .forEach(IndexComponents::deleteComponent);
     }
 
-    @Override
-    public String toString()
+    private static Set<IndexComponent> components(String indexName, NDIType... types)
     {
-        return MoreObjects.toStringHelper(this).add("descriptor", descriptor).add("indexName", indexName).toString();
+        Set<IndexComponent> components = new HashSet<>(types.length);
+        for (NDIType type : types)
+        {
+            components.add(type.newComponent(indexName));
+        }
+        return components;
     }
 
-    @Override
-    public boolean equals(Object o)
+    private static void deleteComponent(File file)
     {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-
-        IndexComponents components = (IndexComponents) o;
-
-        if (descriptor != null ? !descriptor.equals(components.descriptor) : components.descriptor != null)
-            return false;
-        return indexName != null ? indexName.equals(components.indexName) : components.indexName == null;
-    }
-
-    @Override
-    public int hashCode()
-    {
-        int result = descriptor != null ? descriptor.hashCode() : 0;
-        result = 31 * result + (indexName != null ? indexName.hashCode() : 0);
-        return result;
+        logger.debug("Deleting storage attached index component file {}", file);
+        try
+        {
+            IOUtils.deleteFilesIfExist(file.toPath());
+        }
+        catch (IOException e)
+        {
+            logger.warn("Unable to delete storage attached index component file {} due to {}.", file, e.getMessage(), e);
+        }
     }
 
     /**
@@ -394,18 +382,7 @@ public class IndexComponents
     public String logMessage(String message)
     {
         // Index names are unique only within a keyspace.
-        return String.format("[%s.%s.%s] %s", descriptor.ksname, descriptor.cfname, indexName.isEmpty() ? "*" : indexName, message);
-    }
-
-    /**
-     * Delete the per-SSTable index files from the filesystem
-     */
-    public static void deletePerSSTableIndexComponents(Descriptor descriptor)
-    {
-        PER_SSTABLE_COMPONENTS.stream()
-                              .map(descriptor::fileFor)
-                              .filter(File::exists)
-                              .forEach(IndexComponents::deleteComponent);
+        return String.format("[%s.%s.%s] %s", descriptor.ksname, descriptor.cfname, Strings.isNullOrEmpty(indexName) ? "*" : indexName, message);
     }
 
     /**
@@ -418,19 +395,6 @@ public class IndexComponents
               .map(descriptor::fileFor)
               .filter(File::exists)
               .forEach(IndexComponents::deleteComponent);
-    }
-
-    private static void deleteComponent(File file)
-    {
-        logger.debug("Deleting storage attached index component file {}", file);
-        try
-        {
-            IOUtils.deleteFilesIfExist(file.toPath());
-        }
-        catch (IOException e)
-        {
-            logger.warn("Unable to delete storage attached index component file {} due to {}.", file, e.getMessage(), e);
-        }
     }
 
     public FileHandle createFileHandle(IndexComponent component)
@@ -490,12 +454,39 @@ public class IndexComponents
         validatePerColumnComponents(isLiteral, false);
     }
 
+    @Override
+    public String toString()
+    {
+        return MoreObjects.toStringHelper(this).add("descriptor", descriptor).add("indexName", indexName).toString();
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        IndexComponents components = (IndexComponents) o;
+
+        if (descriptor != null ? !descriptor.equals(components.descriptor) : components.descriptor != null)
+            return false;
+        return indexName != null ? indexName.equals(components.indexName) : components.indexName == null;
+    }
+
+    @Override
+    public int hashCode()
+    {
+        int result = descriptor != null ? descriptor.hashCode() : 0;
+        result = 31 * result + (indexName != null ? indexName.hashCode() : 0);
+        return result;
+    }
+
     private void validatePerColumnComponents(boolean isLiteral, boolean checksum) throws IOException
     {
         MetadataSource source = MetadataSource.loadColumnMetadata(this);
         List<SegmentMetadata> segments = SegmentMetadata.load(source);
 
-        for (IndexComponent component : perColumnComponents(column, isLiteral))
+        for (IndexComponent component : perColumnComponents(indexName, isLiteral))
         {
             if (!component.ndiType.completionMarker())
             {

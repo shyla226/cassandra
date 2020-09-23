@@ -71,6 +71,7 @@ import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -179,6 +180,18 @@ public class SAITester extends CQLTester
                                  UTF8Type.instance,
                                  new ClusteringComparator(),
                                  ColumnMetadata.regularColumn("sai", "internal", name, validator),
+                                 IndexMetadata.fromSchemaMetadata(name, IndexMetadata.Kind.CUSTOM, null),
+                                 IndexWriterConfig.emptyConfig());
+    }
+
+    public static ColumnContext createColumnContext(String columnName, String indexName, AbstractType<?> validator)
+    {
+        return new ColumnContext("test_ks",
+                                 "test_cf",
+                                 UTF8Type.instance,
+                                 new ClusteringComparator(),
+                                 ColumnMetadata.regularColumn("sai", "internal", columnName, validator),
+                                 IndexMetadata.fromSchemaMetadata(indexName, IndexMetadata.Kind.CUSTOM, null),
                                  IndexWriterConfig.emptyConfig());
     }
 
@@ -251,14 +264,14 @@ public class SAITester extends CQLTester
         waitForAssert(() -> assertTrue(indexNeedsFullRebuild(indexName)));
     }
 
-    protected boolean verifyChecksum(String column, boolean isLiteral)
+    protected boolean verifyChecksum(ColumnContext context)
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            IndexComponents components = IndexComponents.create(column, sstable);
-            if (!components.validatePerSSTableComponentsChecksum() || !components.validatePerColumnComponentsChecksum(isLiteral))
+            IndexComponents components = IndexComponents.create(context.getIndexName(), sstable);
+            if (!components.validatePerSSTableComponentsChecksum() || !components.validatePerColumnComponentsChecksum(context.isLiteral()))
                 return false;
         }
         return true;
@@ -652,7 +665,7 @@ public class SAITester extends CQLTester
 
     private Set<File> componentFiles(Collection<File> indexFiles, String shortName)
     {
-        String suffix = String.format(IndexComponents.PER_COLUMN_FILE_NAME_FORMAT, StringUtils.EMPTY, shortName);
+        String suffix = String.format("_%s.db", shortName);
         return indexFiles.stream().filter(c -> c.getName().endsWith(suffix)).collect(Collectors.toSet());
     }
 

@@ -107,6 +107,8 @@ public abstract class AbstractNodeStartupTest extends SAITester
 
     private static Throwable error = null;
 
+    private String indexName = null;
+
     enum Populator
     {
         INDEXABLE_ROWS("populateIndexableRows"),
@@ -173,7 +175,7 @@ public abstract class AbstractNodeStartupTest extends SAITester
         requireNetwork();
 
         createTable("CREATE TABLE %s (id text PRIMARY KEY, v1 int)");
-        createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
+        indexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
         Injections.inject(ObjectArrays.concat(barriers, counters, Injection.class));
         Stream.of(barriers).forEach(Injections.Barrier::reset);
         Stream.of(counters).forEach(Injections.Counter::reset);
@@ -279,7 +281,7 @@ public abstract class AbstractNodeStartupTest extends SAITester
     private boolean isColumnIndexComplete() throws Exception
     {
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(currentTable());
-        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexComponents.isColumnIndexComplete(sstable.descriptor, "v1"));
+        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexComponents.isColumnIndexComplete(sstable.descriptor, indexName));
     }
 
     private void setState(IndexStateOnRestart state)
@@ -295,13 +297,13 @@ public abstract class AbstractNodeStartupTest extends SAITester
                 remove(IndexComponents.GROUP_COMPLETION_MARKER);
                 break;
             case PER_COLUMN_INCOMPLETE:
-                remove(IndexComponents.NDIType.COLUMN_COMPLETION_MARKER.newComponent("v1"));
+                remove(IndexComponents.NDIType.COLUMN_COMPLETION_MARKER.newComponent(indexName));
                 break;
             case PER_SSTABLE_CORRUPT:
                 corrupt(IndexComponents.GROUP_META);
                 break;
             case PER_COLUMN_CORRUPT:
-                corrupt(IndexComponents.NDIType.META.newComponent("v1"));
+                corrupt(IndexComponents.NDIType.META.newComponent(indexName));
                 break;
         }
     }
@@ -310,7 +312,7 @@ public abstract class AbstractNodeStartupTest extends SAITester
     {
         Set<Component> components = new HashSet<>();
         components.addAll(IndexComponents.PER_SSTABLE_COMPONENTS);
-        components.addAll(IndexComponents.perColumnComponents("v1", false));
+        components.addAll(IndexComponents.perColumnComponents(indexName, false));
         return components;
     }
 

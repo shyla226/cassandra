@@ -224,7 +224,7 @@ public class IndexViewManagerTest extends CQLTester
 
         MockSSTableIndex(SSTableContext group, ColumnContext context) throws IOException
         {
-            super(group, context, IndexComponents.create(context.getColumnName(), group.descriptor()));
+            super(group, context, IndexComponents.create(context.getIndexName(), group.descriptor()));
         }
 
         @Override

@@ -126,6 +126,7 @@ public class ColumnContext
                          AbstractType<?> partitionKeyType,
                          ClusteringComparator clusteringComparator,
                          ColumnMetadata column,
+                         IndexMetadata config,
                          IndexWriterConfig indexWriterConfig)
     {
         this.keyspace = keyspace;
@@ -134,7 +135,7 @@ public class ColumnContext
         this.clusteringComparator = clusteringComparator;
         this.target = Pair.create(column, IndexTarget.Type.SIMPLE);
         this.validator = column.type;
-        this.config = null;
+        this.config = config;
         this.viewManager = null;
         this.indexMetrics = null;
         this.columnQueryMetrics = null;
@@ -502,13 +503,13 @@ public class ColumnContext
             if (context.sstable.isMarkedCompacted())
                 continue;
 
-            if (!IndexComponents.isColumnIndexComplete(context.descriptor(), getColumnName()))
+            if (!IndexComponents.isColumnIndexComplete(context.descriptor(), getIndexName()))
             {
                 logger.debug(logMessage("An on-disk index build for SSTable {} has not completed."), context.descriptor());
                 continue;
             }
 
-            if (IndexComponents.isColumnIndexEmpty(context.descriptor(), getColumnName()))
+            if (IndexComponents.isColumnIndexEmpty(context.descriptor(), getIndexName()))
             {
                 logger.debug(logMessage("No on-disk index was built for SSTable {} because the SSTable " +
                                                 "had no indexable rows for the index."), context.descriptor());
@@ -516,7 +517,7 @@ public class ColumnContext
             }
 
             // TODO: does the column name need to be encoded since it's being included in a filename?
-            final IndexComponents components = IndexComponents.create(getColumnName(), context.sstable());
+            final IndexComponents components = IndexComponents.create(getIndexName(), context.sstable());
 
             try
             {
