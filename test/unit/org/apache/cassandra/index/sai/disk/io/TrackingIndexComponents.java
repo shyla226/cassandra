@@ -38,9 +38,9 @@ public class TrackingIndexComponents extends IndexComponents
 {
     private final Map<TrackingIndexInput, String> openInputs = Collections.synchronizedMap(new HashMap<>());
 
-    public TrackingIndexComponents(String column, Descriptor descriptor, SequentialWriterOption sequentialWriterOption)
+    public TrackingIndexComponents(String indexName, Descriptor descriptor, SequentialWriterOption sequentialWriterOption)
     {
-        super(column, descriptor, sequentialWriterOption);
+        super(indexName, descriptor, sequentialWriterOption);
     }
 
     @Override

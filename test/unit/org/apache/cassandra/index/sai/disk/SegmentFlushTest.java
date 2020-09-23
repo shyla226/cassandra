@@ -50,6 +50,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.Util.dk;
@@ -132,10 +133,13 @@ public class SegmentFlushTest
         Descriptor descriptor = new Descriptor(tmpDir.toFile(), "ks", "cf", 1);
 
         ColumnMetadata column = ColumnMetadata.regularColumn("sai", "internal", "column", UTF8Type.instance);
+        IndexMetadata config = IndexMetadata.fromSchemaMetadata("index_name", IndexMetadata.Kind.CUSTOM, null);
 
         ColumnContext context = new ColumnContext("ks", "cf",
                                                   UTF8Type.instance, new ClusteringComparator(),
-                                                  column, IndexWriterConfig.defaultConfig("test"));
+                                                  column,
+                                                  config,
+                                                  IndexWriterConfig.defaultConfig("test"));
 
         SSTableIndexWriter writer = new SSTableIndexWriter(descriptor, context, StorageAttachedIndex.SEGMENT_BUILD_MEMORY_LIMITER, () -> true);
 
@@ -155,7 +159,7 @@ public class SegmentFlushTest
 
         writer.flush();
 
-        IndexComponents components = IndexComponents.create(column.toString(), descriptor);
+        IndexComponents components = IndexComponents.create(context.getIndexName(), descriptor);
         MetadataSource source = MetadataSource.loadColumnMetadata(components);
 
         // verify segment count

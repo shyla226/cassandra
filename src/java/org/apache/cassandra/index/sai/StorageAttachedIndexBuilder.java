@@ -143,7 +143,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         try (RandomAccessReader dataFile = sstable.openDataReader();
              LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.INDEX_BUILD))
         {
-            perSSTableFileLock = shouldWriteTokenOffsetFiles(sstable, Iterables.getLast(indexes));
+            perSSTableFileLock = shouldWriteTokenOffsetFiles(sstable);
             boolean perColumnOnly = perSSTableFileLock == null;
             // remove existing per column index files instead of overwriting
             indexes.forEach(index -> index.deleteIndexFiles(sstable));
@@ -267,12 +267,11 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
      * if the per sstable index files are already created, not need to write it again, unless found corrupted on rebuild
      * if not created, try to acquire a lock, so only one builder will generate per sstable index files
      */
-    private CountDownLatch shouldWriteTokenOffsetFiles(SSTableReader sstable, StorageAttachedIndex index)
+    private CountDownLatch shouldWriteTokenOffsetFiles(SSTableReader sstable)
     {
-        IndexComponents components = IndexComponents.create(index.getContext().getColumnName(), sstable);
-
         // if per-table files are incomplete or checksum failed during full rebuild.
-        if (!IndexComponents.isGroupIndexComplete(sstable.descriptor) || (isFullRebuild && !components.validatePerSSTableComponentsChecksum()))
+        if (!IndexComponents.isGroupIndexComplete(sstable.descriptor) ||
+            (isFullRebuild && !IndexComponents.perSSTable(sstable).validatePerSSTableComponentsChecksum()))
         {
             CountDownLatch latch = new CountDownLatch(1);
             if (inProgress.putIfAbsent(sstable, latch) == null)

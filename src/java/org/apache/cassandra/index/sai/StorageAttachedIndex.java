@@ -30,6 +30,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
@@ -154,6 +155,7 @@ public class StorageAttachedIndex implements Index
                                                        boolean isFullRebuild)
         {
             NavigableMap<SSTableReader, Set<StorageAttachedIndex>> sstables = new TreeMap<>(Comparator.comparingInt(a -> a.descriptor.generation));
+            StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
 
             indexes.stream()
                    .filter((i) -> i instanceof StorageAttachedIndex)
@@ -168,11 +170,11 @@ public class StorageAttachedIndex implements Index
                                 if (!isFullRebuild)
                                 {
                                     ss = sstablesToRebuild.stream()
-                                                          .filter(s -> !IndexComponents.isColumnIndexComplete(s.descriptor, context.getColumnName()))
+                                                          .filter(s -> !IndexComponents.isColumnIndexComplete(s.descriptor, context.getIndexName()))
                                                           .collect(Collectors.toList());
                                 }
 
-                                StorageAttachedIndexGroup.getIndexGroup(cfs).dropIndexSSTables(ss, sai);
+                                group.dropIndexSSTables(ss, sai);
 
                                 ss.forEach((sstable) ->
                                            {
@@ -271,7 +273,10 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Failed to retrieve target column for: " + targetColumn);
         }
 
-        if (metadata.indexes.stream().filter(index -> targetColumn.equals(index.options.get(IndexTarget.TARGET_OPTION_NAME))).count() > 1)
+        if (metadata.indexes.stream()
+                            .map(index -> TargetParser.parse(metadata, index.options.get(IndexTarget.TARGET_OPTION_NAME)))
+                            .filter(Objects::nonNull)
+                            .filter(t -> t.equals(target)).count() > 1)
         {
             throw new InvalidRequestException("Cannot create more than one storage-attached index on the same target column: " + targetColumn);
         }
@@ -579,7 +584,7 @@ public class StorageAttachedIndex implements Index
             //   2. The SSTable is not marked compacted
             //   3. The column index does not have a completion marker
             if (!view.containsSSTable(sstable) && !sstable.isMarkedCompacted() &&
-                    !IndexComponents.isColumnIndexComplete(sstable.descriptor, context.getColumnName()))
+                    !IndexComponents.isColumnIndexComplete(sstable.descriptor, context.getIndexName()))
             {
                 nonIndexed.add(sstable);
             }
@@ -704,13 +709,12 @@ public class StorageAttachedIndex implements Index
 
     void deleteIndexFiles(SSTableReader sstable)
     {
-        IndexComponents components = IndexComponents.create(context.getColumnName(), sstable);
-        components.deleteColumnIndex();
+        IndexComponents.create(context.getIndexName(), sstable).deleteColumnIndex();
     }
 
     @Override
     public Set<Component> getComponents()
     {
-        return new HashSet<>(IndexComponents.perColumnComponents(context.getColumnName(), context.isLiteral()));
+        return new HashSet<>(IndexComponents.perColumnComponents(context.getIndexName(), context.isLiteral()));
     }
 }

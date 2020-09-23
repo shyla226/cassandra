@@ -21,19 +21,17 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.ListIterator;
 
 import com.google.common.collect.ListMultimap;
 
-import org.apache.cassandra.index.sai.ColumnContext;
-import org.apache.cassandra.index.sai.plan.Expression.Op;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.index.sai.plan.Expression.Op;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.ColumnMetadata.Kind;
 import org.apache.cassandra.utils.FBUtilities;
@@ -103,18 +101,17 @@ public class FilterTree
      * @param key The partition key for the row.
      * @param currentCluster The row cluster to check.
      * @param staticRow The static row associated with current cluster.
-     * @param allowMissingColumns allow columns value to be null.
      * @return true if give Row satisfied all of the expressions in the tree,
      *         false otherwise.
      */
-    public boolean satisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow, boolean allowMissingColumns)
+    public boolean satisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow)
     {
         boolean sideL, sideR;
 
         if (expressions == null || expressions.isEmpty())
         {
-            sideL =  left != null &&  left.satisfiedBy(key, currentCluster, staticRow, allowMissingColumns);
-            sideR = right != null && right.satisfiedBy(key, currentCluster, staticRow, allowMissingColumns);
+            sideL =  left != null &&  left.satisfiedBy(key, currentCluster, staticRow);
+            sideR = right != null && right.satisfiedBy(key, currentCluster, staticRow);
 
             // one of the expressions was skipped
             // because it had no indexes attached
@@ -123,14 +120,14 @@ public class FilterTree
         }
         else
         {
-            sideL = localSatisfiedBy(key, currentCluster, staticRow, allowMissingColumns);
+            sideL = localSatisfiedBy(key, currentCluster, staticRow);
 
             // if there is no right it means that this expression
             // is last in the sequence, we can just return result from local expressions
             if (right == null)
                 return sideL;
 
-            sideR = right.satisfiedBy(key, currentCluster, staticRow, allowMissingColumns);
+            sideR = right.satisfiedBy(key, currentCluster, staticRow);
         }
 
 
@@ -176,113 +173,76 @@ public class FilterTree
      * @param key The partition key for the row.
      * @param currentCluster The row cluster to check.
      * @param staticRow The static row associated with current cluster.
-     * @param allowMissingColumns allow columns value to be null.
      * @return true if give Row satisfied all of the analyzed expressions,
      *         false otherwise.
      */
-    private boolean localSatisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow, boolean allowMissingColumns)
+    private boolean localSatisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow)
     {
         if (currentCluster == null || !currentCluster.isRow())
             return false;
 
         final int now = FBUtilities.nowInSeconds();
-        boolean result = false;
-        int idx = 0;
+        boolean result = op == OperationType.AND;
 
-        for (Map.Entry<ColumnMetadata, Expression> entry : expressions.entries())
+        Iterator<ColumnMetadata> columnIterator = expressions.keySet().iterator();
+        while(columnIterator.hasNext())
         {
-            ColumnMetadata column = entry.getKey();
-            ColumnContext context = entry.getValue().context;
+            ColumnMetadata column = columnIterator.next();
             Row row = column.kind == Kind.STATIC ? staticRow : (Row)currentCluster;
 
-            // If there is a column with multiple expressions that effectively means an OR
-            // e.g. comment = 'x y z' could be split into 'comment' EQ 'x', 'comment' EQ 'y', 'comment' EQ 'z'
-            // by analyzer, in situation like that we only need to check if at least one of expressions matches,
-            // and there is no hit on the NOT_EQ (if any) which are always at the end of the filter list.
-            // Loop always starts from the end of the list, which makes it possible to break after the last
-            // NOT_EQ condition on first EQ/RANGE condition satisfied, instead of checking every
-            // single expression in the column filter list.
+            // If there is a column with multiple expressions that can mean an OR or (in the case of map
+            // collections) it can mean different map indexes.
             List<Expression> filters = expressions.get(column);
 
-            boolean match;
-
-            if (context.isNonFrozenCollection())
+            // We do a reverse iteration over the filters because NOT_EQ operations will be at the end
+            // of the filter list and we want to check them first.
+            ListIterator<Expression> filterIterator = filters.listIterator(filters.size());
+            while(filterIterator.hasPrevious())
             {
-                Iterator<ByteBuffer> valueIterator = context.getValuesOf(row, now);
+                Expression filter = filterIterator.previous();
 
-                if (!allowMissingColumns && valueIterator == null)
-                    throw new IllegalStateException("All indexed columns should be included into the column slice, missing: " + column);
+                if (TypeUtil.isNonFrozenCollection(column.type))
+                {
+                    Iterator<ByteBuffer> valueIterator = filter.context.getValuesOf(row, now);
+                    result = op.apply(result, collectionMatch(valueIterator, filter));
+                }
+                else
+                {
+                    ByteBuffer value = filter.context.getValueOf(key, row, now);
+                    result = op.apply(result, singletonMatch(value, filter));
+                }
 
-                match = valueIterator != null && collectionMatch(valueIterator, filters);
+                // If the operation is an AND then exit early if we get a single false
+                if (op == OperationType.AND && !result)
+                    return false;
             }
-            else
-            {
-                ByteBuffer value = context.getValueOf(key, row, now);
-
-                if (!allowMissingColumns && value == null)
-                    throw new IllegalStateException("All indexed columns should be included into the column slice, missing: " + column);
-
-                match = singletonMatch(value, filters);
-            }
-
-            if (idx++ == 0)
-            {
-                result = match;
-                continue;
-            }
-
-            result = op.apply(result, match);
-
-            // exit early because we already got a single false
-            if (op == OperationType.AND && !result)
-                return false;
         }
-
-        return idx == 0 || result;
+        return result;
     }
 
-    private boolean singletonMatch(ByteBuffer value, List<Expression> filters)
+    private boolean singletonMatch(ByteBuffer value, Expression filter)
     {
-        boolean isMissingColumn = value == null;
-        boolean match = false;
-
-        for (int i = filters.size() - 1; i >= 0; i--)
-        {
-            Expression expression = filters.get(i);
-            match = !isMissingColumn && expression.isSatisfiedBy(value);
-            if (expression.getOp() == Op.NOT_EQ)
-            {
-                // since this is NOT_EQ operation we have to
-                // inverse match flag (to check against other expressions),
-                // and break in case of negative inverse because that means
-                // that it's a positive hit on the not-eq clause.
-                match = !match;
-                if (!match)
-                    break;
-            } // if it was a match on EQ/RANGE or column is missing
-            else if (match || isMissingColumn)
-                break;
-        }
+        boolean match = value != null && filter.isSatisfiedBy(value);
+        // If this is NOT_EQ operation we have to
+        // inverse match flag (to check against other expressions),
+        if (filter.getOp() == Op.NOT_EQ)
+            match = !match;
         return match;
     }
 
-    private boolean collectionMatch(Iterator<ByteBuffer> valueIterator, List<Expression> filters)
+    private boolean collectionMatch(Iterator<ByteBuffer> valueIterator, Expression filter)
     {
-        // We currently always treat multiple expressions as an and because
-        // we can expect collections to contain more than one value
-        Set<Integer> matchedExpressions = new HashSet<>(filters.size());
-        while (valueIterator.hasNext() && (matchedExpressions.size() != filters.size()))
+        if (valueIterator == null)
+            return false;
+
+        while (valueIterator.hasNext())
         {
             ByteBuffer value = valueIterator.next();
             if (value == null)
                 continue;
-            for (int index = 0; index < filters.size(); index++)
-            {
-                Expression expression = filters.get(index);
-                if (expression.isSatisfiedBy(value))
-                    matchedExpressions.add(index);
-            }
+            if (filter.isSatisfiedBy(value))
+                return true;
         }
-        return matchedExpressions.size() == filters.size();
+        return false;
     }
 }

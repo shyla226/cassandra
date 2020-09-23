@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -45,9 +46,9 @@ public abstract class DataSet<T> extends CQLTester
 
     public abstract QuerySet querySet();
 
-    public String decorateIndexColumn(String column)
+    public Collection<String> decorateIndexColumn(String column)
     {
-        return column;
+        return Arrays.asList(column);
     }
 
     public static abstract class NumericDataSet<T extends Number> extends DataSet<T>
