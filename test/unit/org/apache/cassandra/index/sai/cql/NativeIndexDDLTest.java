@@ -44,7 +44,9 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.ColumnContext;
@@ -822,13 +824,16 @@ public class NativeIndexDDLTest extends SAITester
 
     private void verifyRebuildCorruptedFiles(CorruptionType corruptionType, boolean rebuild) throws Throwable
     {
+        String numericIndexName = IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER);
+        String stringIndexName = IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER);
+
         for (IndexComponents.IndexComponent component : IndexComponents.PER_SSTABLE_COMPONENTS)
             verifyRebuildIndexComponent(component, corruptionType, true, true, rebuild);
 
-        for (IndexComponents.IndexComponent component : IndexComponents.perColumnComponents("v1", false))
+        for (IndexComponents.IndexComponent component : IndexComponents.perColumnComponents(numericIndexName, false))
             verifyRebuildIndexComponent(component, corruptionType, false, true, rebuild);
 
-        for (IndexComponents.IndexComponent component : IndexComponents.perColumnComponents("v2", true))
+        for (IndexComponents.IndexComponent component : IndexComponents.perColumnComponents(stringIndexName, true))
             verifyRebuildIndexComponent(component, corruptionType, true, false, rebuild);
     }
 
@@ -848,8 +853,8 @@ public class NativeIndexDDLTest extends SAITester
         verifySSTableIndexes(numericIndexName, 1);
         verifySSTableIndexes(stringIndexName, 1);
         verifyIndexFiles(1, 1, 1, 2);
-        assertTrue(verifyChecksum("v1", false));
-        assertTrue(verifyChecksum("v2", true));
+        assertTrue(verifyChecksum(createColumnContext("v1", numericIndexName, Int32Type.instance)));
+        assertTrue(verifyChecksum(createColumnContext("v2", stringIndexName, UTF8Type.instance)));
 
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(rowCount, rows.all().size());
@@ -861,8 +866,8 @@ public class NativeIndexDDLTest extends SAITester
 
         // If we are removing completion markers then the rest of the components should still have
         // valid checksums
-        assertEquals(!failedNumericIndex || component.ndiType.completionMarker(), verifyChecksum("v1", false));
-        assertEquals(!failedStringIndex || component.ndiType.completionMarker(), verifyChecksum("v2", true));
+        assertEquals(!failedNumericIndex || component.ndiType.completionMarker(), verifyChecksum(createColumnContext("v1", numericIndexName, Int32Type.instance)));
+        assertEquals(!failedStringIndex || component.ndiType.completionMarker(), verifyChecksum(createColumnContext("v2", stringIndexName, UTF8Type.instance)));
 
         if (rebuild)
         {
@@ -1160,7 +1165,7 @@ public class NativeIndexDDLTest extends SAITester
                                                                                .build();
         Injections.inject(delayIndexBuilderCompletion);
 
-        String indexv1Name = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        String indexV1Name = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
         // Stop initial index build by interrupting active and pending compactions
         int attempt = 10;
@@ -1180,7 +1185,7 @@ public class NativeIndexDDLTest extends SAITester
         delayIndexBuilderCompletion.disable();
 
         // initial index builder should have stopped abruptly resulting in the index not being queryable
-        verifyInitialIndexFailed(indexv1Name);
+        verifyInitialIndexFailed(indexV1Name);
         assertFalse(isIndexQueryable());
 
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
@@ -1197,7 +1202,7 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress(jmxConnection));
 
         // rebuild index
-        ColumnFamilyStore.rebuildSecondaryIndex(KEYSPACE, currentTable(), indexv1Name);
+        ColumnFamilyStore.rebuildSecondaryIndex(KEYSPACE, currentTable(), indexV1Name);
 
         verifyIndexFiles(sstable, 0);
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
@@ -1206,7 +1211,7 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals("Segment memory limiter should revert to zero following rebuild.", 0L, getSegmentBufferUsedBytes(jmxConnection));
         assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress(jmxConnection));
 
-        assertTrue(verifyChecksum("v1", false));
+        assertTrue(verifyChecksum(createColumnContext("v1", indexV1Name, Int32Type.instance)));
     }
 
     @Test

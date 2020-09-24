@@ -78,9 +78,9 @@ public class Operation extends RangeIterator
         this.controller = controller;
     }
 
-    public boolean satisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow, boolean allowMissingColumns)
+    public boolean satisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow)
     {
-        return filterTree.satisfiedBy(key, currentCluster, staticRow, allowMissingColumns);
+        return filterTree.satisfiedBy(key, currentCluster, staticRow);
     }
 
     @VisibleForTesting

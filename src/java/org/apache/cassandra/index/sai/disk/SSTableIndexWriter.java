@@ -80,7 +80,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
     {
         this.columnContext = columnContext;
         this.descriptor = descriptor;
-        this.indexComponents = IndexComponents.create(columnContext.getColumnName(), descriptor);
+        this.indexComponents = IndexComponents.create(columnContext.getIndexName(), descriptor);
         this.analyzer = columnContext.getAnalyzer();
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;

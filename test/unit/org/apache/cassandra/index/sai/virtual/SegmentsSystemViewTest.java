@@ -237,7 +237,7 @@ public class SegmentsSystemViewTest extends SAITester
             {
                 SSTableReader sstable = sstableIndex.getSSTable();
 
-                IndexComponents components = IndexComponents.create(sstableIndex.getColumnContext().getColumnName(), sstable);
+                IndexComponents components = IndexComponents.create(sstableIndex.getColumnContext().getIndexName(), sstable);
 
                 if (sstableIndex.getColumnContext().isLiteral())
                 {

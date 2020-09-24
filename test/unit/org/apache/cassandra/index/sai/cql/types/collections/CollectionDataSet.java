@@ -21,6 +21,8 @@
 package org.apache.cassandra.index.sai.cql.types.collections;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -78,9 +80,9 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         }
 
         @Override
-        public String decorateIndexColumn(String column)
+        public Collection<String> decorateIndexColumn(String column)
         {
-            return String.format("FULL(%s)", column);
+            return Arrays.asList(String.format("FULL(%s)", column));
         }
 
         public String toString()
@@ -133,9 +135,9 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         }
 
         @Override
-        public String decorateIndexColumn(String column)
+        public Collection<String> decorateIndexColumn(String column)
         {
-            return String.format("FULL(%s)", column);
+            return Arrays.asList(String.format("FULL(%s)", column));
         }
 
         public String toString()
@@ -190,9 +192,9 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         }
 
         @Override
-        public String decorateIndexColumn(String column)
+        public Collection<String> decorateIndexColumn(String column)
         {
-            return String.format("FULL(%s)", column);
+            return Arrays.asList(String.format("FULL(%s)", column));
         }
 
         public String toString()
@@ -215,9 +217,9 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         }
 
         @Override
-        public String decorateIndexColumn(String column)
+        public Collection<String> decorateIndexColumn(String column)
         {
-            return String.format("KEYS(%s)", column);
+            return Arrays.asList(String.format("KEYS(%s)", column));
         }
     }
 
@@ -235,9 +237,9 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         }
 
         @Override
-        public String decorateIndexColumn(String column)
+        public Collection<String> decorateIndexColumn(String column)
         {
-            return String.format("VALUES(%s)", column);
+            return Arrays.asList(String.format("VALUES(%s)", column));
         }
     }
 
@@ -255,9 +257,31 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         }
 
         @Override
-        public String decorateIndexColumn(String column)
+        public Collection<String> decorateIndexColumn(String column)
         {
-            return String.format("ENTRIES(%s)", column);
+            return Arrays.asList(String.format("ENTRIES(%s)", column));
+        }
+    }
+
+    public static class MultiMapDataSet<T> extends MapDataSet<T>
+    {
+        public MultiMapDataSet(DataSet<T> elementDataSet)
+        {
+            super(elementDataSet);
+        }
+
+        @Override
+        public QuerySet querySet()
+        {
+            return new QuerySet.MultiMapQuerySet(this, elementDataSet);
+        }
+
+        @Override
+        public Collection<String> decorateIndexColumn(String column)
+        {
+            return Arrays.asList(String.format("KEYS(%s)", column),
+                                 String.format("VALUES(%s)", column),
+                                 String.format("ENTRIES(%s)", column));
         }
     }
 }

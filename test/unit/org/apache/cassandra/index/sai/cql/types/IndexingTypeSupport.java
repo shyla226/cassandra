@@ -26,7 +26,7 @@ import java.util.Collection;
 import org.junit.Before;
 import org.junit.BeforeClass;
 
-import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.index.sai.SAITester;
 
 public abstract class IndexingTypeSupport extends SAITester
@@ -39,7 +39,7 @@ public abstract class IndexingTypeSupport extends SAITester
     private final Scenario scenario;
     private Object[][] allRows;
 
-    protected enum Scenario
+    public enum Scenario
     {
         MEMTABLE_QUERY,
         SSTABLE_QUERY,
@@ -85,25 +85,19 @@ public abstract class IndexingTypeSupport extends SAITester
 
         disableCompaction();
 
-        generateRows();
+        allRows = generateRows(dataset, widePartitions);
     }
 
     protected void runIndexQueryScenarios() throws Throwable
     {
         if (scenario != Scenario.POST_BUILD_QUERY)
-            createIndex(String.format("CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", dataset.decorateIndexColumn("value")));
-
-        int sstableCounter = 0;
-        int sstableIncrement = NUMBER_OF_VALUES / 8;
-        for (int count = 0; count < allRows.length; count++)
         {
-            execute("INSERT INTO %s (pk, ck, value) VALUES (?, ?, ?)", allRows[count][0], allRows[count][1], allRows[count][2]);
-            if ((scenario != Scenario.MEMTABLE_QUERY) && (++sstableCounter == sstableIncrement))
-            {
-                flush();
-                sstableCounter = 0;
-            }
+            for (String index : dataset.decorateIndexColumn("value"))
+                createIndex(String.format("CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", index));
         }
+
+        insertData(this, allRows, scenario);
+
         switch (scenario)
         {
             case SSTABLE_QUERY:
@@ -115,38 +109,52 @@ public abstract class IndexingTypeSupport extends SAITester
                 break;
             case POST_BUILD_QUERY:
                 flush();
-                createIndex(String.format("CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", dataset.decorateIndexColumn("value")));
+                for (String index : dataset.decorateIndexColumn("value"))
+                    createIndex(String.format("CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", index));
                 waitForIndexQueryable();
                 break;
         }
 
-        dataset.querySet().runQueries(allRows, new QueryRunner() {
-            public UntypedResultSet execute(String query, Object... values) throws Throwable
-            {
-                return IndexingTypeSupport.this.execute(query, values);
-            }
-        });
+        dataset.querySet().runQueries(this, allRows);
     }
 
-    private void generateRows()
+    public static void insertData(CQLTester tester, Object[][] allRows, Scenario scenario) throws Throwable
     {
-        allRows = new Object[dataset.values.length][];
-        int partitionIncrement = widePartitions ? NUMBER_OF_VALUES / 16 : NUMBER_OF_VALUES;
-        int partitionCounter = 0;
-        int partition = 1;
-        for (int index = 0; index < dataset.values.length; index++)
+        int sstableCounter = 0;
+        int sstableIncrement = NUMBER_OF_VALUES / 8;
+        for (int count = 0; count < allRows.length; count++)
         {
-            allRows[index] = row(partition, index, dataset.values[index]);
-            if (++partitionCounter == partitionIncrement)
+            tester.execute("INSERT INTO %s (pk, ck, value) VALUES (?, ?, ?)", allRows[count][0], allRows[count][1], allRows[count][2]);
+            if ((scenario != Scenario.MEMTABLE_QUERY) && (++sstableCounter == sstableIncrement))
             {
-                partition++;
-                partitionCounter = 0;
+                tester.flush();
+                sstableCounter = 0;
             }
         }
     }
 
-    public static interface QueryRunner
+    public static Object[][] generateRows(DataSet<?> dataset, boolean widePartitions)
     {
-        public UntypedResultSet execute(String query, Object... values) throws Throwable;
+        Object[][] allRows = new Object[dataset.values.length][];
+        int partitionIncrement = NUMBER_OF_VALUES / 16;
+        int partitionCounter = 0;
+        int partition = 1;
+        for (int index = 0; index < dataset.values.length; index++)
+        {
+            allRows[index] = row(partition, partitionCounter, dataset.values[index]);
+            if (widePartitions)
+            {
+                if (++partitionCounter == partitionIncrement)
+                {
+                    partition++;
+                    partitionCounter = 0;
+                }
+            }
+            else
+            {
+                partition++;
+            }
+        }
+        return allRows;
     }
 }

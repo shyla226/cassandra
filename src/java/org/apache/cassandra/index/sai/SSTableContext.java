@@ -55,7 +55,12 @@ public class SSTableContext extends SharedCloseableImpl
     public final LongArray.Factory tokenReaderFactory, offsetReaderFactory;
     public final KeyFetcher keyFetcher;
 
-    private SSTableContext(SSTableReader sstable, LongArray.Factory tokenReaderFactory, LongArray.Factory offsetReaderFactory, KeyFetcher keyFetcher, Cleanup cleanup, IndexComponents groupComponents)
+    private SSTableContext(SSTableReader sstable,
+                           LongArray.Factory tokenReaderFactory,
+                           LongArray.Factory offsetReaderFactory,
+                           KeyFetcher keyFetcher,
+                           Cleanup cleanup,
+                           IndexComponents groupComponents)
     {
         super(cleanup);
         this.sstable = sstable;
@@ -101,6 +106,10 @@ public class SSTableContext extends SharedCloseableImpl
             tokenReaderFactory = new BlockPackedReader(token, IndexComponents.TOKEN_VALUES, groupComponents, source);
             offsetReaderFactory = new MonotonicBlockPackedReader(offset, IndexComponents.OFFSETS_VALUES, groupComponents, source);
             keyFetcher = new DecoratedKeyFetcher(sstable);
+
+            Cleanup cleanup = new Cleanup(token, offset, sstableRef);
+
+            return new SSTableContext(sstable, tokenReaderFactory, offsetReaderFactory, keyFetcher, cleanup, groupComponents);
         }
         catch (Throwable t)
         {
@@ -111,10 +120,6 @@ public class SSTableContext extends SharedCloseableImpl
 
             throw Throwables.unchecked(Throwables.close(t, token, offset));
         }
-
-        Cleanup cleanup = new Cleanup(token, offset, sstableRef);
-
-        return new SSTableContext(sstable, tokenReaderFactory, offsetReaderFactory, keyFetcher, cleanup, groupComponents);
     }
 
     /**

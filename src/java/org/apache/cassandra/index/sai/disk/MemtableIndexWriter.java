@@ -71,7 +71,7 @@ public class MemtableIndexWriter implements ColumnIndexWriter
         this.context = context;
         this.descriptor = descriptor;
 
-        this.indexComponents = IndexComponents.create(context.getColumnName(), descriptor);
+        this.indexComponents = IndexComponents.create(context.getIndexName(), descriptor);
     }
 
     @Override
