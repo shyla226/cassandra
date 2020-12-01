@@ -21,8 +21,6 @@ import java.io.IOException;
 import java.util.*;
 import java.util.function.Function;
 
-import com.google.common.collect.Iterables;
-
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -204,6 +202,12 @@ public class EncodingStats
 
             updateTimestamp(deletionTime.markedForDeleteAt());
             updateLocalDeletionTime(deletionTime.localDeletionTime());
+        }
+
+        @Override
+        public void updatePartitionDeletion(DeletionTime dt)
+        {
+            update(dt);
         }
 
         public void updateTimestamp(long timestamp)

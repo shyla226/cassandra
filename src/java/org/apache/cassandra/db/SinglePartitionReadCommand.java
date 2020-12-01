@@ -719,7 +719,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         if (!columnFilter().fetchedColumns().statics.isEmpty())
             return true;
 
-        return clusteringIndexFilter().shouldInclude(sstable);
+        return clusteringIndexFilter().intersects(sstable.metadata().comparator, sstable.getSSTableMetadata().coveredClustering);
     }
 
     private UnfilteredRowIteratorWithLowerBound makeIterator(ColumnFamilyStore cfs,
