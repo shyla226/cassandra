@@ -288,7 +288,7 @@ public class BigTableWriter extends SSTableWriter
         @Override
         public RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
         {
-            collector.updateClusteringValues(marker.clustering());
+            collector.updateClusteringValuesByBoundOrBoundary(marker.clustering());
             if (marker.isBoundary())
             {
                 RangeTombstoneBoundaryMarker bm = (RangeTombstoneBoundaryMarker)marker;
