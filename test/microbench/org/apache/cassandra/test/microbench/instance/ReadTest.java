@@ -30,8 +30,8 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.utils.FBUtilities;
 import org.openjdk.jmh.annotations.*;
 
@@ -108,14 +108,11 @@ public abstract class ReadTest extends CQLTester
             performWrite(writeStatement, i, count - i);
 
         Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
-        System.err.format("Memtable in %s mode: %d ops, %s serialized bytes, %s (%.0f%%) on heap, %s (%.0f%%) off-heap\n",
+        System.err.format("Memtable in %s mode: %d ops, %s serialized bytes, %s\n",
                           DatabaseDescriptor.getMemtableAllocationType(),
                           memtable.getOperations(),
                           FBUtilities.prettyPrintMemory(memtable.getLiveDataSize()),
-                          FBUtilities.prettyPrintMemory(memtable.getAllocator().onHeap().owns()),
-                          100 * memtable.getAllocator().onHeap().ownershipRatio(),
-                          FBUtilities.prettyPrintMemory(memtable.getAllocator().offHeap().owns()),
-                          100 * memtable.getAllocator().offHeap().ownershipRatio());
+                          memtable.getMemoryUsage());
 
         switch (flush)
         {
