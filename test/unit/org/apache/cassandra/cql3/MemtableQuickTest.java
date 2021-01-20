@@ -27,15 +27,11 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.memtable.Memtable;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.ObjectSizes;
 
 @RunWith(Parameterized.class)
-public class MemtableSizeTest extends CQLTester
+public class MemtableQuickTest extends CQLTester
 {
     static String keyspace;
     String table;
@@ -44,8 +40,11 @@ public class MemtableSizeTest extends CQLTester
     int partitions = 50_000;
     int rowsPerPartition = 4;
 
-    int deletedPartitions = 10_000;
-    int deletedRows = 5_000;
+    int deletedPartitionsStart = 20_000;
+    int deletedPartitionsEnd = deletedPartitionsStart + 10_000;
+
+    int deletedRowsStart = 40_000;
+    int deletedRowsEnd = deletedRowsStart + 5_000;
 
     @Parameterized.Parameter()
     public String memtableClass;
@@ -55,9 +54,6 @@ public class MemtableSizeTest extends CQLTester
     {
         return ImmutableList.of("SkipListMemtable");
     }
-
-    // must be within 50 bytes per partition of the actual size
-    final int MAX_DIFFERENCE = (partitions + deletedPartitions + deletedRows) * 50;
 
     @BeforeClass
     public static void setUp()
@@ -69,7 +65,7 @@ public class MemtableSizeTest extends CQLTester
     }
 
     @Test
-    public void testSize() throws Throwable
+    public void testMemtable() throws Throwable
     {
         keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
         table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))" +
@@ -83,9 +79,6 @@ public class MemtableSizeTest extends CQLTester
         cfs.disableAutoCompaction();
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
-        long deepSizeBefore = ObjectSizes.measureDeep(cfs.getTracker().getView().getCurrentMemtable());
-        System.out.printf("Memtable deep size before %s\n%n",
-                          FBUtilities.prettyPrintMemory(deepSizeBefore));
         long i;
         long limit = partitions;
         System.out.println("Writing " + partitions + " partitions of " + rowsPerPartition + " rows");
@@ -95,45 +88,49 @@ public class MemtableSizeTest extends CQLTester
                 execute(writeStatement, i, j, i + j);
         }
 
-        System.out.println("Deleting " + deletedPartitions + " partitions");
-        limit += deletedPartitions;
-        for (; i < limit; ++i)
+        System.out.println("Deleting partitions between " + deletedPartitionsStart + " and " + deletedPartitionsEnd);
+        for (i = deletedPartitionsStart; i < deletedPartitionsEnd; ++i)
         {
             // no partition exists, but we will create a tombstone
             execute("DELETE FROM " + table + " WHERE userid = ?", i);
         }
 
-        System.out.println("Deleting " + deletedRows + " rows");
-        limit += deletedRows;
-        for (; i < limit; ++i)
+        System.out.println("Deleting rows between " + deletedRowsStart + " and " + deletedRowsEnd);
+        for (i = deletedRowsStart; i < deletedRowsEnd; ++i)
         {
             // no row exists, but we will create a tombstone (and partition)
             execute("DELETE FROM " + table + " WHERE userid = ? AND picid = ?", i, 0L);
         }
 
+        System.out.println("Reading " + partitions + " partitions");
+        for (i = 0; i < limit; ++i)
+        {
+            UntypedResultSet result = execute("SELECT * FROM " + table + " WHERE userid = ?", i);
+            if (i >= deletedPartitionsStart && i < deletedPartitionsEnd)
+                assertEmpty(result);
+            else
+            {
+                int start = 0;
+                if (i >= deletedRowsStart && i < deletedRowsEnd)
+                    start = 1;
+                Object[][] rows = new Object[rowsPerPartition - start][];
+                for (long j = start; j < rowsPerPartition; ++j)
+                    rows[(int) (j - start)] = row(i, j, i + j);
+                assertRows(result, rows);
+            }
+        }
 
-        if (!cfs.getLiveSSTables().isEmpty())
-            System.out.println("Warning: " + cfs.getLiveSSTables().size() + " sstables created.");
 
-        Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
-        Memtable.MemoryUsage usage = Memtable.getMemoryUsage(memtable);
-        long actualHeap = usage.ownsOnHeap;
-        System.out.printf("Memtable in %s mode: %d ops, %s serialized bytes, %s%n",
-                          DatabaseDescriptor.getMemtableAllocationType(),
-                          memtable.getOperations(),
-                          FBUtilities.prettyPrintMemory(memtable.getLiveDataSize()),
-                          usage);
+        int deletedPartitions = deletedPartitionsEnd - deletedPartitionsStart;
+        int deletedRows = deletedRowsEnd - deletedRowsStart;
+        System.out.println("Selecting *");
+        UntypedResultSet result = execute("SELECT * FROM " + table);
+        assertRowCount(result, rowsPerPartition * (partitions - deletedPartitions) - deletedRows);
 
-        long deepSizeAfter = ObjectSizes.measureDeep(memtable);
-        System.out.printf("Memtable deep size %s\n%n",
-                          FBUtilities.prettyPrintMemory(deepSizeAfter));
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
-        long expectedHeap = deepSizeAfter - deepSizeBefore;
-        String message = String.format("Expected heap usage close to %s, got %s.\n",
-                                       FBUtilities.prettyPrintMemory(expectedHeap),
-                                       FBUtilities.prettyPrintMemory(actualHeap));
-        System.out.println(message);
-        Assert.assertTrue(message, Math.abs(actualHeap - expectedHeap) <= MAX_DIFFERENCE);
+        System.out.println("Selecting *");
+        result = execute("SELECT * FROM " + table);
+        assertRowCount(result, rowsPerPartition * (partitions - deletedPartitions) - deletedRows);
     }
-
 }
