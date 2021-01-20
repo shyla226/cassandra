@@ -29,7 +29,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.memtable.SkipListMemtable;
-import org.apache.cassandra.db.memtable.TestMemtable;
+import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.dht.OrderPreservingPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
@@ -549,20 +549,19 @@ public class AlterTest extends CQLTester
                    row(map("class", "SkipListMemtable")));
 
         alterTable("ALTER TABLE %s"
-                   + " WITH memtable = { 'class' : '" + TestMemtable.class.getName() + "'};");
-        assertSame(TestMemtable.FACTORY, getCurrentColumnFamilyStore().metadata().params.memtable.factory);
-        assertTrue(getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable() instanceof SkipListMemtable);
+                    + " WITH memtable = { 'class' : 'org.apache.cassandra.db.memtable.TrieMemtable' };");
+        assertSame(TrieMemtable.FACTORY, getCurrentColumnFamilyStore().metadata().params.memtable.factory);
+        assertTrue(getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable() instanceof TrieMemtable);
 
         assertRows(execute(format("SELECT memtable FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
                                   SchemaConstants.SCHEMA_KEYSPACE_NAME,
                                   SchemaKeyspace.TABLES),
                            KEYSPACE,
                            currentTable()),
-                   row(map("class", TestMemtable.class.getName())));
+                   row(map("class", "org.apache.cassandra.db.memtable.TrieMemtable")));
 
         alterTable("ALTER TABLE %s"
-                   + " WITH memtable = { 'class' : '" + TestMemtable.class.getName() + "', 'skiplist' : 'true' };");
-        assertSame(SkipListMemtable.FACTORY, getCurrentColumnFamilyStore().metadata().params.memtable.factory);
+                    + " WITH memtable = { 'class' : '" + CreateTest.TestMemtableFactory.class.getName() + "', 'skiplist' : 'true' };");
         assertTrue(getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable() instanceof SkipListMemtable);
 
         assertRows(execute(format("SELECT memtable FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
@@ -570,7 +569,7 @@ public class AlterTest extends CQLTester
                                   SchemaKeyspace.TABLES),
                            KEYSPACE,
                            currentTable()),
-                   row(map("class", TestMemtable.class.getName(),
+                   row(map("class", CreateTest.TestMemtableFactory.class.getName(),
                            "skiplist", "true")));
 
         alterTable("ALTER TABLE %s"
@@ -597,7 +596,7 @@ public class AlterTest extends CQLTester
         assertAlterTableThrowsException(ConfigurationException.class,
                                         "Options {invalid=throw} not expected.",
                                         "ALTER TABLE %s"
-                                        + " WITH memtable = { 'class' : '" + TestMemtable.class.getName() + "', 'invalid' : 'throw' };");
+                                        + " WITH memtable = { 'class' : '" + CreateTest.TestMemtableFactory.class.getName() + "', 'invalid' : 'throw' };");
     }
 
     @Test

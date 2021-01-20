@@ -37,9 +37,10 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.partitions.AbstractBTreePartition;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.AtomicBTreePartition;
+import org.apache.cassandra.db.partitions.BTreePartitionData;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdater;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -138,13 +139,13 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             }
         }
 
-        long[] pair = previous.addAllWithSizeDelta(update, opGroup, indexer);
+        BTreePartitionUpdater updater = previous.addAll(update, opGroup, indexer);
         updateMin(minTimestamp, previous.stats().minTimestamp);
-        liveDataSize.addAndGet(initialSize + pair[0]);
+        liveDataSize.addAndGet(initialSize + updater.dataSize);
         columnsCollector.update(update.columns());
         statsCollector.update(update.stats());
         currentOperations.addAndGet(update.operationCount());
-        return pair[1];
+        return updater.colUpdateTimeDelta;
     }
 
     public long partitionCount()
@@ -217,7 +218,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             rowOverhead = (int) ((avgSize - Math.floor(avgSize)) < 0.05 ? Math.floor(avgSize) : Math.ceil(avgSize));
             rowOverhead -= ObjectSizes.measureDeep(new LongToken(0));
             rowOverhead += AtomicBTreePartition.EMPTY_SIZE;
-            rowOverhead += AbstractBTreePartition.HOLDER_UNSHARED_HEAP_SIZE;
+            rowOverhead += BTreePartitionData.UNSHARED_HEAP_SIZE;
             allocator.setDiscarding();
             allocator.setDiscarded();
             return rowOverhead;

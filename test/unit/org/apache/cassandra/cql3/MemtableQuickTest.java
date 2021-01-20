@@ -52,7 +52,9 @@ public class MemtableQuickTest extends CQLTester
     @Parameterized.Parameters(name = "{0}")
     public static List<Object> parameters()
     {
-        return ImmutableList.of("SkipListMemtable");
+        return ImmutableList.of("SkipListMemtable",
+                                "TrieMemtable",
+                                "PersistentMemoryMemtable");
     }
 
     @BeforeClass
