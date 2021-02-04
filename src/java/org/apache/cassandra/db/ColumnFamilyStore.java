@@ -492,6 +492,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return directories;
     }
 
+    public boolean writesShouldSkipCommitLog()
+    {
+        return memtableFactory.writesShouldSkipCommitLog();
+    }
+
+    public boolean memtableWritesAreDurable()
+    {
+        return memtableFactory.writesAreDurable();
+    }
+
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor, long keyCount, long repairedAt, UUID pendingRepair, boolean isTransient, int sstableLevel, SerializationHeader header, LifecycleNewTracker lifecycleNewTracker)
     {
         MetadataCollector collector = new MetadataCollector(metadata().comparator).sstableLevel(sstableLevel);

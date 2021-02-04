@@ -57,7 +57,7 @@ public interface Memtable extends Comparable<Memtable>
     // Construction
 
     /**
-     * Factory interface for constructing memtables.
+     * Factory interface for constructing memtables, and querying write durability features.
      *
      * The factory is chosen using the MemtableParams class (passed as argument to
      * {@code CREATE TABLE ... WITH memtable = {...}} or in the memtable options in cassandra.yaml). To make that
@@ -68,7 +68,41 @@ public interface Memtable extends Comparable<Memtable>
      */
     interface Factory
     {
+        /**
+         * Create a memtable.
+         *
+         * @param commitLogLowerBound A commit log lower bound for the new memtable. This will be equal to the previous
+         *                            memtable's upper bound and defines the span of positions that any flushed sstable
+         *                            will cover.
+         * @param metadaRef Pointer to the up-to-date table metadata.
+         * @param owner Owning objects that will receive flush requests triggered by the memtable (e.g. on expiration).
+         */
         Memtable create(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadaRef, Owner owner);
+
+        /**
+         * If the memtable can achieve write durability directly (i.e. using some feature other than the commitlog, e.g.
+         * persistent memory), it can return true here, in which case the commit log will not store mutations in this
+         * table.
+         * Note that doing so will prevent point-in-time restores and changed data capture, thus a durable memtable must
+         * allow the option of turning commit log writing on even if it does not need it.
+         */
+        default boolean writesShouldSkipCommitLog()
+        {
+            return false;
+        }
+
+        /**
+         * This should be true if the memtable can achieve write durability for crash recovery directly (i.e. using some
+         * feature other than the commitlog, e.g. persistent memory).
+         * Setting this flag to true means that the commitlog should not replay mutations for this table on restart,
+         * and that it should not try to preserve segments that contain relevant data.
+         * Unless writesShouldSkipCommitLog() is also true, writes will be recorded in the commit log as they may be
+         * needed for changed data capture or point-in-time restore.
+         */
+        default boolean writesAreDurable()
+        {
+            return false;
+        }
     }
 
     /**
