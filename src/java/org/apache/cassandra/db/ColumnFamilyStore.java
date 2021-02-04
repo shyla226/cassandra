@@ -136,6 +136,32 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                                                                                new NamedThreadFactory("MemtableReclaimMemory"),
                                                                                                "internal");
 
+    /**
+     * Reason for initiating a memtable flush.
+     */
+    public enum FlushReason
+    {
+        COMMITLOG_DIRTY,
+        MEMTABLE_LIMIT,
+        MEMTABLE_PERIOD_EXPIRED,
+        INDEX_BUILD_STARTED,
+        INDEX_BUILD_COMPLETED,
+        INDEX_REMOVED,
+        INDEX_TABLE_FLUSH,
+        VIEW_BUILD_STARTED,
+        INTERNALLY_FORCED,  // explicitly requested flush, necessary for the operation of an internal table
+        USER_FORCED, // flush explicitly requested by the user (e.g. nodetool flush)
+        STARTUP,
+        SHUTDOWN,
+        SNAPSHOT,
+        TRUNCATE,
+        DROP,
+        STREAMING,
+        ANTICOMPACTION,
+        SCHEMA_CHANGE,
+        UNIT_TESTS; // explicitly requested flush needed for a test
+    }
+
     private static final String[] COUNTER_NAMES = new String[]{"table", "count", "error", "value"};
     private static final String[] COUNTER_DESCS = new String[]
     { "keyspace.tablename",
@@ -250,13 +276,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         indexManager.reload();
 
-        if (memtableFactory != metadata().params.memtable.factory)
-        {
-            memtableFactory = metadata().params.memtable.factory;
-            switchMemtable();
-        }
-        else if (!data.getView().getCurrentMemtable().updateMetadata())
-            switchMemtable();
+        memtableFactory = metadata().params.memtable.factory;
+        Memtable currentMemtable = data.getView().getCurrentMemtable();
+        if (currentMemtable.shouldSwitch(FlushReason.SCHEMA_CHANGE))
+            switchMemtableIfCurrent(currentMemtable, FlushReason.SCHEMA_CHANGE);
+        else
+            currentMemtable.metadataUpdated();
     }
 
     public static Runnable getBackgroundCompactionTaskSubmitter()
@@ -796,12 +821,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      *
      * @param memtable
      */
-    public ListenableFuture<CommitLogPosition> switchMemtableIfCurrent(Memtable memtable)
+    public ListenableFuture<CommitLogPosition> switchMemtableIfCurrent(Memtable memtable, FlushReason reason)
     {
         synchronized (data)
         {
             if (data.getView().getCurrentMemtable() == memtable)
-                return switchMemtable();
+                return switchMemtable(reason);
         }
         logger.debug("Memtable is no longer current, returning future that completes when current flushing operation completes");
         return waitForFlushes();
@@ -814,11 +839,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      * not complete until the Memtable (and all prior Memtables) have been successfully flushed, and the CL
      * marked clean up to the position owned by the Memtable.
      */
-    public ListenableFuture<CommitLogPosition> switchMemtable()
+    @VisibleForTesting
+    public ListenableFuture<CommitLogPosition> switchMemtable(FlushReason reason)
     {
         synchronized (data)
         {
-            logFlush();
+            logFlush(reason);
             Flush flush = new Flush(false);
             flushExecutor.execute(flush);
             postFlushExecutor.execute(flush.postFlushTask);
@@ -827,7 +853,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     }
 
     // print out size of all memtables we're enqueuing
-    private void logFlush()
+    private void logFlush(FlushReason reason)
     {
         // reclaiming includes that which we are GC-ing;
         Memtable.MemoryUsage usage = getTracker().getView().getCurrentMemtable().getMemoryUsage();
@@ -835,7 +861,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         for (ColumnFamilyStore indexCfs : indexManager.getAllIndexColumnFamilyStores())
             indexCfs.getTracker().getView().getCurrentMemtable().addMemoryUsageTo(usage);
 
-        logger.info("Enqueuing flush of {}: {}", name, usage);
+        logger.info("Enqueuing flush of {} ({}): {}",
+                     name,
+                     reason,
+                     usage);
     }
 
 
@@ -845,14 +874,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    public ListenableFuture<CommitLogPosition> forceFlush()
+    public ListenableFuture<CommitLogPosition> forceFlush(FlushReason reason)
     {
         synchronized (data)
         {
             Memtable current = data.getView().getCurrentMemtable();
             for (ColumnFamilyStore cfs : concatWithIndexes())
                 if (!cfs.data.getView().getCurrentMemtable().isClean())
-                    return switchMemtableIfCurrent(current);
+                    return flushMemtable(current, reason);
             return waitForFlushes();
         }
     }
@@ -870,8 +899,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         // and this does not vary between a table and its table-backed indexes
         Memtable current = data.getView().getCurrentMemtable();
         if (current.mayContainDataBefore(flushIfDirtyBefore))
-            return switchMemtableIfCurrent(current);
+            return flushMemtable(current, FlushReason.COMMITLOG_DIRTY);
         return waitForFlushes();
+    }
+
+    private ListenableFuture<CommitLogPosition> flushMemtable(Memtable current, FlushReason reason)
+    {
+        if (current.shouldSwitch(reason))
+            return switchMemtableIfCurrent(current, reason);
+        else
+            return waitForFlushes();
     }
 
     /**
@@ -891,9 +928,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return task;
     }
 
-    public CommitLogPosition forceBlockingFlush()
+    public CommitLogPosition forceBlockingFlush(FlushReason reason)
     {
-        return FBUtilities.waitOnFuture(forceFlush());
+        return FBUtilities.waitOnFuture(forceFlush(reason));
     }
 
     /**
@@ -1250,7 +1287,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                          largest, ratio(usedOnHeap, usedOffHeap), ratio(liveOnHeap, liveOffHeap),
                          ratio(flushingOnHeap, flushingOffHeap), ratio(largestUsage.ownershipRatioOnHeap, largestUsage.ownershipRatioOffHeap));
 
-            ListenableFuture<CommitLogPosition> flushFuture = largest.switchMemtableIfCurrent(largestMemtable);
+            ListenableFuture<CommitLogPosition> flushFuture = largest.flushMemtable(largestMemtable, FlushReason.MEMTABLE_LIMIT);
             flushFuture.addListener(() -> {
                 try
                 {
@@ -1315,9 +1352,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
     }
 
-    public void signalFlushRequired(Memtable memtable)
+    public void signalFlushRequired(Memtable memtable, FlushReason reason)
     {
-        switchMemtableIfCurrent(memtable);
+        switchMemtableIfCurrent(memtable, reason);
     }
 
     /**
@@ -1988,7 +2025,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         if (!skipFlush)
         {
-            forceBlockingFlush();
+            forceBlockingFlush(FlushReason.SNAPSHOT);
         }
         return snapshotWithoutFlush(snapshotName, predicate, ephemeral, rateLimiter);
     }
@@ -2210,21 +2247,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         if (keyspace.getMetadata().params.durableWrites || DatabaseDescriptor.isAutoSnapshot())
         {
-            replayAfter = forceBlockingFlush();
-            viewManager.forceBlockingFlush();
+            replayAfter = forceBlockingFlush(FlushReason.TRUNCATE);
+            viewManager.forceBlockingFlush(FlushReason.TRUNCATE);
         }
         else
         {
             // just nuke the memtable data w/o writing to disk first
-            viewManager.dumpMemtables();
-            try
-            {
-                replayAfter = dumpMemtable().get();
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
+            // note: this does not wait for the switch to complete, but because the post-flush processing is serial,
+            // the call below does.
+            viewManager.dumpMemtables(FlushReason.TRUNCATE);
+            replayAfter = FBUtilities.waitOnFuture(dumpMemtable(FlushReason.TRUNCATE));
         }
 
         long now = System.currentTimeMillis();
@@ -2268,15 +2300,19 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     /**
      * Drops current memtable without flushing to disk. This should only be called when truncating a column family which is not durable.
      */
-    public Future<CommitLogPosition> dumpMemtable()
+    public Future<CommitLogPosition> dumpMemtable(FlushReason reason)
     {
-        synchronized (data)
-        {
-            final Flush flush = new Flush(true);
-            flushExecutor.execute(flush);
-            postFlushExecutor.execute(flush.postFlushTask);
-            return flush.postFlushTask;
-        }
+        Memtable current = getTracker().getView().getCurrentMemtable();
+        if (current.shouldSwitch(reason))
+            synchronized (data)
+            {
+                final Flush flush = new Flush(true);
+                flushExecutor.execute(flush);
+                postFlushExecutor.execute(flush.postFlushTask);
+                return flush.postFlushTask;
+            }
+        else
+            return waitForFlushes();
     }
 
     public <V> V runWithCompactionsDisabled(Callable<V> callable, boolean interruptValidation, boolean interruptViews)

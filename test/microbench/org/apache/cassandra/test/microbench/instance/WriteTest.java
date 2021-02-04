@@ -109,7 +109,7 @@ public class WriteTest extends CQLTester
 
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
     }
 
     @Benchmark
@@ -124,7 +124,7 @@ public class WriteTest extends CQLTester
         switch (flush)
         {
         case FLUSH:
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
             // if we flush we also must truncate to avoid accummulating sstables
         case TRUNCATE:
             execute("TRUNCATE TABLE " + table);
@@ -222,7 +222,7 @@ public class WriteTest extends CQLTester
             throw new AssertionError("SSTables created for INMEM test.");
 
         // do a flush to print sizes
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
 
         CommitLog.instance.shutdownBlocking();
         CQLTester.tearDownClass();

@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
@@ -158,7 +159,7 @@ public class TrieMemtable extends AbstractMemtable
         if (partitions.reachedAllocatedSizeThreshold() && !switchRequested.getAndSet(true))
         {
             logger.info("Scheduling flush due to trie size limit reached.");
-            owner.signalFlushRequired(this);
+            owner.signalFlushRequired(this, ColumnFamilyStore.FlushReason.MEMTABLE_LIMIT);
         }
 
         return updater.colUpdateTimeDelta;

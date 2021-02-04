@@ -104,7 +104,7 @@ public abstract class ReadTest extends CQLTester
 
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
 
         //Warm up
         long writeStart = System.currentTimeMillis();
@@ -129,7 +129,7 @@ public abstract class ReadTest extends CQLTester
         switch (flush)
         {
         case YES:
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
             break;
         case INMEM:
             if (!cfs.getLiveSSTables().isEmpty())
@@ -196,7 +196,7 @@ public abstract class ReadTest extends CQLTester
             throw new AssertionError("SSTables created for INMEM test.");
 
         // do a flush to print sizes
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
 
         CommitLog.instance.shutdownBlocking();
         CQLTester.tearDownClass();
