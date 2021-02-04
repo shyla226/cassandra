@@ -129,7 +129,17 @@ public class CommitLogReplayer implements CommitLogReadHandler
                 }
             }
 
-            IntervalSet<CommitLogPosition> filter = persistedIntervals(cfs.getLiveSSTables(), truncatedAt);
+            IntervalSet<CommitLogPosition> filter;
+            if (!cfs.memtableWritesAreDurable())
+            {
+                filter = persistedIntervals(cfs.getLiveSSTables(), truncatedAt);
+            }
+            else
+            {
+                // everything is persisted and restored by the memtable itself
+                filter = new IntervalSet<>(CommitLogPosition.NONE, CommitLog.instance.getCurrentPosition());
+            }
+
             cfPersisted.put(cfs.metadata.id, filter);
         }
         CommitLogPosition globalPosition = firstNotCovered(cfPersisted.values());
