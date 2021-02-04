@@ -76,7 +76,7 @@ public class SkipListMemtable extends AbstractMemtable
     @VisibleForTesting
     public SkipListMemtable(TableMetadataRef metadataRef)
     {
-        this(null, metadataRef, m -> {});
+        this(null, metadataRef, (m, r) -> {});
     }
 
     protected Factory factory()

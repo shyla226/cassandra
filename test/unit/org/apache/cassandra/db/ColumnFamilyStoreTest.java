@@ -99,14 +99,14 @@ public class ColumnFamilyStoreTest
                 .add("val", "asdf")
                 .build()
                 .applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         new RowUpdateBuilder(cfs.metadata(), 1, "key1")
                 .clustering("Column1")
                 .add("val", "asdf")
                 .build()
                 .applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear(); // resets counts
         Util.getAll(Util.cmd(cfs, "key1").includeRow("c1").build());
@@ -175,7 +175,7 @@ public class ColumnFamilyStoreTest
         assertRangeCount(cfs, col, val, 2);
 
         // flush.
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         // insert, don't flush
         new RowUpdateBuilder(cfs.metadata(), 1, "key3").clustering("Column1").add("val", "val1").build().applyUnsafe();
@@ -190,7 +190,7 @@ public class ColumnFamilyStoreTest
         assertRangeCount(cfs, col, val, 2);
 
         // flush
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         // re-verify delete. // first breakage is right here because of CASSANDRA-1837.
         assertRangeCount(cfs, col, val, 2);
@@ -208,7 +208,7 @@ public class ColumnFamilyStoreTest
         assertRangeCount(cfs, col, val, 4);
 
         // and it remains so after flush. (this wasn't failing before, but it's good to check.)
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         assertRangeCount(cfs, col, val, 4);
     }
 
@@ -257,9 +257,9 @@ public class ColumnFamilyStoreTest
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE2).getColumnFamilyStore(CF_STANDARD1);
         new RowUpdateBuilder(cfs.metadata(), 0, ByteBufferUtil.bytes("key1")).clustering("Column1").add("val", "asdf").build().applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         new RowUpdateBuilder(cfs.metadata(), 0, ByteBufferUtil.bytes("key2")).clustering("Column1").add("val", "asdf").build().applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         for (int version = 1; version <= 2; ++version)
         {
@@ -398,7 +398,7 @@ public class ColumnFamilyStoreTest
     public void reTest(ColumnFamilyStore cfs, Runnable verify) throws Exception
     {
         verify.run();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         verify.run();
     }
 
@@ -437,7 +437,7 @@ public class ColumnFamilyStoreTest
                                              .add("birthdate", 1L)
                                              .add("notbirthdate", 2L);
         new Mutation(builder.build()).applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         String snapshotName = "newSnapshot";
         cfs.snapshotWithoutFlush(snapshotName);
@@ -466,7 +466,7 @@ public class ColumnFamilyStoreTest
         ColumnFamilyStore.scrubDataDirectories(cfs.metadata());
 
         new RowUpdateBuilder(cfs.metadata(), 2, "key").clustering("name").add("val", "2").build().applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         // Nuke the metadata and reload that sstable
         Collection<SSTableReader> ssTables = cfs.getLiveSSTables();

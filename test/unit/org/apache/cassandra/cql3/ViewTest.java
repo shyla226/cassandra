@@ -127,7 +127,7 @@ public class ViewTest extends CQLTester
         updateView("DELETE FROM %s USING TIMESTAMP 10 WHERE k1 = 1 and c1=1");
 
         if (flush)
-            Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush();
+            Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         String table = KEYSPACE + "." + currentTable();
         updateView("BEGIN BATCH " +
@@ -337,7 +337,7 @@ public class ViewTest extends CQLTester
         for (int i = 0; i < 100; i++)
             updateView("INSERT into %s (k,c,val)VALUES(?,?,?)", 0, i % 2, "baz");
 
-        Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush();
+        Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         Assert.assertEquals(2, execute("select * from %s").size());
         Assert.assertEquals(2, execute("select * from mv_tstest").size());
@@ -463,18 +463,18 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         // change c's value and TS=3, tombstones c=1 and adds c=0 record
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? and b = ? ", 0, 0, 0);
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0));
 
         if(flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         }
 
 
@@ -483,7 +483,7 @@ public class ViewTest extends CQLTester
         if (flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         }
 
         assertRows(execute("SELECT d,e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, null));
@@ -494,7 +494,7 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d,e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, 1));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
 
         //Change d value @ TS=2
@@ -502,7 +502,7 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(2));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
 
         //Change d value @ TS=3
@@ -925,7 +925,7 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT a, b, c from mv WHERE b = ?", 1), row(0, 1, null));
 
         ColumnFamilyStore cfs = Keyspace.open(keyspace()).getColumnFamilyStore("mv");
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         Assert.assertEquals(1, cfs.getLiveSSTables().size());
     }
 
@@ -1349,22 +1349,22 @@ public class ViewTest extends CQLTester
         for (int i = 0; i < 1024; i++)
             execute("INSERT into %s (k,c,val)VALUES(?,?,?)", i, i, ""+i);
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         for (int i = 0; i < 1024; i++)
             execute("INSERT into %s (k,c,val)VALUES(?,?,?)", i, i, ""+i);
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         for (int i = 0; i < 1024; i++)
             execute("INSERT into %s (k,c,val)VALUES(?,?,?)", i, i, ""+i);
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         for (int i = 0; i < 1024; i++)
             execute("INSERT into %s (k,c,val)VALUES(?,?,?)", i, i, ""+i);
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         String viewName1 = "mv_test_" + concurrentViewBuilders;
         createView(viewName1, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE val IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (val,k,c)");

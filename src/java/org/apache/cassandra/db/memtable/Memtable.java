@@ -20,6 +20,7 @@ package org.apache.cassandra.db.memtable;
 
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -75,7 +76,7 @@ public interface Memtable extends Comparable<Memtable>
      */
     interface Owner
     {
-        void signalFlushRequired(Memtable memtable);
+        void signalFlushRequired(Memtable memtable, ColumnFamilyStore.FlushReason reason);
     }
 
 
@@ -300,10 +301,17 @@ public interface Memtable extends Comparable<Memtable>
     }
 
     /**
-     * Called when the table's metadata is updated. The memtable's metadata reference now points to the new version.
-     * Returns true if the memtable is compatible with updated metadata, false if it is not and will need to be flushed.
+     * Called in response to a flush request.
+     *
+     * Normally the memtable will return true, but it may decide to ignore certain request types (e.g. for compatible
+     * metadata changes).
      */
-    boolean updateMetadata();
+    boolean shouldSwitch(ColumnFamilyStore.FlushReason reason);
+
+    /**
+     * Called when the table's metadata is updated. The memtable's metadata reference now points to the new version.
+     */
+    void metadataUpdated();
 
     /**
      * Special commit log position marker used in the upper bound marker setting process

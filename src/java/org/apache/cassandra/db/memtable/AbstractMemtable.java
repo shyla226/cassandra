@@ -143,12 +143,21 @@ public abstract class AbstractMemtable implements Memtable
         return metadata.get();
     }
 
-    public boolean updateMetadata()
+    public boolean shouldSwitch(ColumnFamilyStore.FlushReason reason)
+    {
+        switch (reason)
+        {
+        case SCHEMA_CHANGE:
+            return initialComparator != metadata().comparator // If the CF comparator has changed, because our partitions reference the old one
+                   || metadata().params.memtable.factory != factory(); // If a different type of memtable is requested
+        default:
+            return true;
+        }
+    }
+
+    public void metadataUpdated()
     {
         scheduleFlush();
-        // If the CF comparator has changed, we need to change the memtable,
-        // because the old one still aliases the previous comparator.
-        return initialComparator == metadata().comparator;
     }
 
     protected abstract Factory factory();
@@ -301,7 +310,7 @@ public abstract class AbstractMemtable implements Memtable
                     else
                     {
                         // we'll be rescheduled by the constructor of the Memtable.
-                        owner.signalFlushRequired(AbstractMemtable.this);
+                        owner.signalFlushRequired(AbstractMemtable.this, ColumnFamilyStore.FlushReason.MEMTABLE_PERIOD_EXPIRED);
                     }
                 }
             };

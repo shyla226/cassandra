@@ -386,7 +386,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
 
     public void flush(String keyspace)
     {
-        runOnInstance(() -> FBUtilities.waitOnFutures(Keyspace.open(keyspace).flush()));
+        runOnInstance(() -> FBUtilities.waitOnFutures(Keyspace.open(keyspace).flush(ColumnFamilyStore.FlushReason.UNIT_TESTS)));
     }
 
     public void forceCompact(String keyspace, String table)
