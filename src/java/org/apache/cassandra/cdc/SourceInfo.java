@@ -27,12 +27,14 @@ import org.apache.cassandra.db.commitlog.CommitLogPosition;
 public class SourceInfo  {
 
     public final CommitLogPosition commitLogPosition;
-    public final KeyspaceTable keyspaceTable;
+    public final String keyspace;
+    public final String table;
     public final Instant timestamp;
 
-    public SourceInfo(CommitLogPosition commitLogPosition, KeyspaceTable keyspaceTable, Instant timestamp) {
+    public SourceInfo(CommitLogPosition commitLogPosition, String keyspace, String table, Instant timestamp) {
         this.commitLogPosition = commitLogPosition;
-        this.keyspaceTable = keyspaceTable;
+        this.keyspace = keyspace;
+        this.table = table;
         this.timestamp = timestamp;
     }
 

@@ -249,22 +249,21 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
         for (PartitionUpdate pu : mutation.getPartitionUpdates())
         {
             CommitLogPosition entryPosition = new CommitLogPosition(CommitLogUtil.extractTimestamp(descriptor.fileName()), entryLocation);
-            KeyspaceTable keyspaceTable = new KeyspaceTable(mutation.getKeyspaceName(), pu.metadata().name);
-
             if (offsetWriter.offset().compareTo(entryPosition) > 0)
             {
-                logger.debug("Mutation at {} for table {} already processed, skipping...", entryPosition, keyspaceTable);
+                logger.debug("Mutation at {} for table {}.{} already processed, skipping...",
+                             entryPosition, pu.metadata().keyspace, pu.metadata().name);
                 return;
             }
 
             try
             {
-                process(pu, entryPosition, keyspaceTable);
+                process(pu, entryPosition);
             }
             catch (Exception e)
             {
                 throw new CassandraConnectorDataException(String.format("Failed to process PartitionUpdate %s at %s for table %s.",
-                                                                        pu.toString(), entryPosition.toString(), keyspaceTable.name()), e);
+                             pu.toString(), entryPosition.toString(), pu.metadata().keyspace, pu.metadata().name), e);
             }
         }
     }
@@ -294,7 +293,7 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
      * deletion or a row-level modification) or throw an exception if it isn't. The valid partition
      * update is then converted into a {@link Mutation}.
      */
-    private void process(PartitionUpdate pu, CommitLogPosition position, KeyspaceTable keyspaceTable)
+    private void process(PartitionUpdate pu, CommitLogPosition position)
     {
         PartitionType partitionType = PartitionType.getPartitionType(pu);
 
@@ -307,7 +306,7 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
         switch (partitionType)
         {
             case PARTITION_KEY_ROW_DELETION:
-                handlePartitionDeletion(pu, position, keyspaceTable);
+                handlePartitionDeletion(pu, position);
                 break;
 
             case ROW_LEVEL_MODIFICATION:
@@ -322,7 +321,7 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
                         continue;
                     }
                     Row row = (Row) rowOrRangeTombstone;
-                    handleRowModifications(row, rowType, pu, position, keyspaceTable);
+                    handleRowModifications(row, rowType, pu, position);
                 }
                 break;
 
@@ -343,7 +342,7 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
      * b. populate regular columns with null values
      * (4) Assemble a {@link Mutation} object from the populated data and queue the record
      */
-    private void handlePartitionDeletion(PartitionUpdate pu, CommitLogPosition offsetPosition, KeyspaceTable keyspaceTable)
+    private void handlePartitionDeletion(PartitionUpdate pu, CommitLogPosition offsetPosition)
     {
         try
         {
@@ -372,7 +371,8 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
             }
             */
 
-            mutationMaker.delete(DatabaseDescriptor.getClusterName(), StorageService.instance.getLocalHostUUID(), offsetPosition, keyspaceTable, false,
+            mutationMaker.delete(DatabaseDescriptor.getClusterName(), StorageService.instance.getLocalHostUUID(), offsetPosition,
+                                 pu.metadata().keyspace, pu.metadata().name, false,
                                  toInstantFromMicros(pu.maxTimestamp()), after,
                                  MARK_OFFSET, this::maybeBlockingSend);
         }
@@ -396,7 +396,7 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
      * d. for deletions, populate regular columns with null values
      * (4) Assemble a {@link Mutation} object from the populated data and queue the record
      */
-    private void handleRowModifications(Row row, RowType rowType, PartitionUpdate pu, CommitLogPosition offsetPosition, KeyspaceTable keyspaceTable)
+    private void handleRowModifications(Row row, RowType rowType, PartitionUpdate pu, CommitLogPosition offsetPosition)
     {
         RowData after = new RowData();
         populatePartitionColumns(after, pu);
@@ -407,21 +407,23 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
         // full local read
         UntypedResultSet untypedResultSet = QueryProcessor.execute(String.format(Locale.ROOT,
                                                                                  "SELECT JSON * FROM %s.%s WHERE %s",
-                                                                                 keyspaceTable.keyspace,
-                                                                                 keyspaceTable.table,
+                                                                                 pu.metadata().keyspace,
+                                                                                 pu.metadata().name,
                                                                                  after.primaryKeyClause()),
                                                                    ConsistencyLevel.LOCAL_ONE,
                                                                    after.primaryKeyValues());
         if (untypedResultSet.isEmpty())
         {
-            mutationMaker.delete(DatabaseDescriptor.getClusterName(), StorageService.instance.getLocalHostUUID(), offsetPosition, keyspaceTable, false,
+            mutationMaker.delete(DatabaseDescriptor.getClusterName(), StorageService.instance.getLocalHostUUID(), offsetPosition,
+                                 pu.metadata().keyspace, pu.metadata().name, false,
                                  toInstantFromMicros(ts), after, MARK_OFFSET, this::maybeBlockingSend);
         }
         else
         {
             UntypedResultSet.Row fullRow = untypedResultSet.one();
             String jsonDocument = untypedResultSet.one().getString(fullRow.getColumns().get(0).name.toString());
-            mutationMaker.insert(DatabaseDescriptor.getClusterName(), StorageService.instance.getLocalHostUUID(), offsetPosition, keyspaceTable, false,
+            mutationMaker.insert(DatabaseDescriptor.getClusterName(), StorageService.instance.getLocalHostUUID(), offsetPosition,
+                                 pu.metadata().keyspace, pu.metadata().name, false,
                                  toInstantFromMicros(ts), after, MARK_OFFSET, this::maybeBlockingSend, jsonDocument);
         }
     }

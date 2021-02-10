@@ -83,7 +83,7 @@ public class HttpClientFactory
                             });
     }
 
-    public CompletableFuture<Long> replicate(Mutation mutation)
+    public CompletableFuture<Long> replicate(final Mutation mutation)
     {
         CompletableFuture<State> stateFuture = (State.NO_STATE.equals(this.state))
                                                ? getState()
@@ -124,12 +124,11 @@ public class HttpClientFactory
                        switch (response.statusCode())
                        {
                            case 200:
-                               logger.debug("Successfully replicate id={} operation={} writetime={}",
-                                            key.id, value.operation, value.writetime);
+                               logger.debug("Successfully replicate mutation={}", mutation);
                                return Long.parseLong(response.body());
                            case 503: // service unavailable
                            case 404: // hash not managed
-                               logger.warn("error status={}", response.statusCode());
+                               logger.warn("error mutation={} status={}", mutation, response.statusCode());
                                try
                                {
                                    String body = response.body();

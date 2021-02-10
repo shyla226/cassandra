@@ -75,7 +75,7 @@ public class OffsetFileWriter extends AbstractProcessor implements AutoCloseable
         return this.fileOffsetRef.get();
     }
 
-    public void markOffset(String sourceTable, CommitLogPosition sourceOffset) {
+    public void markOffset(CommitLogPosition sourceOffset) {
         this.fileOffsetRef.set(sourceOffset);
     }
 
@@ -181,7 +181,7 @@ public class OffsetFileWriter extends AbstractProcessor implements AutoCloseable
             long timeSinceLastFlush = now - timeOfLastFlush;
             if(offsetFlushPolicy.shouldFlush(Duration.ofMillis(timeSinceLastFlush), notCommittedEvents)) {
                 SourceInfo source = record.source;
-                markOffset(source.keyspaceTable.name(), source.commitLogPosition);
+                markOffset(source.commitLogPosition);
                 flush();
                 notCommittedEvents = 0L;
                 timeOfLastFlush = now;

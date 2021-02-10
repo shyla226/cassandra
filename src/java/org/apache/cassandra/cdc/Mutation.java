@@ -56,8 +56,8 @@ public class Mutation {
 
     public MutationKey mutationKey() {
         return new MutationKey(
-        source.keyspaceTable.keyspace,
-        source.keyspaceTable.table,
+        source.keyspace,
+        source.table,
         rowData.primaryKeyValues());
     }
 
