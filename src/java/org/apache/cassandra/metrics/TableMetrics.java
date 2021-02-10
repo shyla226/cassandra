@@ -427,15 +427,14 @@ public class TableMetrics
         memtableColumnsCount = createTableGauge("MemtableColumnsCount", 
                                                 () -> cfs.getTracker().getView().getCurrentMemtable().getOperations());
 
-        Memtable.MemoryUsage usage = cfs.getTracker().getView().getCurrentMemtable().getMemoryUsage();
         // MemtableOnHeapSize naming deprecated in 4.0
         memtableOnHeapDataSize = createTableGaugeWithDeprecation("MemtableOnHeapDataSize", "MemtableOnHeapSize", 
-                                                                 () -> usage.ownsOnHeap,
+                                                                 () -> cfs.getTracker().getView().getCurrentMemtable().getMemoryUsage().ownsOnHeap,
                                                                  new GlobalTableGauge("MemtableOnHeapDataSize"));
 
         // MemtableOffHeapSize naming deprecated in 4.0
         memtableOffHeapDataSize = createTableGaugeWithDeprecation("MemtableOffHeapDataSize", "MemtableOffHeapSize", 
-                                                                  () -> usage.ownsOffHeap,
+                                                                  () -> cfs.getTracker().getView().getCurrentMemtable().getMemoryUsage().ownsOffHeap,
                                                                   new GlobalTableGauge("MemtableOnHeapDataSize"));
         
         memtableLiveDataSize = createTableGauge("MemtableLiveDataSize", 

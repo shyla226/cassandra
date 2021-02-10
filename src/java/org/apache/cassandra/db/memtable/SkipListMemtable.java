@@ -54,7 +54,7 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 
-public class SkipListMemtable extends AbstractMemtable
+public class SkipListMemtable extends AbstractAllocatorMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(SkipListMemtable.class);
 

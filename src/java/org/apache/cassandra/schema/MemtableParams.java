@@ -32,7 +32,9 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 
 /**
  * Memtable types and options are specified with these parameters. Memtable classes must either contain a static FACTORY
- * field (if they take no arguments other than class), or implement a factory(Map<String, String>) method
+ * field (if they take no arguments other than class), or implement a factory(Map<String, String>) method.
+ *
+ * The latter should consume any further options (using map.remove).
  *
  *
  * CQL: {'class' : 'SkipListMemtable'}
@@ -78,22 +80,23 @@ public final class MemtableParams
         className = className.contains(".") ? className : "org.apache.cassandra.db.memtable." + className;
         try
         {
+            Memtable.Factory factory;
             Class<?> clazz = Class.forName(className);
             try
             {
                 Method factoryMethod = clazz.getDeclaredMethod("factory", Map.class);
-                return (Memtable.Factory) factoryMethod.invoke(null, copy);
+                factory = (Memtable.Factory) factoryMethod.invoke(null, copy);
             }
             catch (NoSuchMethodException e)
             {
                 // continue with FACTORY field
+                Field factoryField = clazz.getDeclaredField("FACTORY");
+                factory = (Memtable.Factory) factoryField.get(null);
             }
-            Field factoryField = clazz.getDeclaredField("FACTORY");
             if (!copy.isEmpty())
                 throw new ConfigurationException("Memtable class " + className + " does not accept any futher parameters, but " +
                                                  copy + " were given.");
-
-            return (Memtable.Factory) factoryField.get(null);
+            return factory;
         }
         catch (NoSuchFieldException | ClassNotFoundException | IllegalAccessException | InvocationTargetException | ClassCastException e)
         {
