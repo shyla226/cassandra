@@ -54,7 +54,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * Handler that implements {@link CommitLogReadHandler} interface provided by Cassandra source code.
- *
+ * <p>
  * This handler implementation processes each {@link org.apache.cassandra.db.Mutation} and invokes one of the registered partition handler
  * for each {@link PartitionUpdate} in the {@link org.apache.cassandra.db.Mutation} (a mutation could have multiple partitions if it is a batch update),
  * which in turn makes one or more record via the {@link MutationMaker}.
@@ -71,23 +71,25 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
     private final MutationSender<Mutation> mutationSender;
 
     CommitLogReadHandlerImpl(OffsetFileWriter offsetFileWriter,
-                             MutationSender<Mutation> mutationSender) {
+                             MutationSender<Mutation> mutationSender)
+    {
         this.mutationSender = mutationSender;
         this.offsetWriter = offsetFileWriter;
         this.mutationMaker = new MutationMaker(true);
     }
 
     /**
-     *  A PartitionType represents the type of a PartitionUpdate.
+     * A PartitionType represents the type of a PartitionUpdate.
      */
-    enum PartitionType {
+    enum PartitionType
+    {
         /**
          * a partition-level deletion where partition key = primary key (no clustering key)
          */
         PARTITION_KEY_ROW_DELETION,
 
         /**
-         *  a partition-level deletion where partition key + clustering key = primary key
+         * a partition-level deletion where partition key + clustering key = primary key
          */
         PARTITION_AND_CLUSTERING_KEY_ROW_DELETION,
 
@@ -113,44 +115,55 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
 
         static final Set<PartitionType> supportedPartitionTypes = new HashSet<>(Arrays.asList(PARTITION_KEY_ROW_DELETION, ROW_LEVEL_MODIFICATION));
 
-        public static PartitionType getPartitionType(PartitionUpdate pu) {
-            if (pu.metadata().isCounter()) {
+        public static PartitionType getPartitionType(PartitionUpdate pu)
+        {
+            if (pu.metadata().isCounter())
+            {
                 return COUNTER;
             }
-            else if (pu.metadata().isView()) {
+            else if (pu.metadata().isView())
+            {
                 return MATERIALIZED_VIEW;
             }
-            else if (pu.metadata().isIndex()) {
+            else if (pu.metadata().isIndex())
+            {
                 return SECONDARY_INDEX;
             }
-            else if (isPartitionDeletion(pu) && hasClusteringKeys(pu)) {
+            else if (isPartitionDeletion(pu) && hasClusteringKeys(pu))
+            {
                 return PARTITION_AND_CLUSTERING_KEY_ROW_DELETION;
             }
-            else if (isPartitionDeletion(pu) && !hasClusteringKeys(pu)) {
+            else if (isPartitionDeletion(pu) && !hasClusteringKeys(pu))
+            {
                 return PARTITION_KEY_ROW_DELETION;
             }
-            else {
+            else
+            {
                 return ROW_LEVEL_MODIFICATION;
             }
         }
 
-        public static boolean isValid(PartitionType type) {
+        public static boolean isValid(PartitionType type)
+        {
             return supportedPartitionTypes.contains(type);
         }
 
-        public static boolean hasClusteringKeys(PartitionUpdate pu) {
+        public static boolean hasClusteringKeys(PartitionUpdate pu)
+        {
             return !pu.metadata().clusteringColumns().isEmpty();
         }
 
-        public static boolean isPartitionDeletion(PartitionUpdate pu) {
+        public static boolean isPartitionDeletion(PartitionUpdate pu)
+        {
             return pu.partitionLevelDeletion().markedForDeleteAt() > LivenessInfo.NO_TIMESTAMP;
         }
     }
 
     /**
-     *  A RowType represents different types of {@link Row}-level modifications in a Cassandra table.
+     * A RowType represents different types of {@link Row}-level modifications in a Cassandra table.
      */
-    enum RowType {
+    enum RowType
+    {
         /**
          * Single-row insert
          */
@@ -179,63 +192,79 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
 
         static final Set<RowType> supportedRowTypes = ImmutableSet.of(INSERT, UPDATE, DELETE);
 
-        public static RowType getRowType(Unfiltered unfiltered) {
-            if (unfiltered.isRangeTombstoneMarker()) {
+        public static RowType getRowType(Unfiltered unfiltered)
+        {
+            if (unfiltered.isRangeTombstoneMarker())
+            {
                 return RANGE_TOMBSTONE;
             }
-            else if (unfiltered.isRow()) {
+            else if (unfiltered.isRow())
+            {
                 Row row = (Row) unfiltered;
-                if (isDelete(row)) {
+                if (isDelete(row))
+                {
                     return DELETE;
                 }
-                else if (isInsert(row)) {
+                else if (isInsert(row))
+                {
                     return INSERT;
                 }
-                else if (isUpdate(row)) {
+                else if (isUpdate(row))
+                {
                     return UPDATE;
                 }
             }
             return UNKNOWN;
         }
 
-        public static boolean isValid(RowType rowType) {
+        public static boolean isValid(RowType rowType)
+        {
             return supportedRowTypes.contains(rowType);
         }
 
-        public static boolean isDelete(Row row) {
+        public static boolean isDelete(Row row)
+        {
             return row.deletion().time().markedForDeleteAt() > LivenessInfo.NO_TIMESTAMP;
         }
 
-        public static boolean isInsert(Row row) {
+        public static boolean isInsert(Row row)
+        {
             return row.primaryKeyLivenessInfo().timestamp() > LivenessInfo.NO_TIMESTAMP;
         }
 
-        public static boolean isUpdate(Row row) {
+        public static boolean isUpdate(Row row)
+        {
             return row.primaryKeyLivenessInfo().timestamp() == LivenessInfo.NO_TIMESTAMP;
         }
     }
 
     @Override
-    public void handleMutation(org.apache.cassandra.db.Mutation mutation, int size, int entryLocation, CommitLogDescriptor descriptor) {
-        if (!mutation.trackedByCDC()) {
+    public void handleMutation(org.apache.cassandra.db.Mutation mutation, int size, int entryLocation, CommitLogDescriptor descriptor)
+    {
+        if (!mutation.trackedByCDC())
+        {
             return;
         }
 
-        for (PartitionUpdate pu : mutation.getPartitionUpdates()) {
+        for (PartitionUpdate pu : mutation.getPartitionUpdates())
+        {
             CommitLogPosition entryPosition = new CommitLogPosition(CommitLogUtil.extractTimestamp(descriptor.fileName()), entryLocation);
             KeyspaceTable keyspaceTable = new KeyspaceTable(mutation.getKeyspaceName(), pu.metadata().name);
 
-            if (offsetWriter.offset().compareTo(entryPosition) > 0) {
+            if (offsetWriter.offset().compareTo(entryPosition) > 0)
+            {
                 logger.debug("Mutation at {} for table {} already processed, skipping...", entryPosition, keyspaceTable);
                 return;
             }
 
-            try {
+            try
+            {
                 process(pu, entryPosition, keyspaceTable);
             }
-            catch (Exception e) {
+            catch (Exception e)
+            {
                 throw new CassandraConnectorDataException(String.format("Failed to process PartitionUpdate %s at %s for table %s.",
-                                                          pu.toString(), entryPosition.toString(), keyspaceTable.name()), e);
+                                                                        pu.toString(), entryPosition.toString(), keyspaceTable.name()), e);
             }
         }
     }
@@ -249,10 +278,12 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
     @Override
     public boolean shouldSkipSegmentOnError(CommitLogReadException exception) throws IOException
     {
-        if (exception.permissible) {
+        if (exception.permissible)
+        {
             logger.error("Encountered a permissible exception during log replay", exception);
         }
-        else {
+        else
+        {
             logger.error("Encountered a non-permissible exception during log replay", exception);
         }
         return false;
@@ -263,25 +294,30 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
      * deletion or a row-level modification) or throw an exception if it isn't. The valid partition
      * update is then converted into a {@link Mutation}.
      */
-    private void process(PartitionUpdate pu, CommitLogPosition position, KeyspaceTable keyspaceTable) {
+    private void process(PartitionUpdate pu, CommitLogPosition position, KeyspaceTable keyspaceTable)
+    {
         PartitionType partitionType = PartitionType.getPartitionType(pu);
 
-        if (!PartitionType.isValid(partitionType)) {
+        if (!PartitionType.isValid(partitionType))
+        {
             logger.warn("Encountered an unsupported partition type {}, skipping...", partitionType);
             return;
         }
 
-        switch (partitionType) {
+        switch (partitionType)
+        {
             case PARTITION_KEY_ROW_DELETION:
                 handlePartitionDeletion(pu, position, keyspaceTable);
                 break;
 
             case ROW_LEVEL_MODIFICATION:
                 UnfilteredRowIterator it = pu.unfilteredIterator();
-                while (it.hasNext()) {
+                while (it.hasNext())
+                {
                     Unfiltered rowOrRangeTombstone = it.next();
                     RowType rowType = RowType.getRowType(rowOrRangeTombstone);
-                    if (!RowType.isValid(rowType)) {
+                    if (!RowType.isValid(rowType))
+                    {
                         logger.warn("Encountered an unsupported row type {}, skipping...", rowType);
                         continue;
                     }
@@ -299,16 +335,18 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
      * Handle a valid deletion event resulted from a partition-level deletion by converting Cassandra representation
      * of this event into a {@link Mutation} object and send it to pulsar. A valid deletion
      * event means a partition only has a single row, this implies there are no clustering keys.
-     *
+     * <p>
      * The steps are:
-     *      (1) Populate the "source" field for this event
-     *      (3) Populate the "after" field for this event
-     *          a. populate partition columns
-     *          b. populate regular columns with null values
-     *      (4) Assemble a {@link Mutation} object from the populated data and queue the record
+     * (1) Populate the "source" field for this event
+     * (3) Populate the "after" field for this event
+     * a. populate partition columns
+     * b. populate regular columns with null values
+     * (4) Assemble a {@link Mutation} object from the populated data and queue the record
      */
-    private void handlePartitionDeletion(PartitionUpdate pu, CommitLogPosition offsetPosition, KeyspaceTable keyspaceTable) {
-        try {
+    private void handlePartitionDeletion(PartitionUpdate pu, CommitLogPosition offsetPosition, KeyspaceTable keyspaceTable)
+    {
+        try
+        {
 
             RowData after = new RowData();
 
@@ -335,10 +373,11 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
             */
 
             mutationMaker.delete(DatabaseDescriptor.getClusterName(), StorageService.instance.getLocalHostUUID(), offsetPosition, keyspaceTable, false,
-                               toInstantFromMicros(pu.maxTimestamp()), after,
-                               MARK_OFFSET, this::maybeBlockingSend);
+                                 toInstantFromMicros(pu.maxTimestamp()), after,
+                                 MARK_OFFSET, this::maybeBlockingSend);
         }
-        catch (Exception e) {
+        catch (Exception e)
+        {
             logger.error("Fail to send delete partition at {}. Reason: {}", offsetPosition, e);
         }
     }
@@ -347,17 +386,18 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
      * Handle a valid event resulted from a row-level modification by converting Cassandra representation of
      * this event into a {@link Mutation} object and sent it to pulsar. A valid event
      * implies this must be an insert, update, or delete.
-     *
+     * <p>
      * The steps are:
-     *      (1) Populate the "source" field for this event
-     *      (3) Populate the "after" field for this event
-     *          a. populate partition columns
-     *          b. populate clustering columns
-     *          c. populate regular columns
-     *          d. for deletions, populate regular columns with null values
-     *      (4) Assemble a {@link Mutation} object from the populated data and queue the record
+     * (1) Populate the "source" field for this event
+     * (3) Populate the "after" field for this event
+     * a. populate partition columns
+     * b. populate clustering columns
+     * c. populate regular columns
+     * d. for deletions, populate regular columns with null values
+     * (4) Assemble a {@link Mutation} object from the populated data and queue the record
      */
-    private void handleRowModifications(Row row, RowType rowType, PartitionUpdate pu, CommitLogPosition offsetPosition, KeyspaceTable keyspaceTable) {
+    private void handleRowModifications(Row row, RowType rowType, PartitionUpdate pu, CommitLogPosition offsetPosition, KeyspaceTable keyspaceTable)
+    {
         RowData after = new RowData();
         populatePartitionColumns(after, pu);
         populateClusteringColumns(after, row, pu);
@@ -366,49 +406,60 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
 
         // full local read
         UntypedResultSet untypedResultSet = QueryProcessor.execute(String.format(Locale.ROOT,
-                                                              "SELECT JSON * FROM %s.%s WHERE %s",
-                                                              keyspaceTable.keyspace,
-                                                              keyspaceTable.table,
-                                                              after.primaryKeyClause()),
-                                                ConsistencyLevel.LOCAL_ONE,
-                                                after.primaryKeyValues());
-        UntypedResultSet.Row fullRow = untypedResultSet.one();
-        if (fullRow == null) {
+                                                                                 "SELECT JSON * FROM %s.%s WHERE %s",
+                                                                                 keyspaceTable.keyspace,
+                                                                                 keyspaceTable.table,
+                                                                                 after.primaryKeyClause()),
+                                                                   ConsistencyLevel.LOCAL_ONE,
+                                                                   after.primaryKeyValues());
+        if (untypedResultSet.isEmpty())
+        {
             mutationMaker.delete(DatabaseDescriptor.getClusterName(), StorageService.instance.getLocalHostUUID(), offsetPosition, keyspaceTable, false,
                                  toInstantFromMicros(ts), after, MARK_OFFSET, this::maybeBlockingSend);
-        } else {
-            String jsonDocument = fullRow.getString(fullRow.getColumns().get(0).name.toString());
+        }
+        else
+        {
+            UntypedResultSet.Row fullRow = untypedResultSet.one();
+            String jsonDocument = untypedResultSet.one().getString(fullRow.getColumns().get(0).name.toString());
             mutationMaker.insert(DatabaseDescriptor.getClusterName(), StorageService.instance.getLocalHostUUID(), offsetPosition, keyspaceTable, false,
                                  toInstantFromMicros(ts), after, MARK_OFFSET, this::maybeBlockingSend, jsonDocument);
         }
     }
 
-    private void populatePartitionColumns(RowData after, PartitionUpdate pu) {
+    private void populatePartitionColumns(RowData after, PartitionUpdate pu)
+    {
         List<Object> partitionKeys = getPartitionKeys(pu);
-        for (ColumnMetadata cd : pu.metadata().partitionKeyColumns()) {
-            try {
+        for (ColumnMetadata cd : pu.metadata().partitionKeyColumns())
+        {
+            try
+            {
                 String name = cd.name.toString();
                 Object value = partitionKeys.get(cd.position());
                 CellData cellData = new CellData(name, value, null, CellData.ColumnType.PARTITION);
                 after.addCell(cellData);
             }
-            catch (Exception e) {
+            catch (Exception e)
+            {
                 throw new CassandraConnectorDataException(String.format("Failed to populate Column %s with Type %s of Table %s in KeySpace %s.",
-                                                          cd.name.toString(), cd.type.toString(), cd.cfName, cd.ksName), e);
+                                                                        cd.name.toString(), cd.type.toString(), cd.cfName, cd.ksName), e);
             }
         }
     }
 
-    private void populateClusteringColumns(RowData after, Row row, PartitionUpdate pu) {
-        for (ColumnMetadata cd : pu.metadata().clusteringColumns()) {
-            try {
+    private void populateClusteringColumns(RowData after, Row row, PartitionUpdate pu)
+    {
+        for (ColumnMetadata cd : pu.metadata().clusteringColumns())
+        {
+            try
+            {
                 String name = cd.name.toString();
                 Object value = row.clustering().get(cd.position());
                 CellData cellData = new CellData(name, value, null, CellData.ColumnType.CLUSTERING);
                 after.addCell(cellData);
                 after.wideRow(true);
             }
-            catch (Exception e) {
+            catch (Exception e)
+            {
                 throw new CassandraConnectorDataException(String.format("Failed to populate Column %s with Type %s of Table %s in KeySpace %s.",
                                                                         cd.name.toString(), cd.type.toString(), cd.cfName, cd.ksName), e);
             }
@@ -464,34 +515,41 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
      * into a list of partition key values.
      */
     @SuppressWarnings("checkstyle:magicnumber")
-    private static List<Object> getPartitionKeys(PartitionUpdate pu) {
+    private static List<Object> getPartitionKeys(PartitionUpdate pu)
+    {
         List<Object> values = new ArrayList<>();
 
         List<ColumnMetadata> columnDefinitions = pu.metadata().partitionKeyColumns();
 
         // simple partition key
-        if (columnDefinitions.size() == 1) {
+        if (columnDefinitions.size() == 1)
+        {
             ByteBuffer bb = pu.partitionKey().getKey();
             ColumnSpecification cs = columnDefinitions.get(0);
             AbstractType<?> type = cs.type;
-            try {
+            try
+            {
                 Object value = type.compose(bb);
                 values.add(value);
             }
-            catch (Exception e) {
+            catch (Exception e)
+            {
                 throw new CassandraConnectorDataException(String.format("Failed to deserialize Column %s with Type %s in Table %s and KeySpace %s.",
-                                                          cs.name.toString(), cs.type.toString(), cs.cfName, cs.ksName), e);
+                                                                        cs.name.toString(), cs.type.toString(), cs.cfName, cs.ksName), e);
             }
 
             // composite partition key
         }
-        else {
+        else
+        {
             ByteBuffer keyBytes = pu.partitionKey().getKey().duplicate();
 
             // 0xFFFF is reserved to encode "static column", skip if it exists at the start
-            if (keyBytes.remaining() >= 2) {
+            if (keyBytes.remaining() >= 2)
+            {
                 int header = ByteBufferUtil.getShortLength(keyBytes, keyBytes.position());
-                if ((header & 0xFFFF) == 0xFFFF) {
+                if ((header & 0xFFFF) == 0xFFFF)
+                {
                     ByteBufferUtil.readShortLength(keyBytes);
                 }
             }
@@ -504,20 +562,24 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
             // <end-of-component byte> should always be 0 for columns (1 for query bounds)
             // this section reads the bytes for each column and deserialize into objects based on each column type
             int i = 0;
-            while (keyBytes.remaining() > 0 && i < columnDefinitions.size()) {
+            while (keyBytes.remaining() > 0 && i < columnDefinitions.size())
+            {
                 ColumnSpecification cs = columnDefinitions.get(i);
                 AbstractType<?> type = cs.type;
                 ByteBuffer bb = ByteBufferUtil.readBytesWithShortLength(keyBytes);
-                try {
+                try
+                {
                     Object value = type.compose(bb);
                     values.add(value);
                 }
-                catch (Exception e) {
+                catch (Exception e)
+                {
                     throw new CassandraConnectorDataException(String.format("Failed to deserialize Column %s with Type %s in Table %s and KeySpace %s",
-                                                              cs.name.toString(), cs.type.toString(), cs.cfName, cs.ksName), e);
+                                                                            cs.name.toString(), cs.type.toString(), cs.cfName, cs.ksName), e);
                 }
                 byte b = keyBytes.get();
-                if (b != 0) {
+                if (b != 0)
+                {
                     break;
                 }
                 ++i;
@@ -527,7 +589,8 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
         return values;
     }
 
-    public void maybeBlockingSend(Mutation mutation) {
+    public void maybeBlockingSend(Mutation mutation)
+    {
         CommitLogPosition sentOffset = this.offsetWriter.sentOffsetRef.get();
         long seg = sentOffset.segmentId;
         int pos = sentOffset.position;
@@ -535,30 +598,39 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
         assert mutation != null : "Unexpected null mutation";
         assert mutation.segment >= seg : "Unexpected mutation segment";
         assert mutation.segment > seg ||
-                (mutation.segment == seg && mutation.position > pos)
-                : "Unexpected mutation offset";
+               (mutation.segment == seg && mutation.position > pos)
+        : "Unexpected mutation offset";
 
         logger.debug("Sending mutation={}", mutation);
 
-        while(true) {
-            try {
+        while (true)
+        {
+            try
+            {
                 this.offsetWriter.sentMutations.put(processMutation(mutation));
                 break;
-            } catch(Exception e) {
+            }
+            catch (Exception e)
+            {
                 logger.error("failed to send message to pulsar:", e);
-                try {
+                try
+                {
                     Thread.sleep(10000);
-                } catch(InterruptedException interruptedException) {
+                }
+                catch (InterruptedException interruptedException)
+                {
                 }
             }
         }
     }
 
-    MutationSender.MutationFuture processMutation(final Mutation mutation)  {
+    MutationSender.MutationFuture processMutation(final Mutation mutation)
+    {
         return this.mutationSender.sendMutationAsync(mutation);
     }
 
-    public static Instant toInstantFromMicros(long microsSinceEpoch) {
+    public static Instant toInstantFromMicros(long microsSinceEpoch)
+    {
         return Instant.ofEpochSecond(
         TimeUnit.MICROSECONDS.toSeconds(microsSinceEpoch),
         TimeUnit.MICROSECONDS.toNanos(microsSinceEpoch % TimeUnit.SECONDS.toMicros(1)));

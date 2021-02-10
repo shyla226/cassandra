@@ -17,24 +17,11 @@
  */
 package org.apache.cassandra.cdc;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-
-
 public class QuasarMutationSender implements MutationSender<Mutation> {
-    private static final Logger logger = LoggerFactory.getLogger(QuasarMutationSender.class);
-
     final HttpClientFactory httpClientFactory;
 
     public QuasarMutationSender() {
         this.httpClientFactory = new HttpClientFactory();
-    }
-
-    @Override
-    public void initialize() throws Exception
-    {
-        httpClientFactory.init().get();
     }
 
     @Override

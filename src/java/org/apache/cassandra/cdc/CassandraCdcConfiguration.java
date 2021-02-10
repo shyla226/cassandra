@@ -61,7 +61,7 @@ public class CassandraCdcConfiguration
     /**
      * Reprocess on error commitlogs.
      */
-    Boolean errorCommitLogReprocessEnabled;
+    Boolean errorCommitLogReprocessEnabled = false;
 
     /**
      * Cassandra commitlogs relocation directory
@@ -103,10 +103,6 @@ public class CassandraCdcConfiguration
 
     Boolean tombstonesOnDelete = true;
 
-    /**
-     * Fetch the cassandra row before sending a pulsar message.
-     */
-    Boolean fetchRow = false;
 
     // In-memory Queue settings
     /**

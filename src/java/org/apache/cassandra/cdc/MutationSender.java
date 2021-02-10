@@ -42,9 +42,5 @@ public interface MutationSender<P> {
         }
     }
 
-    default void initialize() throws Exception
-    {
-    }
-
     MutationFuture sendMutationAsync(final Mutation mutation);
 }

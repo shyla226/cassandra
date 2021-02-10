@@ -27,7 +27,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.inject.Singleton;
 
@@ -36,15 +36,19 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.metrics.BatchMetrics;
 import org.apache.cassandra.utils.MBeanWrapper;
 
+/**
+ * Track the last acknowledged replicated mutation.
+ */
 @Singleton
-public class OffsetFileWriter extends AbstractProcessor implements AutoCloseable, CommitLogOffsetMBean
+public class OffsetFileWriter extends AbstractProcessor implements AutoCloseable
 {
     private static final Logger logger = LoggerFactory.getLogger(OffsetFileWriter.class);
 
     public static final String COMMITLOG_OFFSET_FILE = "commitlog_offset.dat";
-    public static final String MBEAN_NAME = "org.apache.cassandra.cdc:type=CommittedOffset";
+    public static final String MBEAN_NAME = "org.apache.cassandra.cdc:type=OffsetFileWriterMBean";
 
     private final File offsetFile;
     private final MutationSender mutationSender;
@@ -57,13 +61,14 @@ public class OffsetFileWriter extends AbstractProcessor implements AutoCloseable
     volatile long timeOfLastFlush = System.currentTimeMillis();
     volatile Long notCommittedEvents = 0L;
 
+    public static final CdcReplicationMetrics metrics = new CdcReplicationMetrics();
+
     public OffsetFileWriter(MutationSender mutationSender)
     {
         super("OffsetFileWriter", 1000);
         this.mutationSender = mutationSender;
         this.offsetFlushPolicy = new OffsetFlushPolicy.AlwaysFlushOffsetPolicy();
         this.offsetFile = new File(DatabaseDescriptor.getCDCLogLocation(), COMMITLOG_OFFSET_FILE);
-        MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
     }
 
     public CommitLogPosition offset() {
@@ -108,18 +113,28 @@ public class OffsetFileWriter extends AbstractProcessor implements AutoCloseable
         while(true) {
             try {
                 MutationSender.MutationFuture mutationFuture = this.sentMutations.take();
-                while (true) {
-                    if (mutationFuture.sentFuture.isCompletedExceptionally()) {
-                        // retry on error
-                        mutationFuture = mutationFuture.retry(mutationSender);
-                    } else {
-                        try {
-                            mutationFuture.sentFuture.get();
-                            sentOffsetRef.set(new CommitLogPosition(mutationFuture.mutation.segment, mutationFuture.mutation.position));
-                        } catch(InterruptedException e) {
-                            logger.warn("error:", e);
+                while(true)
+                {
+                    try
+                    {
+                        mutationFuture.sentFuture.get();
+                        if (mutationFuture.sentFuture.isCompletedExceptionally() || mutationFuture.sentFuture.isCancelled())
+                        {
+                            logger.debug("mutation={} not replicated, retrying", mutationFuture.mutation);
+                            metrics.retriedMutations.mark();
                             mutationFuture = mutationFuture.retry(mutationSender);
                         }
+                        else
+                        {
+                            sentOffsetRef.set(new CommitLogPosition(mutationFuture.mutation.segment, mutationFuture.mutation.position));
+                            metrics.replicatedMutations.mark();
+                            break;
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        logger.warn("error:", e);
+                        mutationFuture = mutationFuture.retry(mutationSender);
                     }
                 }
             } catch(Exception e) {
@@ -175,17 +190,5 @@ public class OffsetFileWriter extends AbstractProcessor implements AutoCloseable
         } catch(IOException e) {
             logger.warn("error:", e);
         }
-    }
-
-    @Override
-    public long getOffsetSegment()
-    {
-        return fileOffsetRef.get().segmentId;
-    }
-
-    @Override
-    public int getOffsetPosition()
-    {
-        return fileOffsetRef.get().position;
     }
 }

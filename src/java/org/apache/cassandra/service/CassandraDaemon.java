@@ -52,6 +52,7 @@ import com.codahale.metrics.jvm.GarbageCollectorMetricSet;
 import com.codahale.metrics.jvm.MemoryUsageGaugeSet;
 
 import org.apache.cassandra.audit.AuditLogManager;
+import org.apache.cassandra.cdc.CdcReplicationPlugin;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -186,8 +187,8 @@ public class CassandraDaemon
     }
 
     @VisibleForTesting
-    public static Runnable SPECULATION_THRESHOLD_UPDATER = 
-        () -> 
+    public static Runnable SPECULATION_THRESHOLD_UPDATER =
+        () ->
         {
             try
             {
@@ -199,7 +200,7 @@ public class CassandraDaemon
                 JVMStabilityInspector.inspectThrowable(t);
             }
         };
-    
+
     static final CassandraDaemon instance = new CassandraDaemon();
 
     private volatile NativeTransportService nativeTransportService;
@@ -463,6 +464,18 @@ public class CassandraDaemon
             }
         }
 
+        if (DatabaseDescriptor.isCDCEnabled() && DatabaseDescriptor.getCDCLogLocation() != null)
+        {
+            try
+            {
+                CdcReplicationPlugin.instance.initialize();
+            }
+            catch (Exception e)
+            {
+                exitOrFail(StartupException.ERR_WRONG_CONFIG, e.getMessage(), e.getCause());
+            }
+        }
+
         AuditLogManager.instance.initialize();
 
         // schedule periodic background compaction task submission. this is simply a backstop against compactions stalling
@@ -470,7 +483,7 @@ public class CassandraDaemon
         ScheduledExecutors.optionalTasks.scheduleWithFixedDelay(ColumnFamilyStore.getBackgroundCompactionTaskSubmitter(), 5, 1, TimeUnit.MINUTES);
 
         // schedule periodic recomputation of speculative retry thresholds
-        ScheduledExecutors.optionalTasks.scheduleWithFixedDelay(SPECULATION_THRESHOLD_UPDATER, 
+        ScheduledExecutors.optionalTasks.scheduleWithFixedDelay(SPECULATION_THRESHOLD_UPDATER,
                                                                 DatabaseDescriptor.getReadRpcTimeout(NANOSECONDS),
                                                                 DatabaseDescriptor.getReadRpcTimeout(NANOSECONDS),
                                                                 NANOSECONDS);
@@ -681,6 +694,8 @@ public class CassandraDaemon
         }
 
         startClientTransports();
+
+        CdcReplicationPlugin.instance.start();
     }
 
     private void startClientTransports()

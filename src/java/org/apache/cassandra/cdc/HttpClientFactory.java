@@ -17,26 +17,21 @@
  */
 package org.apache.cassandra.cdc;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.cdc.exceptions.CassandraConnectorTaskException;
-import org.asynchttpclient.AsyncHttpClient;
-
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.time.Duration;
 
 public class HttpClientFactory
 {
@@ -44,6 +39,7 @@ public class HttpClientFactory
     private static final ObjectMapper mapper = new ObjectMapper();
 
     private static final int NUMBER_OF_EXECUTORS = 3;
+    private static final String USER_AGENT = "Cassandra CDC Replication Agent";
 
     String serviceUrlTemplate = System.getProperty("cassandra.cdcrep.node_url_template", "http://quasar-%d:8081");
     String serviceUrl = System.getProperty("cassandra.cdcrep.service_url", "http://quasar-0:8081");
@@ -54,7 +50,8 @@ public class HttpClientFactory
 
     public HttpClientFactory()
     {
-        for(int i=0; i < NUMBER_OF_EXECUTORS; i++) {
+        for (int i = 0; i < NUMBER_OF_EXECUTORS; i++)
+        {
             executors[i] = Executors.newSingleThreadExecutor();
             httpClient[i] = HttpClient.newBuilder()
                                       .executor(executors[i])
@@ -64,78 +61,92 @@ public class HttpClientFactory
         }
     }
 
-    public CompletableFuture<State> init()
+    public CompletableFuture<State> getState()
     {
         HttpRequest request = HttpRequest.newBuilder()
                                          .GET()
                                          .uri(URI.create(serviceUrl + "/state"))
-                                         .setHeader("User-Agent", "Java 11 HttpClient Bot")
+                                         .setHeader("User-Agent", USER_AGENT)
                                          .build();
         return httpClient[0].sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                  .thenApply(response -> {
-                      try
-                      {
-                          this.state = mapper.readValue(response.body(), State.class);
-                      }
-                      catch (Exception e)
-                      {
-                          logger.warn("error:", e);
-                      }
-                      logger.debug("Initial state={}", this.state);
-                      return this.state;
-                  });
-
+                            .thenApply(response -> {
+                                try
+                                {
+                                    this.state = mapper.readValue(response.body(), State.class);
+                                }
+                                catch (Exception e)
+                                {
+                                    logger.warn("error:", e);
+                                }
+                                logger.debug("Initial state={}", this.state);
+                                return this.state;
+                            });
     }
 
     public CompletableFuture<Long> replicate(Mutation mutation)
     {
+        CompletableFuture<State> stateFuture = (State.NO_STATE.equals(this.state))
+                                               ? getState()
+                                               : CompletableFuture.completedFuture(this.state);
+
         MutationKey key = mutation.mutationKey();
         MutationValue value = mutation.mutationValue();
         int hash = key.hash();
         int ordinal = hash % state.size;
 
-        String query = String.format(Locale.ROOT,
-                                    String.format(Locale.ROOT, serviceUrlTemplate + "/replicate/%s/%s/%s/%s?writetime=%d&nodeId=%s",
-                                                  ordinal,
-                                                  key.keyspace,
-                                                  key.table,
-                                                  key.id(),
-                                                  value.operation,
-                                                  value.writetime,
-                                                  value.nodeId.toString()));
-        HttpRequest request = HttpRequest.newBuilder()
-                                         .POST(HttpRequest.BodyPublishers.ofString(mutation.jsonDocument))
-                                         .uri(URI.create(query))
-                                         .setHeader("User-Agent", "Java 11 HttpClient Bot") // add request header
-                                         .header("Content-Type", "application/text")
-                                         .build();
+        final String query = String.format(Locale.ROOT,
+                                           String.format(Locale.ROOT, serviceUrlTemplate + "/replicate/%s/%s/%s?writetime=%d&nodeId=%s",
+                                                         ordinal,
+                                                         key.keyspace,
+                                                         key.table,
+                                                         key.id(),
+                                                         value.writetime,
+                                                         value.nodeId.toString()));
 
-        return httpClient[hash % httpClient.length].sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                         .thenApply(response -> {
-                             switch (response.statusCode())
-                             {
-                                 case 200:
-                                     logger.debug("Successfully replicate id={} operation={} writetime={}", key.id, value.operation, value.writetime);
-                                     return Long.parseLong(response.body());
-                                 case 503: // service unavailable
-                                 case 404: // hash not managed
-                                     logger.warn("error status={}", response.statusCode());
-                                     try
-                                     {
-                                         String body = response.body();
-                                         this.state = mapper.readValue(body, State.class);
-                                         logger.debug("New state={}, retrying later", this.state);
-                                         throw new IllegalStateException();
-                                     }
-                                     catch (Exception e)
-                                     {
-                                         logger.warn("error:", e);
-                                         throw new CassandraConnectorTaskException(e);
-                                     }
-                                 default:
-                                     logger.warn("unexpected response code={}", response.statusCode());
-                                     throw new CassandraConnectorTaskException("code="+response.statusCode());
-                             }
-                         });
+        final HttpRequest request = Operation.DELETE.equals(value.operation)
+                                    ? HttpRequest.newBuilder()
+                                                 .DELETE()
+                                                 .uri(URI.create(query))
+                                                 .setHeader("User-Agent", USER_AGENT) // add request header
+                                                 .build()
+                                    : HttpRequest.newBuilder()
+                                                 .POST(HttpRequest.BodyPublishers.ofString(mutation.jsonDocument))
+                                                 .uri(URI.create(query))
+                                                 .setHeader("User-Agent", USER_AGENT) // add request header
+                                                 .header("Content-Type", "application/json")
+                                                 .build();
+
+        return stateFuture.thenCompose(state -> {
+            logger.debug("Sending mutation={}", mutation);
+            return httpClient[hash % httpClient.length]
+                   .sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                   .thenApply(response -> {
+                       switch (response.statusCode())
+                       {
+                           case 200:
+                               logger.debug("Successfully replicate id={} operation={} writetime={}",
+                                            key.id, value.operation, value.writetime);
+                               return Long.parseLong(response.body());
+                           case 503: // service unavailable
+                           case 404: // hash not managed
+                               logger.warn("error status={}", response.statusCode());
+                               try
+                               {
+                                   String body = response.body();
+                                   this.state = mapper.readValue(body, State.class);
+                                   logger.debug("New state={}, retrying later", this.state);
+                                   throw new IllegalStateException();
+                               }
+                               catch (Exception e)
+                               {
+                                   logger.warn("error:", e);
+                                   throw new CassandraConnectorTaskException(e);
+                               }
+                           default:
+                               logger.warn("unexpected response code={}", response.statusCode());
+                               throw new CassandraConnectorTaskException("code=" + response.statusCode());
+                       }
+                   });
+        });
     }
 }

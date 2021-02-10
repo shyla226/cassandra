@@ -42,7 +42,7 @@ import org.apache.cassandra.utils.MBeanWrapper;
  * @author vroyer
  */
 @Singleton
-public class CommitLogReaderProcessor extends AbstractProcessor implements AutoCloseable, CommitLogOffsetMBean
+public class CommitLogReaderProcessor extends AbstractProcessor implements AutoCloseable
 {
     private static final Logger logger = LoggerFactory.getLogger(CommitLogReaderProcessor.class);
     private static final String NAME = "CommitLogReader Processor";
@@ -69,11 +69,10 @@ public class CommitLogReaderProcessor extends AbstractProcessor implements AutoC
         this.commitLogReadHandler = commitLogReadHandler;
         this.offsetFileWriter = offsetFileWriter;
         this.commitLogTransfer = new BlackHoleCommitLogTransfer();
-
-        MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
     }
 
     public void submitCommitLog(File file)  {
+        logger.debug("submit file={}", file.getAbsolutePath());
         if (file.getName().endsWith("_cdc.idx")) {
             // you can have old _cdc.idx file, ignore it
             long seg = CommitLogUtil.extractTimestamp(file.getName());
@@ -91,11 +90,13 @@ public class CommitLogReaderProcessor extends AbstractProcessor implements AutoC
                     }
                     syncedOffsetRef.set(new CommitLogPosition(seg, pos));
                     logger.debug("New synced position={} completed={}", syncedOffsetRef.get(), completed);
-                    assert seg > this.syncedOffsetRef.get().segmentId || pos > this.syncedOffsetRef.get().position : "Unexpected synced position " + seg + ":" +pos;
 
                     // unlock the processing of commitlogs
                     if (syncedOffsetLatch.getCount() > 0)
+                    {
+                        logger.debug("Releasing the syncedOffsetLatch");
                         syncedOffsetLatch.countDown();
+                    }
                 } catch(IOException ex) {
                     logger.warn("error while reading file=" + file.getName(), ex);
                 }
@@ -110,6 +111,7 @@ public class CommitLogReaderProcessor extends AbstractProcessor implements AutoC
     public void awaitSyncedPosition() throws InterruptedException
     {
         syncedOffsetLatch.await();
+        logger.debug("syncedOffsetLatch released");
     }
 
     @Override
@@ -180,17 +182,5 @@ public class CommitLogReaderProcessor extends AbstractProcessor implements AutoC
      */
     @Override
     public void close() {
-    }
-
-    @Override
-    public long getOffsetSegment()
-    {
-        return syncedOffsetRef.get().segmentId;
-    }
-
-    @Override
-    public int getOffsetPosition()
-    {
-        return syncedOffsetRef.get().position;
     }
 }

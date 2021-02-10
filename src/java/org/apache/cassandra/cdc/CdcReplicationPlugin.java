@@ -18,15 +18,20 @@
 
 package org.apache.cassandra.cdc;
 
-import java.io.IOException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-import org.apache.cassandra.db.commitlog.CommitLogReadHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class CdcReplicationPlugin
 {
+    private static final Logger logger = LoggerFactory.getLogger(CdcReplicationPlugin.class);
+
     OffsetFileWriter offsetFileWriter;
     MutationSender<Mutation> mutationSender;
-    CommitLogReadHandler commitLogReadHandler;
+    CommitLogTransfer commitLogTransfer;
+    CommitLogProcessor commitLogProcessor;
     CommitLogReaderProcessor commitLogReaderProcessor;
 
     public static final CdcReplicationPlugin instance = new CdcReplicationPlugin();
@@ -35,15 +40,51 @@ public class CdcReplicationPlugin
     {
         this.mutationSender = new QuasarMutationSender();
         this.offsetFileWriter = new OffsetFileWriter(mutationSender);
-        this.commitLogReadHandler = new CommitLogReadHandlerImpl(offsetFileWriter, mutationSender);
-        this.commitLogReaderProcessor = new CommitLogReaderProcessor(commitLogReadHandler, offsetFileWriter);
+        this.commitLogTransfer = new BlackHoleCommitLogTransfer();
+        this.commitLogReaderProcessor = new CommitLogReaderProcessor(new CommitLogReadHandlerImpl(offsetFileWriter, mutationSender), offsetFileWriter);
+        this.commitLogProcessor = new CommitLogProcessor(new CassandraCdcConfiguration(), commitLogTransfer, offsetFileWriter, commitLogReaderProcessor);
     }
 
-    public void init() throws Exception
+    public void initialize() throws Exception
     {
+        offsetFileWriter.initialize();
+        commitLogProcessor.initialize();
         commitLogReaderProcessor.initialize();
-        mutationSender.initialize();
     }
 
+    public void start()
+    {
+        // watch new commitlog files
+        ExecutorService commitLogExecutor = Executors.newSingleThreadExecutor();
+        commitLogExecutor.submit(() -> {
+            try {
+                commitLogProcessor.start();
+            } catch(Exception e) {
+                logger.error("commitLogProcessor error:", e);
+            }
+        });
 
+        // process commitlog mutation, after we know the synced position
+        ExecutorService commitLogReaderExecutor = Executors.newSingleThreadExecutor();
+        commitLogReaderExecutor.submit(() -> {
+            try {
+                commitLogReaderProcessor.awaitSyncedPosition();
+                commitLogReaderProcessor.start();
+            } catch(Exception e) {
+                logger.error("commitLogProcessor error:", e);
+            }
+        });
+
+        // persist the offset of replicated mutation.
+        ExecutorService offsetWriterExecutor = Executors.newSingleThreadExecutor();
+        offsetWriterExecutor.submit(() -> {
+            try {
+                // wait for the synced position
+                offsetFileWriter.start();
+            } catch(Exception e) {
+                logger.error("commitLogProcessor error:", e);
+            }
+        });
+        logger.info("CDC replication started");
+    }
 }

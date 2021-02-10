@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.cdc;
 
+import java.util.Objects;
+
 import org.apache.cassandra.service.StorageService;
 
 /**
@@ -61,5 +63,33 @@ public class Mutation {
 
     public MutationValue mutationValue() {
         return new MutationValue(source.timestamp.toEpochMilli(), StorageService.instance.getLocalHostUUID(), op, jsonDocument);
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Mutation mutation = (Mutation) o;
+        return segment == mutation.segment &&
+               position == mutation.position;
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(segment, position);
+    }
+
+    @Override
+    public String toString()
+    {
+        return "Mutation{" +
+               "segment=" + segment +
+               ", position=" + position +
+               ", op=" + op +
+               ", ts=" + ts +
+               ", id=" + mutationKey().id() +
+               '}';
     }
 }
