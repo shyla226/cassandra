@@ -63,7 +63,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
 
-public class TrieMemtable extends AbstractMemtable
+public class TrieMemtable extends AbstractAllocatorMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtable.class);
 
@@ -323,7 +323,7 @@ public class TrieMemtable extends AbstractMemtable
         }
     }
 
-    private static class MemtablePartition extends ImmutableBTreePartition
+    static class MemtablePartition extends ImmutableBTreePartition
     {
 
         private final EnsureOnHeap ensureOnHeap;
